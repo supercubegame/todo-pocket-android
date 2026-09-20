@@ -1,0 +1,126 @@
+name: Android APK verification
+on:
+  push:
+    branches: [main, feature/first-apk]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  core:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Use Java 17
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+      - name: Core gate
+        run: |
+          set -o pipefail
+          python3 tools/verify.py core 2>&1 | tee core.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: core-evidence
+          path: core.log
+          if-no-files-found: error
+  android:
+    needs: core
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    outputs:
+      apk: ${{ steps.apk.outcome }}
+      emulator: ${{ steps.emulator.outcome }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Java and fixed build tools
+        run: |
+          set -euo pipefail
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip.sha256 -o /tmp/gradle.sha256
+          echo "$(cat /tmp/gradle.sha256)  /tmp/gradle.zip" | sha256sum -c -
+          unzip -q /tmp/gradle.zip -d /tmp
+          echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Build, lint and verify signature
+        id: apk
+        run: |
+          set -o pipefail
+          python3 tools/verify.py build 2>&1 | tee build.log
+      - name: Publish installable test APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "test-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" delivery/* \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "Pocket Todo 1.0 test APK" \
+            --notes "Native offline Android Todo. Android 8.0+. Disposable debug signature; not store-ready. Build and core gates passed. Emulator results are recorded separately on the evidence branch."
+      - name: Emulator behavior and screenshots
+        id: emulator
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          exec > >(tee ui.log) 2>&1
+          sudo chmod 666 /dev/kvm
+          sdkmanager "emulator" "system-images;android-30;google_apis;x86_64"
+          echo no | avdmanager create avd --force --name todo-test --package "system-images;android-30;google_apis;x86_64"
+          "$ANDROID_HOME/emulator/emulator" -avd todo-test -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 2048 > emulator.log 2>&1 &
+          PID=$!
+          trap 'kill "$PID" || true' EXIT
+          timeout 240 adb wait-for-device
+          BOOTED=0
+          for i in $(seq 1 120); do
+            if [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1 ]; then BOOTED=1; break; fi
+            sleep 2
+          done
+          test "$BOOTED" = 1
+          adb shell input keyevent 82
+          adb shell settings put global window_animation_scale 0
+          adb shell settings put global transition_animation_scale 0
+          adb shell settings put global animator_duration_scale 0
+          python3 tools/ui_test.py
+      - name: Attach emulator evidence
+        if: steps.emulator.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "test-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" delivery/*.png delivery/ui-result.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: android-evidence
+          path: |
+            delivery/
+            build.log
+            ui.log
+            emulator.log
+            build/reports/lint-results-debug.html
+          if-no-files-found: error
+      - name: Preserve UI failure signal
+        if: steps.emulator.outcome == 'failure'
+        run: exit 1
+  report:
+    needs: [core, android]
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          path: collected
+      - name: Publish and read back exact evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 tools/verify.py report

@@ -60,7 +60,7 @@ def report():
     # Only this step receives GH_TOKEN. Never include environment or auth in output.
     out = Path("collected")
     logs = {}
-    for name in ("core.log", "build.log", "ui.log"):
+    for name in ("core.log", "setup.log", "build.log", "ui.log", "emulator.log"):
         paths = list(out.rglob(name))
         logs[name] = paths[0].read_text(errors="replace")[-16000:] if paths else "NOT_OBSERVED"
     needs = json.loads(os.environ["NEEDS_JSON"])

@@ -83,13 +83,14 @@ public final class MainActivity extends Activity {
         LinearLayout composer = new LinearLayout(this);
         composer.setGravity(Gravity.CENTER_VERTICAL);
         input = new EditText(this);
-        input.setId(1001);
+        input.setId(View.generateViewId());
         input.setContentDescription("新待办输入");
         input.setHint("下一件要做的事…");
         input.setTextSize(16);
         input.setTextColor(INK);
         input.setSingleLine(true);
         input.setFilters(new InputFilter[]{new InputFilter.LengthFilter(TodoModel.MAX_TITLE)});
+        if (saved != null) input.setText(saved.getString("draft", ""));
         input.setImeOptions(EditorInfo.IME_ACTION_DONE);
         input.setPadding(dp(12), dp(8), dp(12), dp(8));
         input.setBackground(shape(Color.WHITE, 12));
@@ -196,6 +197,7 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onSaveInstanceState(Bundle state) {
         state.putInt("filter", filter);
+        state.putString("draft", input.getText().toString());
         super.onSaveInstanceState(state);
     }
     private int dp(int n) { return Math.round(n * getResources().getDisplayMetrics().density); }

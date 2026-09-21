@@ -1,0 +1,28 @@
+{
+  "commit": "ae2c505b4384a5d3eec5333901824c82a8136b9e",
+  "run_id": "35571062098",
+  "jobs": {
+    "core": {
+      "result": "failure",
+      "outputs": {}
+    },
+    "android": {
+      "result": "skipped",
+      "outputs": {}
+    }
+  },
+  "logs": {
+    "core.log": "+ javac -encoding UTF-8 -d build/core src/main/java/com/supercubegame/pockettodo/TodoModel.java tests/CoreTest.java\n+ java -cp build/core CoreTest\nPASS fresh install is empty\nPASS blank rejected\nPASS null rejected\nPASS overlong rejected\nPASS stable distinct ids\nPASS trim title\nPASS new item unfinished\nPASS toggle complete\nPASS toggle back\nPASS restore exact count\nPASS restore Unicode\nPASS restore completed state\nPASS canonical roundtrip\nPASS delete exact id\nPASS deletion persists\nPASS snapshot independent\nPASS id does not collide after restore\nPASS unknown toggle rejected\nPASS unknown delete rejected\nPASS empty storage default\nPASS corrupt storage rejected\nPASS truncated data rejected\nPASS trailing data rejected\nPASS caller cannot mutate collection\nPASS capacity boundary\nPASS capacity limit enforced\nException in thread \"main\" java.lang.AssertionError: Required v1.1 capability missing: com.supercubegame.pockettodo.TodoModel.edit\n\tat CoreTest.invoke(CoreTest.java:24)\n\tat CoreTest.edit(CoreTest.java:27)\n\tat CoreTest.main(CoreTest.java:84)\nCaused by: java.lang.NoSuchMethodException: com.supercubegame.pockettodo.TodoModel.edit(long,java.lang.String)\n\tat java.base/java.lang.Class.getMethod(Class.java:2229)\n\tat CoreTest.invoke(CoreTest.java:20)\n\t... 2 more\nGATE_FAILED core: CalledProcessError: Command '['java', '-cp', 'build/core', 'CoreTest']' returned non-zero exit status 1.\nTraceback (most recent call last):\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify.py\", line 105, in <module>\n    {\"core\": core, \"build\": build, \"report\": report}[mode]()\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify.py\", line 32, in core\n    run([\"java\", \"-cp\", str(out), \"CoreTest\"])\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify.py\", line 20, in run\n    return subprocess.run(args, check=True, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/lib/python3.12/subprocess.py\", line 571, in run\n    raise CalledProcessError(retcode, process.args,\nsubprocess.CalledProcessError: Command '['java', '-cp', 'build/core', 'CoreTest']' returned non-zero exit status 1.\n",
+    "setup.log": "NOT_OBSERVED",
+    "build.log": "NOT_OBSERVED",
+    "ui.log": "NOT_OBSERVED",
+    "emulator.log": "NOT_OBSERVED"
+  },
+  "physical_device": "NOT_TESTED",
+  "ui": {
+    "status": "NOT_OBSERVED"
+  },
+  "SHA256SUMS.txt": "NOT_OBSERVED",
+  "signature.txt": "NOT_OBSERVED",
+  "package.txt": "NOT_OBSERVED"
+}

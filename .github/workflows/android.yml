@@ -1,7 +1,7 @@
 name: Android APK verification
 on:
   push:
-    branches: [main, feature/first-apk]
+    branches: [main, feature/first-apk, feature/v1.1-edit-backup]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -58,26 +58,22 @@ jobs:
         run: |
           set -o pipefail
           python3 tools/verify.py build 2>&1 | tee build.log
-      - name: Publish installable test APK
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh release create "test-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" delivery/* \
-            --target "$GITHUB_SHA" --prerelease \
-            --title "Pocket Todo 1.0 test APK" \
-            --notes "Native offline Android Todo. Android 8.0+. Disposable debug signature; not store-ready. Build and core gates passed. Emulator results are recorded separately on the evidence branch."
       - name: Emulator behavior and screenshots
         id: emulator
         continue-on-error: true
         run: |
           set -euo pipefail
           python3 tools/emulator_gate.py 2>&1 | tee ui.log
-      - name: Attach emulator evidence
+      - name: Publish verified preview APK and real screenshots
         if: steps.emulator.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "test-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" delivery/*.png delivery/ui-result.json
+        run: |
+          set -euo pipefail
+          gh release create "preview-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" delivery/* \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "Pocket Todo 1.1 isolated preview" \
+            --notes "Editing and file backup preview. Android 8.0+. Separate preview package, no automatic access to old app data. Disposable debug signature, NOT a durable upgrade channel. Core, build, lint and emulator gates passed; see evidence branch for exact report. Backup files are not encrypted. Keep the original app installed."
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

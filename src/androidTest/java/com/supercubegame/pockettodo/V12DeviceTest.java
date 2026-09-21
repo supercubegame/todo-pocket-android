@@ -273,7 +273,9 @@ public final class V12DeviceTest extends Instrumentation {
         MediaRepository media=new MediaRepository(c.getFilesDir().toPath().resolve("guarded-media"),1000000);
         String id=new String(Files.readAllBytes(c.getFilesDir().toPath().resolve("restore-media-id.txt")),java.nio.charset.StandardCharsets.US_ASCII);
         Object canceled=preview(t,good,stage);
-        ok(Arrays.equals(fixture(t),before)&&!Files.exists(media.path(id)),"restore preview does not mutate any live table or publish media");
+        // MediaRepository.path requires an existing file; absence must be checked
+        // independently against the fixture directory, not through that accessor.
+        ok(Arrays.equals(fixture(t),before)&&!Files.exists(c.getFilesDir().toPath().resolve("guarded-media").resolve(id),LinkOption.NOFOLLOW_LINKS),"restore preview does not mutate any live table or publish media");
         @SuppressWarnings("unchecked") Map<String,Long> current=(Map<String,Long>)call(canceled,"currentCounts",new Class[]{});
         @SuppressWarnings("unchecked") Map<String,Long> incoming=(Map<String,Long>)call(canceled,"incomingCounts",new Class[]{});
         Map<String,Long> actualCurrent=new LinkedHashMap<>(),actualIncoming=new LinkedHashMap<>();

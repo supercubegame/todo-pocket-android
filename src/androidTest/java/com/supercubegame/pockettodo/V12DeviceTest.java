@@ -153,7 +153,6 @@ public final class V12DeviceTest extends Instrumentation {
         ok(call(d,"todoIds",new Class[]{}).equals(List.of("local","long-todo",first,second)),"legacy appends preserve imported and existing order");
         ok(count(d,"activities")==2&&count(d,"ledger")==0&&count(d,"checkins")==0,"legacy import invents no activities money or check-ins");
         byte[] broken=legacy();broken[broken.length-2]^=1;reject(()->importLegacy(d,broken),"corrupt legacy import rejected before transaction");ok(count(d,"todos")==4&&count(d,"legacy_imports")==1,"bad import retains rows and journal exactly");
-        // Force an ID conflict on the SECOND imported row. First row and journal must roll back.
         TodoModel other=new TodoModel();other.add("另一备份甲");other.add("另一备份乙");byte[] clash=BackupCodec.encode(other);String clashSource=LegacyImport.preview(clash).sourceId();
         call(d,"addTodo",new Class[]{String.class,String.class},"legacy-"+clashSource+"-2","本地占用标识");
         reject(()->importLegacy(d,clash),"late imported ID collision rolls back complete import");ok(count(d,"todos")==5&&count(d,"legacy_imports")==1,"failed import has neither first row nor journal residue");
@@ -167,7 +166,6 @@ public final class V12DeviceTest extends Instrumentation {
         ok(importLegacy(d,legacy())==0&&count(d,"todos")==5&&count(d,"legacy_imports")==1,"process restart retains legacy import idempotency journal");
         close(d);Object migrated=db("migrate-v1.db");ok(call(migrated,"categoryName",new Class[]{long.class},7L).equals("原分类"),"migrated data persists into separate process");close(migrated);
     }
-    // Frozen v1 DDL from41165adf, independent from current production onCreate/onUpgrade.
     private static final String[] V1_DDL={
         "CREATE TABLE revision(id INTEGER PRIMARY KEY CHECK(id=1), value INTEGER NOT NULL CHECK(value>=0))",
         "CREATE TABLE categories(id INTEGER PRIMARY KEY CHECK(id>0),name TEXT NOT NULL CHECK(length(trim(name))>0),position INTEGER NOT NULL CHECK(position>=0))",
@@ -194,14 +192,81 @@ public final class V12DeviceTest extends Instrumentation {
         SQLiteDatabase raw=((android.database.sqlite.SQLiteOpenHelper)newer).getReadableDatabase();
         try(android.database.Cursor c=raw.rawQuery("SELECT value FROM revision WHERE id=1",null)){c.moveToFirst();ok(raw.getVersion()==2&&c.getLong(0)==42,"migration advances schema not user revision");}
         define(newer,"new-field","新字段","TEXT",List.of());value(newer,9,"new-field",List.of("迁移后可用"));ok(value(newer,9,"new-field").equals(List.of("迁移后可用")),"new fields usable on migrated database");
-        try(android.database.Cursor c=raw.rawQuery("PRAGMA foreign_key_check",null)){ok(!c.moveToFirst(),"migrated database has no foreign key violations");}
-        close(newer);
+        try(android.database.Cursor c=raw.rawQuery("PRAGMA foreign_key_check",null)){ok(!c.moveToFirst(),"migrated database has no foreign key violations");}close(newer);
+    }
+
+    // Independent schema2 wire fixture: no production encoder or semantic validator used.
+    private static final String[] TABLES={"revision","categories","applications","activities","paths","tags","batches","ledger","checkins","media","notes","blocks","fields","field_options","field_values","field_notes","todos","legacy_imports"};
+    private SQLiteDatabase raw(Object d){return((android.database.sqlite.SQLiteOpenHelper)d).getWritableDatabase();}
+    private void bytes(DataOutputStream out,byte[] b)throws IOException{out.writeInt(b.length);out.write(b);}
+    private void str(DataOutputStream out,String s)throws IOException{bytes(out,s.getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+    private byte[] fixture(Object d)throws Exception{
+        ByteArrayOutputStream b=new ByteArrayOutputStream();DataOutputStream out=new DataOutputStream(b);out.writeInt(0x50544442);out.writeInt(1);out.writeInt(2);out.writeInt(TABLES.length);
+        for(String table:TABLES)try(android.database.Cursor c=raw(d).rawQuery("SELECT * FROM "+table+" ORDER BY rowid",null)){
+            str(out,table);out.writeInt(c.getColumnCount());for(String name:c.getColumnNames())str(out,name);out.writeInt(c.getCount());
+            while(c.moveToNext())for(int i=0;i<c.getColumnCount();i++){int type=c.getType(i);out.writeByte(type);switch(type){case 0:break;case 1:out.writeLong(c.getLong(i));break;case 3:str(out,c.getString(i));break;case 4:bytes(out,c.getBlob(i));break;default:throw new AssertionError("unexpected fixture SQL type");}}
+        }out.flush();return b.toByteArray();
+    }
+    private byte[] state(Object d)throws Exception{return(byte[])call(d,"exportState",new Class[]{});}
+    private void backup(Object d,Path file,MediaRepository media)throws Exception{call(d,"exportBackup",new Class[]{Path.class,MediaRepository.class},file,media);}
+    private void restore(Object d,Path file,MediaRepository media)throws Exception{call(d,"restoreBackup",new Class[]{Path.class,Path.class,long.class,MediaRepository.class},file,getTargetContext().getCacheDir().toPath(),1000000L,media);}
+    private void rejectedRestore(Object d,Path file,MediaRepository media,byte[] before,String label)throws Exception{
+        boolean refused=false;try{restore(d,file,media);}catch(IOException|IllegalArgumentException|IllegalStateException e){refused=true;}
+        ok(refused,label+" rejected");ok(Arrays.equals(state(d),before),label+" keeps complete prior DB state");
+    }
+    private byte[] poisoned(Object source,String sql)throws Exception{SQLiteDatabase r=raw(source);r.beginTransaction();try{r.execSQL(sql);return fixture(source);}finally{r.endTransaction();}}
+    private void backupSeed()throws Exception{
+        Context c=getTargetContext();c.deleteDatabase("backup-source.db");c.deleteDatabase("backup-target.db");Object s=db("backup-source.db"),t=db("backup-target.db");
+        category(s,1,"完整恢复");call(s,"addApplication",new Class[]{long.class,String.class,String.class},10L,"示例应用","com.example.app");activity(s,100,1,10,"活动内容");
+        call(s,"savePath",new Class[]{long.class,List.class},100L,List.of("我的","福利","打卡"));call(s,"saveTags",new Class[]{long.class,List.class},100L,List.of("购物","邀请"));
+        define(s,"number","次数","NUMBER",List.of());value(s,100,"number",List.of("12"));define(s,"choice","方式","MULTI_SELECT",List.of("a","b"));value(s,100,"choice",List.of("b","a"));
+        call(s,"createFieldNote",new Class[]{String.class,long.class,String.class,String.class},"n",100L,"number","字段攻略");
+        MediaRepository sm=new MediaRepository(c.getFilesDir().toPath().resolve("backup-source-media"),1000000),tm=new MediaRepository(c.getFilesDir().toPath().resolve("backup-target-media"),1000000);
+        byte[] asset={1,2,3,4,5};String id=sm.copy(new ByteArrayInputStream(asset));call(s,"registerMedia",new Class[]{String.class,String.class,long.class},id,"application/octet-stream",5L);
+        NoteDocument n=new NoteDocument();n.add(NoteDocument.Block.text("secret","保留私有内容",true));n.addImage("img",id,"合成媒体原字节");n.addText("end","末尾文字");call(s,"saveNote",new Class[]{String.class,List.class},"n",n.snapshot());call(s,"archiveField",new Class[]{String.class,boolean.class},"number",true);
+        call(s,"putMark",new Class[]{CalendarRules.Mark.class},new CalendarRules.Mark(100,LocalDate.of(2026,9,1),CalendarRules.Status.SKIPPED,"跳过",Instant.parse("2026-09-21T12:00:00Z")));
+        call(s,"addTodo",new Class[]{String.class,String.class},"own","自己的待办");importLegacy(s,legacy());
+        batch(s,"undone",List.of(row("u",100,"2026-09-01",100)));call(s,"undoBatch",new Class[]{String.class},"undone");
+        List<Ledger.Entry> money=List.of(row("m1",100,"2026-09-01",1500),new Ledger.Entry("m2",100,LocalDate.of(2026,9,3),Ledger.Kind.REFUND,500,"退款"));batch(s,"latest",money);
+        byte[] expected=state(s);ok(Arrays.equals(expected,fixture(s)),"production snapshot equals independently encoded all-table fixture");
+        for(String table:TABLES)try(android.database.Cursor rows=raw(s).rawQuery("SELECT count(*) FROM "+table,null)){rows.moveToFirst();ok(rows.getLong(0)>0,"backup fixture covers nonempty "+table);}
+        Path good=c.getFilesDir().toPath().resolve("full-good.zip");Files.deleteIfExists(good);backup(s,good,sm);
+        try(BackupArchive.Snapshot z=BackupArchive.read(good,c.getCacheDir().toPath(),1000000)){ok(Arrays.equals(z.state(),expected)&&z.assets().keySet().equals(Set.of(id)),"real backup ZIP contains exact semantic state and registered assets");}
+        call(t,"addTodo",new Class[]{String.class,String.class},"sentinel","恢复前不要丢");byte[] before=state(t);String oldId=tm.copy(new ByteArrayInputStream(new byte[]{9,8,7}));
+        Path bad=c.getFilesDir().toPath().resolve("full-bad.zip");Files.deleteIfExists(bad);BackupArchive.write(bad,expected,Set.of(),sm);rejectedRestore(t,bad,tm,before,"valid ZIP with missing registered media");
+        String extra=sm.copy(new ByteArrayInputStream(new byte[]{6,7}));Files.deleteIfExists(bad);BackupArchive.write(bad,expected,Set.of(id,extra),sm);rejectedRestore(t,bad,tm,before,"valid ZIP with unregistered extra media");
+        byte[] future=expected.clone();future[11]=99;Files.deleteIfExists(bad);BackupArchive.write(bad,future,Set.of(id),sm);rejectedRestore(t,bad,tm,before,"unknown state schema");
+        byte[] tail=Arrays.copyOf(expected,expected.length+1);Files.deleteIfExists(bad);BackupArchive.write(bad,tail,Set.of(id),sm);rejectedRestore(t,bad,tm,before,"trailing semantic state bytes");
+        String[] faults={"UPDATE field_values SET value='not-a-number' WHERE field_id='number'","UPDATE checkins SET day='2026-02-29'","UPDATE paths SET position=99 WHERE position=1","UPDATE batches SET payload=X'00000000' WHERE id='latest'","UPDATE media SET bytes=6","UPDATE field_values SET value='unknown' WHERE field_id='choice' AND position=0"};
+        String[] labels={"invalid archived numeric field","impossible check-in date","ordered path gap","inconsistent money batch journal","media registry size mismatch","unknown saved choice"};
+        for(int i=0;i<faults.length;i++){byte[] invalid=poisoned(s,faults[i]);ok(!Arrays.equals(invalid,expected),"semantic fault fixture differs: "+labels[i]);Files.deleteIfExists(bad);BackupArchive.write(bad,invalid,Set.of(id),sm);rejectedRestore(t,bad,tm,before,labels[i]);}
+        // This trigger fails late, after replacement has deleted old rows and inserted parents.
+        raw(t).execSQL("CREATE TEMP TRIGGER fail_restore BEFORE INSERT ON todos WHEN NEW.id='own' BEGIN SELECT RAISE(ABORT,'injected_restore_failure'); END");
+        boolean injected=false;try{restore(t,good,tm);}catch(Exception e){Throwable x=e;while(x!=null){if(String.valueOf(x.getMessage()).contains("injected_restore_failure"))injected=true;x=x.getCause();}}
+        ok(injected,"late restore failure is the exact injected SQLite trigger fault");ok(Arrays.equals(state(t),before),"late commit failure rolls back deleted old data plus all inserted tables");
+        ok(Arrays.equals(Files.readAllBytes(tm.path(oldId)),new byte[]{9,8,7}),"failed restore never modifies old media bytes");raw(t).execSQL("DROP TRIGGER fail_restore");
+        restore(t,good,tm);ok(Arrays.equals(state(t),expected),"successful replacement round-trips all tables and journals exactly");ok(Arrays.equals(Files.readAllBytes(tm.path(id)),asset),"restored media has exact source bytes");
+        ok(count(t,"todos")==3&&call(t,"todoIds",new Class[]{}).equals(call(s,"todoIds",new Class[]{})),"restore replaces sentinel rather than merging and preserves todo order");
+        ok(value(t,100,"choice").equals(List.of("b","a"))&&((CustomFields.Definition)definition(t,"number")).archived,"restore retains ordered choices and archived field values");
+        ok(call(t,"fieldNoteIds",new Class[]{long.class,String.class},100L,"number").equals(List.of("n")),"restore retains field-note relationship");
+        ok(importLegacy(t,legacy())==0,"restored legacy import journal still prevents duplicate import");ok(!batch(t,"latest",money),"restored money journal still prevents duplicate batch");
+        reject(()->batch(t,"undone",List.of(row("u",100,"2026-09-01",100))),"restored undo tombstone rejects resurrection");
+        restore(t,good,tm);ok(Arrays.equals(state(t),expected),"same complete backup can be restored repeatedly without duplicates");
+        Files.write(c.getFilesDir().toPath().resolve("restore-expected.bin"),expected);Files.write(c.getFilesDir().toPath().resolve("restore-media-id.txt"),id.getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        raw(s).execSQL("CREATE TABLE unregistered(value TEXT)");boolean unknown=false;try{state(s);}catch(IllegalArgumentException|IllegalStateException e){unknown=true;}ok(unknown,"new unregistered table cannot silently disappear from backup");raw(s).execSQL("DROP TABLE unregistered");
+        close(s);close(t);
+    }
+    private void backupReopen()throws Exception{
+        Context c=getTargetContext();Object t=db("backup-target.db");ok(Arrays.equals(state(t),Files.readAllBytes(c.getFilesDir().toPath().resolve("restore-expected.bin"))),"separate process retains complete restored state");
+        String id=new String(Files.readAllBytes(c.getFilesDir().toPath().resolve("restore-media-id.txt")),java.nio.charset.StandardCharsets.US_ASCII);MediaRepository m=new MediaRepository(c.getFilesDir().toPath().resolve("backup-target-media"),1000000);m.verify(id);ok(Arrays.equals(Files.readAllBytes(m.path(id)),new byte[]{1,2,3,4,5}),"separate process retains restored media bytes");
+        ok(total(t,100,Set.of(LocalDate.of(2026,9,1),LocalDate.of(2026,9,3)),"NET_EXPENSE")==1000,"restored exact-cent totals remain usable after restart");
+        call(t,"undoBatch",new Class[]{String.class},"latest");ok(count(t,"ledger")==0,"restored latest batch undo works after separate-process restart");ok(importLegacy(t,legacy())==0,"restored import journal still works after restart");close(t);
     }
     @Override public void onStart(){
         Bundle result=new Bundle();try{
             ok(getTargetContext().getPackageName().equals("com.supercubegame.pockettodo.v12.preview"),"tests target isolated v1.2 package");
             ok(android.os.Build.VERSION.SDK_INT==Integer.parseInt(args.getString("expectedApi")),"actual emulator API equals requested test matrix");
-            String phase=args.getString("phase");if("seed".equals(phase)){seed();fieldsSeed();}else if("reopen".equals(phase)){reopen();fieldsReopen();}else throw new IllegalArgumentException("unknown test phase");
+            String phase=args.getString("phase");if("seed".equals(phase)){seed();fieldsSeed();backupSeed();}else if("reopen".equals(phase)){reopen();fieldsReopen();backupReopen();}else throw new IllegalArgumentException("unknown test phase");
             log.append("DEVICE_DATABASE_RESULT ").append(phase).append(' ').append(checks).append('/').append(checks).append(" PASS\n");result.putString("stream",log.toString());finish(Activity.RESULT_OK,result);
         }catch(Throwable error){StringWriter text=new StringWriter();error.printStackTrace(new PrintWriter(text));result.putString("stream",log+"DEVICE_DATABASE_FAILED\n"+text);finish(Activity.RESULT_CANCELED,result);}
     }

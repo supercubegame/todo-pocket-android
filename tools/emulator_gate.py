@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Disposable database/media-byte verification. No product UI or photo acceptance."""
+"""Disposable DB/media and bounded native UI slice; never full product acceptance."""
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import sqlite3
 import subprocess
 import time
+import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 os.chdir(ROOT)
@@ -113,9 +116,130 @@ def verify_database(adb):
         Path('device-' + phase + '.txt').write_text(output)
         results[phase] = verify_phase(output, phase)
     Path('device-result.json').write_text(json.dumps({'status': 'PASS', 'api': API, 'checks': results,
-        'scope': 'ANDROID_SCHEMA2_DATABASE_AND_MEDIA_BYTES', 'ui': 'NOT_TESTED', 'image_decoding': 'NOT_TESTED',
+        'scope': 'ANDROID_SCHEMA2_DATABASE_AND_MEDIA_BYTES', 'ui': 'SEE_NATIVE_UI_RESULT', 'image_decoding': 'NOT_TESTED',
         'full_backup_restore': RESTORE_SCOPE, 'saf_restore_ui': 'NOT_TESTED', 'power_loss': 'NOT_TESTED',
         'release_ready': False}, indent=2))
+
+def verify_native_ui(adb):
+    """Only real taps/text input; independently read SQLite after force-stop, no seeding UI DB."""
+    out = Path('native-ui'); out.mkdir(exist_ok=True)
+    checks, shots = [], []
+    def shell(*args):
+        return subprocess.check_output([str(adb), '-s', SERIAL, 'shell', *args], text=True, timeout=40)
+    def nodes():
+        shell('uiautomator', 'dump', '/sdcard/pocket-window.xml')
+        return list(ET.fromstring(shell('cat', '/sdcard/pocket-window.xml')).iter('node'))
+    def find(**attrs):
+        deadline=time.monotonic()+20; last=[]
+        while time.monotonic()<deadline:
+            last=nodes()
+            for n in last:
+                if all(n.get(k)==v for k,v in attrs.items()): return n
+            time.sleep(.25)
+        raise AssertionError('UI missing '+repr(attrs)+'; actual='+repr([n.attrib for n in last if n.get('text') or n.get('content-desc')]))
+    def desc(value): return find(**{'content-desc':value})
+    def tap_node(n):
+        assert n.get('enabled')=='true', 'disabled touch target '+repr(n.attrib)
+        x1,y1,x2,y2=map(int,re.findall(r'\d+',n.get('bounds')))
+        assert x2>x1 and y2>y1, 'empty touch bounds'
+        shell('input','tap',str((x1+x2)//2),str((y1+y2)//2))
+    def tap(text): tap_node(find(text=text))
+    def touch(value): tap_node(desc(value))
+    def type_text(value): shell('input','text',value.replace(' ','%s'))
+    def ok(condition,label):
+        assert condition,label
+        checks.append(label); print('UI_PASS '+label,flush=True)
+    def absent(text): return not any(n.get('text')==text for n in nodes())
+    def ready(): find(**{'content-desc':'v12-status','text':'已保存到本机'})
+    def start():
+        shell('am','start','-W','-n',PKG+'/com.supercubegame.pockettodo.MainActivity'); desc('v12-home'); ready()
+    def stop():
+        shell('am','force-stop',PKG)
+        p=subprocess.run([str(adb),'-s',SERIAL,'shell','pidof',PKG],text=True,capture_output=True,timeout=10)
+        assert p.returncode==1 and not p.stdout.strip(),'UI process must actually stop'
+    def restart(): stop(); start()
+    def clear_field(description):
+        n=desc(description); count=len(n.get('text','').encode('utf-16-le'))//2
+        tap_node(n); shell('input','keyevent','KEYCODE_MOVE_END')
+        shell('input','keyevent',*(['KEYCODE_DEL']*(count+1)))
+        assert desc(description).get('text')=='','input fixture not cleared'
+    def shot(name):
+        data=subprocess.check_output([str(adb),'-s',SERIAL,'exec-out','screencap','-p'],timeout=30)
+        assert data[:8]==b'\x89PNG\r\n\x1a\n','real PNG signature required'
+        (out/name).write_bytes(data)
+        shots.append({'file':name,'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()})
+    def named_todo(title):
+        n=find(text=title); assert n.get('class')=='android.widget.CheckBox' and n.get('content-desc','').startswith('todo-'),n.attrib
+        return n
+    def add_todo(title):
+        touch('新待办输入'); type_text(title); tap('添加'); ready(); return named_todo(title)
+    try:
+        start()
+        ok(find(text='还剩 0 件 / 共 0 件') is not None,'new UI database starts empty without fabricated activities')
+        tap('添加'); ok(find(text='内容不能为空') is not None,'blank todo rejected visibly')
+        a=add_todo('Buy milk'); aid=a.get('content-desc')[5:]
+        b=add_todo('Walk outside'); bid=b.get('content-desc')[5:]
+        ok(aid!=bid,'UI adds distinct stable todo identities')
+        touch('todo-'+aid); ready()
+        ok(named_todo('Buy milk').get('checked')=='true','real checkbox completes todo')
+        tap('待办'); ready(); ok(absent('Buy milk') and named_todo('Walk outside') is not None,'pending filter excludes completed row')
+        tap('已完成'); ready(); ok(absent('Walk outside') and named_todo('Buy milk').get('checked')=='true','completed filter excludes pending row')
+        tap('全部'); ready(); touch('edit-'+aid); clear_field('编辑待办输入'); tap('保存')
+        ok(find(text='内容不能为空') is not None,'invalid edit stays open without losing original')
+        tap('取消'); ok(named_todo('Buy milk').get('checked')=='true','cancel invalid edit preserves value and completion')
+        touch('edit-'+aid); clear_field('编辑待办输入'); type_text('Fresh milk'); tap('保存'); ready()
+        ok(named_todo('Fresh milk').get('content-desc')=='todo-'+aid and named_todo('Fresh milk').get('checked')=='true','title edit preserves stable identity and completion')
+        restart(); ok(named_todo('Fresh milk').get('checked')=='true' and named_todo('Walk outside').get('checked')=='false','native todo state survives actual process restart')
+        shot('01-todos.png')
+        tap('活动'); ready(); tap('新建分类'); touch('分类名称'); type_text('Daily'); tap('保存'); ready()
+        ok(find(text='Daily') is not None,'category created through visible native dialog')
+        touch('category-rename-1'); clear_field('分类名称'); type_text('Checkins'); tap('保存'); ready()
+        ok(find(text='Checkins') is not None and absent('Daily'),'category rename updates visible label')
+        touch('category-add-1'); touch('活动名称'); type_text('Daily reward'); tap('保存'); ready()
+        ok(desc('activity-1').get('text')=='Daily reward','activity created under selected category')
+        touch('activity-1'); ready(); tap('编辑路径'); touch('活动路径'); type_text('Home'); shell('input','keyevent','KEYCODE_ENTER'); type_text('Daily rewards'); tap('保存'); ready()
+        ok(find(text='1. Home') is not None and find(text='2. Daily rewards') is not None,'ordered multiline manual path displays without collapse')
+        tap('标记完成'); ready(); ok(find(text='今天：已完成') is not None,'daily check-in writes visible done state')
+        tap('标记完成'); ready(); ok(find(text='今天：已完成') is not None,'repeated daily mark remains one visible day')
+        tap('跳过今天'); ready(); ok(find(text='今天：已跳过') is not None,'skipped is distinct from done and unrecorded')
+        shot('02-activity.png')
+        tap('返回分类'); ready(); tap('新建分类'); touch('分类名称'); type_text('Farm'); tap('保存'); ready()
+        touch('category-up-2'); ready()
+        cats=[n.get('text') for n in nodes() if n.get('content-desc','').startswith('category-name-')]
+        ok(cats==['Farm','Checkins'],'accessible category reorder changes exact visible order')
+        shot('03-categories.png')
+        restart(); tap('活动'); ready()
+        cats=[n.get('text') for n in nodes() if n.get('content-desc','').startswith('category-name-')]
+        ok(cats==['Farm','Checkins'],'category order persists after process restart')
+        touch('activity-1'); ready()
+        ok(find(text='今天：已跳过') is not None and find(text='2. Daily rewards') is not None,'activity path and skipped mark persist after process restart')
+        ok(len({x['sha256'] for x in shots})==len(shots),'actual native screenshots represent distinct states')
+        stop()
+        # The writer is stopped first. Copy base plus any remaining WAL; Python SQLite
+        # is an independent reader of actual Android-generated bytes, not an Android substitute.
+        local=out/'pocket-v12.db'
+        local.write_bytes(subprocess.check_output([str(adb),'-s',SERIAL,'exec-out','run-as',PKG,'cat','databases/pocket-v12.db'],timeout=30))
+        present=shell('run-as',PKG,'ls','databases').splitlines()
+        if 'pocket-v12.db-wal' in present:
+            Path(str(local)+'-wal').write_bytes(subprocess.check_output([str(adb),'-s',SERIAL,'exec-out','run-as',PKG,'cat','databases/pocket-v12.db-wal'],timeout=30))
+        with sqlite3.connect(local) as db:
+            ok(db.execute('SELECT id,title,done FROM todos ORDER BY position').fetchall()==[(aid,'Fresh milk',1),(bid,'Walk outside',0)],'independent SQLite read matches exact UI todo identities titles and states')
+            ok(db.execute('SELECT id,name FROM categories ORDER BY position').fetchall()==[(2,'Farm'),(1,'Checkins')],'independent SQLite read matches renamed reordered categories')
+            ok(db.execute('SELECT category_id,application_id,title FROM activities').fetchall()==[(1,None,'Daily reward')],'activity stays in its category without invented application')
+            ok(db.execute('SELECT position,text FROM paths ORDER BY position').fetchall()==[(0,'Home'),(1,'Daily rewards')],'independent SQLite read preserves path order')
+            marks=db.execute('SELECT activity_id,day,status,recorded_at FROM checkins').fetchall()
+            ok(len(marks)==1 and marks[0][0]==1 and marks[0][2]=='SKIPPED' and bool(marks[0][1]) and bool(marks[0][3]),'repeated native marks persist exactly one day with entry timestamp')
+            ok(db.execute('SELECT count(*) FROM ledger').fetchone()[0]==0,'check-in does not invent money entries')
+        result={'status':'PASS','scope':'NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_SLICE','api':API,'count':len(checks),'checks':checks,'screenshots':shots,'restore_ui':'NOT_TESTED','photos':'NOT_TESTED','sharing':'NOT_TESTED','release_ready':False}
+    except Exception as exc:
+        result={'status':'FAIL','api':API,'count':len(checks),'checks':checks,'error':repr(exc),'screenshots':shots,'release_ready':False}
+        try: shot('failure.png')
+        except Exception: pass
+        (out/'native-result.json').write_text(json.dumps(result,ensure_ascii=False,indent=2))
+        print('NATIVE_UI_FAILED '+json.dumps(result,ensure_ascii=False),flush=True)
+        raise
+    (out/'native-result.json').write_text(json.dumps(result,ensure_ascii=False,indent=2))
+    print('NATIVE_UI_RESULT '+json.dumps(result,ensure_ascii=False),flush=True)
 
 def main():
     assert os.environ.get('GITHUB_ACTIONS') == 'true', 'disposable GitHub runner only'
@@ -167,6 +291,7 @@ def main():
             raise TimeoutError('emulator boot deadline exceeded: ' + last + '; see emulator.log')
         assert run([adb, '-s', SERIAL, 'shell', 'getprop', 'ro.kernel.qemu'], capture=True).stdout.strip() == '1'
         verify_database(adb)
+        verify_native_ui(adb)
     finally:
         if proc.poll() is None:
             proc.terminate()

@@ -82,20 +82,30 @@ def main():
     print('AVD_DISCOVERY', listed, flush=True)
     assert NAME in listed, 'emulator cannot discover newly created AVD'
     log = open('emulator.log', 'w')
-    proc = subprocess.Popen([str(emulator), '-avd', NAME, '-port', '5554', '-no-window',
+    proc = subprocess.Popen([str(emulator), '-avd', NAME, '-port', '5554', '-no-window', '-no-metrics',
                              '-no-audio', '-no-boot-anim', '-no-snapshot', '-gpu', 'swiftshader_indirect',
                              '-memory', '2048', '-camera-back', 'none', '-camera-front', 'none'],
                             stdout=log, stderr=subprocess.STDOUT)
     try:
         deadline = time.monotonic() + 240
+        last = 'no probe yet'
         while time.monotonic() < deadline:
             if proc.poll() is not None:
                 log.flush()
                 raise RuntimeError('emulator exited before boot: ' + Path('emulator.log').read_text()[-4000:])
-            p = subprocess.run([str(adb), '-s', SERIAL, 'shell', 'getprop', 'sys.boot_completed'], capture_output=True, text=True, timeout=10)
-            if p.returncode == 0 and p.stdout.strip() == '1': break
-            time.sleep(2)
-        else: raise TimeoutError('emulator boot deadline exceeded; see emulator.log')
+            # A boot-time adb probe may itself time out. It is not successful boot,
+            # but remains retryable ONLY within the original 240s overall deadline.
+            try:
+                p = subprocess.run([str(adb), '-s', SERIAL, 'shell', 'getprop', 'sys.boot_completed'], capture_output=True, text=True,
+                                   timeout=min(10, max(0.1, deadline-time.monotonic())))
+                last = 'rc=' + str(p.returncode) + ' stdout=' + p.stdout.strip() + ' stderr=' + p.stderr[-300:]
+                if p.returncode == 0 and p.stdout.strip() == '1': break
+            except subprocess.TimeoutExpired:
+                last = 'boot probe timed out; emulator still alive=' + str(proc.poll() is None)
+                print('BOOT_RETRY', last, flush=True)
+            time.sleep(min(2, max(0, deadline-time.monotonic())))
+        else:
+            raise TimeoutError('emulator boot deadline exceeded: ' + last + '; see emulator.log')
         assert run([adb, '-s', SERIAL, 'shell', 'getprop', 'ro.kernel.qemu'], capture=True).stdout.strip() == '1'
         verify_database(adb)
     finally:

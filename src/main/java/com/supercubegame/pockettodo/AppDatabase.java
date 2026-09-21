@@ -268,7 +268,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
         try{stage.setForeignKeyConstraintsEnabled(true);onCreate(stage);stage.beginTransaction();try{
             deleteRows(stage);decodeRows(stage,bytes);validateSemantics(stage);require(Arrays.equals(encodeState(stage),bytes),"备份规范回读不一致");stage.setTransactionSuccessful();
         }finally{stage.endTransaction();}success=true;return stage;
-        }catch(IOException|android.database.SQLException e){throw new IllegalArgumentException("备份状态校验失败",e);}finally{if(!success)stage.close();}
+        }catch(IOException|RuntimeException e){throw new IllegalArgumentException("备份状态校验失败",e);}finally{if(!success)stage.close();}
     }
     /** One consistent transaction, including revision/journals and insertion-based note order. */
     public synchronized byte[] exportState(){return tx(db->{byte[] state=encodeState(db);try(SQLiteDatabase ignored=candidate(state)){return state;}});}

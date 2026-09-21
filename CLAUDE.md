@@ -1,27 +1,27 @@
 # Pocket Todo v1.2 development
 
-- Approved32 files: docs/V1_2_PLAN.md. One writer; no merge/main/old release changes. Public fixtures synthetic.
-- Native Java Android, SQLiteOpenHelper schema2 with FK/WAL and explicit1-to2 additive migration. No destructive fallback or unknown version reset.
-- Fast gate python3 tools/verify.py v12: fresh JDK17 compile, legacy54/domain82/file49. Preserve all assertions.
-- Device: gradle --no-daemon --console=plain assembleDebug assembleDebugAndroidTest lintDebug; TEST_API=26 or34 python3 tools/emulator_gate.py on isolated CI runner.
-- Internal app/test APKs not deliverables. Upload logs only, no release. python3 tools/verify.py build still blocks product delivery; old reason string is guard text, not internal compilation status.
-- Package com.supercubegame.pockettodo.v12.preview,1.2/code3,min26/target34/compile35;AGP8.7.3,Gradle8.9,JDK17,desugar_jdk_libs2.1.5 pinned.
-- MainActivity inherited v1.1 UI, not launched by device DB tests. No new UI/screenshots/full-product claim.
-- Seed/reopen separate instrumentation, force-stop plus pid absence between. No mid-transaction kill, power-loss or physical-device acceptance implied.
-- DB writes transactional/global revision; exact retries no-op; latest untouched money batch only undo, persistent tombstones prevent replay. Ledger total still materializes all rows, scale optimization pending.
-- DB: categories/apps/activities/path/tag/ledger/checkin/note/block/media registry plus typed fields/options/ordered values/field-note links and ordinary todos/import journal.
-- Reuse CustomFields domain validators. Field rename uses stable ID; archive retains values/notes and blocks new values/notes. Existing note editing is independent, no recursive notes.
-- Ordinary todos have separate string IDs, no invented activity/checkin/money. No inherited500/200 legacy quotas; storage resources still bounded by device, not infinite.
-- Legacy import validates before transaction, appends only, namespaces ID by source hash, journals same-backup idempotency. Changed backup is a distinct import; UI must explain before consent. Conflicts roll back all rows/journal.
-- Legacy TodoModel/BackupCodec/CoreTest unchanged; old format limits remain only for old backups. Import UI/undo-import not implemented by adapter methods.
-- V1 migration fixture freezes actual old DDL independently of production and checks schema1 premise, private note/checkin preservation, revision retention, new fields and FK integrity. More migration corruption/power-loss coverage pending.
-- Domain has no Android/I/O/clock/random IDs; adapters own I/O, IDs/timestamps injected. Integer cents with overflow checks, planned separate, missing not confirmed zero.
-- Media private publication: same-dir ATOMIC_MOVE under JVM+persistent OS lock; destination absence checked inside lock. Cooperating app-private writers only, never unlink lock, never public writable destination.
-- Hard-link AccessDenied on26/34 was fixed, history retained. File fsync/rename is not proof of power-loss durability. Source photos never deleted, thumbnail/cache not authoritative.
-- Media registry/byte transport not image decoding. UI must validate format/dimensions and actual persistent files. Real picker/thumbnail/redaction pending.
-- ZIP state remains opaque: not semantic full DB/media backup restore. Validate IDs/types/reference set/order/journals then transactionally commit before claiming restore.
-- 8MiB archive state/metadata limit provisional protection, not measured capacity or image-count quota. Share filtering is not redaction; derivatives must exclude originals.
-- Still pending schedules/shortcuts/templates/search, full restore, native screens, PDF/image/Markdown export, FileProvider/picker/UI/phone acceptance and stable signing.
-- Report top scope is fast JVM; ui.devices contains actual per-API DB logs/results. ui.status NOT_TESTED means no UI tests. release_ready false; missing evidence never PASS.
-- e35624ef test-first: API34 reached38 prior checks then missing defineField; API26 failed boot probe timeout, not a missing-feature result. Retry only boot probes within unchanged240s deadline, never retry/hide product assertions.
-- Actual report exact SHA/run ID with byte-for-byte readback. Preserve exit codes and exact fault causes. AGENTS.md==CLAUDE.md, <=200lines.
+- Approved32 project paths: docs/V1_2_PLAN.md. One writer; no merge/main/old-release changes. All public fixtures synthetic.
+- Native Java Android, SQLiteOpenHelper schema2, FK/WAL, explicit1-to2 additive migration. No destructive migration/unknown-version reset.
+- Fast gate python3 tools/verify.py v12: actual JDK17 legacy/domain/file checks. Preserve assertions; Android code validated by Gradle/device jobs, not host Python.
+- Device gate: gradle --no-daemon --console=plain assembleDebug assembleDebugAndroidTest lintDebug then TEST_API26/34 python3 tools/emulator_gate.py on isolated CI runner.
+- Internal package com.supercubegame.pockettodo.v12.preview,1.2/code3,min26/target34/compile35;AGP8.7.3,Gradle8.9,JDK17,desugar_jdk_libs2.1.5 pinned.
+- MainActivity inherited v1.1, not launched by DB tests. No new UI/screenshots/deliverable APK. python3 tools/verify.py build intentionally blocks product delivery; replace with real product gates, never merely remove guard.
+- seed/reopen separate instrumentation with force-stop/no-pid between. Committed-process persistence is NOT mid-write death, reboot or power-loss testing.
+- Transactional global revision, exact retries no-op, latest untouched ledger batch only undo, tombstones prevent replay. Exact integer cents/overflow checks; planned separate; missing day not zero. Totals still materialize all rows.
+- Fields reuse domain validators; stable IDs survive rename; archive retains values/notes, prevents new values/note associations. Existing notes separately editable.
+- Ordinary todos separate; no invented activity/date/money. No inherited500/200 quotas for new records, but device resources/cursor limits apply.
+- Legacy import validates then transactionally APPENDS with source-hash journal/remapped IDs. Same backup no-op, changed backup can append similar rows. UI preview/consent and import undo pending.
+- Legacy TodoModel/BackupCodec/CoreTest unchanged. V1 migration fixture freezes old DDL but does not seed every old table; further failure coverage pending.
+- Domain remains Android/I/O/clock free; adapters own I/O and injected IDs/timestamps.
+- Media: immutable content IDs, same-dir ATOMIC_MOVE, JVM+persistent OS lock, absence check inside lock. Never unlink lock or overwrite. Cooperating private writers only, not public SAF directories. Registry/bytes are not image decoding.
+- BackupArchive remains transport. AppDatabase exportState/exportBackup/restoreBackup add schema2 semantic adapter. Fixed magic/format/schema/table order/column names/type markers, strict UTF8, bounded lengths, exact end-of-input. No archive SQL/DDL executed.
+- State table set must equal actual user tables. Snapshot preserves IDs, positions, insertion-based note order, privacy, revision, ledger payloads/tombstones and legacy journal. Decode into trusted in-memory schema with SQL constraints/FKs and domain validation, then canonical byte readback.
+- Validate archived field values too; invalid dates, choice IDs, ordering gaps and ledger/journal inconsistencies must fail. Wrap snapshot parsing/validation exceptions in IllegalArgumentException with original cause, never accept or retry invalid state.
+- Media file set must equal registry, with exact sizes/hashes. Export uses consistent SQL transaction; media verified before ZIP publication. STATE_LIMIT and BackupArchive META_LIMIT both8MiB, provisional memory protection not measured capacity. Future schema/columns require new codec/migration/tests.
+- Restore REPLACES live rows in one SQL transaction only after all state/media checks and immutable blob copies. Clear staging before commit, then transactional canonical readback. Caller must preview/get consent; UI, stale-preview protection and undo-restore are pending.
+- Never delete old media on restore failure. Newly copied unreachable blobs MAY remain after DB failure, intentionally not removed because another writer may reference them. Safe GC pending. No physical-folder equality or power-loss guarantee.
+- Device restore fixture seeds every schema2 table, uses independent wire encoder, actual ZIP/assets, malformed-valid-ZIP cases, exact injected late SQLite trigger cause, whole-state equality, repeated restore and separate-process undo/import checks. Synthetic bytes are not photos/scale proof.
+- Test-first7203da45/35619172618: both devices reached old76 seed checks then missing exportState. Initial24801c3b/35619931896 reached invalid-date case then uncaught DateTimeParseException; normalize at candidate boundary, do not loosen test catches.
+- Earlier hardlink denial repaired by locked rename; boot-probe timeout retried only within original240s deadline, exact boot required. No product assertion retry/skip.
+- Still pending: schedules/shortcuts/templates/search, native screens, ordinary-todo delete/reorder, real picker/image decode/thumbnail/crop/redaction, PDF/image/Markdown sharing, SAF restore UI/phone/stable signing.
+- Reports distinguish schema2 DB+media-byte restore from UI/image decoding/full-v1.2 acceptance. release_ready=false. Exact SHA/run report readback, missing evidence never PASS; no keys in chat/source/log. AGENTS.md==CLAUDE.md <=200lines.

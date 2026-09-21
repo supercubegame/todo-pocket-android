@@ -56,7 +56,7 @@ public final class TodayScreen {
         root=column();root.setPadding(dp(18),dp(12),dp(18),dp(10));root.setBackgroundColor(BG);root.setFocusableInTouchMode(true);
         activity.setContentView(root);root.requestFocus();
         TextView label=text("口袋待办  /  1.2 开发预览",14,ACCENT);label.setContentDescription("v12-home");root.addView(label);
-        TextView heading=text("把今天，放进口袋",28,INK);heading.setTypeface(Typeface.create("sans-serif-medium",0));heading.setPadding(0,dp(8),0,dp(8));root.addView(heading);
+        TextView heading=text("把今天，放进口袋",28,INK);heading.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));heading.setPadding(0,dp(8),0,dp(8));root.addView(heading);
         status=text("正在读取本机数据…",14,MUTED);status.setContentDescription("v12-status");status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);root.addView(status);
         content=column();LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,0,1);cp.topMargin=dp(12);root.addView(content,cp);
         LinearLayout nav=new LinearLayout(activity);

@@ -1,0 +1,149 @@
+{
+  "commit": "2df6bc09287d451d6a5cc862a616ed4c5b2ca079",
+  "run_id": "35667109098",
+  "status": "NOT_VERIFIED",
+  "scope": "GUARDED_RESTORE_BACKEND_NOT_SAF_UI",
+  "devices": {
+    "26": {
+      "status": "NOT_VERIFIED",
+      "phases": {
+        "seed": {
+          "status": "NOT_VERIFIED",
+          "required_checks": [
+            "restore preview does not mutate any live table or publish media",
+            "preview shows independent exact current and incoming counts for every table",
+            "restore preview summary cannot be modified by caller",
+            "cancel twice clears private staging without altering live state",
+            "canceled restore plan cannot be confirmed",
+            "semantic-invalid preview refuses and cleans staging without touching live data",
+            "restore preview is bound to its exact database helper owner",
+            "ordinary write after preview rejects stale restore",
+            "stale rejection preserves every new row and revision and clears stage",
+            "failed stale plan is single use and requires a new preview",
+            "full snapshot guard rejects another connection write even without revision bump",
+            "same-revision stale rejection retains exact externally changed state",
+            "changed staged media is rejected on confirmation with complete old state intact",
+            "guarded confirmation late injected failure rolls back every replaced table",
+            "failed commit plan cannot be reused after removing the fault",
+            "confirmation uses the exact validated preview not a subsequently replaced source file",
+            "confirmed snapshot publishes exact media and cleans staging before commit",
+            "successful confirmation cannot be replayed",
+            "exact idempotent retry remains a genuine no-op while preview is open",
+            "unchanged state after no-op can still confirm the reviewed snapshot"
+          ],
+          "observed_required": [],
+          "missing": [
+            "restore preview does not mutate any live table or publish media",
+            "preview shows independent exact current and incoming counts for every table",
+            "restore preview summary cannot be modified by caller",
+            "cancel twice clears private staging without altering live state",
+            "canceled restore plan cannot be confirmed",
+            "semantic-invalid preview refuses and cleans staging without touching live data",
+            "restore preview is bound to its exact database helper owner",
+            "ordinary write after preview rejects stale restore",
+            "stale rejection preserves every new row and revision and clears stage",
+            "failed stale plan is single use and requires a new preview",
+            "full snapshot guard rejects another connection write even without revision bump",
+            "same-revision stale rejection retains exact externally changed state",
+            "changed staged media is rejected on confirmation with complete old state intact",
+            "guarded confirmation late injected failure rolls back every replaced table",
+            "failed commit plan cannot be reused after removing the fault",
+            "confirmation uses the exact validated preview not a subsequently replaced source file",
+            "confirmed snapshot publishes exact media and cleans staging before commit",
+            "successful confirmation cannot be replayed",
+            "exact idempotent retry remains a genuine no-op while preview is open",
+            "unchanged state after no-op can still confirm the reviewed snapshot"
+          ],
+          "total_device_pass_records": 135,
+          "failure_tail": "dered in-app path persisted\nPASS invalid later path step rejected\nPASS failed path replacement leaves all old steps\nPASS tags deduplicate without losing order\nPASS multi-date money batch inserted\nPASS persistent selected-date total is 80 yuan\nPASS identical retry no duplicate money\nPASS conflicting batch key rejected\nPASS late unknown activity rolls back whole money batch\nPASS failed batch leaves no rows or idempotency key\nPASS late duplicate entry rolls back whole transaction\nPASS duplicate entry leaves ledger and journal unchanged\nPASS planned isolated from actual after SQL persistence\nPASS latest batch undo removes own rows\nPASS undo tombstone prevents old retry resurrection\nPASS duplicate check-in single persistent day\nPASS persistent mark requires actual entry timestamp\nPASS ordered private/public text blocks committed\nPASS note cannot reference missing stored media\nPASS failed note replace retains all prior blocks\nPASS Android locked atomic publication and digest verified\nPASS Android duplicate media does not replace existing file\nPASS parallel media imports retain exact bytes without overlapping JVM locks\nPASS note image reference requires registered media\nPASS Android archive byte transport round-trips\nPASS Android export refuses overwrite and preserves exact existing ZIP\nPASS database helper reopen retains money\nPASS future schema refused without destructive downgrade\nPASS future database remains byte-semantically intact\nPASS persistent field rename preserves typed value\nPASS field note stays attached by ID after rename\nPASS persistent numeric field rejects non-number\nPASS bad field edit retains exact previous value\nPASS field value cannot refer to unknown activity\nPASS persistent multi-select deduplicates in order\nPASS late invalid option rejects whole replacement\nPASS invalid option leaves all old choices\nPASS persistent impossible date rejected\nPASS persistent executable link rejected\nPASS false field value differs from unset\nPASS explicit empty field clears value\nPASS new long field does not inherit legacy200-char cap\nPASS archiving field retains persistent value\nPASS archived persistent field rejects new value\nPASS archived field rejects new attached note\nPASS archive preserves existing field note and text\nPASS unknown field note rejected atomically\nPASS failed field note does not create orphan note\nPASS new ordinary todo does not inherit legacy title cap\nPASS ordinary todo edit and completion persist\nPASS blank ordinary todo edit rejected\nPASS invalid todo edit does not change completion\nPASS legacy import appends ordinary todos without replacing existing\nPASS same legacy backup imported twice is persistent no-op\nPASS legacy remapping keeps text and completion\nPASS legacy appends preserve imported and existing order\nPASS legacy import invents no activities money or check-ins\nPASS corrupt legacy import rejected before transaction\nPASS bad import retains rows and journal exactly\nPASS late imported ID collision rolls back complete import\nPASS failed import has neither first row nor journal residue\nPASS migration fixture really is v1 without new field table\nPASS v1 to v2 migration retains category and activity\nPASS migration preserves old private note and check-in\nPASS migration advances schema not user revision\nPASS new fields usable on migrated database\nPASS migrated database has no foreign key violations\nPASS production snapshot equals independently encoded all-table fixture\nPASS backup fixture covers nonempty revision\nPASS backup fixture covers nonempty categories\nPASS backup fixture covers nonempty applications\nPASS backup fixture covers nonempty activities\nPASS backup fixture covers nonempty paths\nPASS backup fixture covers nonempty tags\nPASS backup fixture covers nonempty batches\nPASS backup fixture covers nonempty ledger\nPASS backup fixture covers nonempty checkins\nPASS backup fixture covers nonempty media\nPASS backup fixture covers nonempty notes\nPASS backup fixture covers nonempty blocks\nPASS backup fixture covers nonempty fields\nPASS backup fixture covers nonempty field_options\nPASS backup fixture covers nonempty field_values\nPASS backup fixture covers nonempty field_notes\nPASS backup fixture covers nonempty todos\nPASS backup fixture covers nonempty legacy_imports\nPASS real backup ZIP contains exact semantic state and registered assets\nPASS valid ZIP with missing registered media rejected\nPASS valid ZIP with missing registered media keeps complete prior DB state\nPASS valid ZIP with unregistered extra media rejected\nPASS valid ZIP with unregistered extra media keeps complete prior DB state\nPASS unknown state schema rejected\nPASS unknown state schema keeps complete prior DB state\nPASS trailing semantic state bytes rejected\nPASS trailing semantic state bytes keeps complete prior DB state\nPASS semantic fault fixture differs: invalid archived numeric field\nPASS invalid archived numeric field rejected\nPASS invalid archived numeric field keeps complete prior DB state\nPASS semantic fault fixture differs: impossible check-in date\nPASS impossible check-in date rejected\nPASS impossible check-in date keeps complete prior DB state\nPASS semantic fault fixture differs: ordered path gap\nPASS ordered path gap rejected\nPASS ordered path gap keeps complete prior DB state\nPASS semantic fault fixture differs: inconsistent money batch journal\nPASS inconsistent money batch journal rejected\nPASS inconsistent money batch journal keeps complete prior DB state\nPASS semantic fault fixture differs: media registry size mismatch\nPASS media registry size mismatch rejected\nPASS media registry size mismatch keeps complete prior DB state\nPASS semantic fault fixture differs: unknown saved choice\nPASS unknown saved choice rejected\nPASS unknown saved choice keeps complete prior DB state\nPASS late restore failure is the exact injected SQLite trigger fault\nPASS late commit failure rolls back deleted old data plus all inserted tables\nPASS failed restore never modifies old media bytes\nPASS successful replacement round-trips all tables and journals exactly\nPASS restored media has exact source bytes\nPASS restore replaces sentinel rather than merging and preserves todo order\nPASS restore retains ordered choices and archived field values\nPASS restore retains field-note relationship\nPASS restored legacy import journal still prevents duplicate import\nPASS restored money journal still prevents duplicate batch\nPASS restored undo tombstone rejects resurrection\nPASS same complete backup can be restored repeatedly without duplicates\nPASS new unregistered table cannot silently disappear from backup\nDEVICE_DATABASE_FAILED\njava.io.IOException: 媒体不存在或不是普通文件\n\tat com.supercubegame.pockettodo.MediaRepository.path(MediaRepository.java:69)\n\tat com.supercubegame.pockettodo.V12DeviceTest.guardedSeed(V12DeviceTest.java:276)\n\tat com.supercubegame.pockettodo.V12DeviceTest.onStart(V12DeviceTest.java:323)\n\tat android.app.Instrumentation$InstrumentationThread.run(Instrumentation.java:2074)\n\nINSTRUMENTATION_CODE: 0\n"
+        },
+        "reopen": {
+          "status": "NOT_VERIFIED",
+          "required_checks": [
+            "guarded restore survives a separate Android process with all tables exact",
+            "guarded restore retains usable import journal and exact-cent totals after restart"
+          ],
+          "observed_required": [],
+          "missing": [
+            "guarded restore survives a separate Android process with all tables exact",
+            "guarded restore retains usable import journal and exact-cent totals after restart"
+          ],
+          "total_device_pass_records": 0,
+          "failure_tail": ""
+        }
+      }
+    },
+    "34": {
+      "status": "NOT_VERIFIED",
+      "phases": {
+        "seed": {
+          "status": "NOT_VERIFIED",
+          "required_checks": [
+            "restore preview does not mutate any live table or publish media",
+            "preview shows independent exact current and incoming counts for every table",
+            "restore preview summary cannot be modified by caller",
+            "cancel twice clears private staging without altering live state",
+            "canceled restore plan cannot be confirmed",
+            "semantic-invalid preview refuses and cleans staging without touching live data",
+            "restore preview is bound to its exact database helper owner",
+            "ordinary write after preview rejects stale restore",
+            "stale rejection preserves every new row and revision and clears stage",
+            "failed stale plan is single use and requires a new preview",
+            "full snapshot guard rejects another connection write even without revision bump",
+            "same-revision stale rejection retains exact externally changed state",
+            "changed staged media is rejected on confirmation with complete old state intact",
+            "guarded confirmation late injected failure rolls back every replaced table",
+            "failed commit plan cannot be reused after removing the fault",
+            "confirmation uses the exact validated preview not a subsequently replaced source file",
+            "confirmed snapshot publishes exact media and cleans staging before commit",
+            "successful confirmation cannot be replayed",
+            "exact idempotent retry remains a genuine no-op while preview is open",
+            "unchanged state after no-op can still confirm the reviewed snapshot"
+          ],
+          "observed_required": [],
+          "missing": [
+            "restore preview does not mutate any live table or publish media",
+            "preview shows independent exact current and incoming counts for every table",
+            "restore preview summary cannot be modified by caller",
+            "cancel twice clears private staging without altering live state",
+            "canceled restore plan cannot be confirmed",
+            "semantic-invalid preview refuses and cleans staging without touching live data",
+            "restore preview is bound to its exact database helper owner",
+            "ordinary write after preview rejects stale restore",
+            "stale rejection preserves every new row and revision and clears stage",
+            "failed stale plan is single use and requires a new preview",
+            "full snapshot guard rejects another connection write even without revision bump",
+            "same-revision stale rejection retains exact externally changed state",
+            "changed staged media is rejected on confirmation with complete old state intact",
+            "guarded confirmation late injected failure rolls back every replaced table",
+            "failed commit plan cannot be reused after removing the fault",
+            "confirmation uses the exact validated preview not a subsequently replaced source file",
+            "confirmed snapshot publishes exact media and cleans staging before commit",
+            "successful confirmation cannot be replayed",
+            "exact idempotent retry remains a genuine no-op while preview is open",
+            "unchanged state after no-op can still confirm the reviewed snapshot"
+          ],
+          "total_device_pass_records": 135,
+          "failure_tail": "dered in-app path persisted\nPASS invalid later path step rejected\nPASS failed path replacement leaves all old steps\nPASS tags deduplicate without losing order\nPASS multi-date money batch inserted\nPASS persistent selected-date total is 80 yuan\nPASS identical retry no duplicate money\nPASS conflicting batch key rejected\nPASS late unknown activity rolls back whole money batch\nPASS failed batch leaves no rows or idempotency key\nPASS late duplicate entry rolls back whole transaction\nPASS duplicate entry leaves ledger and journal unchanged\nPASS planned isolated from actual after SQL persistence\nPASS latest batch undo removes own rows\nPASS undo tombstone prevents old retry resurrection\nPASS duplicate check-in single persistent day\nPASS persistent mark requires actual entry timestamp\nPASS ordered private/public text blocks committed\nPASS note cannot reference missing stored media\nPASS failed note replace retains all prior blocks\nPASS Android locked atomic publication and digest verified\nPASS Android duplicate media does not replace existing file\nPASS parallel media imports retain exact bytes without overlapping JVM locks\nPASS note image reference requires registered media\nPASS Android archive byte transport round-trips\nPASS Android export refuses overwrite and preserves exact existing ZIP\nPASS database helper reopen retains money\nPASS future schema refused without destructive downgrade\nPASS future database remains byte-semantically intact\nPASS persistent field rename preserves typed value\nPASS field note stays attached by ID after rename\nPASS persistent numeric field rejects non-number\nPASS bad field edit retains exact previous value\nPASS field value cannot refer to unknown activity\nPASS persistent multi-select deduplicates in order\nPASS late invalid option rejects whole replacement\nPASS invalid option leaves all old choices\nPASS persistent impossible date rejected\nPASS persistent executable link rejected\nPASS false field value differs from unset\nPASS explicit empty field clears value\nPASS new long field does not inherit legacy200-char cap\nPASS archiving field retains persistent value\nPASS archived persistent field rejects new value\nPASS archived field rejects new attached note\nPASS archive preserves existing field note and text\nPASS unknown field note rejected atomically\nPASS failed field note does not create orphan note\nPASS new ordinary todo does not inherit legacy title cap\nPASS ordinary todo edit and completion persist\nPASS blank ordinary todo edit rejected\nPASS invalid todo edit does not change completion\nPASS legacy import appends ordinary todos without replacing existing\nPASS same legacy backup imported twice is persistent no-op\nPASS legacy remapping keeps text and completion\nPASS legacy appends preserve imported and existing order\nPASS legacy import invents no activities money or check-ins\nPASS corrupt legacy import rejected before transaction\nPASS bad import retains rows and journal exactly\nPASS late imported ID collision rolls back complete import\nPASS failed import has neither first row nor journal residue\nPASS migration fixture really is v1 without new field table\nPASS v1 to v2 migration retains category and activity\nPASS migration preserves old private note and check-in\nPASS migration advances schema not user revision\nPASS new fields usable on migrated database\nPASS migrated database has no foreign key violations\nPASS production snapshot equals independently encoded all-table fixture\nPASS backup fixture covers nonempty revision\nPASS backup fixture covers nonempty categories\nPASS backup fixture covers nonempty applications\nPASS backup fixture covers nonempty activities\nPASS backup fixture covers nonempty paths\nPASS backup fixture covers nonempty tags\nPASS backup fixture covers nonempty batches\nPASS backup fixture covers nonempty ledger\nPASS backup fixture covers nonempty checkins\nPASS backup fixture covers nonempty media\nPASS backup fixture covers nonempty notes\nPASS backup fixture covers nonempty blocks\nPASS backup fixture covers nonempty fields\nPASS backup fixture covers nonempty field_options\nPASS backup fixture covers nonempty field_values\nPASS backup fixture covers nonempty field_notes\nPASS backup fixture covers nonempty todos\nPASS backup fixture covers nonempty legacy_imports\nPASS real backup ZIP contains exact semantic state and registered assets\nPASS valid ZIP with missing registered media rejected\nPASS valid ZIP with missing registered media keeps complete prior DB state\nPASS valid ZIP with unregistered extra media rejected\nPASS valid ZIP with unregistered extra media keeps complete prior DB state\nPASS unknown state schema rejected\nPASS unknown state schema keeps complete prior DB state\nPASS trailing semantic state bytes rejected\nPASS trailing semantic state bytes keeps complete prior DB state\nPASS semantic fault fixture differs: invalid archived numeric field\nPASS invalid archived numeric field rejected\nPASS invalid archived numeric field keeps complete prior DB state\nPASS semantic fault fixture differs: impossible check-in date\nPASS impossible check-in date rejected\nPASS impossible check-in date keeps complete prior DB state\nPASS semantic fault fixture differs: ordered path gap\nPASS ordered path gap rejected\nPASS ordered path gap keeps complete prior DB state\nPASS semantic fault fixture differs: inconsistent money batch journal\nPASS inconsistent money batch journal rejected\nPASS inconsistent money batch journal keeps complete prior DB state\nPASS semantic fault fixture differs: media registry size mismatch\nPASS media registry size mismatch rejected\nPASS media registry size mismatch keeps complete prior DB state\nPASS semantic fault fixture differs: unknown saved choice\nPASS unknown saved choice rejected\nPASS unknown saved choice keeps complete prior DB state\nPASS late restore failure is the exact injected SQLite trigger fault\nPASS late commit failure rolls back deleted old data plus all inserted tables\nPASS failed restore never modifies old media bytes\nPASS successful replacement round-trips all tables and journals exactly\nPASS restored media has exact source bytes\nPASS restore replaces sentinel rather than merging and preserves todo order\nPASS restore retains ordered choices and archived field values\nPASS restore retains field-note relationship\nPASS restored legacy import journal still prevents duplicate import\nPASS restored money journal still prevents duplicate batch\nPASS restored undo tombstone rejects resurrection\nPASS same complete backup can be restored repeatedly without duplicates\nPASS new unregistered table cannot silently disappear from backup\nDEVICE_DATABASE_FAILED\njava.io.IOException: 媒体不存在或不是普通文件\n\tat com.supercubegame.pockettodo.MediaRepository.path(MediaRepository.java:69)\n\tat com.supercubegame.pockettodo.V12DeviceTest.guardedSeed(V12DeviceTest.java:276)\n\tat com.supercubegame.pockettodo.V12DeviceTest.onStart(V12DeviceTest.java:323)\n\tat android.app.Instrumentation$InstrumentationThread.run(Instrumentation.java:2402)\n\nINSTRUMENTATION_CODE: 0\n"
+        },
+        "reopen": {
+          "status": "NOT_VERIFIED",
+          "required_checks": [
+            "guarded restore survives a separate Android process with all tables exact",
+            "guarded restore retains usable import journal and exact-cent totals after restart"
+          ],
+          "observed_required": [],
+          "missing": [
+            "guarded restore survives a separate Android process with all tables exact",
+            "guarded restore retains usable import journal and exact-cent totals after restart"
+          ],
+          "total_device_pass_records": 0,
+          "failure_tail": ""
+        }
+      }
+    }
+  },
+  "saf_restore_ui": "NOT_TESTED",
+  "undo_restore": "NOT_IMPLEMENTED",
+  "release_ready": false
+}

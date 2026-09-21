@@ -72,25 +72,7 @@ jobs:
         continue-on-error: true
         run: |
           set -euo pipefail
-          exec > >(tee ui.log) 2>&1
-          sudo chmod 666 /dev/kvm
-          sdkmanager "emulator" "system-images;android-30;google_apis;x86_64"
-          echo no | avdmanager create avd --force --name todo-test --package "system-images;android-30;google_apis;x86_64"
-          "$ANDROID_HOME/emulator/emulator" -avd todo-test -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 2048 > emulator.log 2>&1 &
-          PID=$!
-          trap 'kill "$PID" || true' EXIT
-          timeout 240 adb wait-for-device
-          BOOTED=0
-          for i in $(seq 1 120); do
-            if [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = 1 ]; then BOOTED=1; break; fi
-            sleep 2
-          done
-          test "$BOOTED" = 1
-          adb shell input keyevent 82
-          adb shell settings put global window_animation_scale 0
-          adb shell settings put global transition_animation_scale 0
-          adb shell settings put global animator_duration_scale 0
-          python3 tools/ui_test.py
+          python3 tools/emulator_gate.py 2>&1 | tee ui.log
       - name: Attach emulator evidence
         if: steps.emulator.outcome == 'success'
         env:

@@ -11,9 +11,7 @@ import java.util.*;
 import java.io.*;
 import java.nio.file.*;
 
-/** Real-device contracts. Custom framework runner avoids AndroidX test dependencies.
- * No production Activity is launched: this is a database/API test, NOT UI acceptance.
- */
+/** Real-device database/API contracts, NOT product UI acceptance. */
 public final class V12DeviceTest extends Instrumentation {
     private Bundle args; private int checks; private final StringBuilder log=new StringBuilder();
     interface Action {void run() throws Exception;}
@@ -72,18 +70,25 @@ public final class V12DeviceTest extends Instrumentation {
         NoteDocument missingImage=new NoteDocument();missingImage.addText("replace","替换");missingImage.addImage("photo","missing","截图");
         reject(()->call(d,"saveNote",new Class[]{String.class,List.class},"guide",missingImage.snapshot()),"note cannot reference missing stored media");
         ok(((List<?>)call(d,"noteBlocks",new Class[]{String.class},"guide")).size()==2,"failed note replace retains all prior blocks");
-        // Exercise real Android private-file NIO operations, not just host JVM.
         Path mediaRoot=context.getFilesDir().toPath().resolve("contract-media");MediaRepository media=new MediaRepository(mediaRoot,4096);String id=media.copy(new ByteArrayInputStream(new byte[]{97,98,99}));
-        ok(id.equals("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),"Android media hard-link publication and digest verified");
+        ok(id.equals("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),"Android locked atomic publication and digest verified");
+        ok(media.copy(new ByteArrayInputStream(new byte[]{97,98,99})).equals(id),"Android duplicate media does not replace existing file");
+        // Concurrent repository instances must cooperate on one private destination.
+        java.util.concurrent.CountDownLatch start=new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicReference<Throwable> failure=new java.util.concurrent.atomic.AtomicReference<>();
+        List<Thread> writers=new ArrayList<>();for(int i=0;i<4;i++){Thread t=new Thread(()->{try{start.await();String actual=new MediaRepository(mediaRoot,4096).copy(new ByteArrayInputStream(new byte[]{97,98,99}));if(!actual.equals(id))throw new AssertionError("digest mismatch");}catch(Throwable e){failure.compareAndSet(null,e);}});writers.add(t);t.start();}
+        start.countDown();for(Thread t:writers){t.join(10000);if(t.isAlive())throw new AssertionError("parallel writer stalled");}
+        if(failure.get()!=null)throw new AssertionError("parallel writer failed",failure.get());media.verify(id);
+        ok(Arrays.equals(Files.readAllBytes(media.path(id)),new byte[]{97,98,99}),"parallel media imports retain exact bytes without overlapping JVM locks");
         call(d,"registerMedia",new Class[]{String.class,String.class,long.class},id,"application/octet-stream",3L);
         note.addImage("image",id,"合成文件，不是图片解码测试");call(d,"saveNote",new Class[]{String.class,List.class},"guide",note.snapshot());
         ok(((List<?>)call(d,"noteBlocks",new Class[]{String.class},"guide")).size()==3,"note image reference requires registered media");
         Path archive=context.getFilesDir().toPath().resolve("contract.ptodo12");Files.deleteIfExists(archive);BackupArchive.write(archive,new byte[]{1,2,3},Set.of(id),media);
         try(BackupArchive.Snapshot snapshot=BackupArchive.read(archive,context.getCacheDir().toPath(),4096)){ok(Arrays.equals(snapshot.state(),new byte[]{1,2,3})&&snapshot.assets().containsKey(id),"Android archive byte transport round-trips");}
-        // Last successful mutation must be this batch so undo can be tested after process death.
+        boolean refused=false;byte[] archiveBefore=Files.readAllBytes(archive);try{BackupArchive.write(archive,new byte[]{9},Set.of(id),media);}catch(IOException e){refused=true;}
+        ok(refused&&Arrays.equals(archiveBefore,Files.readAllBytes(archive)),"Android export refuses overwrite and preserves exact existing ZIP");
         batch(d,"restart-undo",List.of(row("later",200,"2026-09-08",500)));
         close(d);Object again=db("v12-contract.db");ok(count(again,"ledger")==4,"database helper reopen retains money");close(again);
-        // Leave a future-version database: opening must fail, never delete or recreate.
         context.deleteDatabase("future.db");SQLiteDatabase future=context.openOrCreateDatabase("future.db",0,null);future.execSQL("CREATE TABLE sentinel(value TEXT)");future.execSQL("INSERT INTO sentinel VALUES ('keep')");future.setVersion(99);future.close();
         reject(()->{Object newer=db("future.db");try{count(newer,"categories");}finally{close(newer);}},"future schema refused without destructive downgrade");
         SQLiteDatabase retained=context.openOrCreateDatabase("future.db",0,null);try(android.database.Cursor c=retained.rawQuery("SELECT value FROM sentinel",null)){ok(c.moveToFirst()&&c.getString(0).equals("keep")&&retained.getVersion()==99,"future database remains byte-semantically intact");}finally{retained.close();}

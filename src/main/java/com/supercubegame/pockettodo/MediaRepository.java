@@ -4,19 +4,23 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.FileAlreadyExistsException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
-/** App-private immutable byte store. Caller owns input streams and supplies a resource budget.
- * This layer does NOT prove bytes are a decodable/safe image. Android must validate dimensions,
- * format and decode separately before attaching an imported asset to a note.
- * Publication uses an atomic create-only hard link; unsupported filesystems fail explicitly.
- * fsync of contents is not a tested guarantee against device power loss/directory durability.
+/** App-private immutable byte store. Caller owns streams and supplies resource budget.
+ * This layer does NOT validate image decoding, dimensions, format or safe rendering.
+ * Android denied hard links in actual API26/34 runs. Publication now uses same-directory
+ * atomic rename under a persistent OS lock, plus a JVM lock for overlapping instances.
+ * Only cooperating app-private writers are supported. Do not use this on public directories
+ * writable by other apps. Existing destinations are checked under that lock, never replaced.
+ * File fsync/rename do not constitute a tested power-loss or directory durability guarantee.
  */
 public final class MediaRepository {
     private final Path root;
@@ -42,16 +46,31 @@ public final class MediaRepository {
     static void validId(String id) {
         if (id == null || !id.matches("[0-9a-f]{64}")) throw new IllegalArgumentException("无效的媒体标识");
     }
+    /** Persistent lock is in the parent of the publication directory, never deleted:
+     * unlinking a lock while other processes wait would create two independent locks.
+     * Both source/destination must be app-private siblings on the same filesystem.
+     */
+    static synchronized void publishNewFile(Path temporary, Path destination) throws IOException {
+        Path temp=temporary.toAbsolutePath().normalize(),dest=destination.toAbsolutePath().normalize();
+        Path directory=dest.getParent();
+        if(directory==null||directory.getParent()==null||!directory.equals(temp.getParent())||!Files.isRegularFile(temp,LinkOption.NOFOLLOW_LINKS))
+            throw new IOException("原子发布要求同一私有目录内的普通文件");
+        Path lockFile=directory.getParent().resolve(".pocket-publish.lock");
+        try(FileChannel channel=FileChannel.open(lockFile,StandardOpenOption.CREATE,StandardOpenOption.WRITE,LinkOption.NOFOLLOW_LINKS);
+            FileLock lock=channel.lock()) {
+            if(!lock.isValid())throw new IOException("无法取得文件发布锁");
+            if(Files.exists(dest,LinkOption.NOFOLLOW_LINKS))throw new FileAlreadyExistsException(dest.toString());
+            Files.move(temp,dest,StandardCopyOption.ATOMIC_MOVE);
+        }
+    }
     public Path path(String id) throws IOException {
-        validId(id);
-        Path path = root.resolve(id);
+        validId(id);Path path = root.resolve(id);
         if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(path))
             throw new IOException("媒体不存在或不是普通文件");
         return path;
     }
     public void verify(String id) throws IOException {
-        Path p = path(id);
-        MessageDigest digest = sha(); long size = 0;
+        Path p = path(id);MessageDigest digest = sha();long size = 0;
         try (InputStream in = Files.newInputStream(p, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) {
             byte[] buffer = new byte[16384]; int n;
             while ((n = in.read(buffer)) != -1) {
@@ -78,11 +97,9 @@ public final class MediaRepository {
             if (size == 0) throw new IOException("不能导入空媒体文件");
             try (FileChannel channel = FileChannel.open(temp, StandardOpenOption.WRITE)) { channel.force(true); }
             String id = hex(digest.digest());
-            Path dest = root.resolve(id);
-            try { Files.createLink(dest, temp); }
+            try { publishNewFile(temp,root.resolve(id)); }
             catch (FileAlreadyExistsException exists) { verify(id); }
-            verify(id);
-            return id;
+            verify(id);return id;
         } finally { Files.deleteIfExists(temp); }
     }
 }

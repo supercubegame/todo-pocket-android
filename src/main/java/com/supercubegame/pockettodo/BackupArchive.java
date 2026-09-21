@@ -13,10 +13,10 @@ import java.util.*;
 import java.util.zip.*;
 
 /** Integrity-checked transport, NOT database restore. State is opaque at this layer.
- * The database adapter must additionally validate schema/IDs/relationships and commit atomically.
- * Input assets must be the exact reference set obtained from that validated state.
- * No encryption or authenticity guarantee: hashes detect damage, not malicious re-authoring.
- * 8 MiB metadata/state budget is a provisional defensive memory bound, not a photo-count quota.
+ * Database adapter must validate schema/IDs/relationships and commit atomically.
+ * References must come from that validated state. No encryption or authenticity guarantee.
+ * 8 MiB metadata/state budget is provisional memory protection, not a photo-count quota.
+ * Write only to app-private directories; system SAF delivery must copy a validated snapshot.
  */
 public final class BackupArchive {
     private static final int META_LIMIT = 8 * 1024 * 1024;
@@ -127,9 +127,8 @@ public final class BackupArchive {
                 for(String id:ids)try(InputStream in=Files.newInputStream(media.path(id),StandardOpenOption.READ,LinkOption.NOFOLLOW_LINKS)){entry(zip,"media/"+id,in);}
             }
             try(FileChannel channel=FileChannel.open(temp,StandardOpenOption.WRITE)){channel.force(true);}
-            // Validate the actual produced ZIP and exact reference set before publishing it.
             try(Snapshot snapshot=read(temp,parent,Math.max(1,total))){if(!Arrays.equals(owned,snapshot.state())||!snapshot.assets().keySet().equals(ids))throw new IOException("备份回读不一致");}
-            Files.createLink(dest,temp);
+            MediaRepository.publishNewFile(temp,dest);
         } finally {Files.deleteIfExists(temp);}
     }
 }

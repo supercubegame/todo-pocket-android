@@ -8,8 +8,8 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 
-/** A bounded native slice: category buttons, manual paths, today's explicit marks.
- * Category drag, schedules, application catalog, money and notes UI are subsequent work.
+/** Native category/path/check-in workbench with activity-specific calendar ledger.
+ * Category drag, schedules, application catalog and notes remain subsequent work.
  * Writes go through validated AppDatabase APIs; UI read queries never mutate raw SQL.
  */
 public final class ActivitiesScreen {
@@ -73,7 +73,9 @@ public final class ActivitiesScreen {
         },d->renderDetail(id,d),null);
     }
     private void renderDetail(long id,Detail d){
-        LinearLayout body=host.content();body.addView(host.button("返回分类",()->{selected=0;load();}));
+        LinearLayout body=host.content();LinearLayout toolbar=new LinearLayout(host.activity);
+        toolbar.addView(host.button("返回分类",()->{selected=0;load();}),new LinearLayout.LayoutParams(0,host.dp(48),1));
+        toolbar.addView(host.button("日历账本",()->new CalendarScreen(host,id,d.title,this::load).load()),new LinearLayout.LayoutParams(0,host.dp(48),1));body.addView(toolbar);
         ScrollView scroll=new ScrollView(host.activity);LinearLayout details=host.column();scroll.addView(details);body.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         details.addView(host.text(d.title,26,TodayScreen.INK));
         TextView note=host.text("手动记录，不会替你操作其他应用",14,TodayScreen.MUTED);note.setPadding(0,host.dp(6),0,host.dp(18));details.addView(note);

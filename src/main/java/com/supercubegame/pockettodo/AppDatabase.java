@@ -19,10 +19,12 @@ import java.util.*;
  */
 public final class AppDatabase extends SQLiteOpenHelper {
     private interface Work<T> { T run(SQLiteDatabase db); }
+    private Object restoreSession=new Object();
     public AppDatabase(Context context,String name) {
         super(context.getApplicationContext(),validName(name),null,2);
         setWriteAheadLoggingEnabled(true);
     }
+    @Override public synchronized void close(){restoreSession=new Object();super.close();}
     private static String validName(String name) {
         if(name==null||!name.matches("[A-Za-z0-9_-]+\\.db"))throw new IllegalArgumentException("无效数据库文件名");return name;
     }
@@ -306,6 +308,80 @@ public final class AppDatabase extends SQLiteOpenHelper {
             snapshot.close();
             for(Map.Entry<String,Long> item:registry.entrySet()){media.verify(item.getKey());if(Files.size(media.path(item.getKey()))!=item.getValue())throw new IOException("恢复媒体回读大小不一致");}
             tx(db->{tableSet(db);deleteRows(db);copyRows(staged,db);require(Arrays.equals(encodeState(db),expected),"恢复事务回读不一致");return null;});
+        }
+    }
+
+    /** A private, validated, single-attempt preview. Caller MUST close on cancellation
+     * or lifecycle abandonment, and obtain explicit user consent before confirmRestore.
+     * Counts describe replacement, not merge. No paths or mutable state are exposed.
+     * This token is in-memory only, not restorable after process death/helper close.
+     */
+    public static final class RestorePlan implements AutoCloseable {
+        private final AppDatabase owner;
+        private final Object session;
+        private final BackupArchive.Snapshot snapshot;
+        private final byte[] before,expected;
+        private final Map<String,Long> current,incoming;
+        private boolean terminal;
+        private RestorePlan(AppDatabase owner,BackupArchive.Snapshot snapshot,byte[] before,byte[] expected,Map<String,Long> current,Map<String,Long> incoming){
+            this.owner=owner;this.session=owner.restoreSession;this.snapshot=snapshot;
+            this.before=before.clone();this.expected=expected.clone();this.current=current;this.incoming=incoming;
+        }
+        public Map<String,Long> currentCounts(){return current;}
+        public Map<String,Long> incomingCounts(){return incoming;}
+        @Override public void close()throws IOException{synchronized(owner){terminal=true;snapshot.close();}}
+    }
+    private static Map<String,Long> summary(SQLiteDatabase db){
+        Map<String,Long> counts=new LinkedHashMap<>();for(String table:SNAPSHOT_TABLES)try(Cursor c=db.rawQuery("SELECT count(*) FROM "+table,null)){c.moveToFirst();counts.put(table,c.getLong(0));}
+        return Collections.unmodifiableMap(counts);
+    }
+    private static Map<String,Long> validateFiles(SQLiteDatabase staged,BackupArchive.Snapshot snapshot)throws IOException{
+        Map<String,Long> registry=registeredMedia(staged);Map<String,Path> files=snapshot.assets();
+        if(!registry.keySet().equals(files.keySet()))throw new IOException("媒体集合与数据库引用不一致");
+        for(Map.Entry<String,Long> item:registry.entrySet())if(!Files.isRegularFile(files.get(item.getKey()),LinkOption.NOFOLLOW_LINKS)||Files.size(files.get(item.getKey()))!=item.getValue())throw new IOException("媒体登记大小或文件类型不一致");
+        return registry;
+    }
+    /** Performs full archive/domain validation, freezes the reviewed source in private
+     * staging and captures a consistent current state. No live media is published.
+     * Later source-file changes cannot substitute a different backup after consent.
+     */
+    public synchronized RestorePlan prepareRestore(Path archive,Path stagingRoot,long byteBudget)throws IOException{
+        BackupArchive.Snapshot snapshot=BackupArchive.read(archive,stagingRoot,byteBudget);boolean success=false;
+        try{
+            byte[] expected=snapshot.state(),before=exportState();
+            try(SQLiteDatabase incoming=candidate(expected);SQLiteDatabase current=candidate(before)){
+                validateFiles(incoming,snapshot);
+                RestorePlan plan=new RestorePlan(this,snapshot,before,expected,summary(current),summary(incoming));success=true;return plan;
+            }
+        }finally{if(!success)snapshot.close();}
+    }
+    private static void unchanged(SQLiteDatabase db,RestorePlan plan){
+        // Revision alone is insufficient: restores can rewind it and another connection
+        // could change content without bumping it. Compare the complete canonical state.
+        if(!Arrays.equals(encodeState(db),plan.before))throw new IllegalStateException("本机数据已变化，请重新预览后确认恢复");
+    }
+    /** Caller consent is a UI obligation, not something this backend can prove.
+     * Owner/session identity and single-attempt consumption prevent stale token reuse.
+     * Final comparison and replacement share ONE write transaction, not a TOCTOU check.
+     * Legacy restoreBackup remains a lower-level adapter and bypasses this preview API;
+     * future user-facing restoration MUST use this guarded path instead.
+     */
+    public synchronized void confirmRestore(RestorePlan plan,MediaRepository media)throws IOException{
+        if(plan==null||plan.owner!=this)throw new IllegalArgumentException("恢复预览不属于当前数据库");
+        if(plan.terminal||plan.session!=restoreSession)throw new IllegalStateException("恢复预览已取消、使用或失效，请重新预览");
+        plan.terminal=true;
+        try(BackupArchive.Snapshot snapshot=plan.snapshot;SQLiteDatabase staged=candidate(plan.expected)){
+            if(media==null)throw new IllegalArgumentException("媒体仓库不能为空");
+            // Early read avoids unnecessary publication for already stale plans. It is
+            // NOT the safety boundary: repeat inside the actual replacement transaction.
+            tx(db->{unchanged(db,plan);return null;});
+            Map<String,Long> registry=validateFiles(staged,snapshot);Map<String,Path> files=snapshot.assets();
+            for(String id:registry.keySet())try(InputStream in=Files.newInputStream(files.get(id),StandardOpenOption.READ,LinkOption.NOFOLLOW_LINKS)){
+                if(!media.copy(in).equals(id))throw new IOException("预览媒体已变化，拒绝恢复");
+            }
+            snapshot.close();
+            for(Map.Entry<String,Long> item:registry.entrySet()){media.verify(item.getKey());if(Files.size(media.path(item.getKey()))!=item.getValue())throw new IOException("恢复媒体回读大小不一致");}
+            tx(db->{unchanged(db,plan);deleteRows(db);copyRows(staged,db);require(Arrays.equals(encodeState(db),plan.expected),"恢复事务回读不一致");return null;});
         }
     }
 }

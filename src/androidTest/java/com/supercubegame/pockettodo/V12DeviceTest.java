@@ -73,7 +73,6 @@ public final class V12DeviceTest extends Instrumentation {
         Path mediaRoot=context.getFilesDir().toPath().resolve("contract-media");MediaRepository media=new MediaRepository(mediaRoot,4096);String id=media.copy(new ByteArrayInputStream(new byte[]{97,98,99}));
         ok(id.equals("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),"Android locked atomic publication and digest verified");
         ok(media.copy(new ByteArrayInputStream(new byte[]{97,98,99})).equals(id),"Android duplicate media does not replace existing file");
-        // Concurrent repository instances must cooperate on one private destination.
         java.util.concurrent.CountDownLatch start=new java.util.concurrent.CountDownLatch(1);
         java.util.concurrent.atomic.AtomicReference<Throwable> failure=new java.util.concurrent.atomic.AtomicReference<>();
         List<Thread> writers=new ArrayList<>();for(int i=0;i<4;i++){Thread t=new Thread(()->{try{start.await();String actual=new MediaRepository(mediaRoot,4096).copy(new ByteArrayInputStream(new byte[]{97,98,99}));if(!actual.equals(id))throw new AssertionError("digest mismatch");}catch(Throwable e){failure.compareAndSet(null,e);}});writers.add(t);t.start();}
@@ -107,14 +106,102 @@ public final class V12DeviceTest extends Instrumentation {
         ok(!batch(d,"money-1",entries)&&count(d,"ledger")==4,"idempotency journal survives process restart");
         call(d,"undoBatch",new Class[]{String.class},"restart-undo");ok(count(d,"ledger")==3,"latest batch undo survives process restart");
         reject(()->call(d,"undoBatch",new Class[]{String.class},"money-1"),"old batch undo still invalid after later writes and restart");
-        reject(()->batch(d,"restart-undo",List.of(row("later",200,"2026-09-08",500))),"undone batch tombstone survives restart");
-        close(d);
+        reject(()->batch(d,"restart-undo",List.of(row("later",200,"2026-09-08",500))),"undone batch tombstone survives restart");close(d);
+    }
+    private void define(Object d,String id,String name,String type,List<String> options)throws Exception{call(d,"defineField",new Class[]{String.class,String.class,String.class,List.class},id,name,type,options);}
+    private void value(Object d,long activity,String id,List<String> values)throws Exception{call(d,"putField",new Class[]{long.class,String.class,List.class},activity,id,values);}
+    private Object value(Object d,long activity,String id)throws Exception{return call(d,"fieldValue",new Class[]{long.class,String.class},activity,id);}
+    private Object definition(Object d,String id)throws Exception{return call(d,"fieldDefinition",new Class[]{String.class},id);}
+    private byte[] legacy(){TodoModel model=new TodoModel();model.add("旧待办甲");model.add("旧待办乙");model.toggle(2);return BackupCodec.encode(model);}
+    private long importLegacy(Object d,byte[] bytes)throws Exception{return((Number)call(d,"importLegacy",new Class[]{byte[].class},(Object)bytes)).longValue();}
+    private Object todo(Object d,String id)throws Exception{return call(d,"todo",new Class[]{String.class},id);}
+    private Object member(Object obj,String name)throws Exception{return obj.getClass().getField(name).get(obj);}
+    private void fieldsSeed()throws Exception{
+        getTargetContext().deleteDatabase("fields.db");Object d=db("fields.db");category(d,1,"测试");activity(d,1,1,0,"活动一");activity(d,2,1,0,"活动二");
+        define(d,"invite","邀请人数","NUMBER",List.of());value(d,1,"invite",List.of("3"));
+        call(d,"createFieldNote",new Class[]{String.class,long.class,String.class,String.class},"field-note",1L,"invite","怎么邀请");
+        NoteDocument n=new NoteDocument();n.addText("tip","邀请前先确认活动规则");call(d,"saveNote",new Class[]{String.class,List.class},"field-note",n.snapshot());
+        call(d,"renameField",new Class[]{String.class,String.class},"invite","需要邀请的人数");
+        ok(value(d,1,"invite").equals(List.of("3"))&&((CustomFields.Definition)definition(d,"invite")).name.equals("需要邀请的人数"),"persistent field rename preserves typed value");
+        ok(call(d,"fieldNoteIds",new Class[]{long.class,String.class},1L,"invite").equals(List.of("field-note")),"field note stays attached by ID after rename");
+        reject(()->value(d,1,"invite",List.of("three")),"persistent numeric field rejects non-number");ok(value(d,1,"invite").equals(List.of("3")),"bad field edit retains exact previous value");
+        reject(()->value(d,999,"invite",List.of("4")),"field value cannot refer to unknown activity");
+        define(d,"conditions","条件","MULTI_SELECT",List.of("invite","purchase"));value(d,1,"conditions",List.of("purchase","invite","purchase"));
+        ok(value(d,1,"conditions").equals(List.of("purchase","invite")),"persistent multi-select deduplicates in order");
+        reject(()->value(d,1,"conditions",List.of("invite","unknown")),"late invalid option rejects whole replacement");ok(value(d,1,"conditions").equals(List.of("purchase","invite")),"invalid option leaves all old choices");
+        define(d,"date","截止","DATE",List.of());reject(()->value(d,1,"date",List.of("2026-02-29")),"persistent impossible date rejected");
+        define(d,"link","规则","LINK",List.of());reject(()->value(d,1,"link",List.of("javascript:alert(1)")),"persistent executable link rejected");value(d,1,"link",List.of("https://example.com/rules"));
+        define(d,"flag","已确认","BOOLEAN",List.of());value(d,1,"flag",List.of("false"));ok(value(d,1,"flag").equals(List.of("false")),"false field value differs from unset");
+        value(d,1,"flag",List.of());ok(value(d,1,"flag").equals(List.of()),"explicit empty field clears value");
+        define(d,"long","攻略补充","LONG_TEXT",List.of());char[] chars=new char[5000];Arrays.fill(chars,'技');String longText=new String(chars);value(d,1,"long",List.of(longText));ok(value(d,1,"long").equals(List.of(longText)),"new long field does not inherit legacy200-char cap");
+        call(d,"archiveField",new Class[]{String.class,boolean.class},"invite",true);ok(value(d,1,"invite").equals(List.of("3")),"archiving field retains persistent value");
+        reject(()->value(d,1,"invite",List.of("4")),"archived persistent field rejects new value");
+        reject(()->call(d,"createFieldNote",new Class[]{String.class,long.class,String.class,String.class},"blocked",1L,"invite","new"),"archived field rejects new attached note");
+        ok(call(d,"fieldNoteIds",new Class[]{long.class,String.class},1L,"invite").equals(List.of("field-note"))&&((List<?>)call(d,"noteBlocks",new Class[]{String.class},"field-note")).size()==1,"archive preserves existing field note and text");
+        reject(()->call(d,"createFieldNote",new Class[]{String.class,long.class,String.class,String.class},"missing",1L,"missing","bad"),"unknown field note rejected atomically");
+        ok(count(d,"notes")==1,"failed field note does not create orphan note");
+        call(d,"addTodo",new Class[]{String.class,String.class},"local","本地新待办");call(d,"addTodo",new Class[]{String.class,String.class},"long-todo",longText);
+        ok(member(todo(d,"long-todo"),"title").equals(longText),"new ordinary todo does not inherit legacy title cap");
+        call(d,"editTodo",new Class[]{String.class,String.class,boolean.class},"local","本地已编辑",true);
+        ok(member(todo(d,"local"),"title").equals("本地已编辑")&&(Boolean)member(todo(d,"local"),"done"),"ordinary todo edit and completion persist");
+        reject(()->call(d,"editTodo",new Class[]{String.class,String.class,boolean.class},"local"," ",false),"blank ordinary todo edit rejected");
+        ok((Boolean)member(todo(d,"local"),"done"),"invalid todo edit does not change completion");
+        ok(importLegacy(d,legacy())==2&&count(d,"todos")==4,"legacy import appends ordinary todos without replacing existing");
+        ok(importLegacy(d,legacy())==0&&count(d,"todos")==4,"same legacy backup imported twice is persistent no-op");
+        String source=LegacyImport.preview(legacy()).sourceId();String first="legacy-"+source+"-1",second="legacy-"+source+"-2";
+        ok(member(todo(d,first),"title").equals("旧待办甲")&&!(Boolean)member(todo(d,first),"done")&&(Boolean)member(todo(d,second),"done"),"legacy remapping keeps text and completion");
+        ok(call(d,"todoIds",new Class[]{}).equals(List.of("local","long-todo",first,second)),"legacy appends preserve imported and existing order");
+        ok(count(d,"activities")==2&&count(d,"ledger")==0&&count(d,"checkins")==0,"legacy import invents no activities money or check-ins");
+        byte[] broken=legacy();broken[broken.length-2]^=1;reject(()->importLegacy(d,broken),"corrupt legacy import rejected before transaction");ok(count(d,"todos")==4&&count(d,"legacy_imports")==1,"bad import retains rows and journal exactly");
+        // Force an ID conflict on the SECOND imported row. First row and journal must roll back.
+        TodoModel other=new TodoModel();other.add("另一备份甲");other.add("另一备份乙");byte[] clash=BackupCodec.encode(other);String clashSource=LegacyImport.preview(clash).sourceId();
+        call(d,"addTodo",new Class[]{String.class,String.class},"legacy-"+clashSource+"-2","本地占用标识");
+        reject(()->importLegacy(d,clash),"late imported ID collision rolls back complete import");ok(count(d,"todos")==5&&count(d,"legacy_imports")==1,"failed import has neither first row nor journal residue");
+        close(d);migration();
+    }
+    private void fieldsReopen()throws Exception{
+        Object d=db("fields.db");ok(value(d,1,"invite").equals(List.of("3"))&&((CustomFields.Definition)definition(d,"invite")).archived,"process restart retains archived definition and numeric value");
+        ok(value(d,1,"conditions").equals(List.of("purchase","invite")),"process restart retains multi-select ordering");
+        ok(call(d,"fieldNoteIds",new Class[]{long.class,String.class},1L,"invite").equals(List.of("field-note")),"process restart retains field-note relationship");
+        ok(member(todo(d,"local"),"title").equals("本地已编辑")&&(Boolean)member(todo(d,"local"),"done"),"process restart retains independent ordinary todo");
+        ok(importLegacy(d,legacy())==0&&count(d,"todos")==5&&count(d,"legacy_imports")==1,"process restart retains legacy import idempotency journal");
+        close(d);Object migrated=db("migrate-v1.db");ok(call(migrated,"categoryName",new Class[]{long.class},7L).equals("原分类"),"migrated data persists into separate process");close(migrated);
+    }
+    // Frozen v1 DDL from41165adf, independent from current production onCreate/onUpgrade.
+    private static final String[] V1_DDL={
+        "CREATE TABLE revision(id INTEGER PRIMARY KEY CHECK(id=1), value INTEGER NOT NULL CHECK(value>=0))",
+        "CREATE TABLE categories(id INTEGER PRIMARY KEY CHECK(id>0),name TEXT NOT NULL CHECK(length(trim(name))>0),position INTEGER NOT NULL CHECK(position>=0))",
+        "CREATE TABLE applications(id INTEGER PRIMARY KEY CHECK(id>0),name TEXT NOT NULL,package_name TEXT NOT NULL)",
+        "CREATE UNIQUE INDEX application_package ON applications(package_name) WHERE package_name<>''",
+        "CREATE TABLE activities(id INTEGER PRIMARY KEY CHECK(id>0),category_id INTEGER NOT NULL REFERENCES categories(id),application_id INTEGER REFERENCES applications(id),title TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN(0,1)))",
+        "CREATE TABLE paths(activity_id INTEGER NOT NULL REFERENCES activities(id),position INTEGER NOT NULL CHECK(position>=0),text TEXT NOT NULL,PRIMARY KEY(activity_id,position))",
+        "CREATE TABLE tags(activity_id INTEGER NOT NULL REFERENCES activities(id),position INTEGER NOT NULL CHECK(position>=0),text TEXT NOT NULL,PRIMARY KEY(activity_id,text),UNIQUE(activity_id,position))",
+        "CREATE TABLE batches(id TEXT PRIMARY KEY NOT NULL,payload BLOB NOT NULL,revision INTEGER NOT NULL,undone INTEGER NOT NULL CHECK(undone IN(0,1)))",
+        "CREATE TABLE ledger(id TEXT PRIMARY KEY NOT NULL,activity_id INTEGER NOT NULL REFERENCES activities(id),day TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN('EXPENSE','REFUND','INCOME','PLANNED')),cents INTEGER NOT NULL CHECK(cents>=0),memo TEXT NOT NULL,batch_id TEXT NOT NULL REFERENCES batches(id),position INTEGER NOT NULL CHECK(position>=0),UNIQUE(batch_id,position))",
+        "CREATE INDEX ledger_activity_day ON ledger(activity_id,day)",
+        "CREATE TABLE checkins(activity_id INTEGER NOT NULL REFERENCES activities(id),day TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN('DONE','SKIPPED')),memo TEXT NOT NULL,recorded_at TEXT NOT NULL,PRIMARY KEY(activity_id,day))",
+        "CREATE TABLE media(id TEXT PRIMARY KEY NOT NULL,mime TEXT NOT NULL,bytes INTEGER NOT NULL CHECK(bytes>0))",
+        "CREATE TABLE notes(id TEXT PRIMARY KEY NOT NULL,activity_id INTEGER NOT NULL REFERENCES activities(id),title TEXT NOT NULL)",
+        "CREATE TABLE blocks(note_id TEXT NOT NULL REFERENCES notes(id),id TEXT NOT NULL,position INTEGER NOT NULL CHECK(position>=0),kind TEXT NOT NULL CHECK(kind IN('TEXT','IMAGE')),text TEXT NOT NULL,asset_id TEXT REFERENCES media(id),caption TEXT NOT NULL,private INTEGER NOT NULL CHECK(private IN(0,1)),PRIMARY KEY(note_id,id),UNIQUE(note_id,position),CHECK((kind='TEXT' AND asset_id IS NULL) OR (kind='IMAGE' AND asset_id IS NOT NULL)))"
+    };
+    private void migration()throws Exception{
+        Context context=getTargetContext();context.deleteDatabase("migrate-v1.db");SQLiteDatabase old=context.openOrCreateDatabase("migrate-v1.db",0,null);old.setForeignKeyConstraintsEnabled(true);
+        for(String sql:V1_DDL)old.execSQL(sql);old.execSQL("INSERT INTO revision VALUES(1,42)");old.execSQL("INSERT INTO categories VALUES(7,'原分类',0)");old.execSQL("INSERT INTO activities VALUES(9,7,NULL,'原活动',0)");old.execSQL("INSERT INTO notes VALUES('old-note',9,'原笔记')");old.execSQL("INSERT INTO blocks VALUES('old-note','old-block',0,'TEXT','不能丢',NULL,'',1)");old.execSQL("INSERT INTO checkins VALUES(9,'2026-09-01','DONE','补记','2026-09-21T12:00:00Z')");old.setVersion(1);
+        try(android.database.Cursor c=old.rawQuery("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='fields'",null)){c.moveToFirst();ok(old.getVersion()==1&&c.getLong(0)==0,"migration fixture really is v1 without new field table");}old.close();
+        Object newer=db("migrate-v1.db");ok(call(newer,"categoryName",new Class[]{long.class},7L).equals("原分类")&&count(newer,"activities")==1,"v1 to v2 migration retains category and activity");
+        @SuppressWarnings("unchecked") List<NoteDocument.Block> blocks=(List<NoteDocument.Block>)call(newer,"noteBlocks",new Class[]{String.class},"old-note");
+        ok(blocks.size()==1&&blocks.get(0).text.equals("不能丢")&&blocks.get(0).privateContent&&count(newer,"checkins")==1,"migration preserves old private note and check-in");
+        SQLiteDatabase raw=((android.database.sqlite.SQLiteOpenHelper)newer).getReadableDatabase();
+        try(android.database.Cursor c=raw.rawQuery("SELECT value FROM revision WHERE id=1",null)){c.moveToFirst();ok(raw.getVersion()==2&&c.getLong(0)==42,"migration advances schema not user revision");}
+        define(newer,"new-field","新字段","TEXT",List.of());value(newer,9,"new-field",List.of("迁移后可用"));ok(value(newer,9,"new-field").equals(List.of("迁移后可用")),"new fields usable on migrated database");
+        try(android.database.Cursor c=raw.rawQuery("PRAGMA foreign_key_check",null)){ok(!c.moveToFirst(),"migrated database has no foreign key violations");}
+        close(newer);
     }
     @Override public void onStart(){
         Bundle result=new Bundle();try{
             ok(getTargetContext().getPackageName().equals("com.supercubegame.pockettodo.v12.preview"),"tests target isolated v1.2 package");
             ok(android.os.Build.VERSION.SDK_INT==Integer.parseInt(args.getString("expectedApi")),"actual emulator API equals requested test matrix");
-            String phase=args.getString("phase");if("seed".equals(phase))seed();else if("reopen".equals(phase))reopen();else throw new IllegalArgumentException("unknown test phase");
+            String phase=args.getString("phase");if("seed".equals(phase)){seed();fieldsSeed();}else if("reopen".equals(phase)){reopen();fieldsReopen();}else throw new IllegalArgumentException("unknown test phase");
             log.append("DEVICE_DATABASE_RESULT ").append(phase).append(' ').append(checks).append('/').append(checks).append(" PASS\n");result.putString("stream",log.toString());finish(Activity.RESULT_OK,result);
         }catch(Throwable error){StringWriter text=new StringWriter();error.printStackTrace(new PrintWriter(text));result.putString("stream",log+"DEVICE_DATABASE_FAILED\n"+text);finish(Activity.RESULT_CANCELED,result);}
     }

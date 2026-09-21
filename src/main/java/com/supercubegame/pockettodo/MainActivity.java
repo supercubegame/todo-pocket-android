@@ -156,13 +156,23 @@ public final class MainActivity extends Activity {
         if (!writable()) return;
         EditText field = editText("编辑待办输入");
         field.setText(item.title); field.setSelectAllOnFocus(true);
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("编辑待办").setView(field)
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(dp(20), dp(4), dp(20), 0);
+        body.addView(field, new LinearLayout.LayoutParams(-1, -2));
+        TextView validation = text("修改标题，不改变完成状态。", 13, MUTED);
+        validation.setContentDescription("编辑校验提示");
+        validation.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        body.addView(validation, new LinearLayout.LayoutParams(-1, -2));
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("编辑待办").setView(body)
             .setNegativeButton("取消", null).setPositiveButton("保存", null).create();
         dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             try {
                 TodoModel next = copy(); next.edit(item.id, field.getText().toString());
                 if (persist(next)) dialog.dismiss();
-            } catch (IllegalArgumentException e) { field.setError(e.getMessage()); }
+            } catch (IllegalArgumentException e) {
+                validation.setText(e.getMessage()); validation.setTextColor(ACCENT);
+            }
         }));
         dialog.show();
     }

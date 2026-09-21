@@ -58,10 +58,13 @@ def add(title):
     adb("shell", "input", "text", title.replace(" ", "%s")); tap(text="添加")
 
 def replace_field(description, title):
-    tap(**{"content-desc": description})
+    field = find(**{"content-desc": description})
+    length = len(field.get("text", "").encode("utf-16-le")) // 2
+    tap_node(field)
+    # Collapse any selection, then delete every code unit. Sequential keyevent is not a chord.
     adb("shell", "input", "keyevent", "KEYCODE_MOVE_END")
-    adb("shell", "input", "keyevent", "--longpress", "KEYCODE_SHIFT_LEFT", "KEYCODE_MOVE_HOME")
-    adb("shell", "input", "keyevent", "KEYCODE_DEL")
+    adb("shell", "input", "keyevent", *(["KEYCODE_DEL"] * (length + 1)))
+    check(find(**{"content-desc": description}).get("text") == "", "editor fixture cleared through real input")
     if title: adb("shell", "input", "text", title.replace(" ", "%s"))
 
 def screenshot(name):
@@ -71,11 +74,25 @@ def screenshot(name):
     (OUT / name).write_bytes(data)
     return {"file": name, "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
 
+def save_document():
+    deadline = time.monotonic() + 18
+    last = []
+    while time.monotonic() < deadline:
+        last = nodes()
+        for n in last:
+            if n.get("text", "").casefold() in ("save", "保存") and n.get("enabled") == "true" and "documentsui" in n.get("package", ""):
+                tap_node(n); return
+        time.sleep(0.3)
+    print("PICKER_NODES " + repr([(n.get("text"), n.get("resource-id"), n.get("package")) for n in last]), flush=True)
+    raise AssertionError("System document picker save button missing")
+
 def open_backup():
     tap(text="导入备份")
-    # The system picker remembers the directory used by ACTION_CREATE_DOCUMENT.
     tap(text="PocketTodo-backup.ptodo")
     find(text="导入预览")
+
+def stored_state():
+    return adb("shell", "run-as", PKG, "cat", "shared_prefs/pocket_todo.xml")
 
 def main():
     OUT.mkdir(exist_ok=True)
@@ -108,9 +125,7 @@ def main():
     check(item(1).get("text") == "Fresh milk", "cancel valid edit preserves title")
     restart(); check(item(1).get("text") == "Fresh milk" and item(1).get("checked") == "true", "edit persists across restart")
     tap(text="导出备份"); tap(text="取消"); check(item(1).get("text") == "Fresh milk", "cancel export keeps list")
-    tap(text="导出备份"); tap(text="选择保存位置")
-    # API 30 AOSP DocumentsUI uses this stable resource id for the save action.
-    tap(**{"resource-id": "com.google.android.documentsui:id/button1"})
+    tap(text="导出备份"); tap(text="选择保存位置"); save_document()
     check(find(text="备份已导出并校验") is not None, "export through real system picker and exact readback")
     tap(**{"content-desc": "delete-2"}); tap(text="取消"); check(item(2) is not None, "cancel deletion preserves task")
     tap(**{"content-desc": "delete-2"}); tap(text="删除"); check(absent(2), "confirm deletes exact task")
@@ -129,6 +144,15 @@ def main():
     open_backup(); tap(text="确认替换"); tap(**{"content-desc": "todo-1"})
     check(find(text="撤销导入").get("enabled") == "false", "new mutation invalidates old undo snapshot")
     tap(**{"content-desc": "todo-1"}); shots.append(screenshot("03-tasks.png"))
+    before = stored_state()
+    paths = adb("shell", "find", "/storage/emulated/0", "-name", "PocketTodo-backup.ptodo").strip().splitlines()
+    check(len(paths) == 1 and paths[0].startswith("/storage/emulated/0/"), "locate disposable exported backup fixture")
+    corrupt = Path(os.environ["RUNNER_TEMP"]) / "corrupt.ptodo"; corrupt.write_bytes(b"broken backup\n")
+    adb("push", str(corrupt), paths[0])
+    tap(text="导入备份"); tap(text="PocketTodo-backup.ptodo")
+    find(text="导入失败：文件无效或无法读取，列表未更改")
+    check(stored_state() == before and item(1).get("checked") == "true" and item(2).get("text") == "Walk outside", "corrupt file through real picker leaves exact persisted state unchanged")
+    restart(); check(stored_state() == before, "rejected import remains unchanged after restart")
     tap(text="已完成"); check(item(1).get("checked") == "true" and absent(2), "completed view after backup roundtrip")
     shots.append(screenshot("04-completed.png"))
     start(OLD); check(item(1).get("text") == "Keep old data" and item(1).get("checked") == "false", "original APK coexists and keeps original data")

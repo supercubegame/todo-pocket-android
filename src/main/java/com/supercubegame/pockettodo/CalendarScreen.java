@@ -83,7 +83,9 @@ public final class CalendarScreen {
         YearMonth[] shown={month};
         LinearLayout body=host.column();body.setPadding(host.dp(10),0,host.dp(10),0);body.setFocusableInTouchMode(true);
         LinearLayout jump=new LinearLayout(host.activity);
-        EditText field=host.field("日历月份",false);field.setText(shown[0].toString());field.setHint("YYYY-MM");jump.addView(field,new LinearLayout.LayoutParams(0,host.dp(48),1));
+        // Prefilled format is self-explanatory; a hint would become accessibility text
+        // when cleared, obscuring the distinction between no input and actual content.
+        EditText field=host.field("日历月份",false);field.setText(shown[0].toString());jump.addView(field,new LinearLayout.LayoutParams(0,host.dp(48),1));
         TextView feedback=host.text("多选日期，只改变汇总范围",14,TodayScreen.MUTED);
         LinearLayout days=host.column();ScrollView scroll=new ScrollView(host.activity);scroll.addView(days);
         final Runnable[] draw=new Runnable[1];
@@ -111,7 +113,6 @@ public final class CalendarScreen {
         nav.addView(host.button("上月",()->shift(shown,-1,draw[0],feedback)),new LinearLayout.LayoutParams(0,host.dp(48),1));
         nav.addView(host.button("下月",()->shift(shown,1,draw[0],feedback)),new LinearLayout.LayoutParams(0,host.dp(48),1));
         nav.addView(host.button("清空选择",()->{draft.clear();draw[0].run();feedback.setText("已选 0 天");}),new LinearLayout.LayoutParams(0,host.dp(48),1));body.addView(nav);body.addView(feedback);
-        // Bounded viewport, not a quota: all days/months remain available by scrolling.
         int height=Math.min(host.dp(300),Math.max(host.dp(144),host.activity.getResources().getDisplayMetrics().heightPixels/2));
         body.addView(scroll,new LinearLayout.LayoutParams(-1,height));draw[0].run();
         AlertDialog dialog=new AlertDialog.Builder(host.activity).setTitle("选择汇总日期").setView(body).setNegativeButton("取消",null).setPositiveButton("应用选择",(d,w)->{selected.clear();selected.addAll(draft);month=shown[0];load();}).create();
@@ -143,8 +144,6 @@ public final class CalendarScreen {
             catch(RuntimeException e){validation.setText("日期无效：请填写真实的 YYYY-MM-DD");validation.setTextColor(TodayScreen.ERROR);hideKeyboard(date);return;}
             RadioButton chosen=kinds.findViewById(kinds.getCheckedRadioButtonId());
             Ledger.Entry entry=new Ledger.Entry(id,activityId,day,(Ledger.Kind)chosen.getTag(),cents,memo.getText().toString());
-            // One dialog owns one immutable submission identity. Duplicate button events
-            // are disabled, and DB idempotency remains the backstop, not UI timing alone.
             dialog.setCancelable(false);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);
             date.setEnabled(false);amount.setEnabled(false);memo.setEnabled(false);for(int i=0;i<kinds.getChildCount();i++)kinds.getChildAt(i).setEnabled(false);
             host.work(()->host.db.recordBatch(key,Collections.singletonList(entry)),ignored->{hideKeyboard(amount);dialog.dismiss();load();},()->{

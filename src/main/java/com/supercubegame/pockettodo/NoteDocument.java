@@ -2,7 +2,7 @@ package com.supercubegame.pockettodo;
 
 import java.util.*;
 
-/** Ordered note structure. Assets are stable identifiers, never absolute paths or expiring URIs. */
+/** Ordered note structure. Asset IDs are not absolute paths or expiring external URIs. */
 public final class NoteDocument {
     public enum Kind { TEXT, IMAGE }
     public static final class Block {
@@ -53,9 +53,9 @@ public final class NoteDocument {
         List<String> ids=new ArrayList<>(); for(Block b:blocks) ids.add(b.id); return List.copyOf(ids);
     }
     public synchronized List<Block> snapshot() { return List.copyOf(blocks); }
-    /** Sharing excludes private blocks by default; media derivative/redaction validation belongs in exporter. */
+    /** Private blocks excluded. Image derivative and redaction checks are still export-layer duties. */
     public synchronized List<Block> shareSelection(Set<String> selectedIds) {
-        if(selectedIds==null||selectedIds.contains(null)) throw new IllegalArgumentException("Explicit selection required");
+        if(selectedIds==null||Ledger.hasNull(selectedIds)) throw new IllegalArgumentException("Explicit selection required");
         for(String id:selectedIds) index(id);
         List<Block> selected=new ArrayList<>();
         for(Block b:blocks) if(selectedIds.contains(b.id) && !b.privateContent) selected.add(b);

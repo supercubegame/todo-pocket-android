@@ -15,8 +15,7 @@ public final class Ledger {
         public final long cents;
         public final String memo;
         public Entry(String id,long activityId,LocalDate date,Kind kind,long cents,String memo) {
-            this.id=identifier(id); this.activityId=positive(activityId);
-            this.date=validDate(date);
+            this.id=identifier(id); this.activityId=positive(activityId); this.date=validDate(date);
             if(kind==null || cents<0 || memo==null) throw new IllegalArgumentException("Invalid ledger entry");
             this.kind=kind; this.cents=cents; this.memo=memo;
         }
@@ -46,6 +45,7 @@ public final class Ledger {
         if(date==null || date.getYear()<1 || date.getYear()>9999) throw new IllegalArgumentException("Date outside supported calendar");
         return date;
     }
+    static boolean hasNull(Collection<?> items) { for(Object item:items) if(item==null) return true; return false; }
     public static long parseCents(String text) {
         if(text==null || !text.matches("[0-9]+(?:\\.[0-9]{1,2})?")) throw new IllegalArgumentException("Use non-negative decimal yuan with at most two decimal places");
         return new BigDecimal(text).movePointRight(2).longValueExact();
@@ -57,7 +57,7 @@ public final class Ledger {
     /** Validate the entire batch before mutating. A retry of identical payload is a no-op. */
     public synchronized boolean recordBatch(String key,List<Entry> rows) {
         identifier(key);
-        if(rows==null || rows.isEmpty() || rows.contains(null)) throw new IllegalArgumentException("Non-empty batch required");
+        if(rows==null || rows.isEmpty() || hasNull(rows)) throw new IllegalArgumentException("Non-empty batch required");
         List<Entry> copy=List.copyOf(rows);
         Batch prior=batches.get(key);
         if(prior!=null) {
@@ -66,9 +66,7 @@ public final class Ledger {
             return false;
         }
         Set<String> ids=new HashSet<>();
-        for(Entry row:copy) {
-            if(!ids.add(row.id) || entries.containsKey(row.id)) throw new IllegalStateException("Entry ID already exists");
-        }
+        for(Entry row:copy) if(!ids.add(row.id) || entries.containsKey(row.id)) throw new IllegalStateException("Entry ID already exists");
         long next=Math.incrementExact(revision);
         for(Entry row:copy) entries.put(row.id,row);
         batches.put(key,new Batch(copy,next)); revision=next; return true;
@@ -90,7 +88,7 @@ public final class Ledger {
     public synchronized List<Entry> snapshot() { return List.copyOf(entries.values()); }
     /** activity=0 means all activities. Empty selected days always means nothing selected. */
     public synchronized long total(long activity,Set<LocalDate> dates,String metric) {
-        if(activity<0 || dates==null || dates.contains(null) || metric==null) throw new IllegalArgumentException("Invalid summary filter");
+        if(activity<0 || dates==null || hasNull(dates) || metric==null) throw new IllegalArgumentException("Invalid summary filter");
         Set<LocalDate> selected=new HashSet<>(dates);
         for(LocalDate date:selected) validDate(date);
         if(!Set.of("EXPENSE","REFUND","INCOME","PLANNED","NET_EXPENSE","NET_CASH").contains(metric)) throw new IllegalArgumentException("Unknown metric");
@@ -114,7 +112,8 @@ public final class Ledger {
         }
     }
     public synchronized Set<LocalDate> recordedActualDates(long activity,Set<LocalDate> selected) {
-        if(activity<0 || selected==null || selected.contains(null)) throw new IllegalArgumentException("Invalid selected dates");
+        if(activity<0 || selected==null || hasNull(selected)) throw new IllegalArgumentException("Invalid selected dates");
+        for(LocalDate date:selected) validDate(date);
         Set<LocalDate> result=new TreeSet<>();
         for(Entry e:entries.values()) if(e.kind!=Kind.PLANNED && (activity==0||activity==e.activityId) && selected.contains(e.date)) result.add(e.date);
         return Collections.unmodifiableSet(result);

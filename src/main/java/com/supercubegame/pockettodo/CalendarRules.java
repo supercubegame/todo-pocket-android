@@ -3,7 +3,7 @@ package com.supercubegame.pockettodo;
 import java.time.*;
 import java.util.*;
 
-/** Local calendar dates are provided by caller in the user's activity timezone. No midnight reset. */
+/** Dates are supplied in activity timezone. No live clock and no midnight reset. */
 public final class CalendarRules {
     public enum Status { DONE, SKIPPED, UNRECORDED }
     public static final class Mark {
@@ -22,7 +22,7 @@ public final class CalendarRules {
     public CalendarRules() {}
     public static List<LocalDate> scheduled(LocalDate start,LocalDate end,Set<DayOfWeek> weekdays) {
         Ledger.validDate(start); Ledger.validDate(end);
-        if(end.isBefore(start)||weekdays==null||weekdays.contains(null)) throw new IllegalArgumentException("Invalid schedule");
+        if(end.isBefore(start)||weekdays==null||Ledger.hasNull(weekdays)) throw new IllegalArgumentException("Invalid schedule");
         List<LocalDate> result=new ArrayList<>();
         for(LocalDate d=start;!d.isAfter(end);d=d.plusDays(1)) if(weekdays.contains(d.getDayOfWeek())) result.add(d);
         return List.copyOf(result);
@@ -31,7 +31,7 @@ public final class CalendarRules {
         if(status==null) throw new IllegalArgumentException("Missing status");
         put(new Mark(activityId,date,Status.valueOf(status),"",null));
     }
-    /** Production callers supply recordedAt so a backdated check-in retains its actual entry time. */
+    /** Production callers supply recordedAt to distinguish backdated activity from entry time. */
     public synchronized void put(Mark value) {
         if(value==null) throw new IllegalArgumentException("Missing check-in");
         TreeMap<LocalDate,Mark> existing=marks.computeIfAbsent(value.activityId,k->new TreeMap<>());
@@ -51,8 +51,9 @@ public final class CalendarRules {
         Ledger.positive(activityId); Map<LocalDate,Mark> history=marks.get(activityId);
         return history==null?List.of():List.copyOf(history.values());
     }
-    /** Consecutive scheduled days ending at an explicit scheduled date; skipped/unrecorded breaks. */
+    /** Consecutive scheduled days through the supplied date. Skipped/unrecorded breaks. */
     public synchronized int streak(long activityId,LocalDate start,LocalDate through,Set<DayOfWeek> weekdays) {
+        Ledger.positive(activityId);
         List<LocalDate> due=scheduled(start,through,weekdays); int result=0;
         for(int i=due.size()-1;i>=0;i--) {
             if(!status(activityId,due.get(i)).equals(Status.DONE.name())) break;

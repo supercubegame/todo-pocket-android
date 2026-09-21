@@ -20,16 +20,16 @@ jobs:
       - name: Legacy regression and V1.2 domain contracts
         run: |
           set -euo pipefail
-          {
-            python3 tools/verify.py core
-            sources=(tests/V12CoreTest.java)
-            for name in ActivityModel Ledger CalendarRules CustomFields NoteDocument BackupArchive LegacyImport; do
-              path="src/main/java/com/supercubegame/pockettodo/$name.java"
-              if [ -f "$path" ]; then sources+=("$path"); fi
-            done
-            javac -encoding UTF-8 -cp build/core -d build/core "${sources[@]}"
-            java -cp build/core V12CoreTest
-          } 2>&1 | tee core.log
+          python3 tools/verify.py v12 2>&1 | tee core.log
+      - name: Verify unfinished APK cannot be mislabeled
+        run: |
+          python3 - <<'PY' 2>&1 | tee -a core.log
+          import subprocess
+          result = subprocess.run(['python3','tools/verify.py','build'],capture_output=True,text=True)
+          assert result.returncode != 0, 'Unfinished Android build gate must fail'
+          assert 'V1.2 Android phase is not wired' in result.stderr, 'Unexpected failure is not proof of release guard'
+          print('PASS unfinished V1.2 build explicitly blocked before Gradle')
+          PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

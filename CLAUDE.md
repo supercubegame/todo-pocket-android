@@ -1,25 +1,25 @@
 # Pocket Todo v1.2 development
 
-- Approved 32-file scope is in docs/V1_2_PLAN.md. One writer on this branch. Do not merge or alter previous releases.
-- Native Java Android. No accounts, telemetry, cloud resources or network permissions. Public fixtures are synthetic only.
-- Gate first. Legacy: python3 tools/verify.py core. V1.2 domain contract runs in CI via javac and V12CoreTest.
-- Current stage is DOMAIN_ONLY: no Android/export/restore acceptance and no release. Do not relabel old builds as v1.2.
-- Domain models must not use Android APIs, I/O, live clocks or random IDs. Inject dates and stable IDs.
-- Money uses integer cents and checked sums; planned and actual never mix. Missing record is not a zero-expense confirmation.
-- Check-ins and monetary records are independent. Duplicate submissions cannot add money or days twice.
-- Category/field/block renaming and ordering preserve stable identities and references. Invalid operations leave state unchanged.
-- Image sources are copied to persistent private storage after validation; thumbnails/cache are not authoritative data.
-- Full backups include referenced media and relationships; share exports include selected public content only.
-- Share redaction must change flattened exported bytes, never merely overlay a removable UI layer or include original assets.
-- Validate restores fully before committing; never silently reset damaged data or use destructive database migration fallback.
-- Keep legacy TodoModel/BackupCodec and CoreTest unchanged. Old 500/200 limits apply only to legacy format.
-- Package target is com.supercubegame.pockettodo.v12.preview; version 1.2/code 3 only when APK phase changes all coupled assertions.
-- Until then build.gradle and legacy APK gates are still v1.1; intentionally no Android job/publication in staged workflow.
-- Min SDK 26 / target 34; SDK assertions, manifest, package and test targets change together.
-- Use bounded streams and off-main-thread media/provider I/O; never load all original images or one unbounded export bitmap.
-- System pickers with fallback, minimum visibility, scoped FileProvider. No broad storage or all-packages permission.
-- Stable signing remains blocked on secure local user setup. Never transmit keys or claim debug previews support durable upgrades.
-- Preserve real exit codes and full failure context. Only publish verified output, never pass skipped/unobserved checks as success.
-- Reports land on evidence branch with source SHA/run ID and byte-for-byte readback. Missing evidence is NOT_TESTED.
+- Approved 32-file scope: docs/V1_2_PLAN.md. One writer on branch. No merge or previous release changes.
+- Native Java Android. No accounts, telemetry, cloud resources or network permissions. Public fixtures synthetic only.
+- Gate first: python3 tools/verify.py v12. This runs legacy regression and required V1.2 sources in fresh class output.
+- Current stage DOMAIN_ONLY. No Android/persistence/media/export/restore acceptance or release. Never relabel old UI as v1.2.
+- build gate explicitly fails on this unfinished branch; CI asserts its actual nonzero exit and exact reason.
+- Domain models never use Android APIs, I/O, live clocks or random IDs. Inject dates and stable IDs.
+- Money is integer cents with checked sums. Planned and actual never mix. Missing record is not confirmed zero spending.
+- Duplicate submissions cannot add money/days twice. Batch validation is all-or-nothing; stale corrections must fail.
+- IDs survive rename/reorder. Invalid operations preserve state. Snapshots must be defensive and immutable.
+- Images copied to persistent private storage; thumbnail/cache never authoritative. Still NOT_IMPLEMENTED at domain stage.
+- Full backup includes media and relationships; selected share content excludes private blocks. Export integration pending.
+- Redaction must alter exported bytes, not removable overlays; never include unredacted originals in shared ZIP.
+- Validate restore before commit; no silent resets or destructive migration fallback. Persistence phase pending.
+- Legacy TodoModel/BackupCodec/CoreTest stay unchanged; old 500/200 limits apply only to legacy format.
+- Target package com.supercubegame.pockettodo.v12.preview, version 1.2/code 3; update all coupled assertions at APK phase.
+- Until APK phase, build.gradle/legacy gates still identify v1.1; build gate intentionally blocks output and no release job exists.
+- Min SDK 26/target 34. Account for Java collection APIs on older Android via compatible code/desugaring in build phase.
+- System picker fallback, minimum app visibility, scoped FileProvider. No broad storage/all-packages permission.
+- Stable signing blocked on secure local setup. Never transmit keys or claim durable debug upgrades.
+- Preserve real exit codes, include failure context, and distinguish staged success from full acceptance.
+- Reports on evidence branch with exact SHA/run ID and byte-for-byte readback; ambiguous evidence must fail.
 - Keep this file byte-identical to CLAUDE.md and <=200 lines.
-- Physical device behavior, target sharing apps, disk-full/process-death and large-media limits need explicit evidence, not inference.
+- Physical phone, receiving share apps, disk-full/process-death and media capacity need explicit tests, not inference.

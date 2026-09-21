@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exit-code gates. No synthetic substitute for Java, Android, or UI execution."""
+"""Exit-code gates. Real Java execution, explicit staged Android boundaries."""
 import argparse
 import base64
 import hashlib
@@ -14,8 +14,10 @@ import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 os.chdir(ROOT)
+# These legacy identities remain blocked for builds on the unfinished v1.2 branch.
 PKG = "com.supercubegame.pockettodo.safe.preview"
 APK_NAME = "PocketTodo-1.1-preview.apk"
+V12_SOURCES = ("ActivityModel", "Ledger", "CalendarRules", "CustomFields", "NoteDocument")
 
 def run(args, **kwargs):
     print("+ " + " ".join(map(str, args)), flush=True)
@@ -34,7 +36,22 @@ def core():
          "src/main/java/com/supercubegame/pockettodo/BackupCodec.java", "tests/CoreTest.java"])
     run(["java", "-cp", str(out), "CoreTest"])
 
+def v12():
+    core()
+    sources = [Path("src/main/java/com/supercubegame/pockettodo") / (name + ".java") for name in V12_SOURCES]
+    sources.append(Path("tests/V12CoreTest.java"))
+    for path in sources:
+        assert path.is_file(), "Required V1.2 contract source missing: " + str(path)
+    # Separate output prevents a deleted source being masked by yesterday's class file.
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="v12-core-", dir="build") as out:
+        run(["javac", "-encoding", "UTF-8", "-d", out, *map(str, sources)])
+        run(["java", "-cp", out, "V12CoreTest"])
+    print("V12_ACCEPTANCE PARTIAL: domain contracts only; Android/persistence/media/export/restore NOT_TESTED")
+
 def build():
+    if Path("docs/V1_2_PLAN.md").exists():
+        raise RuntimeError("V1.2 Android phase is not wired: refusing to build/publish the inherited V1.1 UI as V1.2")
     run(["gradle", "--no-daemon", "--console=plain", "assembleDebug", "lintDebug"])
     sdk = Path(os.environ["ANDROID_HOME"])
     bt = sdk / "build-tools/35.0.0"
@@ -66,14 +83,18 @@ def report():
     logs = {}
     for name in ("core.log", "setup.log", "build.log", "ui.log", "emulator.log"):
         paths = list(out.rglob(name))
+        if len(paths) > 1: raise RuntimeError("Ambiguous evidence log: " + name)
         logs[name] = paths[0].read_text(errors="replace")[-24000:] if paths else "NOT_OBSERVED"
     needs = json.loads(os.environ["NEEDS_JSON"])
     doc = {"commit": os.environ["GITHUB_SHA"], "run_id": os.environ["GITHUB_RUN_ID"],
-           "jobs": needs, "logs": logs, "physical_device": "NOT_TESTED", "durable_upgrade_ready": False}
+           "jobs": needs, "logs": logs, "physical_device": "NOT_TESTED", "durable_upgrade_ready": False,
+           "acceptance_scope": "V1.2_DOMAIN_ONLY", "full_v12_acceptance": "NOT_TESTED", "release_ready": False}
     ui_files = list(out.rglob("ui-result.json"))
+    if len(ui_files) > 1: raise RuntimeError("Ambiguous UI evidence")
     doc["ui"] = json.loads(ui_files[0].read_text()) if ui_files else {"status": "NOT_OBSERVED"}
     for name in ("SHA256SUMS.txt", "signature.txt", "package.txt"):
         paths = list(out.rglob(name))
+        if len(paths) > 1: raise RuntimeError("Ambiguous artifact evidence: " + name)
         doc[name] = paths[0].read_text() if paths else "NOT_OBSERVED"
     data = (json.dumps(doc, ensure_ascii=False, indent=2) + "\n").encode()
     repo = os.environ["GITHUB_REPOSITORY"]
@@ -90,7 +111,7 @@ def report():
         if e.code != 404: raise
         api("git/refs", "POST", {"ref": "refs/heads/evidence", "sha": os.environ["GITHUB_SHA"]})
     path = "reports/" + os.environ["GITHUB_SHA"] + "-" + os.environ["GITHUB_RUN_ID"] + ".json"
-    body = {"message": "Record Android verification evidence", "branch": "evidence", "content": base64.b64encode(data).decode()}
+    body = {"message": "Record staged V1.2 verification evidence", "branch": "evidence", "content": base64.b64encode(data).decode()}
     try:
         prior = api("contents/" + path + "?ref=evidence")
         body["sha"] = prior["sha"]
@@ -103,10 +124,10 @@ def report():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("gate", choices=["core", "build", "report"])
+    parser.add_argument("gate", choices=["core", "v12", "build", "report"])
     mode = parser.parse_args().gate
     try:
-        {"core": core, "build": build, "report": report}[mode]()
+        {"core": core, "v12": v12, "build": build, "report": report}[mode]()
     except Exception as exc:
         print(f"GATE_FAILED {mode}: {type(exc).__name__}: {exc}", file=sys.stderr)
         raise

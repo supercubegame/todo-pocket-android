@@ -2,24 +2,28 @@
 
 - Approved 32-file scope: docs/V1_2_PLAN.md. One writer on branch. No merge or previous release changes.
 - Native Java Android. No accounts, telemetry, cloud resources or network permissions. Public fixtures synthetic only.
-- Gate first: python3 tools/verify.py v12. This runs legacy regression and required V1.2 sources in fresh class output.
-- Current stage DOMAIN_ONLY. No Android/persistence/media/export/restore acceptance or release. Never relabel old UI as v1.2.
-- build gate explicitly fails on this unfinished branch; CI asserts its actual nonzero exit and exact reason.
-- Domain models never use Android APIs, I/O, live clocks or random IDs. Inject dates and stable IDs.
+- Gate first: python3 tools/verify.py v12. Fresh Java compilation executes legacy, domain and real filesystem contracts.
+- Current stage JVM_DOMAIN_AND_FILE_BOUNDARIES. No Android/database/image-decoding/export/full-restore acceptance or release.
+- build explicitly fails before Gradle; CI asserts actual nonzero exit and exact reason. Never relabel old UI as v1.2.
+- Domain models never use Android APIs, I/O, live clocks or random IDs. Inject dates and stable IDs; I/O lives in adapters.
 - Money is integer cents with checked sums. Planned and actual never mix. Missing record is not confirmed zero spending.
 - Duplicate submissions cannot add money/days twice. Batch validation is all-or-nothing; stale corrections must fail.
 - IDs survive rename/reorder. Invalid operations preserve state. Snapshots must be defensive and immutable.
-- Images copied to persistent private storage; thumbnail/cache never authoritative. Still NOT_IMPLEMENTED at domain stage.
-- Full backup includes media and relationships; selected share content excludes private blocks. Export integration pending.
-- Redaction must alter exported bytes, not removable overlays; never include unredacted originals in shared ZIP.
-- Validate restore before commit; no silent resets or destructive migration fallback. Persistence phase pending.
-- Legacy TodoModel/BackupCodec/CoreTest stay unchanged; old 500/200 limits apply only to legacy format.
+- MediaRepository is a content-addressed byte store, NOT image validation. Android decode/dimensions and picker integration pending.
+- Copy into persistent private storage; source originals are never deleted. Thumbnail/cache must never be authoritative.
+- Archive transport validates manifest/file-set/digests/budgets and stages in new directories; opaque state is NOT semantic DB restore.
+- Full restore must validate database schema, IDs, relationships, media reference set and commit atomically; never destructive fallback.
+- Share filtering is NOT redaction. Flatten redaction into derivative bytes and never bundle originals in shared exports.
+- LegacyImport only previews validated ordinary todos with stable source fingerprint; transactional remapping/import journal pending.
+- Legacy TodoModel/BackupCodec/CoreTest unchanged; old 500/200 limits apply only to legacy format.
+- Resource byte budgets are explicit defensive bounds, not proven device capacity or photo-count promises. Archive metadata cap 8 MiB provisional.
+- Atomic create-only file publication uses hard links; unsupported filesystems fail explicitly. Android/power-loss behavior still untested.
 - Target package com.supercubegame.pockettodo.v12.preview, version 1.2/code 3; update all coupled assertions at APK phase.
-- Until APK phase, build.gradle/legacy gates still identify v1.1; build gate intentionally blocks output and no release job exists.
-- Min SDK 26/target 34. Account for Java collection APIs on older Android via compatible code/desugaring in build phase.
+- build.gradle/Activity remain v1.1, build blocked, no release job. Replace blocker only together with actual Android/package/UI gates.
+- Min SDK 26/target 34; validate Java collection and NIO APIs on Android, not merely JDK 17. Test-only newer JDK calls must stay out of APK.
 - System picker fallback, minimum app visibility, scoped FileProvider. No broad storage/all-packages permission.
-- Stable signing blocked on secure local setup. Never transmit keys or claim durable debug upgrades.
-- Preserve real exit codes, include failure context, and distinguish staged success from full acceptance.
-- Reports on evidence branch with exact SHA/run ID and byte-for-byte readback; ambiguous evidence must fail.
+- Stable signing requires secure local setup. Never transmit keys or claim durable debug upgrades.
+- Preserve exit codes and exact fault causes. Fixture self-checks must prove the intended failure, not just any rejection.
+- Reports on evidence branch include exact SHA/run ID and byte-for-byte readback; ambiguous evidence fails.
 - Keep this file byte-identical to CLAUDE.md and <=200 lines.
-- Physical phone, receiving share apps, disk-full/process-death and media capacity need explicit tests, not inference.
+- Phone, receiving apps, real decode/large photos, disk-full/process-death and crash recovery need explicit tests, not inference.

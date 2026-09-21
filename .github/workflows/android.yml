@@ -17,7 +17,7 @@ jobs:
         run: |
           echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
           echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
-      - name: Legacy regression and V1.2 domain contracts
+      - name: Legacy, domain and real JVM file boundary contracts
         run: |
           set -euo pipefail
           python3 tools/verify.py v12 2>&1 | tee core.log
@@ -55,7 +55,7 @@ jobs:
           python3 - <<'PY'
           import json
           from pathlib import Path
-          Path('collected/scope/ui-result.json').write_text(json.dumps({'status':'NOT_TESTED','scope':'V1.2_DOMAIN_CONTRACTS_ONLY','android_build':'NOT_TESTED','screenshots':'NOT_TESTED','exports':'NOT_TESTED','backup_restore':'NOT_TESTED','release_ready':False}))
+          Path('collected/scope/ui-result.json').write_text(json.dumps({'status':'NOT_TESTED','scope':'V1.2_JVM_DOMAIN_AND_FILE_BOUNDARIES','android_build':'NOT_TESTED','database':'NOT_TESTED','image_decoding':'NOT_TESTED','screenshots':'NOT_TESTED','exports':'NOT_TESTED','full_database_media_restore':'NOT_TESTED','release_ready':False}))
           PY
       - name: Publish and read back evidence
         env:

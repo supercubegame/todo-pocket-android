@@ -2,7 +2,6 @@
 """Exit-code gates. Real Java execution, explicit staged Android boundaries."""
 import argparse
 import base64
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -14,14 +13,10 @@ import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 os.chdir(ROOT)
-PKG = "com.supercubegame.pockettodo.safe.preview"
-APK_NAME = "PocketTodo-1.1-preview.apk"
-V12_SOURCES = ("ActivityModel", "Ledger", "CalendarRules", "CustomFields", "NoteDocument", "TodoModel", "BackupCodec")
-# Reflection executes the missing-contract red tests before these sources exist.
-IO_SOURCES = ("LegacyImport", "MediaRepository", "BackupArchive")
+V12_SOURCES = ("ActivityModel", "Ledger", "CalendarRules", "CustomFields", "NoteDocument", "TodoModel", "BackupCodec", "LegacyImport", "MediaRepository", "BackupArchive")
 
-# Generated test output lives in build, not an extra hand-authored project file.
-# These are real Java filesystem/ZIP tests, not a Python reimplementation.
+# Generated test output is not a new hand-authored project file. These execute real
+# Java filesystem/ZIP operations, not a Python reimplementation. Fixtures are synthetic.
 IO_TEST = r'''
 import com.supercubegame.pockettodo.*;
 import java.io.*;
@@ -58,6 +53,13 @@ public final class FileBoundaryTest {
    }
   }
  }
+ static void extraEntry(Path source,Path target,String name)throws IOException{
+  try(ZipFile z=new ZipFile(source.toFile());ZipOutputStream out=new ZipOutputStream(Files.newOutputStream(target))){
+   Enumeration<? extends ZipEntry> es=z.entries();while(es.hasMoreElements()){
+    ZipEntry e=es.nextElement();out.putNextEntry(new ZipEntry(e.getName()));try(InputStream in=z.getInputStream(e)){out.write(in.readAllBytes());}out.closeEntry();
+   }out.putNextEntry(new ZipEntry(name));out.write(1);out.closeEntry();
+  }
+ }
  public static void main(String[] args)throws Exception{
   TodoModel old=new TodoModel();long first=old.add("普通待办：买牛奶");old.add("已经完成");old.toggle(2);String before=old.encode();byte[] bytes=BackupCodec.encode(old);
   Object plan=preview(bytes);List<?> items=(List<?>)invoke(plan,"todos",new Class[]{});
@@ -80,8 +82,12 @@ public final class FileBoundaryTest {
    reject(()->media(r,"../outside"),"media path traversal rejected");
    reject(()->copy(r,new ByteArrayInputStream(new byte[1025])),"over-budget media import explicitly fails");
    ok(count(store)==1,"oversize import leaves no partial asset");
-   InputStream failing=new InputStream(){int n;public int read()throws IOException{if(n++==5)throw new IOException("synthetic read failure");return 7;}};
-   reject(()->copy(r,failing),"interrupted source read reported");ok(count(store)==1,"failed stream leaves no partial asset");
+   // Override bulk read explicitly: InputStream's default implementation may swallow
+   // a one-shot read() failure after partial progress. Require the exact injected cause.
+   IOException injected=new IOException("synthetic read failure after prefix");
+   InputStream failing=new InputStream(){boolean prefix;public int read()throws IOException{throw injected;}public int read(byte[] out,int off,int len)throws IOException{if(prefix)throw injected;prefix=true;out[off]=7;return 1;}};
+   boolean exact=false;try{copy(r,failing);}catch(IOException e){exact=e==injected;}
+   ok(exact,"interrupted source read propagates exact injected failure not budget rejection");ok(count(store)==1,"failed stream leaves no partial asset");
    reject(()->copy(r,new ByteArrayInputStream(new byte[0])),"empty media input rejected");
    Path outside=root.resolve("outside");Files.write(outside,photo);String fake="a".repeat(64);Files.createSymbolicLink(store.resolve(fake),outside);
    reject(()->media(r,fake),"media symlink cannot escape private store");Files.delete(store.resolve(fake));
@@ -94,16 +100,28 @@ public final class FileBoundaryTest {
    ok(assets.keySet().equals(Set.of(id))&&Arrays.equals(Files.readAllBytes(assets.get(id)),photo),"archive media set and bytes round-trip exactly");
    restored[0]^=1;ok(Arrays.equals(state,(byte[])invoke(snap,"state",new Class[]{})),"archive state snapshot defensive copy");
    ok(Arrays.equals(Files.readAllBytes(store.resolve(id)),photo),"archive staging never replaces live media");close(snap);ok(count(staging)==0,"closing staged snapshot cleans temporary files");
+   reject(()->invoke(snap,"state",new Class[]{}),"closed archive snapshot cannot be reused");
    reject(()->archive(zip,state,Set.of(id),r),"archive export refuses existing destination");
    Path bad=root.resolve("bad.ptodo12");rewrite(zip,bad,"media/"+id,false);reject(()->open(bad,staging,4096),"damaged archive media rejected");ok(count(staging)==0,"bad media archive leaves no staging residue");
    rewrite(zip,bad,"state.bin",false);reject(()->open(bad,staging,4096),"damaged archive state rejected");
    rewrite(zip,bad,"media/"+id,true);reject(()->open(bad,staging,4096),"missing referenced asset rejected");
+   rewrite(zip,bad,"manifest.txt",false);reject(()->open(bad,staging,4096),"foreign archive header rejected");
+   extraEntry(zip,bad,"unlisted.bin");reject(()->open(bad,staging,4096),"unlisted archive asset cannot slip through");
+   // Build a real duplicate-name ZIP by patching equal-length local/central names.
+   extraEntry(zip,bad,"spare.bin");byte[] duplicate=Files.readAllBytes(bad),from="spare.bin".getBytes(),to="state.bin".getBytes();int patched=0;
+   for(int i=0;i<=duplicate.length-from.length;i++){boolean match=true;for(int j=0;j<from.length;j++)if(duplicate[i+j]!=from[j])match=false;if(match){System.arraycopy(to,0,duplicate,i,to.length);patched++;}}
+   ok(patched==2,"duplicate zip fixture changes both local and central names");Files.write(bad,duplicate);
+   try(ZipFile valid=new ZipFile(bad.toFile())){int names=0;Enumeration<? extends ZipEntry> en=valid.entries();while(en.hasMoreElements())if(en.nextElement().getName().equals("state.bin"))names++;ok(names==2,"duplicate fixture parses and exposes two state entries");}
+   reject(()->open(bad,staging,4096),"duplicate archive names rejected");
    reject(()->open(zip,staging,state.length+photo.length-1),"expanded archive byte budget enforced");ok(count(staging)==0,"all rejected archive reads clean staging");
    try(ZipOutputStream out=new ZipOutputStream(Files.newOutputStream(bad))){out.putNextEntry(new ZipEntry("../escaped"));out.write(photo);out.closeEntry();}
    reject(()->open(bad,staging,4096),"hostile archive paths rejected");ok(!Files.exists(root.resolve("escaped")),"archive never extracts arbitrary entry paths");
    byte[] packed=Files.readAllBytes(zip);Files.write(bad,Arrays.copyOf(packed,packed.length-10));reject(()->open(bad,staging,4096),"truncated zip central directory rejected");
    Path missing=root.resolve("missing.ptodo12");reject(()->archive(missing,state,Set.of(fake),r),"export rejects referenced missing media");ok(!Files.exists(missing),"failed archive export leaves no published destination");
    archive(root.resolve("empty.ptodo12"),new byte[0],Set.of(),r);Object empty=open(root.resolve("empty.ptodo12"),staging,1);ok(((byte[])invoke(empty,"state",new Class[]{})).length==0&&((Map<?,?>)invoke(empty,"assets",new Class[]{})).isEmpty(),"transport can represent an empty payload without inventing data");close(empty);
+   String abc=copy(r,new ByteArrayInputStream(new byte[]{97,98,99}));ok(abc.equals("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"),"media digest matches independent published SHA256 abc vector");
+   String boundary=copy(r,new ByteArrayInputStream(new byte[1024]));ok(Files.size(media(r,boundary))==1024,"exact media byte budget accepted");
+   InputStream stalled=new InputStream(){public int read(){return 0;}public int read(byte[] x,int off,int len){return 0;}};reject(()->copy(r,stalled),"nonprogressing input fails instead of hanging");
    ok(count(staging)==0&&Arrays.equals(Files.readAllBytes(original),photo),"all boundary tests retain original and clear staging");
   }finally{try(java.util.stream.Stream<Path>s=Files.walk(root)){for(Path p:s.sorted(Comparator.reverseOrder()).toArray(Path[]::new))Files.deleteIfExists(p);}}
   System.out.println("FILE_BOUNDARY_RESULT "+checks+"/"+checks+" PASS; JVM_FILESYSTEM_ONLY; DATABASE_ANDROID_IMAGE_DECODING_FULL_RESTORE_NOT_TESTED");
@@ -132,7 +150,6 @@ def v12():
     core()
     base = Path("src/main/java/com/supercubegame/pockettodo")
     sources = [base / (name + ".java") for name in V12_SOURCES]
-    sources += [base / (name + ".java") for name in IO_SOURCES if (base / (name + ".java")).exists()]
     sources.append(Path("tests/V12CoreTest.java"))
     for path in sources:
         assert path.is_file(), "Required V1.2 contract source missing: " + str(path)
@@ -146,32 +163,9 @@ def v12():
     print("V12_ACCEPTANCE PARTIAL: JVM domain/file boundaries only; Android/database/image decoding/full restore/export NOT_TESTED")
 
 def build():
-    if Path("docs/V1_2_PLAN.md").exists():
-        raise RuntimeError("V1.2 Android phase is not wired: refusing to build/publish the inherited V1.1 UI as V1.2")
-    run(["gradle", "--no-daemon", "--console=plain", "assembleDebug", "lintDebug"])
-    sdk = Path(os.environ["ANDROID_HOME"])
-    bt = sdk / "build-tools/35.0.0"
-    apk = Path("build/outputs/apk/debug/todo-pocket-android-debug.apk")
-    assert apk.exists(), "expected APK output missing"
-    Path("delivery").mkdir(exist_ok=True)
-    dest = Path("delivery") / APK_NAME
-    dest.write_bytes(apk.read_bytes())
-    sig = subprocess.check_output([str(bt / "apksigner"), "verify", "--verbose", "--print-certs", str(dest)], text=True)
-    badging = subprocess.check_output([str(bt / "aapt"), "dump", "badging", str(dest)], text=True)
-    permissions = subprocess.check_output([str(bt / "aapt"), "dump", "permissions", str(dest)], text=True)
-    assert "name='" + PKG + "'" in badging
-    assert "versionCode='2'" in badging and "versionName='1.1'" in badging
-    assert "sdkVersion:'26'" in badging and "targetSdkVersion:'34'" in badging
-    assert "launchable-activity: name='com.supercubegame.pockettodo.MainActivity'" in badging
-    assert "uses-permission:" not in permissions
-    assert "native-code:" not in badging, "APK should not restrict native ABI"
-    Path("delivery/signature.txt").write_text(sig)
-    Path("delivery/package.txt").write_text(badging + "\n" + permissions)
-    digest = hashlib.sha256(dest.read_bytes()).hexdigest()
-    Path("delivery/SHA256SUMS.txt").write_text(f"{digest}  {dest.name}\n")
-    print(sig)
-    print("APK_RESULT " + json.dumps({"sha256": digest, "bytes": dest.stat().st_size, "package": PKG,
-          "version": "1.1", "min_android": "8.0", "signing": "disposable-debug", "durable_upgrade_ready": False}, ensure_ascii=False))
+    # The inherited V1.1 Gradle/UI configuration is not a V1.2 product. No dormant
+    # APK publisher remains here. Replace this guard only WITH real Android gates.
+    raise RuntimeError("V1.2 Android phase is not wired: refusing to build/publish the inherited V1.1 UI as V1.2")
 
 def report():
     out = Path("collected")

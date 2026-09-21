@@ -23,6 +23,7 @@ jobs:
           python3 tools/verify.py v12 2>&1 | tee core.log
       - name: Verify unfinished APK cannot be mislabeled
         run: |
+          set -euo pipefail
           python3 - <<'PY' 2>&1 | tee -a core.log
           import subprocess
           result = subprocess.run(['python3','tools/verify.py','build'],capture_output=True,text=True)

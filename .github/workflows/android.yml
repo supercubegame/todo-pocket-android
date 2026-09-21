@@ -66,7 +66,7 @@ jobs:
         run: |
           set -euo pipefail
           gradle --no-daemon --console=plain assembleDebug assembleDebugAndroidTest lintDebug 2>&1 | tee build.log
-      - name: Device database and semantic backup contracts
+      - name: Database, semantic backups and actual native UI interactions
         run: |
           set -euo pipefail
           python3 tools/emulator_gate.py 2>&1 | tee ui.log
@@ -81,6 +81,8 @@ jobs:
             emulator.log
             device-*.txt
             device-result.json
+            native-ui/native-result.json
+            native-ui/*.png
             build/reports/lint-results-debug.html
           if-no-files-found: error
   report:
@@ -95,29 +97,59 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           path: collected
-      - name: Preserve matrix evidence without ambiguous filenames
+      - name: Preserve matrix and synthetic native screenshots with exact readback
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
-          import json
+          import base64,hashlib,json,os,urllib.request,urllib.error
           from pathlib import Path
           root=Path('collected')
+          repo=os.environ['GITHUB_REPOSITORY']
+          source=os.environ['GITHUB_SHA']
+          run=os.environ['GITHUB_RUN_ID']
+          def api(path,method='GET',body=None):
+            req=urllib.request.Request('https://api.github.com/repos/'+repo+'/'+path,data=json.dumps(body).encode() if body is not None else None,method=method,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+            with urllib.request.urlopen(req,timeout=30) as response:return json.load(response)
+          def publish(path,data):
+            body={'message':'Record synthetic native UI evidence','branch':'evidence','content':base64.b64encode(data).decode()}
+            try:body['sha']=api('contents/'+path+'?ref=evidence')['sha']
+            except urllib.error.HTTPError as exc:
+              if exc.code!=404:raise
+            written=api('contents/'+path,'PUT',body)
+            actual=api('contents/'+path+'?ref='+written['commit']['sha'])
+            assert base64.b64decode(actual['content'])==data,'native evidence readback mismatch'
+            return {'url':actual['html_url'],'raw_url':actual['download_url'],'sha256':hashlib.sha256(data).hexdigest()}
           devices={}
-          for api in (26,34):
-            folder=root / ('database-api-'+str(api))
+          native={}
+          for api_level in (26,34):
+            folder=root/('database-api-'+str(api_level))
             logs={}
             for name in ('setup.log','build.log','ui.log','emulator.log'):
               path=folder/name
               if path.exists():
                 logs[name]=path.read_text(errors='replace')[-24000:]
-                path.rename(folder/(str(api)+'-'+name))
-              else:
-                logs[name]='NOT_OBSERVED'
+                path.rename(folder/(str(api_level)+'-'+name))
+              else:logs[name]='NOT_OBSERVED'
             result=folder/'device-result.json'
-            devices[str(api)]={'result':json.loads(result.read_text()) if result.exists() else {'status':'NOT_OBSERVED'},'logs':logs}
+            devices[str(api_level)]={'result':json.loads(result.read_text()) if result.exists() else {'status':'NOT_OBSERVED'},'logs':logs}
+            result=folder/'native-ui/native-result.json'
+            native[str(api_level)]=json.loads(result.read_text()) if result.exists() else {'status':'NOT_OBSERVED'}
+            published=[]
+            for image in sorted((folder/'native-ui').glob('*.png')):
+              data=image.read_bytes()
+              assert data.startswith(b'\x89PNG\r\n\x1a\n'),'invalid native screenshot'
+              asset=publish('screenshots/'+source+'-'+run+'/'+str(api_level)+'/'+image.name,data)
+              asset['file']=image.name
+              published.append(asset)
+            native[str(api_level)]['published_screenshots']=published
           restore='SCHEMA2_DB_MEDIA_BYTES_PASS' if all(d['result'].get('status')=='PASS' and d['result'].get('full_backup_restore')=='SCHEMA2_DB_MEDIA_BYTES_PASS' for d in devices.values()) else 'NOT_VERIFIED'
-          scope=root/'scope'
-          scope.mkdir(exist_ok=True)
-          (scope/'ui-result.json').write_text(json.dumps({'status':'NOT_TESTED','scope':'DATABASE_DEVICE_PHASE_NOT_UI','devices':devices,'screenshots':'NOT_TESTED','exports':'NOT_TESTED','full_database_media_restore':restore,'saf_restore_ui':'NOT_TESTED','image_decoding':'NOT_TESTED','power_loss':'NOT_TESTED','release_ready':False}))
+          native_status='PASS' if all(n.get('status')=='PASS' and n.get('scope')=='NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_SLICE' and n.get('count',0)>0 for n in native.values()) else 'NOT_VERIFIED'
+          index={'commit':source,'run_id':run,'scope':'NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_SLICE','status':native_status,'devices':native,'release_ready':False}
+          index_asset=publish('reports/native-'+source+'-'+run+'.json',(json.dumps(index,ensure_ascii=False,indent=2)+'\n').encode())
+          scope=root/'scope';scope.mkdir(exist_ok=True)
+          (scope/'ui-result.json').write_text(json.dumps({'status':native_status,'scope':'NATIVE_SLICE_AND_DATABASE_NOT_FULL_PRODUCT','devices':devices,'native':native,'native_index':index_asset,'screenshots':'SYNTHETIC_NATIVE_UI_ONLY','exports':'NOT_TESTED','full_database_media_restore':restore,'saf_restore_ui':'NOT_TESTED','image_decoding':'NOT_TESTED','power_loss':'NOT_TESTED','release_ready':False}))
+          print('NATIVE_EVIDENCE '+index_asset['url'])
           PY
       - name: Publish and read back evidence
         env:

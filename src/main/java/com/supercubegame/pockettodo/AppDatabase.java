@@ -5,16 +5,17 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteConstraintException;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
-import java.io.ByteArrayOutputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
+import java.io.*;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.charset.CodingErrorAction;
+import java.nio.file.*;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.*;
 
-/** Local SQLite schema2. Every write is transactional, no destructive fallback.
- * Full DB/media backup restore and asynchronous UI integration remain separate work.
+/** SQLite schema2. Transactional writes and semantic snapshots, no destructive migration.
+ * Backup APIs are private-storage adapters, not SAF/UI acceptance or photo decoding.
  */
 public final class AppDatabase extends SQLiteOpenHelper {
     private interface Work<T> { T run(SQLiteDatabase db); }
@@ -155,5 +156,156 @@ public final class AppDatabase extends SQLiteOpenHelper {
             db.execSQL("INSERT INTO legacy_imports VALUES(?,?)",new Object[]{plan.sourceId(),plan.todos().size()});long position=nextTodoPosition(db);
             for(TodoModel.Item item:plan.todos()){String id="legacy-"+plan.sourceId()+"-"+item.id;db.execSQL("INSERT INTO todos VALUES(?,?,?,?)",new Object[]{id,item.title,item.done?1:0,position});position=Math.incrementExact(position);}
             bump(db);return (long)plan.todos().size();});
+    }
+
+    // Fixed schema2 transport. No backup-provided SQL, identifiers or DDL are executed.
+    // This order is topological for FKs; reverse order is used for transactional deletion.
+    private static final String[] SNAPSHOT_TABLES={"revision","categories","applications","activities","paths","tags","batches","ledger","checkins","media","notes","blocks","fields","field_options","field_values","field_notes","todos","legacy_imports"};
+    private static final int STATE_LIMIT=8*1024*1024; // Coupled to BackupArchive metadata budget.
+    private static void require(boolean condition,String message){if(!condition)throw new IllegalArgumentException(message);}
+    private static void tableSet(SQLiteDatabase db){
+        Set<String> actual=new HashSet<>();try(Cursor c=db.rawQuery("SELECT name FROM sqlite_master WHERE type='table'",null)){
+            while(c.moveToNext()){String name=c.getString(0);if(!name.equals("android_metadata")&&!name.startsWith("sqlite_"))actual.add(name);}
+        }
+        require(actual.equals(new HashSet<>(Arrays.asList(SNAPSHOT_TABLES))),"备份表集合与当前实现不一致，拒绝遗漏数据");
+    }
+    private static final class LimitedBytes extends ByteArrayOutputStream {
+        @Override public synchronized void write(int value){require(count<STATE_LIMIT,"备份状态超过内存预算");super.write(value);}
+        @Override public synchronized void write(byte[] b,int off,int len){require(len<=STATE_LIMIT-count,"备份状态超过内存预算");super.write(b,off,len);}
+    }
+    private static void blob(DataOutputStream out,byte[] value)throws IOException{out.writeInt(value.length);out.write(value);}
+    private static byte[] readBlob(DataInputStream in)throws IOException{
+        int n=in.readInt();require(n>=0&&n<=STATE_LIMIT&&n<=in.available(),"备份长度无效或截断");byte[] out=new byte[n];in.readFully(out);return out;
+    }
+    private static String readText(DataInputStream in)throws IOException{
+        return StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(readBlob(in))).toString();
+    }
+    private static Object cell(Cursor c,int i){switch(c.getType(i)){case Cursor.FIELD_TYPE_NULL:return null;case Cursor.FIELD_TYPE_INTEGER:return c.getLong(i);case Cursor.FIELD_TYPE_STRING:return c.getString(i);case Cursor.FIELD_TYPE_BLOB:return c.getBlob(i);default:throw new IllegalArgumentException("备份不接受浮点或未知 SQL 类型");}}
+    private static String insertSql(String table,int columns){String[] marks=new String[columns];Arrays.fill(marks,"?");return "INSERT INTO "+table+" VALUES("+String.join(",",marks)+")";}
+    private static byte[] encodeState(SQLiteDatabase db){
+        tableSet(db);
+        try{LimitedBytes bytes=new LimitedBytes();DataOutputStream out=new DataOutputStream(bytes);out.writeInt(0x50544442);out.writeInt(1);out.writeInt(2);out.writeInt(SNAPSHOT_TABLES.length);
+            for(String table:SNAPSHOT_TABLES)try(Cursor c=db.rawQuery("SELECT * FROM "+table+" ORDER BY rowid",null)){
+                utf8(out,table);out.writeInt(c.getColumnCount());for(String name:c.getColumnNames())utf8(out,name);out.writeInt(c.getCount());
+                while(c.moveToNext())for(int i=0;i<c.getColumnCount();i++){
+                    Object value=cell(c,i);out.writeByte(c.getType(i));if(value instanceof Long)out.writeLong((Long)value);else if(value instanceof String)utf8(out,(String)value);else if(value instanceof byte[])blob(out,(byte[])value);
+                }
+            }out.flush();return bytes.toByteArray();
+        }catch(IOException e){throw new IllegalStateException("无法编码备份状态",e);}
+    }
+    private static void deleteRows(SQLiteDatabase db){for(int i=SNAPSHOT_TABLES.length-1;i>=0;i--)db.delete(SNAPSHOT_TABLES[i],null,null);}
+    private static void decodeRows(SQLiteDatabase db,byte[] bytes)throws IOException{
+        DataInputStream in=new DataInputStream(new ByteArrayInputStream(bytes));
+        require(in.readInt()==0x50544442&&in.readInt()==1&&in.readInt()==2,"未知备份格式或数据库版本");
+        require(in.readInt()==SNAPSHOT_TABLES.length,"备份表数量不完整");
+        for(String table:SNAPSHOT_TABLES){
+            require(readText(in).equals(table),"备份表缺失、重复或顺序错误");List<String> names=new ArrayList<>(),types=new ArrayList<>();
+            try(Cursor c=db.rawQuery("PRAGMA table_info("+table+")",null)){while(c.moveToNext()){names.add(c.getString(1));types.add(c.getString(2));}}
+            require(in.readInt()==names.size(),"备份列数量不匹配");for(String name:names)require(readText(in).equals(name),"备份列不匹配");
+            int rows=in.readInt();require(rows>=0&&rows<=in.available()/Math.max(1,names.size()),"备份行数量无效");String sql=insertSql(table,names.size());
+            for(int row=0;row<rows;row++){Object[] values=new Object[names.size()];for(int col=0;col<values.length;col++){
+                int tag=in.readUnsignedByte();String type=types.get(col);
+                if(tag==0){require((table.equals("activities")&&names.get(col).equals("application_id"))||(table.equals("blocks")&&names.get(col).equals("asset_id")),"备份包含不允许的空值");values[col]=null;}
+                else if(tag==1){require(type.equals("INTEGER"),"整数列类型不匹配");values[col]=in.readLong();}
+                else if(tag==3){require(type.equals("TEXT"),"文本列类型不匹配");values[col]=readText(in);}
+                else if(tag==4){require(type.equals("BLOB"),"二进制列类型不匹配");values[col]=readBlob(in);}
+                else throw new IllegalArgumentException("未知备份值类型");
+            }db.execSQL(sql,values);}
+        }
+        require(in.available()==0,"备份状态存在尾随数据");
+    }
+    private static void ordered(SQLiteDatabase db,String table,String group){
+        String grouping=group.isEmpty()?"":" GROUP BY "+group;
+        try(Cursor c=db.rawQuery("SELECT count(*),count(DISTINCT position),min(position),max(position) FROM "+table+grouping,null)){
+            while(c.moveToNext()){long n=c.getLong(0);if(n>0)require(c.getLong(1)==n&&c.getLong(2)==0&&c.getLong(3)==n-1,"有序数据缺失或重复："+table);}
+        }
+    }
+    private static LocalDate day(String input){LocalDate date=Ledger.validDate(LocalDate.parse(input));require(date.toString().equals(input),"非标准日期");return date;}
+    private static List<Ledger.Entry> decodeBatch(byte[] bytes)throws IOException{
+        DataInputStream in=new DataInputStream(new ByteArrayInputStream(bytes));int n=in.readInt();require(n>0&&n<=in.available(),"记账批次载荷无效");List<Ledger.Entry> rows=new ArrayList<>();Set<String> ids=new HashSet<>();
+        for(int i=0;i<n;i++){Ledger.Entry e=new Ledger.Entry(readText(in),in.readLong(),day(readText(in)),Ledger.Kind.valueOf(readText(in)),in.readLong(),readText(in));require(ids.add(e.id),"批次内条目标识重复");rows.add(e);}
+        require(in.available()==0&&Arrays.equals(payload(rows),bytes),"记账批次编码不完整");return rows;
+    }
+    private static void validateSemantics(SQLiteDatabase db)throws IOException{
+        try(Cursor c=db.rawQuery("PRAGMA foreign_key_check",null)){require(!c.moveToFirst(),"备份存在无效关联");}
+        revision(db);
+        try(Cursor c=db.rawQuery("SELECT count(*) FROM revision",null)){c.moveToFirst();require(c.getLong(0)==1,"备份修订记录不完整");}
+        for(String table:new String[]{"categories","applications","activities","notes","todos"}){
+            String column=table.equals("categories")||table.equals("applications")?"name":"title";
+            try(Cursor c=db.rawQuery("SELECT id,"+column+" FROM "+table,null)){while(c.moveToNext()){if(table.equals("notes")||table.equals("todos"))Ledger.identifier(c.getString(0));else Ledger.positive(c.getLong(0));require(text(c.getString(1)).equals(c.getString(1)),"名称不是有效规范文本");}}
+        }
+        try(Cursor c=db.rawQuery("SELECT package_name FROM applications",null)){while(c.moveToNext()){String p=c.getString(0);require(p.isEmpty()||p.matches("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+"),"备份应用包名无效");}}
+        for(String table:new String[]{"paths","tags"})try(Cursor c=db.rawQuery("SELECT text FROM "+table,null)){while(c.moveToNext())require(text(c.getString(0)).equals(c.getString(0)),"路径或标签文本无效");}
+        ordered(db,"categories","");ordered(db,"paths","activity_id");ordered(db,"tags","activity_id");ordered(db,"ledger","batch_id");ordered(db,"blocks","note_id");ordered(db,"field_options","field_id");ordered(db,"field_values","activity_id,field_id");
+        try(Cursor c=db.rawQuery("SELECT activity_id,day,status,memo,recorded_at FROM checkins",null)){while(c.moveToNext()){
+            Instant at=Instant.parse(c.getString(4));require(at.toString().equals(c.getString(4)),"非标准录入时间");new CalendarRules.Mark(c.getLong(0),day(c.getString(1)),CalendarRules.Status.valueOf(c.getString(2)),c.getString(3),at);
+        }}
+        try(Cursor c=db.rawQuery("SELECT id,mime FROM media",null)){while(c.moveToNext()){MediaRepository.validId(c.getString(0));require(text(c.getString(1)).equals(c.getString(1)),"媒体类型无效");}}
+        try(Cursor notes=db.rawQuery("SELECT id FROM notes",null)){while(notes.moveToNext()){
+            NoteDocument validator=new NoteDocument();try(Cursor c=db.rawQuery("SELECT id,kind,text,asset_id,caption,private FROM blocks WHERE note_id=? ORDER BY position",new String[]{notes.getString(0)})){
+                while(c.moveToNext()){boolean image=c.getString(1).equals("IMAGE");NoteDocument.Block b=image?NoteDocument.Block.image(c.getString(0),c.getString(3),c.getString(4),c.getInt(5)!=0):NoteDocument.Block.text(c.getString(0),c.getString(2),c.getInt(5)!=0);validator.add(b);require(b.text.equals(c.getString(2))&&b.caption.equals(c.getString(4)),"笔记块有非规范隐藏内容");}
+            }
+        }}
+        try(Cursor fields=db.rawQuery("SELECT id FROM fields",null)){while(fields.moveToNext()){
+            CustomFields.Definition f=fieldDefinition(db,fields.getString(0));CustomFields validator=new CustomFields();validator.define(f.id,f.name,f.type.name(),f.options);
+            // Validate historical values even for archived definitions; do not reopen archive.
+            try(Cursor owners=db.rawQuery("SELECT DISTINCT activity_id FROM field_values WHERE field_id=?",new String[]{f.id})){while(owners.moveToNext()){
+                long activity=owners.getLong(0);List<String> values=new ArrayList<>();try(Cursor c=db.rawQuery("SELECT value FROM field_values WHERE activity_id=? AND field_id=? ORDER BY position",new String[]{Long.toString(activity),f.id})){while(c.moveToNext())values.add(c.getString(0));}
+                validator.put(activity,f.id,values);require(validator.value(activity,f.id).equals(values),"字段值重复或非规范");
+            }}
+        }}
+        Set<Long> batchRevisions=new HashSet<>();try(Cursor c=db.rawQuery("SELECT id,payload,revision,undone FROM batches",null)){while(c.moveToNext()){
+            String id=Ledger.identifier(c.getString(0));long rev=c.getLong(2);boolean undone=c.getInt(3)!=0;require(rev>0&&rev<=revision(db)&&batchRevisions.add(rev)&&(!undone||rev<revision(db)),"批次修订号无效");
+            List<Ledger.Entry> saved=decodeBatch(c.getBlob(1));for(Ledger.Entry row:saved)exists(db,"activities",row.activityId);
+            List<Ledger.Entry> live=new ArrayList<>();try(Cursor rows=db.rawQuery("SELECT id,activity_id,day,kind,cents,memo FROM ledger WHERE batch_id=? ORDER BY position",new String[]{id})){while(rows.moveToNext()){day(rows.getString(2));live.add(entry(rows));}}
+            require(undone?live.isEmpty():saved.equals(live),"账本与批次日志不一致");
+        }}
+        try(Cursor c=db.rawQuery("SELECT source_id FROM legacy_imports",null)){while(c.moveToNext())MediaRepository.validId(c.getString(0));}
+    }
+    /** Fresh in-memory DB from trusted DDL: validates SQL constraints plus domain invariants. */
+    private SQLiteDatabase candidate(byte[] bytes){
+        require(bytes!=null&&bytes.length>0&&bytes.length<=STATE_LIMIT,"备份状态为空或超过预算");SQLiteDatabase stage=SQLiteDatabase.create(null);boolean success=false;
+        try{stage.setForeignKeyConstraintsEnabled(true);onCreate(stage);stage.beginTransaction();try{
+            deleteRows(stage);decodeRows(stage,bytes);validateSemantics(stage);require(Arrays.equals(encodeState(stage),bytes),"备份规范回读不一致");stage.setTransactionSuccessful();
+        }finally{stage.endTransaction();}success=true;return stage;
+        }catch(IOException|android.database.SQLException e){throw new IllegalArgumentException("备份状态校验失败",e);}finally{if(!success)stage.close();}
+    }
+    /** One consistent transaction, including revision/journals and insertion-based note order. */
+    public synchronized byte[] exportState(){return tx(db->{byte[] state=encodeState(db);try(SQLiteDatabase ignored=candidate(state)){return state;}});}
+    private static Map<String,Long> registeredMedia(SQLiteDatabase db){Map<String,Long> out=new LinkedHashMap<>();try(Cursor c=db.rawQuery("SELECT id,bytes FROM media ORDER BY id",null)){while(c.moveToNext())out.put(c.getString(0),c.getLong(1));}return out;}
+    public synchronized void exportBackup(Path destination,MediaRepository media)throws IOException{
+        if(media==null)throw new IllegalArgumentException("媒体仓库不能为空");byte[] state=exportState();
+        try(SQLiteDatabase staged=candidate(state)){
+            Map<String,Long> files=registeredMedia(staged);for(Map.Entry<String,Long> item:files.entrySet()){media.verify(item.getKey());if(Files.size(media.path(item.getKey()))!=item.getValue())throw new IOException("媒体登记大小不一致");}
+            BackupArchive.write(destination,state,files.keySet(),media);
+        }
+    }
+    private static void copyRows(SQLiteDatabase source,SQLiteDatabase target){
+        for(String table:SNAPSHOT_TABLES)try(Cursor c=source.rawQuery("SELECT * FROM "+table+" ORDER BY rowid",null)){
+            String sql=insertSql(table,c.getColumnCount());while(c.moveToNext()){Object[] values=new Object[c.getColumnCount()];for(int i=0;i<values.length;i++)values[i]=cell(c,i);target.execSQL(sql,values);}
+        }
+    }
+    /** Destructive REPLACE adapter: future UI MUST preview and get consent first.
+     * No archive SQL executed. Validate entire state/assets before touching live rows.
+     * Publish immutable blobs first, then replace rows in ONE SQLite transaction.
+     * Failure never removes old media. New unreachable blobs may remain for future GC;
+     * do NOT delete them here because another writer may already reference them.
+     * This is logical atomicity, not power-loss durability or an undo-restore feature.
+     */
+    public synchronized void restoreBackup(Path archive,Path stagingRoot,long byteBudget,MediaRepository media)throws IOException{
+        if(media==null)throw new IllegalArgumentException("媒体仓库不能为空");
+        try(BackupArchive.Snapshot snapshot=BackupArchive.read(archive,stagingRoot,byteBudget);SQLiteDatabase staged=candidate(snapshot.state())){
+            byte[] expected=snapshot.state();Map<String,Long> registry=registeredMedia(staged);Map<String,Path> files=snapshot.assets();
+            if(!registry.keySet().equals(files.keySet()))throw new IOException("媒体集合与数据库引用不一致");
+            for(Map.Entry<String,Long> item:registry.entrySet())if(Files.size(files.get(item.getKey()))!=item.getValue())throw new IOException("媒体登记大小不一致");
+            for(String id:registry.keySet())try(InputStream in=Files.newInputStream(files.get(id),StandardOpenOption.READ,LinkOption.NOFOLLOW_LINKS)){
+                if(!media.copy(in).equals(id))throw new IOException("恢复媒体摘要不一致");
+            }
+            // Staging cleanup occurs BEFORE live commit; cleanup failure cannot report
+            // a failed restore after the replacement has already committed.
+            snapshot.close();
+            for(Map.Entry<String,Long> item:registry.entrySet()){media.verify(item.getKey());if(Files.size(media.path(item.getKey()))!=item.getValue())throw new IOException("恢复媒体回读大小不一致");}
+            tx(db->{tableSet(db);deleteRows(db);copyRows(staged,db);require(Arrays.equals(encodeState(db),expected),"恢复事务回读不一致");return null;});
+        }
     }
 }

@@ -9,7 +9,6 @@ import subprocess
 import time
 import urllib.request
 import xml.etree.ElementTree as ET
-
 PKG = "com.supercubegame.pockettodo.safe.preview"
 OLD = "com.supercubegame.pockettodo"
 ACTIVITY = "com.supercubegame.pockettodo.MainActivity"
@@ -33,80 +32,76 @@ def find(**attrs):
         for n in last:
             if all(n.get(k) == v for k, v in attrs.items()): return n
         time.sleep(0.3)
-    print("UI_NODES " + repr([n.attrib for n in last]), flush=True)
+    print("UI_NODES " + repr([{k:n.get(k) for k in ("text", "content-desc", "resource-id", "bounds", "focused", "enabled")} for n in last if n.get("text") or n.get("content-desc") or n.get("focused") == "true"]), flush=True)
     raise AssertionError("UI node not found: " + repr(attrs))
 
 def tap_node(n):
     x1, y1, x2, y2 = map(int, re.findall(r"\d+", n.get("bounds")))
-    adb("shell", "input", "tap", str((x1+x2)//2), str((y1+y2)//2))
-    time.sleep(0.25)
+    adb("shell", "input", "tap", str((x1+x2)//2), str((y1+y2)//2)); time.sleep(0.25)
 
 def tap(**attrs): tap_node(find(**attrs))
-
 def check(ok, name):
     if not ok: raise AssertionError(name)
     checks.append(name); print("PASS " + name, flush=True)
-
 def item(id): return find(**{"content-desc": "todo-" + str(id)})
 def absent(id): return not any(n.get("content-desc") == "todo-" + str(id) for n in nodes())
 def start(pkg=PKG): adb("shell", "am", "start", "-W", "-n", pkg + "/" + ACTIVITY)
 def restart():
     adb("shell", "am", "force-stop", PKG); start()
-
 def add(title):
-    tap(**{"content-desc": "新待办输入"})
-    adb("shell", "input", "text", title.replace(" ", "%s")); tap(text="添加")
+    tap(**{"content-desc": "新待办输入"}); adb("shell", "input", "text", title.replace(" ", "%s")); tap(text="添加")
 
 def replace_field(description, title):
-    field = find(**{"content-desc": description})
-    length = len(field.get("text", "").encode("utf-16-le")) // 2
-    tap_node(field)
-    adb("shell", "input", "keyevent", "KEYCODE_MOVE_END")
+    field = find(**{"content-desc": description}); length = len(field.get("text", "").encode("utf-16-le")) // 2
+    tap_node(field); adb("shell", "input", "keyevent", "KEYCODE_MOVE_END")
     adb("shell", "input", "keyevent", *(["KEYCODE_DEL"] * (length + 1)))
     check(find(**{"content-desc": description}).get("text") == "", "editor fixture cleared through real input")
     if title: adb("shell", "input", "text", title.replace(" ", "%s"))
 
 def screenshot(name):
-    time.sleep(0.5)
-    data = adb("exec-out", "screencap", "-p", binary=True)
+    time.sleep(0.5); data = adb("exec-out", "screencap", "-p", binary=True)
     assert data[:8] == b"\x89PNG\r\n\x1a\n", "invalid PNG"
     (OUT / name).write_bytes(data)
     return {"file": name, "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
 
 def save_document():
     deadline = time.monotonic() + 18
-    last = []
     while time.monotonic() < deadline:
-        last = nodes()
-        for n in last:
+        for n in nodes():
             if n.get("text", "").casefold() in ("save", "保存") and n.get("enabled") == "true" and "documentsui" in n.get("package", ""):
                 tap_node(n); return
         time.sleep(0.3)
-    print("PICKER_NODES " + repr([n.attrib for n in last]), flush=True)
     raise AssertionError("System document picker save button missing")
+
+def picker_diagnostics():
+    result = {}
+    for name, args in (("activities", ("shell", "dumpsys", "activity", "activities")),
+                       ("platform", ("logcat", "-d", "-t", "600", "-v", "brief"))):
+        try:
+            text = adb(*args)
+            if name == "activities":
+                text = "\n".join(line for line in text.splitlines() if any(s in line for s in ("Intent", "Hist #", "Resumed", "launchedFrom", "resultTo", "resultWho", "requestCode")))
+            else:
+                text = "\n".join(line for line in text.splitlines() if any(s.lower() in line.lower() for s in ("documents", "pockettodo", "exception", "denial", "permission", "ActivityTaskManager", "AndroidRuntime")))
+            result[name] = text[-14000:]
+        except Exception as e: result[name] = repr(e)
+    return result
 
 def select_backup_file():
     find(text="PocketTodo-backup.ptodo")
-    # Grid nameplate labels can select instead of opening. Use the real list row.
     for n in nodes():
-        if n.get("content-desc") == "List view":
-            tap_node(n); break
+        if n.get("content-desc") == "List view": tap_node(n); break
     root = tree()
-    matches = [n for n in root.iter("node") if n.get("resource-id", "").endswith(":id/item_root")
-               and any(c.get("text") == "PocketTodo-backup.ptodo" for c in n.iter("node"))]
+    matches = [n for n in root.iter("node") if n.get("resource-id", "").endswith(":id/item_root") and any(c.get("text") == "PocketTodo-backup.ptodo" for c in n.iter("node"))]
     if len(matches) != 1: raise AssertionError("Expected exactly one backup document row")
     print("PICKER_TARGET " + repr(matches[0].attrib), flush=True)
     tap_node(matches[0])
-    # Accessibility keyboard activation is a real picker action, not a URI bypass.
-    current = nodes()
-    if any(n.get("text") == "PocketTodo-backup.ptodo" and "documentsui" in n.get("package", "") for n in current):
+    if any(n.get("text") == "PocketTodo-backup.ptodo" and "documentsui" in n.get("package", "") for n in nodes()):
         adb("shell", "input", "keyevent", "KEYCODE_ENTER")
 
 def open_backup():
     tap(text="导入备份"); select_backup_file(); find(text="导入预览")
-
-def stored_state():
-    return adb("shell", "run-as", PKG, "cat", "shared_prefs/pocket_todo.xml")
+def stored_state(): return adb("shell", "run-as", PKG, "cat", "shared_prefs/pocket_todo.xml")
 
 def main():
     OUT.mkdir(exist_ok=True)
@@ -117,10 +112,8 @@ def main():
     old_path = Path(os.environ["RUNNER_TEMP"]) / "original-todo.apk"; old_path.write_bytes(old_apk)
     adb("install", str(old_path)); start(OLD); add("Keep old data")
     check(item(1).get("text") == "Keep old data", "seed original app on disposable emulator")
-    adb("install", "-r", str(OUT / "PocketTodo-1.1-preview.apk"))
-    adb("shell", "pm", "clear", PKG); start()
-    find(text="口袋待办")
-    check(find(text="还剩 0 件  /  共 0 件") is not None, "isolated preview launches empty")
+    adb("install", "-r", str(OUT / "PocketTodo-1.1-preview.apk")); adb("shell", "pm", "clear", PKG); start()
+    find(text="口袋待办"); check(find(text="还剩 0 件  /  共 0 件") is not None, "isolated preview launches empty")
     shots = [screenshot("01-empty.png")]
     tap(text="添加"); check(absent(1), "blank input creates no task")
     add("Buy milk"); check(item(1).get("text") == "Buy milk", "add via visible input")
@@ -158,32 +151,27 @@ def main():
     open_backup(); tap(text="确认替换"); tap(**{"content-desc": "todo-1"})
     check(find(text="撤销导入").get("enabled") == "false", "new mutation invalidates old undo snapshot")
     tap(**{"content-desc": "todo-1"}); shots.append(screenshot("03-tasks.png"))
-    before = stored_state()
-    paths = adb("shell", "find", "/storage/emulated/0", "-name", "PocketTodo-backup.ptodo").strip().splitlines()
+    before = stored_state(); paths = adb("shell", "find", "/storage/emulated/0", "-name", "PocketTodo-backup.ptodo").strip().splitlines()
     check(len(paths) == 1 and paths[0].startswith("/storage/emulated/0/"), "locate disposable exported backup fixture")
-    corrupt = Path(os.environ["RUNNER_TEMP"]) / "corrupt.ptodo"; corrupt.write_bytes(b"broken backup\n")
-    adb("push", str(corrupt), paths[0])
-    tap(text="导入备份"); select_backup_file()
-    find(text="导入失败：文件无效或无法读取，列表未更改")
+    corrupt = Path(os.environ["RUNNER_TEMP"]) / "corrupt.ptodo"; corrupt.write_bytes(b"broken backup\n"); adb("push", str(corrupt), paths[0])
+    tap(text="导入备份"); select_backup_file(); find(text="导入失败：文件无效或无法读取，列表未更改")
     check(stored_state() == before and item(1).get("checked") == "true" and item(2).get("text") == "Walk outside", "corrupt file through real picker leaves exact persisted state unchanged")
     restart(); check(stored_state() == before, "rejected import remains unchanged after restart")
     tap(text="已完成"); check(item(1).get("checked") == "true" and absent(2), "completed view after backup roundtrip")
     shots.append(screenshot("04-completed.png"))
     start(OLD); check(item(1).get("text") == "Keep old data" and item(1).get("checked") == "false", "original APK coexists and keeps original data")
     check(len({x["sha256"] for x in shots}) == len(shots), "real screenshots show distinct states")
-    return {"status": "PASS", "checks": checks, "count": len(checks), "screenshots": shots,
-            "device": adb("shell", "getprop", "ro.product.model").strip(), "api": adb("shell", "getprop", "ro.build.version.sdk").strip(),
-            "physical_device": "NOT_TESTED", "release_upgrade": "NOT_TESTED", "provider_failure_injection": "NOT_TESTED"}
+    return {"status": "PASS", "checks": checks, "count": len(checks), "screenshots": shots, "device": adb("shell", "getprop", "ro.product.model").strip(), "api": adb("shell", "getprop", "ro.build.version.sdk").strip(), "physical_device": "NOT_TESTED", "release_upgrade": "NOT_TESTED", "provider_failure_injection": "NOT_TESTED"}
 
 try:
     result = main()
 except Exception as exc:
-    result = {"status": "FAIL", "checks": checks, "error": repr(exc), "physical_device": "NOT_TESTED"}
+    result = {"status": "FAIL", "checks": checks, "error": repr(exc), "physical_device": "NOT_TESTED", "diagnostics": picker_diagnostics()}
+    print("FAILURE_DIAGNOSTICS " + json.dumps(result["diagnostics"], ensure_ascii=False), flush=True)
     OUT.mkdir(exist_ok=True)
     try: screenshot("failure.png")
     except Exception: pass
-    (OUT / "ui-result.json").write_text(json.dumps(result, indent=2, ensure_ascii=False))
-    raise
+    (OUT / "ui-result.json").write_text(json.dumps(result, indent=2, ensure_ascii=False)); raise
 else:
     (OUT / "ui-result.json").write_text(json.dumps(result, indent=2, ensure_ascii=False))
     print("UI_RESULT " + json.dumps(result, ensure_ascii=False))

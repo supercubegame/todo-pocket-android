@@ -66,7 +66,7 @@ jobs:
         run: |
           set -euo pipefail
           gradle --no-daemon --console=plain assembleDebug assembleDebugAndroidTest lintDebug 2>&1 | tee build.log
-      - name: Device database and byte transport contracts
+      - name: Device database and semantic backup contracts
         run: |
           set -euo pipefail
           python3 tools/emulator_gate.py 2>&1 | tee ui.log
@@ -114,9 +114,10 @@ jobs:
                 logs[name]='NOT_OBSERVED'
             result=folder/'device-result.json'
             devices[str(api)]={'result':json.loads(result.read_text()) if result.exists() else {'status':'NOT_OBSERVED'},'logs':logs}
+          restore='SCHEMA2_DB_MEDIA_BYTES_PASS' if all(d['result'].get('status')=='PASS' and d['result'].get('full_backup_restore')=='SCHEMA2_DB_MEDIA_BYTES_PASS' for d in devices.values()) else 'NOT_VERIFIED'
           scope=root/'scope'
           scope.mkdir(exist_ok=True)
-          (scope/'ui-result.json').write_text(json.dumps({'status':'NOT_TESTED','scope':'DATABASE_DEVICE_PHASE_NOT_UI','devices':devices,'screenshots':'NOT_TESTED','exports':'NOT_TESTED','full_database_media_restore':'NOT_TESTED','release_ready':False}))
+          (scope/'ui-result.json').write_text(json.dumps({'status':'NOT_TESTED','scope':'DATABASE_DEVICE_PHASE_NOT_UI','devices':devices,'screenshots':'NOT_TESTED','exports':'NOT_TESTED','full_database_media_restore':restore,'saf_restore_ui':'NOT_TESTED','image_decoding':'NOT_TESTED','power_loss':'NOT_TESTED','release_ready':False}))
           PY
       - name: Publish and read back evidence
         env:

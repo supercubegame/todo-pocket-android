@@ -1,35 +1,33 @@
 # 口袋待办 v1.2 开发中
 
-**尚无可交付 v1.2 APK。** 内部包用于数据库/文件测试，主界面仍继承 v1.1，不是新版 UI 验收。[v1.1 已发布预览](https://github.com/supercubegame/todo-pocket-android/releases/tag/preview-35575804413-1) · [v1.2 草稿 PR](https://github.com/supercubegame/todo-pocket-android/pull/4)。main、旧发布和 PR3 未改。
+**没有可交付 v1.2 APK。** 主界面仍继承 v1.1，数据库与媒体字节验证不等于新版界面、真实图片或产品验收。[已发布 v1.1](https://github.com/supercubegame/todo-pocket-android/releases/tag/preview-35575804413-1) · [v1.2 草稿 PR](https://github.com/supercubegame/todo-pocket-android/pull/4)。main、PR3、旧发布及手机数据保持不动。
 
 ## 当前实现
 
-领域规则：分类/应用关联、精确账本、打卡日历、字段、有序图文引用。Android 数据库：系统 SQLiteOpenHelper+FK/WAL/事务，分类顺序、应用/活动、路径/标签、账本批次重试/撤销、日期/录入时间、笔记顺序/私有标志/媒体登记。
+原生 Java，SQLiteOpenHelper schema2、FK/WAL/事务。分类与应用关联、活动、路径/标签、分精度账本和重试/撤销日志、打卡日期与录入时间、私有/公开有序图文块、媒体登记、自定义字段及字段笔记、独立普通待办。字段改名不换身份，归档保留旧值和笔记，禁止新值/新关联笔记；原笔记仍可编辑。新记录不继承旧500条/200字限制，但受设备和Cursor内存限制，不承诺物理无限。
 
-本轮 schema2 增加字段定义/有序选项/活动字段值、字段笔记关联、独立普通待办与旧备份导入记录。字段复用领域验证，改名不换ID；归档保留已有内容，拒绝新增值和笔记。多选去重保序，false 与未填区分，空列表明确清空。新待办与长文本不继承旧格式的500条/200字限制，但仍受设备资源约束，不承诺物理无限。
+旧备份先验证后事务追加，保留原有待办，按来源摘要重映射ID，同一备份重试不重复。不同内容备份可能追加语义相似的待办；预览告知、确认界面及撤销导入尚待接入。不会凭空生成活动/打卡/账目。schema1到2采用非破坏性新增表迁移；旧DDL独立夹具验证部分旧实体和私有内容保留，并非全部异常升级情形覆盖。
 
-旧备份先验证，再事务追加为普通待办，不覆盖现有记录、不伪造活动/打卡/金额。导入身份来自备份摘要，条目ID加来源前缀；同一份备份再次导入为无操作，第二条冲突也整批回滚。**内容修改后的备份视作另一来源，可能追加相似待办；未来界面必须先预览明确告知。** 导入界面和导入撤销尚未实现。
+## 本轮：全数据库和媒体字节备份恢复适配器
 
-schema1到2是新增表迁移，测试夹具冻结旧版完整建表语句，不通过当前onCreate伪造旧库。检查旧分类、活动、私有笔记和打卡保留，用户修订号不变，字段可用、外键无损。更高未知版本仍拒绝打开，不清空重建；异常迁移和断电覆盖尚待加强。
+新增 AppDatabase.exportState/exportBackup/restoreBackup。备份格式固定版本、schema2、完整18表及列顺序，逐值标记SQL类型，严格UTF8、长度/尾随校验；拒绝未知表防止悄悄漏备份。读取在一个SQL事务内形成一致快照，保留ID、排序、私有标志、修订号、账目批次载荷/撤销墓碑及旧导入记录。备份含私有内容且未加密，不能当分享包。
 
-文件层已实现内容摘要复制/去重/校验、锁保护的私有目录原子重命名、ZIP清单/大小/摘要/预算验证及新目录暂存。合成文件不是图片解码验收，登记媒体也不等于文件有效。ZIP状态仍为待数据库解释的数据，不是完整业务备份恢复。
+恢复先在由可信代码建表的临时内存数据库中验证SQL约束、外键、字段值（包括已归档字段）、日期、有序记录和账本日志，再核对媒体集合、大小、摘要。不执行备份提供的SQL或DDL。复制不可变媒体并回读之后，在**一个数据库事务**中替换全部业务记录并做规范字节回读。临时目录在提交前清理，避免清理失败被误报为已提交数据恢复失败。
 
-## 验证
+**重要边界：**这是替换型底层接口，未来界面必须预览并确认，不是已交付的手机恢复流程。失败不删除/更改旧媒体，数据库回滚；可能留下新复制但未引用的内容文件，安全垃圾回收尚待做，不承诺物理目录完全不变。只实现schema2完整快照，旧普通待办格式走独立导入；不接受未知未来schema。8MiB状态/清单限制是暂定资源保护，不是容量实测。断电、写入中杀进程、磁盘写满、真实照片解码、SAF/云盘、预览过期保护和撤销恢复均未验收。
 
-快速命令：`python3 tools/verify.py v12`，JDK17，原54+领域82+文件49项。
+## 验证与实际失败记录
 
-设备：`gradle --no-daemon --console=plain assembleDebug assembleDebugAndroidTest lintDebug`，再在 GitHub 隔离 runner 运行 `TEST_API=26 python3 tools/emulator_gate.py`（另一档34）。固定独立包com.supercubegame.pockettodo.v12.preview，1.2/code3，min26/target34，desugar_jdk_libs2.1.5。seed/reopen分别运行，中间强停并验证进程不存在；不是写入中杀进程、系统重启或断电测试。
+快速：`python3 tools/verify.py v12`，真实JDK17，旧核心54、领域82、文件49。设备：`gradle --no-daemon --console=plain assembleDebug assembleDebugAndroidTest lintDebug`，再在隔离CI上分别运行`TEST_API=26 python3 tools/emulator_gate.py`和34。构建后验证包/版本/无权限/签名并安装，seed/reopen之间强停且检查原进程不存在。
 
-上一基线41165adf /35613984527，两档各50项设备检查通过。新增字段测试先行e35624ef6dc66869c39aa6f9b6ede4824ae4ce40 / [35615624880](https://github.com/supercubegame/todo-pocket-android/actions/runs/35615624880)：API34通过先前seed38项后因缺少defineField失败；API26是启动时单次adb查询超时，没到字段测试，不能说成同一种失败。本轮修复启动轮询，仅在原240秒总时限内重试未完成的启动探针，不忽略产品断言。最新结果以对应SHA的evidence报告为准。
+原字段阶段a009f749 /35616574786，两档各94检查通过。本轮先行7203da4529714567915fc720ee3e9410501957e6 / [35619172618](https://github.com/supercubegame/todo-pocket-android/actions/runs/35619172618) 两档通过原76项seed后因缺少exportState失败；首个实现24801c3b / [35619931896](https://github.com/supercubegame/todo-pocket-android/actions/runs/35619931896) 能导出完整快照，但非法日期直接冒出底层DateTimeParseException。修复在候选数据校验边界统一包装并保留原始cause，没有放宽日期规则或测试捕获。
 
-历史硬链接在两档Android被拒绝，现已改同私有目录原子重命名，加JVM锁/持久OS锁，在锁内检查目标不存在；拒绝覆盖已有文件。只支持协作的私有写入者，不用于其他App可写目录，SAF从已验证快照另行复制。不等于断电耐久性。
+新增设备夹具每表都有数据，用独立编码器比较完整快照，实际生成ZIP并验证原媒体字节。合法ZIP内装缺媒体/多媒体/未知schema/尾随/非法字段/日期/顺序/账本日志等坏数据，必须拒绝且旧数据库完整不变；后置SQLite触发器故障必须命中精确注入原因并回滚，再验证成功、重复恢复和重开后的原账目撤销/导入幂等。
 
-产品交付入口`python3 tools/verify.py build`继续故意阻断；错误字符串为保护断言保留，不表示内部APK没有编译。只上传日志、不上传APK、不创建Release。报告ui.devices是真实设备结果，ui.status=NOT_TESTED表示未测UI，release_ready=false。
+设备报告只有同时具备全部关键恢复断言、计数匹配和正常instrumentation退出才标`SCHEMA2_DB_MEDIA_BYTES_PASS`。解析器另做正负夹具自测，不计入产品设备功能数。两个API必须都通过才汇总恢复通过；`ui.status=NOT_TESTED`仍表示未测界面，`release_ready=false`。完整实际结果以对应提交的evidence报告为准，不把当前文字当通过证据。
 
-## 待完成
+## 仍待完成
 
-计划/快捷关联/模板/搜索、全数据与媒体备份恢复、原生Today/Activities/Calendar/NoteEditor、图片选择/解码/缩略图/裁剪遮挡、PDF/分段图片/Markdown+assets分享、真实UI自动验收/截图/真机试用。账本汇总仍全量加载，规模优化未做；8MiB备份元数据/状态限制是暂定保护，不是容量测量。
+计划/快捷关联/模板/搜索、普通待办删除/排序、原生Today/Activities/Calendar/NoteEditor、真实图片选择/解码/缩略图/裁剪遮挡、PDF/分段图片/Markdown+assets分享、SAF恢复预览确认、真实界面测试/截图/真机试用。账本汇总仍全量加载，规模优化未做。分享过滤不是截图遮挡，不能夹带未遮挡原图。
 
-备份未加密，摘要不证明作者；分享过滤不是截图遮挡，分享包不得带未遮挡原图。无云同步/自动打卡/付费服务。长期签名需要用户可信本地生成备份和配置，密钥不得进聊天/代码/日志。debug不是长期升级通道。
-
-批准32文件及完整计划：[docs/V1_2_PLAN.md](docs/V1_2_PLAN.md)。
+固定内部包com.supercubegame.pockettodo.v12.preview、1.2/code3、min26/target34/compile35，desugar_jdk_libs2.1.5。`python3 tools/verify.py build`继续故意阻断产品交付，内部测试构建独立执行；不上传APK、不创建Release。长期签名需可信本地生成与备份，密钥不进聊天/源码/日志。无云同步、自动打卡或付费服务。批准范围：[docs/V1_2_PLAN.md](docs/V1_2_PLAN.md)。

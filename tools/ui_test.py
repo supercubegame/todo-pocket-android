@@ -1,32 +1,32 @@
 #!/usr/bin/env python3
-"""Real APK and document picker gates on a disposable CI emulator only."""
+"""Real APK and system picker gates, disposable CI emulator only."""
 import hashlib, json, os, re, subprocess, time, urllib.request
 from pathlib import Path
 import xml.etree.ElementTree as ET
-PKG = "com.supercubegame.pockettodo.safe.preview"
-OLD = "com.supercubegame.pockettodo"
-ACTIVITY = "com.supercubegame.pockettodo.MainActivity"
-OUT = Path("delivery")
-checks = []
+PKG="com.supercubegame.pockettodo.safe.preview"
+OLD="com.supercubegame.pockettodo"
+ACTIVITY="com.supercubegame.pockettodo.MainActivity"
+OUT=Path("delivery")
+checks=[]
+touch_ready=False
 
-def adb(*args, binary=False): return subprocess.check_output(["adb", *args], timeout=40, text=not binary)
+def adb(*args,binary=False): return subprocess.check_output(["adb",*args],timeout=40,text=not binary)
 def tree():
-    adb("shell", "uiautomator", "dump", "/sdcard/window.xml")
-    return ET.fromstring(adb("shell", "cat", "/sdcard/window.xml"))
+    adb("shell","uiautomator","dump","/sdcard/window.xml")
+    return ET.fromstring(adb("shell","cat","/sdcard/window.xml"))
 def nodes(): return list(tree().iter("node"))
 def find(**attrs):
-    deadline = time.monotonic() + 18
-    last = []
-    while time.monotonic() < deadline:
-        last = nodes()
+    deadline=time.monotonic()+18; last=[]
+    while time.monotonic()<deadline:
+        last=nodes()
         for n in last:
-            if all(n.get(k) == v for k, v in attrs.items()): return n
-        time.sleep(0.3)
-    print("UI_NODES " + repr([{k:n.get(k) for k in ("text", "content-desc", "resource-id", "bounds", "focused", "enabled")} for n in last if n.get("text") or n.get("content-desc") or n.get("focused") == "true"]), flush=True)
-    raise AssertionError("UI node not found: " + repr(attrs))
+            if all(n.get(k)==v for k,v in attrs.items()): return n
+        time.sleep(.3)
+    print("UI_NODES "+repr([{k:n.get(k) for k in ("text","content-desc","resource-id","bounds","focused","enabled")} for n in last if n.get("text") or n.get("content-desc") or n.get("focused")=="true"]),flush=True)
+    raise AssertionError("UI node not found: "+repr(attrs))
 def tap_node(n):
-    x1,y1,x2,y2 = map(int,re.findall(r"\d+",n.get("bounds")))
-    adb("shell","input","tap",str((x1+x2)//2),str((y1+y2)//2)); time.sleep(0.25)
+    x1,y1,x2,y2=map(int,re.findall(r"\d+",n.get("bounds")))
+    adb("shell","input","tap",str((x1+x2)//2),str((y1+y2)//2)); time.sleep(.25)
 def tap(**attrs): tap_node(find(**attrs))
 def check(ok,name):
     if not ok: raise AssertionError(name)
@@ -45,7 +45,7 @@ def replace_field(description,title):
     check(find(**{"content-desc":description}).get("text")=="","editor fixture cleared through real input")
     if title: adb("shell","input","text",title.replace(" ","%s"))
 def screenshot(name):
-    time.sleep(0.5); data=adb("exec-out","screencap","-p",binary=True)
+    time.sleep(.5); data=adb("exec-out","screencap","-p",binary=True)
     assert data[:8]==b"\x89PNG\r\n\x1a\n","invalid PNG"
     (OUT/name).write_bytes(data)
     return {"file":name,"sha256":hashlib.sha256(data).hexdigest(),"bytes":len(data)}
@@ -55,35 +55,68 @@ def save_document():
         for n in nodes():
             if n.get("text","").casefold() in ("save","保存") and n.get("enabled")=="true" and "documentsui" in n.get("package",""):
                 tap_node(n); return
-        time.sleep(0.3)
+        time.sleep(.3)
     raise AssertionError("System document picker save button missing")
+
+def prepare_touch():
+    global touch_ready
+    if touch_ready: return
+    assert os.environ.get("GITHUB_ACTIONS")=="true" and adb("shell","getprop","ro.kernel.qemu").strip()=="1"
+    work=Path("build/ci-touch"); work.mkdir(parents=True,exist_ok=True)
+    source=r'''import android.os.Build;
+import android.os.SystemClock;
+import android.view.InputDevice;
+import android.view.InputEvent;
+import android.view.MotionEvent;
+public final class PocketTouch {
+ public static void main(String[] args) throws Exception {
+  if (!Build.HARDWARE.equals("ranchu") && !Build.HARDWARE.equals("goldfish")) throw new SecurityException("Emulator only");
+  float x=Float.parseFloat(args[0]), y=Float.parseFloat(args[1]);
+  Class<?> cls=Class.forName("android.hardware.input.InputManager");
+  Object manager=cls.getMethod("getInstance").invoke(null);
+  java.lang.reflect.Method inject=cls.getMethod("injectInputEvent",InputEvent.class,int.class);
+  MotionEvent.PointerProperties p=new MotionEvent.PointerProperties(); p.id=0; p.toolType=MotionEvent.TOOL_TYPE_FINGER;
+  MotionEvent.PointerCoords c=new MotionEvent.PointerCoords(); c.x=x; c.y=y; c.size=1; c.pressure=1;
+  long down=SystemClock.uptimeMillis();
+  for (int action : new int[]{MotionEvent.ACTION_DOWN,MotionEvent.ACTION_UP}) {
+   if (action==MotionEvent.ACTION_UP) { SystemClock.sleep(80); c.pressure=0; }
+   MotionEvent e=MotionEvent.obtain(down,SystemClock.uptimeMillis(),action,1,new MotionEvent.PointerProperties[]{p},new MotionEvent.PointerCoords[]{c},0,0,1,1,0,0,InputDevice.SOURCE_TOUCHSCREEN,0);
+   if (e.getToolType(0)!=MotionEvent.TOOL_TYPE_FINGER) throw new AssertionError("Missing finger type");
+   if (!Boolean.TRUE.equals(inject.invoke(manager,e,2))) throw new AssertionError("Input injection rejected");
+   e.recycle();
+  }
+  System.out.println("FINGER_TOUCH source=4098 tool=1 accepted");
+ }
+}
+'''
+    java=work/"PocketTouch.java"; java.write_text(source)
+    sdk=Path(os.environ["ANDROID_HOME"]); android=sdk/"platforms/android-35/android.jar"
+    subprocess.run(["javac","-encoding","UTF-8","-cp",str(android),"-d",str(work),str(java)],check=True,timeout=40)
+    jar=work/"pocket-touch.jar"
+    subprocess.run([str(sdk/"build-tools/35.0.0/d8"),"--lib",str(android),"--min-api","26","--output",str(jar),str(work/"PocketTouch.class")],check=True,timeout=40)
+    adb("push",str(jar),"/data/local/tmp/pocket-touch.jar"); touch_ready=True
+
+def select_backup_file():
+    find(text="PocketTodo-backup.ptodo")
+    for n in nodes():
+        if n.get("content-desc")=="List view": tap_node(n); time.sleep(1); break
+    matches=[n for n in tree().iter("node") if n.get("resource-id","").endswith(":id/item_root") and any(c.get("text")=="PocketTodo-backup.ptodo" for c in n.iter("node"))]
+    if len(matches)!=1: raise AssertionError("Expected exactly one backup document row")
+    target=matches[0]; print("PICKER_TARGET "+repr(target.attrib),flush=True)
+    x1,y1,x2,y2=map(int,re.findall(r"\d+",target.get("bounds")))
+    prepare_touch()
+    print(adb("shell","CLASSPATH=/data/local/tmp/pocket-touch.jar","app_process","/system/bin","PocketTouch",str((x1+x2)//2),str((y1+y2)//2)),flush=True)
+    time.sleep(1)
+
 def picker_diagnostics():
     result={}
-    for name,args in (("activities",("shell","dumpsys","activity","activities")),
-                      ("platform",("logcat","-d","-v","brief","*:W","PickerActionHandler:V","PickActivity:V","ActivityTaskManager:I","UriGrantsManagerService:V","AccessibilityNodeInfoDumper:S","AndroidRuntime:E"))):
+    for name,args in (("activities",("shell","dumpsys","activity","activities")),("platform",("logcat","-d","-v","brief","*:W","PickerActionHandler:V","PickActivity:V","ActivityTaskManager:I","UriGrantsManagerService:V","AccessibilityNodeInfoDumper:S","AndroidRuntime:E"))):
         try:
             text=adb(*args)
             if name=="activities": text="\n".join(line for line in text.splitlines() if any(s in line for s in ("Intent","Hist #","Resumed","launchedFrom","resultTo","resultWho","requestCode")))
             result[name]=text[-18000:]
         except Exception as e: result[name]=repr(e)
     return result
-
-def select_backup_file():
-    find(text="PocketTodo-backup.ptodo")
-    for n in nodes():
-        if n.get("content-desc")=="List view": tap_node(n); time.sleep(1); break
-    root=tree()
-    matches=[n for n in root.iter("node") if n.get("resource-id","").endswith(":id/item_root") and any(c.get("text")=="PocketTodo-backup.ptodo" for c in n.iter("node"))]
-    if len(matches)!=1: raise AssertionError("Expected exactly one backup document row")
-    target=matches[0]; print("PICKER_TARGET "+repr(target.attrib),flush=True)
-    x1,y1,x2,y2=map(int,re.findall(r"\d+",target.get("bounds"))); x=str((x1+x2)//2); y=str((y1+y2)//2)
-    # A finite real touch, then a quiet interval for GestureDetector single-tap confirmation.
-    # Do not attach another UiAutomation dump during the confirmation interval.
-    adb("shell","input","touchscreen","swipe",x,y,x,y,"120"); time.sleep(1.2)
-    current=nodes()
-    if any(n.get("text")=="PocketTodo-backup.ptodo" and "documentsui" in n.get("package","") for n in current):
-        print("PICKER_SECOND_TOUCH",flush=True)
-        adb("shell","input","touchscreen","swipe",x,y,x,y,"120"); time.sleep(1.2)
 
 def open_backup():
     tap(text="导入备份"); select_backup_file(); find(text="导入预览")

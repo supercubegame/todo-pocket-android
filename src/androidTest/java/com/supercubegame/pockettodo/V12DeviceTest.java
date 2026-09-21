@@ -262,11 +262,65 @@ public final class V12DeviceTest extends Instrumentation {
         ok(total(t,100,Set.of(LocalDate.of(2026,9,1),LocalDate.of(2026,9,3)),"NET_EXPENSE")==1000,"restored exact-cent totals remain usable after restart");
         call(t,"undoBatch",new Class[]{String.class},"latest");ok(count(t,"ledger")==0,"restored latest batch undo works after separate-process restart");ok(importLegacy(t,legacy())==0,"restored import journal still works after restart");close(t);
     }
+
+    private Object preview(Object d,Path archive,Path stage)throws Exception{return call(d,"prepareRestore",new Class[]{Path.class,Path.class,long.class},archive,stage,1000000L);}
+    private void confirm(Object d,Object plan,MediaRepository media)throws Exception{call(d,"confirmRestore",new Class[]{plan.getClass(),MediaRepository.class},plan,media);}
+    private boolean empty(Path dir)throws IOException{try(java.util.stream.Stream<Path> files=Files.list(dir)){return !files.findAny().isPresent();}}
+    private void guardedSeed()throws Exception{
+        Context c=getTargetContext();c.deleteDatabase("guarded.db");Object t=db("guarded.db"),source=db("backup-source.db");
+        call(t,"addTodo",new Class[]{String.class,String.class},"local","保留本地");byte[] before=fixture(t),expected=fixture(source);
+        Path good=c.getFilesDir().toPath().resolve("full-good.zip"),stage=c.getCacheDir().toPath().resolve("guarded-stage");Files.createDirectories(stage);
+        MediaRepository media=new MediaRepository(c.getFilesDir().toPath().resolve("guarded-media"),1000000);
+        String id=new String(Files.readAllBytes(c.getFilesDir().toPath().resolve("restore-media-id.txt")),java.nio.charset.StandardCharsets.US_ASCII);
+        Object canceled=preview(t,good,stage);
+        ok(Arrays.equals(fixture(t),before)&&!Files.exists(media.path(id)),"restore preview does not mutate any live table or publish media");
+        @SuppressWarnings("unchecked") Map<String,Long> current=(Map<String,Long>)call(canceled,"currentCounts",new Class[]{});
+        @SuppressWarnings("unchecked") Map<String,Long> incoming=(Map<String,Long>)call(canceled,"incomingCounts",new Class[]{});
+        Map<String,Long> actualCurrent=new LinkedHashMap<>(),actualIncoming=new LinkedHashMap<>();
+        for(String table:TABLES){try(android.database.Cursor a=raw(t).rawQuery("SELECT count(*) FROM "+table,null);android.database.Cursor b=raw(source).rawQuery("SELECT count(*) FROM "+table,null)){a.moveToFirst();b.moveToFirst();actualCurrent.put(table,a.getLong(0));actualIncoming.put(table,b.getLong(0));}}
+        ok(current.equals(actualCurrent)&&incoming.equals(actualIncoming),"preview shows independent exact current and incoming counts for every table");
+        boolean immutable=false;try{incoming.put("todos",999L);}catch(UnsupportedOperationException e){immutable=true;}ok(immutable,"restore preview summary cannot be modified by caller");
+        close(canceled);close(canceled);ok(empty(stage)&&Arrays.equals(fixture(t),before),"cancel twice clears private staging without altering live state");
+        reject(()->confirm(t,canceled,media),"canceled restore plan cannot be confirmed");
+        boolean invalid=false;try{Object bad=preview(t,c.getFilesDir().toPath().resolve("full-bad.zip"),stage);close(bad);}catch(IOException|IllegalArgumentException|IllegalStateException e){invalid=true;}
+        ok(invalid&&empty(stage)&&Arrays.equals(fixture(t),before),"semantic-invalid preview refuses and cleans staging without touching live data");
+        Object foreign=preview(t,good,stage),other=db("guarded.db");
+        reject(()->confirm(other,foreign,media),"restore preview is bound to its exact database helper owner");close(other);close(foreign);
+        Object stale=preview(t,good,stage);call(t,"editTodo",new Class[]{String.class,String.class,boolean.class},"local","预览后的新内容",true);byte[] newer=fixture(t);
+        reject(()->confirm(t,stale,media),"ordinary write after preview rejects stale restore");
+        ok(Arrays.equals(fixture(t),newer)&&empty(stage),"stale rejection preserves every new row and revision and clears stage");
+        reject(()->confirm(t,stale,media),"failed stale plan is single use and requires a new preview");
+        Object sameRevision=preview(t,good,stage),writer=db("guarded.db");
+        raw(writer).execSQL("UPDATE todos SET title='另一个连接写入' WHERE id='local'");close(writer);byte[] changed=fixture(t);
+        reject(()->confirm(t,sameRevision,media),"full snapshot guard rejects another connection write even without revision bump");
+        ok(Arrays.equals(fixture(t),changed),"same-revision stale rejection retains exact externally changed state");
+        Object damaged=preview(t,good,stage);Path asset;
+        try(java.util.stream.Stream<Path> paths=Files.walk(stage)){asset=paths.filter(p->p.getFileName().toString().equals(id)).findFirst().orElseThrow(()->new AssertionError("missing staged asset fixture"));}
+        Files.write(asset,new byte[]{5,4,3,2,1});boolean corrupt=false;try{confirm(t,damaged,media);}catch(IOException e){corrupt=true;}
+        ok(corrupt&&Arrays.equals(fixture(t),changed)&&empty(stage),"changed staged media is rejected on confirmation with complete old state intact");
+        Object late=preview(t,good,stage);raw(t).execSQL("CREATE TEMP TRIGGER guarded_fault BEFORE INSERT ON todos WHEN NEW.id='own' BEGIN SELECT RAISE(ABORT,'guarded_commit_fault'); END");
+        boolean injected=false;try{confirm(t,late,media);}catch(Exception e){for(Throwable x=e;x!=null;x=x.getCause())if(String.valueOf(x.getMessage()).contains("guarded_commit_fault"))injected=true;}
+        ok(injected&&Arrays.equals(fixture(t),changed),"guarded confirmation late injected failure rolls back every replaced table");
+        raw(t).execSQL("DROP TRIGGER guarded_fault");reject(()->confirm(t,late,media),"failed commit plan cannot be reused after removing the fault");
+        Object frozen=preview(t,good,stage);byte[] zip=Files.readAllBytes(good);Files.write(good,new byte[]{0,1,2});
+        try{confirm(t,frozen,media);}finally{Files.write(good,zip);}
+        ok(Arrays.equals(fixture(t),expected),"confirmation uses the exact validated preview not a subsequently replaced source file");
+        ok(Arrays.equals(Files.readAllBytes(media.path(id)),new byte[]{1,2,3,4,5})&&empty(stage),"confirmed snapshot publishes exact media and cleans staging before commit");
+        reject(()->confirm(t,frozen,media),"successful confirmation cannot be replayed");
+        Object noop=preview(t,good,stage);List<Ledger.Entry> money=List.of(row("m1",100,"2026-09-01",1500),new Ledger.Entry("m2",100,LocalDate.of(2026,9,3),Ledger.Kind.REFUND,500,"退款"));
+        ok(!batch(t,"latest",money),"exact idempotent retry remains a genuine no-op while preview is open");
+        confirm(t,noop,media);ok(Arrays.equals(fixture(t),expected)&&empty(stage),"unchanged state after no-op can still confirm the reviewed snapshot");
+        close(source);close(t);
+    }
+    private void guardedReopen()throws Exception{
+        Object t=db("guarded.db");ok(Arrays.equals(fixture(t),Files.readAllBytes(getTargetContext().getFilesDir().toPath().resolve("restore-expected.bin"))),"guarded restore survives a separate Android process with all tables exact");
+        ok(importLegacy(t,legacy())==0&&total(t,100,Set.of(LocalDate.of(2026,9,1),LocalDate.of(2026,9,3)),"NET_EXPENSE")==1000,"guarded restore retains usable import journal and exact-cent totals after restart");close(t);
+    }
     @Override public void onStart(){
         Bundle result=new Bundle();try{
             ok(getTargetContext().getPackageName().equals("com.supercubegame.pockettodo.v12.preview"),"tests target isolated v1.2 package");
             ok(android.os.Build.VERSION.SDK_INT==Integer.parseInt(args.getString("expectedApi")),"actual emulator API equals requested test matrix");
-            String phase=args.getString("phase");if("seed".equals(phase)){seed();fieldsSeed();backupSeed();}else if("reopen".equals(phase)){reopen();fieldsReopen();backupReopen();}else throw new IllegalArgumentException("unknown test phase");
+            String phase=args.getString("phase");if("seed".equals(phase)){seed();fieldsSeed();backupSeed();guardedSeed();}else if("reopen".equals(phase)){reopen();fieldsReopen();backupReopen();guardedReopen();}else throw new IllegalArgumentException("unknown test phase");
             log.append("DEVICE_DATABASE_RESULT ").append(phase).append(' ').append(checks).append('/').append(checks).append(" PASS\n");result.putString("stream",log.toString());finish(Activity.RESULT_OK,result);
         }catch(Throwable error){StringWriter text=new StringWriter();error.printStackTrace(new PrintWriter(text));result.putString("stream",log+"DEVICE_DATABASE_FAILED\n"+text);finish(Activity.RESULT_CANCELED,result);}
     }

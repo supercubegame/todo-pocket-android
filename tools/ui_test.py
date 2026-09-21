@@ -33,7 +33,7 @@ def find(**attrs):
         for n in last:
             if all(n.get(k) == v for k, v in attrs.items()): return n
         time.sleep(0.3)
-    print("UI_NODES " + repr([(n.get("text"), n.get("content-desc"), n.get("resource-id")) for n in last]), flush=True)
+    print("UI_NODES " + repr([n.attrib for n in last]), flush=True)
     raise AssertionError("UI node not found: " + repr(attrs))
 
 def tap_node(n):
@@ -61,7 +61,6 @@ def replace_field(description, title):
     field = find(**{"content-desc": description})
     length = len(field.get("text", "").encode("utf-16-le")) // 2
     tap_node(field)
-    # Collapse any selection, then delete every code unit. Sequential keyevent is not a chord.
     adb("shell", "input", "keyevent", "KEYCODE_MOVE_END")
     adb("shell", "input", "keyevent", *(["KEYCODE_DEL"] * (length + 1)))
     check(find(**{"content-desc": description}).get("text") == "", "editor fixture cleared through real input")
@@ -83,13 +82,28 @@ def save_document():
             if n.get("text", "").casefold() in ("save", "保存") and n.get("enabled") == "true" and "documentsui" in n.get("package", ""):
                 tap_node(n); return
         time.sleep(0.3)
-    print("PICKER_NODES " + repr([(n.get("text"), n.get("resource-id"), n.get("package")) for n in last]), flush=True)
+    print("PICKER_NODES " + repr([n.attrib for n in last]), flush=True)
     raise AssertionError("System document picker save button missing")
 
+def select_backup_file():
+    find(text="PocketTodo-backup.ptodo")
+    # Grid nameplate labels can select instead of opening. Use the real list row.
+    for n in nodes():
+        if n.get("content-desc") == "List view":
+            tap_node(n); break
+    root = tree()
+    matches = [n for n in root.iter("node") if n.get("resource-id", "").endswith(":id/item_root")
+               and any(c.get("text") == "PocketTodo-backup.ptodo" for c in n.iter("node"))]
+    if len(matches) != 1: raise AssertionError("Expected exactly one backup document row")
+    print("PICKER_TARGET " + repr(matches[0].attrib), flush=True)
+    tap_node(matches[0])
+    # Accessibility keyboard activation is a real picker action, not a URI bypass.
+    current = nodes()
+    if any(n.get("text") == "PocketTodo-backup.ptodo" and "documentsui" in n.get("package", "") for n in current):
+        adb("shell", "input", "keyevent", "KEYCODE_ENTER")
+
 def open_backup():
-    tap(text="导入备份")
-    tap(text="PocketTodo-backup.ptodo")
-    find(text="导入预览")
+    tap(text="导入备份"); select_backup_file(); find(text="导入预览")
 
 def stored_state():
     return adb("shell", "run-as", PKG, "cat", "shared_prefs/pocket_todo.xml")
@@ -149,7 +163,7 @@ def main():
     check(len(paths) == 1 and paths[0].startswith("/storage/emulated/0/"), "locate disposable exported backup fixture")
     corrupt = Path(os.environ["RUNNER_TEMP"]) / "corrupt.ptodo"; corrupt.write_bytes(b"broken backup\n")
     adb("push", str(corrupt), paths[0])
-    tap(text="导入备份"); tap(text="PocketTodo-backup.ptodo")
+    tap(text="导入备份"); select_backup_file()
     find(text="导入失败：文件无效或无法读取，列表未更改")
     check(stored_state() == before and item(1).get("checked") == "true" and item(2).get("text") == "Walk outside", "corrupt file through real picker leaves exact persisted state unchanged")
     restart(); check(stored_state() == before, "rejected import remains unchanged after restart")

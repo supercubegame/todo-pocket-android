@@ -1,29 +1,31 @@
 # Pocket Todo v1.2 development
 
-- Approved 32-file scope: docs/V1_2_PLAN.md. One writer on branch. No merge or previous release changes.
-- Native Java Android. No accounts, telemetry, cloud resources or network permissions. Public fixtures synthetic only.
-- Gate first: python3 tools/verify.py v12. Fresh Java compilation executes legacy, domain and real filesystem contracts.
-- Current stage JVM_DOMAIN_AND_FILE_BOUNDARIES. No Android/database/image-decoding/export/full-restore acceptance or release.
-- build explicitly fails before Gradle; CI asserts actual nonzero exit and exact reason. Never relabel old UI as v1.2.
-- Domain models never use Android APIs, I/O, live clocks or random IDs. Inject dates and stable IDs; I/O lives in adapters.
-- Money is integer cents with checked sums. Planned and actual never mix. Missing record is not confirmed zero spending.
-- Duplicate submissions cannot add money/days twice. Batch validation is all-or-nothing; stale corrections must fail.
-- IDs survive rename/reorder. Invalid operations preserve state. Snapshots must be defensive and immutable.
-- MediaRepository is a content-addressed byte store, NOT image validation. Android decode/dimensions and picker integration pending.
-- Copy into persistent private storage; source originals are never deleted. Thumbnail/cache must never be authoritative.
-- Archive transport validates manifest/file-set/digests/budgets and stages in new directories; opaque state is NOT semantic DB restore.
-- Full restore must validate database schema, IDs, relationships, media reference set and commit atomically; never destructive fallback.
-- Share filtering is NOT redaction. Flatten redaction into derivative bytes and never bundle originals in shared exports.
-- LegacyImport only previews validated ordinary todos with stable source fingerprint; transactional remapping/import journal pending.
-- Legacy TodoModel/BackupCodec/CoreTest unchanged; old 500/200 limits apply only to legacy format.
-- Resource byte budgets are explicit defensive bounds, not proven device capacity or photo-count promises. Archive metadata cap 8 MiB provisional.
-- Atomic create-only file publication uses hard links; unsupported filesystems fail explicitly. Android/power-loss behavior still untested.
-- Target package com.supercubegame.pockettodo.v12.preview, version 1.2/code 3; update all coupled assertions at APK phase.
-- build.gradle/Activity remain v1.1, build blocked, no release job. Replace blocker only together with actual Android/package/UI gates.
-- Min SDK 26/target 34; validate Java collection and NIO APIs on Android, not merely JDK 17. Test-only newer JDK calls must stay out of APK.
-- System picker fallback, minimum app visibility, scoped FileProvider. No broad storage/all-packages permission.
-- Stable signing requires secure local setup. Never transmit keys or claim durable debug upgrades.
-- Preserve exit codes and exact fault causes. Fixture self-checks must prove the intended failure, not just any rejection.
-- Reports on evidence branch include exact SHA/run ID and byte-for-byte readback; ambiguous evidence fails.
-- Keep this file byte-identical to CLAUDE.md and <=200 lines.
-- Phone, receiving apps, real decode/large photos, disk-full/process-death and crash recovery need explicit tests, not inference.
+- Approved 32-file scope: docs/V1_2_PLAN.md. One writer. No merge/main/previous release changes.
+- Native Java Android, local SQLiteOpenHelper v1 with FK/WAL. No accounts/telemetry/cloud/network permissions. Synthetic public fixtures only.
+- Fixed fast gate: python3 tools/verify.py v12, fresh Java17 compile and legacy/domain/real-file contracts.
+- Device gate: gradle --no-daemon --console=plain assembleDebug assembleDebugAndroidTest lintDebug then TEST_API=26 or34 python3 tools/emulator_gate.py on isolated GitHub runner.
+- Current stage ANDROID_DATABASE_DEVICE_CONTRACTS, not product UI acceptance. No APK release or deliverable uploaded.
+- python3 tools/verify.py build intentionally blocks product delivery; its old reason string is kept stable for the negative guard. It is NOT the internal compilation command.
+- CI builds internal app/test APKs and validates package/signature/permissions; only logs/results, never APKs, are uploaded in this phase.
+- Target package com.supercubegame.pockettodo.v12.preview, version1.2/code3. MainActivity is inherited v1.1, not launched by DB tests, no claim new UI works.
+- Min26/target34/compile35, AGP8.7.3/Gradle8.9/JDK17, desugar_jdk_libs2.1.5 pinned. Device matrix26/34 must validate actual API paths.
+- Custom Instrumentation runner uses framework only; seed and reopen are separate invocations, app force-stopped and pid absence checked in between.
+- Device tests cover SQLite transactions/idempotency/undo and byte transport, not image decode, full restore, UI, force-kill mid-write or power loss.
+- Domain modules have no Android/I/O/live-clock/random-ID calls. Adapters own I/O; inject IDs and timestamps.
+- Money integer cents/checked sums, planned separate from actual, missing day not confirmed zero. DB total currently materializes ledger; scale optimization pending.
+- Every DB write transaction updates global revision except exact retries; persistent undo only newest untouched batch; undo tombstone stops resurrection.
+- FK relationships, order and privacy must persist. Failed batches/notes cannot partly replace data; no destructive schema fallback.
+- Future schema explicitly refused without deleting data. Successful upgrade migrations are not implemented; add tested migrations when schema changes.
+- Current DB covers categories/apps/activities/paths/tags/ledger/checkins/notes/blocks/media registry. Custom fields, ordinary todos, shortcuts, schedule/templates and full restore still pending DB integration.
+- LegacyImport previews validated ordinary todos; transactional ID remapping and import journal remain pending. Legacy TodoModel/BackupCodec/CoreTest unchanged.
+- MediaRepository is a content-addressed byte store, NOT image validation. Android UI must check format/dimensions before attachment; registry alone does not verify files.
+- Private source copies, not thumbnail/cache, are authoritative. Never delete gallery originals. Hard-link publication fails explicitly on unsupported filesystems.
+- Archive is integrity-checked transport with opaque state, not semantic database/media restore. Validate schema/IDs/references and commit transactionally before claiming restore.
+- Full restore must preserve media files, relationships, ordering and journals. No silent resets, destructive fallback or unvalidated replacement.
+- 8MiB archive metadata/state bound provisional; explicit byte budgets are protection, not measured phone capacity or unlimited-image promises.
+- Selected-share filtering is not redaction. Flatten into derivatives and never bundle originals in shared exports. PDF/image/Markdown export pending.
+- Report core logs remain fast-gate scope; actual matrix evidence is ui.devices with per-API logs/result. ui.status stays NOT_TESTED because no UI tests run.
+- Reports include exact SHA/run ID and byte-for-byte readback; missing/ambiguous evidence is never PASS. release_ready stays false.
+- System picker/FileProvider/native UI remain pending. No broad storage/all-packages permission. No screenshots generated to imitate real device captures.
+- Durable signing requires secure user-local setup; no keys in chat/source/log. No durable upgrade claim for debug packages.
+- Keep AGENTS.md and CLAUDE.md byte-identical and <=200 lines. Preserve real exit codes and exact injected fault causes.

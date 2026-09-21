@@ -1,31 +1,28 @@
 # Pocket Todo v1.2 development
 
-- Approved 32-file scope: docs/V1_2_PLAN.md. One writer. No merge/main/previous release changes.
-- Native Java Android, local SQLiteOpenHelper v1 with FK/WAL. No accounts/telemetry/cloud/network permissions. Synthetic public fixtures only.
-- Fixed fast gate: python3 tools/verify.py v12, fresh Java17 compile and legacy/domain/real-file contracts.
-- Device gate: gradle --no-daemon --console=plain assembleDebug assembleDebugAndroidTest lintDebug then TEST_API=26 or34 python3 tools/emulator_gate.py on isolated GitHub runner.
-- Current stage ANDROID_DATABASE_DEVICE_CONTRACTS, not product UI acceptance. No APK release or deliverable uploaded.
-- python3 tools/verify.py build intentionally blocks product delivery; its old reason string is kept stable for the negative guard. It is NOT the internal compilation command.
-- CI builds internal app/test APKs and validates package/signature/permissions; only logs/results, never APKs, are uploaded in this phase.
-- Target package com.supercubegame.pockettodo.v12.preview, version1.2/code3. MainActivity is inherited v1.1, not launched by DB tests, no claim new UI works.
-- Min26/target34/compile35, AGP8.7.3/Gradle8.9/JDK17, desugar_jdk_libs2.1.5 pinned. Device matrix26/34 must validate actual API paths.
-- Custom Instrumentation runner uses framework only; seed and reopen are separate invocations, app force-stopped and pid absence checked in between.
-- Device tests cover SQLite transactions/idempotency/undo and byte transport, not image decode, full restore, UI, force-kill mid-write or power loss.
-- Domain modules have no Android/I/O/live-clock/random-ID calls. Adapters own I/O; inject IDs and timestamps.
-- Money integer cents/checked sums, planned separate from actual, missing day not confirmed zero. DB total currently materializes ledger; scale optimization pending.
-- Every DB write transaction updates global revision except exact retries; persistent undo only newest untouched batch; undo tombstone stops resurrection.
-- FK relationships, order and privacy must persist. Failed batches/notes cannot partly replace data; no destructive schema fallback.
-- Future schema explicitly refused without deleting data. Successful upgrade migrations are not implemented; add tested migrations when schema changes.
-- Current DB covers categories/apps/activities/paths/tags/ledger/checkins/notes/blocks/media registry. Custom fields, ordinary todos, shortcuts, schedule/templates and full restore still pending DB integration.
-- LegacyImport previews validated ordinary todos; transactional ID remapping and import journal remain pending. Legacy TodoModel/BackupCodec/CoreTest unchanged.
-- MediaRepository is a content-addressed byte store, NOT image validation. Android UI must check format/dimensions before attachment; registry alone does not verify files.
-- Private source copies, not thumbnail/cache, are authoritative. Never delete gallery originals. Hard-link publication fails explicitly on unsupported filesystems.
-- Archive is integrity-checked transport with opaque state, not semantic database/media restore. Validate schema/IDs/references and commit transactionally before claiming restore.
-- Full restore must preserve media files, relationships, ordering and journals. No silent resets, destructive fallback or unvalidated replacement.
-- 8MiB archive metadata/state bound provisional; explicit byte budgets are protection, not measured phone capacity or unlimited-image promises.
-- Selected-share filtering is not redaction. Flatten into derivatives and never bundle originals in shared exports. PDF/image/Markdown export pending.
-- Report core logs remain fast-gate scope; actual matrix evidence is ui.devices with per-API logs/result. ui.status stays NOT_TESTED because no UI tests run.
-- Reports include exact SHA/run ID and byte-for-byte readback; missing/ambiguous evidence is never PASS. release_ready stays false.
-- System picker/FileProvider/native UI remain pending. No broad storage/all-packages permission. No screenshots generated to imitate real device captures.
-- Durable signing requires secure user-local setup; no keys in chat/source/log. No durable upgrade claim for debug packages.
-- Keep AGENTS.md and CLAUDE.md byte-identical and <=200 lines. Preserve real exit codes and exact injected fault causes.
+- Approved32-file scope: docs/V1_2_PLAN.md. One writer. No merge/main/old release changes. Public fixtures synthetic.
+- Native Java Android, SQLiteOpenHelper v1 with FK/WAL. No accounts/telemetry/cloud/network permissions.
+- Fast gate: python3 tools/verify.py v12, fresh JDK17 compile, legacy/domain/file contracts. Preserve all assertions.
+- Device gate: gradle --no-daemon --console=plain assembleDebug assembleDebugAndroidTest lintDebug then TEST_API=26 or34 python3 tools/emulator_gate.py on isolated CI runner.
+- Internal device app/test APKs are NOT deliverables. Upload logs/results only, no APK or Release. python3 tools/verify.py build still deliberately blocks delivery.
+- Delivery blocker retains old reason string for its negative test. It does not mean the separate internal Android compilation did not run.
+- Package com.supercubegame.pockettodo.v12.preview,1.2/code3,min26/target34/compile35; AGP8.7.3,Gradle8.9,JDK17,desugar_jdk_libs2.1.5 pinned.
+- MainActivity still v1.1 UI and not launched in device contracts. No new UI/screenshot/product acceptance claim.
+- Seed/reopen instrumentation runs separately, with force-stop and pid absence check. Tests cover committed persistence, not killing mid-transaction/power loss.
+- Missing AppDatabase actually failed on API26/34 before implementation. Implemented DB reached29 checks on both then actual hard-link AccessDeniedException; retain this failure history.
+- Media publication now uses same-directory ATOMIC_MOVE under JVM + persistent OS file lock, with destination absence checked under lock. No hard links; no copy fallback weakening atomicity.
+- Publication only for cooperating app-private writers; never public writable directories. Never unlink the persistent lock file. Test concurrent instances and no-overwrite behavior.
+- No assumption of directory-fsync/power-loss durability. Android support must come from the matching SHA device report, not JVM success.
+- Domain has no Android/I/O/clock/random IDs; adapters own I/O. Inject IDs/dates/timestamps. Money integer cents, checked overflow, planned separate, missing not confirmed zero.
+- DB writes transactional with global revision; exact retries no-op, latest untouched batch only undo, tombstones stop resurrection. Current total loads ledger into memory: scale work pending.
+- Preserve FK relationships, order/privacy, reject partial batch/note replacements. Unknown schema refused, never destructive fallback. Successful migrations pending.
+- DB currently categories/apps/activities/paths/tags/ledger/checkins/notes/blocks/media registry. Fields/field-notes/ordinary todos/shortcuts/schedules/templates/search/full restore still pending integration.
+- LegacyImport preview only, transactional remapping/import journal pending. Keep legacy TodoModel/BackupCodec/CoreTest unchanged.
+- Media is byte storage, not image validation. Caller must validate format/dimensions and verified persistent file before UI attachment. Registry alone is insufficient.
+- Never delete gallery sources; thumbnail/cache never authoritative. 8MiB archive state/metadata bound provisional, not device capacity or image-count promise.
+- Archive is validated byte transport with opaque state, NOT full DB/media restore; validate schema/IDs/references/order/journals then transactionally commit.
+- Share filtering not redaction: flatten derivatives, never bundle unredacted originals. PDF/image/Markdown exports and FileProvider/picker integration pending.
+- Reports fast-gate scope at top, device matrix in ui.devices. ui.status NOT_TESTED means no UI. Missing/ambiguous evidence never PASS; release_ready false.
+- Reports exact SHA/run ID and byte-for-byte readback. Preserve real exit codes, exact fault cause and fixture self-checks.
+- Real images/large capacity, receiving apps, disk-full/mid-write death, phone and stable-key upgrade need separate evidence. Never transmit signing keys.
+- AGENTS.md and CLAUDE.md byte-identical, <=200 lines.

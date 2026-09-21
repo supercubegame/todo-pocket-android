@@ -14,6 +14,8 @@ import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 os.chdir(ROOT)
+PKG = "com.supercubegame.pockettodo.safe.preview"
+APK_NAME = "PocketTodo-1.1-preview.apk"
 
 def run(args, **kwargs):
     print("+ " + " ".join(map(str, args)), flush=True)
@@ -28,7 +30,8 @@ def core():
     out = Path("build/core")
     out.mkdir(parents=True, exist_ok=True)
     run(["javac", "-encoding", "UTF-8", "-d", str(out),
-         "src/main/java/com/supercubegame/pockettodo/TodoModel.java", "tests/CoreTest.java"])
+         "src/main/java/com/supercubegame/pockettodo/TodoModel.java",
+         "src/main/java/com/supercubegame/pockettodo/BackupCodec.java", "tests/CoreTest.java"])
     run(["java", "-cp", str(out), "CoreTest"])
 
 def build():
@@ -38,15 +41,15 @@ def build():
     apk = Path("build/outputs/apk/debug/todo-pocket-android-debug.apk")
     assert apk.exists(), "expected APK output missing"
     Path("delivery").mkdir(exist_ok=True)
-    dest = Path("delivery/PocketTodo-1.0-debug.apk")
+    dest = Path("delivery") / APK_NAME
     dest.write_bytes(apk.read_bytes())
     sig = subprocess.check_output([str(bt / "apksigner"), "verify", "--verbose", "--print-certs", str(dest)], text=True)
     badging = subprocess.check_output([str(bt / "aapt"), "dump", "badging", str(dest)], text=True)
     permissions = subprocess.check_output([str(bt / "aapt"), "dump", "permissions", str(dest)], text=True)
-    assert "name='com.supercubegame.pockettodo'" in badging
-    assert "sdkVersion:'26'" in badging
-    assert "targetSdkVersion:'34'" in badging
-    assert "launchable-activity:" in badging
+    assert "name='" + PKG + "'" in badging
+    assert "versionCode='2'" in badging and "versionName='1.1'" in badging
+    assert "sdkVersion:'26'" in badging and "targetSdkVersion:'34'" in badging
+    assert "launchable-activity: name='com.supercubegame.pockettodo.MainActivity'" in badging
     assert "uses-permission:" not in permissions
     assert "native-code:" not in badging, "APK should not restrict native ABI"
     Path("delivery/signature.txt").write_text(sig)
@@ -54,7 +57,8 @@ def build():
     digest = hashlib.sha256(dest.read_bytes()).hexdigest()
     Path("delivery/SHA256SUMS.txt").write_text(f"{digest}  {dest.name}\n")
     print(sig)
-    print("APK_RESULT " + json.dumps({"sha256": digest, "bytes": dest.stat().st_size, "package": "com.supercubegame.pockettodo", "min_android": "8.0", "signing": "debug"}, ensure_ascii=False))
+    print("APK_RESULT " + json.dumps({"sha256": digest, "bytes": dest.stat().st_size, "package": PKG,
+          "version": "1.1", "min_android": "8.0", "signing": "disposable-debug", "durable_upgrade_ready": False}, ensure_ascii=False))
 
 def report():
     # Only this step receives GH_TOKEN. Never include environment or auth in output.
@@ -62,10 +66,10 @@ def report():
     logs = {}
     for name in ("core.log", "setup.log", "build.log", "ui.log", "emulator.log"):
         paths = list(out.rglob(name))
-        logs[name] = paths[0].read_text(errors="replace")[-16000:] if paths else "NOT_OBSERVED"
+        logs[name] = paths[0].read_text(errors="replace")[-24000:] if paths else "NOT_OBSERVED"
     needs = json.loads(os.environ["NEEDS_JSON"])
     doc = {"commit": os.environ["GITHUB_SHA"], "run_id": os.environ["GITHUB_RUN_ID"],
-           "jobs": needs, "logs": logs, "physical_device": "NOT_TESTED"}
+           "jobs": needs, "logs": logs, "physical_device": "NOT_TESTED", "durable_upgrade_ready": False}
     ui_files = list(out.rglob("ui-result.json"))
     doc["ui"] = json.loads(ui_files[0].read_text()) if ui_files else {"status": "NOT_OBSERVED"}
     for name in ("SHA256SUMS.txt", "signature.txt", "package.txt"):

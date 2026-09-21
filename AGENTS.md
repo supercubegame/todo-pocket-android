@@ -2,14 +2,20 @@
 
 - Native Java Android app. No network permissions, accounts, telemetry or cloud resources.
 - Gate first: `python3 tools/verify.py core`; Android: `python3 tools/verify.py build`.
-- Emulator: `python3 tools/ui_test.py` against a disposable, booted emulator only.
-- Core model must remain Android-free, deterministic and independent of clocks or I/O.
-- SharedPreferences persistence belongs to the Activity; do not silently reset corrupt storage.
-- Min SDK 26 / target 34 must agree with APK package assertions. This is a test build, not store release.
-- State limit 500 tasks / 200 UTF-16 code units must agree with boundary tests and UI input limit.
-- Fast core and slow Android checks have distinct logs. Preserve real subprocess exit codes.
-- Reports land on the evidence branch with source SHA and run ID and are read back byte-for-byte.
-- APK signing is disposable debug signing. Never publish a private signing key.
-- Every failure retains its log. Missing emulator evidence is NOT_TESTED, never PASS.
+- Emulator: `python3 tools/ui_test.py` only on a disposable GitHub Actions emulator.
+- Core model and BackupCodec are Android-free and deterministic. File I/O belongs to the Activity.
+- Keep existing storage v1 compatible. Never silently reset damaged storage or import into unhealthy storage.
+- State limit 500 tasks / 200 UTF-16 code units; file limit BackupCodec.MAX_BYTES.
+- Backup v1 is an unencrypted ASCII envelope with canonical state and SHA-256 damage detection, not authentication.
+- Import requires a validated preview and explicit replace confirmation. Store pre-import snapshot in the same commit.
+- Undo is single-level, survives restart, and ends on any subsequent normal mutation or another import.
+- Use the system document picker; never request broad storage permission. Bound reads and perform provider I/O off the UI thread.
+- Preview package is com.supercubegame.pockettodo.safe.preview, separate from accepted com.supercubegame.pockettodo.
+- Stable package com.supercubegame.pockettodo.safe is reserved, not delivered until durable signing is configured.
+- Never publish signing keys or pretend disposable preview signatures support future in-place upgrades.
+- Min SDK 26 / target 34 must agree with APK assertions; version 1.1 code 2. No store-ready claim.
+- Preserve real exit codes. Publish preview release only after the core, build, lint and emulator checks pass.
+- Reports land on evidence branch with source SHA/run ID and are read back byte-for-byte.
 - Keep this file byte-identical to CLAUDE.md and no more than 200 lines.
-- Known limits: physical devices, vendor-specific behavior and official distribution signing are untested.
+- Missing evidence is NOT_TESTED. v1.0 phone acceptance does not cover v1.1 or durable upgrades.
+- Cloud document-provider behavior, disk-full fault injection, rotation during I/O and vendor behavior need separate tests.

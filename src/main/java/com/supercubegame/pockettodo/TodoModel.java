@@ -27,18 +27,28 @@ public final class TodoModel {
     public List<Item> items() {
         return Collections.unmodifiableList(new ArrayList<>(items));
     }
-    public long add(String title) {
+    private static String validTitle(String title) {
         if (title == null || title.trim().isEmpty() || title.trim().length() > MAX_TITLE)
             throw new IllegalArgumentException("请输入 1 至 200 字的待办");
+        return title.trim();
+    }
+    public long add(String title) {
+        String clean = validTitle(title);
         if (items.size() >= MAX_ITEMS || nextId == Long.MAX_VALUE)
             throw new IllegalArgumentException("最多保存 500 条待办");
         long id = nextId++;
-        items.add(new Item(id, title.trim(), false));
+        items.add(new Item(id, clean, false));
         return id;
     }
     private int index(long id) {
         for (int i = 0; i < items.size(); i++) if (items.get(i).id == id) return i;
         throw new IllegalArgumentException("待办不存在");
+    }
+    public void edit(long id, String title) {
+        String clean = validTitle(title);
+        int i = index(id);
+        Item old = items.get(i);
+        items.set(i, new Item(old.id, clean, old.done));
     }
     public void toggle(long id) {
         int i = index(id);
@@ -64,6 +74,7 @@ public final class TodoModel {
     }
     public static TodoModel decode(String encoded) {
         TodoModel model = new TodoModel();
+        if (encoded == null) throw new IllegalArgumentException("本地数据无法读取，原始数据已保留");
         if (encoded.isEmpty()) return model;
         try {
             if (encoded.length() > 1000000) throw new IOException("oversize");
@@ -76,11 +87,11 @@ public final class TodoModel {
             for (int i = 0; i < count; i++) {
                 long id = in.readLong();
                 String title = in.readUTF();
-                boolean done = in.readBoolean();
-                if (id < 1 || id >= model.nextId || !ids.add(id) ||
+                int flag = in.readUnsignedByte();
+                if (id < 1 || id >= model.nextId || !ids.add(id) || flag > 1 ||
                     title.isEmpty() || !title.equals(title.trim()) || title.length() > MAX_TITLE)
                     throw new IOException("invalid item");
-                model.items.add(new Item(id, title, done));
+                model.items.add(new Item(id, title, flag == 1));
             }
             if (in.available() != 0) throw new IOException("trailing data");
             return model;

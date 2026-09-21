@@ -21,15 +21,15 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/verify.py v12 2>&1 | tee core.log
-      - name: Verify unfinished APK cannot be mislabeled
+      - name: Verify unfinished delivery cannot be mislabeled
         run: |
           set -euo pipefail
           python3 - <<'PY' 2>&1 | tee -a core.log
           import subprocess
           result = subprocess.run(['python3','tools/verify.py','build'],capture_output=True,text=True)
-          assert result.returncode != 0, 'Unfinished Android build gate must fail'
+          assert result.returncode != 0, 'Unfinished delivery gate must fail'
           assert 'V1.2 Android phase is not wired' in result.stderr, 'Unexpected failure is not proof of release guard'
-          print('PASS unfinished V1.2 build explicitly blocked before Gradle')
+          print('PASS unfinished V1.2 delivery explicitly blocked')
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -37,8 +37,54 @@ jobs:
           name: core-evidence
           path: core.log
           if-no-files-found: error
+  database:
+    needs: core
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [26, 34]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      TEST_API: ${{ matrix.api }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Fixed Android build setup
+        run: |
+          set -euo pipefail
+          exec > >(tee setup.log) 2>&1
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip.sha256 -o /tmp/gradle.sha256
+          echo "$(cat /tmp/gradle.sha256)  /tmp/gradle.zip" | sha256sum -c -
+          unzip -q /tmp/gradle.zip -d /tmp
+          echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+      - name: Compile internal test APKs and lint (not deliverable)
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --console=plain assembleDebug assembleDebugAndroidTest lintDebug 2>&1 | tee build.log
+      - name: Device database and byte transport contracts
+        run: |
+          set -euo pipefail
+          python3 tools/emulator_gate.py 2>&1 | tee ui.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: database-api-${{ matrix.api }}
+          path: |
+            setup.log
+            build.log
+            ui.log
+            emulator.log
+            device-*.txt
+            device-result.json
+            build/reports/lint-results-debug.html
+          if-no-files-found: error
   report:
-    needs: [core]
+    needs: [core, database]
     if: always() && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -49,13 +95,28 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           path: collected
-      - name: Record explicit staged scope
+      - name: Preserve matrix evidence without ambiguous filenames
         run: |
-          mkdir -p collected/scope
           python3 - <<'PY'
           import json
           from pathlib import Path
-          Path('collected/scope/ui-result.json').write_text(json.dumps({'status':'NOT_TESTED','scope':'V1.2_JVM_DOMAIN_AND_FILE_BOUNDARIES','android_build':'NOT_TESTED','database':'NOT_TESTED','image_decoding':'NOT_TESTED','screenshots':'NOT_TESTED','exports':'NOT_TESTED','full_database_media_restore':'NOT_TESTED','release_ready':False}))
+          root=Path('collected')
+          devices={}
+          for api in (26,34):
+            folder=root / ('database-api-'+str(api))
+            logs={}
+            for name in ('setup.log','build.log','ui.log','emulator.log'):
+              path=folder/name
+              if path.exists():
+                logs[name]=path.read_text(errors='replace')[-24000:]
+                path.rename(folder/(str(api)+'-'+name))
+              else:
+                logs[name]='NOT_OBSERVED'
+            result=folder/'device-result.json'
+            devices[str(api)]={'result':json.loads(result.read_text()) if result.exists() else {'status':'NOT_OBSERVED'},'logs':logs}
+          scope=root/'scope'
+          scope.mkdir(exist_ok=True)
+          (scope/'ui-result.json').write_text(json.dumps({'status':'NOT_TESTED','scope':'DATABASE_DEVICE_PHASE_NOT_UI','devices':devices,'screenshots':'NOT_TESTED','exports':'NOT_TESTED','full_database_media_restore':'NOT_TESTED','release_ready':False}))
           PY
       - name: Publish and read back evidence
         env:

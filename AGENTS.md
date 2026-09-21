@@ -1,21 +1,25 @@
-# Pocket Todo development
+# Pocket Todo v1.2 development
 
-- Native Java Android app. No network permissions, accounts, telemetry or cloud resources.
-- Gate first: `python3 tools/verify.py core`; Android: `python3 tools/verify.py build`.
-- Emulator: `python3 tools/ui_test.py` only on a disposable GitHub Actions emulator.
-- Core model and BackupCodec are Android-free and deterministic. File I/O belongs to the Activity.
-- Keep existing storage v1 compatible. Never silently reset damaged storage or import into unhealthy storage.
-- State limit 500 tasks / 200 UTF-16 code units; file limit BackupCodec.MAX_BYTES.
-- Backup v1 is an unencrypted ASCII envelope with canonical state and SHA-256 damage detection, not authentication.
-- Import requires a validated preview and explicit replace confirmation. Store pre-import snapshot in the same commit.
-- Undo is single-level, survives restart, and ends on any subsequent normal mutation or another import.
-- Use the system document picker; never request broad storage permission. Bound reads and perform provider I/O off the UI thread.
-- Preview package is com.supercubegame.pockettodo.safe.preview, separate from accepted com.supercubegame.pockettodo.
-- Stable package com.supercubegame.pockettodo.safe is reserved, not delivered until durable signing is configured.
-- Never publish signing keys or pretend disposable preview signatures support future in-place upgrades.
-- Min SDK 26 / target 34 must agree with APK assertions; version 1.1 code 2. No store-ready claim.
-- Preserve real exit codes. Publish preview release only after the core, build, lint and emulator checks pass.
-- Reports land on evidence branch with source SHA/run ID and are read back byte-for-byte.
-- Keep this file byte-identical to CLAUDE.md and no more than 200 lines.
-- Missing evidence is NOT_TESTED. v1.0 phone acceptance does not cover v1.1 or durable upgrades.
-- Cloud document-provider behavior, disk-full fault injection, rotation during I/O and vendor behavior need separate tests.
+- Approved 32-file scope is in docs/V1_2_PLAN.md. One writer on this branch. Do not merge or alter previous releases.
+- Native Java Android. No accounts, telemetry, cloud resources or network permissions. Public fixtures are synthetic only.
+- Gate first. Legacy: python3 tools/verify.py core. V1.2 domain contract runs in CI via javac and V12CoreTest.
+- Current stage is DOMAIN_ONLY: no Android/export/restore acceptance and no release. Do not relabel old builds as v1.2.
+- Domain models must not use Android APIs, I/O, live clocks or random IDs. Inject dates and stable IDs.
+- Money uses integer cents and checked sums; planned and actual never mix. Missing record is not a zero-expense confirmation.
+- Check-ins and monetary records are independent. Duplicate submissions cannot add money or days twice.
+- Category/field/block renaming and ordering preserve stable identities and references. Invalid operations leave state unchanged.
+- Image sources are copied to persistent private storage after validation; thumbnails/cache are not authoritative data.
+- Full backups include referenced media and relationships; share exports include selected public content only.
+- Share redaction must change flattened exported bytes, never merely overlay a removable UI layer or include original assets.
+- Validate restores fully before committing; never silently reset damaged data or use destructive database migration fallback.
+- Keep legacy TodoModel/BackupCodec and CoreTest unchanged. Old 500/200 limits apply only to legacy format.
+- Package target is com.supercubegame.pockettodo.v12.preview; version 1.2/code 3 only when APK phase changes all coupled assertions.
+- Until then build.gradle and legacy APK gates are still v1.1; intentionally no Android job/publication in staged workflow.
+- Min SDK 26 / target 34; SDK assertions, manifest, package and test targets change together.
+- Use bounded streams and off-main-thread media/provider I/O; never load all original images or one unbounded export bitmap.
+- System pickers with fallback, minimum visibility, scoped FileProvider. No broad storage or all-packages permission.
+- Stable signing remains blocked on secure local user setup. Never transmit keys or claim debug previews support durable upgrades.
+- Preserve real exit codes and full failure context. Only publish verified output, never pass skipped/unobserved checks as success.
+- Reports land on evidence branch with source SHA/run ID and byte-for-byte readback. Missing evidence is NOT_TESTED.
+- Keep this file byte-identical to CLAUDE.md and <=200 lines.
+- Physical device behavior, target sharing apps, disk-full/process-death and large-media limits need explicit evidence, not inference.

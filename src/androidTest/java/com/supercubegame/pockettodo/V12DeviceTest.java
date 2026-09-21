@@ -318,11 +318,29 @@ public final class V12DeviceTest extends Instrumentation {
         Object t=db("guarded.db");ok(Arrays.equals(fixture(t),Files.readAllBytes(getTargetContext().getFilesDir().toPath().resolve("restore-expected.bin"))),"guarded restore survives a separate Android process with all tables exact");
         ok(importLegacy(t,legacy())==0&&total(t,100,Set.of(LocalDate.of(2026,9,1),LocalDate.of(2026,9,3)),"NET_EXPENSE")==1000,"guarded restore retains usable import journal and exact-cent totals after restart");close(t);
     }
+    private void prepareUiBackup()throws Exception{
+        // Runs in the isolated test APK process after native checks force-stop the UI.
+        // Host adb has no access to app-private storage, so this phase stages the
+        // already-generated UI database into a validated disposable export fixture.
+        // It never creates product data, skips product SAF/UI assertions, or accepts
+        // a live process; release acceptance still requires actual picker coverage.
+        Context c=getTargetContext();boolean stopped=false;
+        for(int i=0;i<50;i++){
+            boolean live=false;for(java.io.File p:new java.io.File("/proc").listFiles())if(p.isDirectory())try{String name=new String(Files.readAllBytes(new java.io.File(p,"cmdline").toPath()),java.nio.charset.StandardCharsets.UTF_8);if(name.startsWith(c.getPackageName()+"\0")){live=true;break;}}catch(Exception ignored){}
+            if(!live){stopped=true;break;}Thread.sleep(200);
+        }
+        if(!stopped)throw new IllegalStateException("UI process still running; backup fixture would copy a live database");
+        Path data=c.getDataDir().toPath();
+        for(String suffix:new String[]{"","-wal","-shm"}){Path source=data.resolve("databases/pocket-v12.db"+suffix);if(Files.exists(source))Files.copy(source,data.resolve("databases/ui-backup-source.db"+suffix),StandardCopyOption.REPLACE_EXISTING);}
+        Path media=data.resolve("files/pocket-v12-media");if(Files.isDirectory(media))try(java.util.stream.Stream<Path> files=Files.list(media)){for(Path p:(Iterable<Path>)files::iterator)Files.copy(p,data.resolve("files/ui-backup-media").resolve(p.getFileName().toString()),StandardCopyOption.REPLACE_EXISTING);}
+        Object d=db("ui-backup-source.db");MediaRepository m=new MediaRepository(data.resolve("files/ui-backup-media"),1000000);
+        backup(d,java.nio.file.Paths.get("/storage/emulated/0/Download/PocketTodo-v12-backup.zip"),m);close(d);
+    }
     @Override public void onStart(){
         Bundle result=new Bundle();try{
             ok(getTargetContext().getPackageName().equals("com.supercubegame.pockettodo.v12.preview"),"tests target isolated v1.2 package");
             ok(android.os.Build.VERSION.SDK_INT==Integer.parseInt(args.getString("expectedApi")),"actual emulator API equals requested test matrix");
-            String phase=args.getString("phase");if("seed".equals(phase)){seed();fieldsSeed();backupSeed();guardedSeed();}else if("reopen".equals(phase)){reopen();fieldsReopen();backupReopen();guardedReopen();}else throw new IllegalArgumentException("unknown test phase");
+            String phase=args.getString("phase");if("seed".equals(phase)){seed();fieldsSeed();backupSeed();guardedSeed();}else if("reopen".equals(phase)){reopen();fieldsReopen();backupReopen();guardedReopen();}else if("prepare_ui_backup".equals(phase))prepareUiBackup();else throw new IllegalArgumentException("unknown test phase");
             log.append("DEVICE_DATABASE_RESULT ").append(phase).append(' ').append(checks).append('/').append(checks).append(" PASS\n");result.putString("stream",log.toString());finish(Activity.RESULT_OK,result);
         }catch(Throwable error){StringWriter text=new StringWriter();error.printStackTrace(new PrintWriter(text));result.putString("stream",log+"DEVICE_DATABASE_FAILED\n"+text);finish(Activity.RESULT_CANCELED,result);}
     }

@@ -190,6 +190,72 @@ def verify_native_ui(adb):
         touch('ledger-kind-'+kind); touch('金额（元）'); type_text(amount)
         tap('保存账目' if save else '取消'); ready()
     def metric(name,value):return desc('metric-'+name).get('text')==value
+    # Real system file picker on disposable emulator only. Never a production path,
+    # seeded DB, bypass hook, or generic tap that can hide selection.
+    touch_ready=False
+    def finger_touch(x,y):
+        nonlocal touch_ready
+        if not touch_ready:
+            work=Path('build/ci-touch'); work.mkdir(parents=True,exist_ok=True)
+            source=r'''import android.os.Build;
+import android.os.SystemClock;
+import android.view.InputDevice;
+import android.view.InputEvent;
+import android.view.MotionEvent;
+public final class PocketTouch {
+ public static void main(String[] args) throws Exception {
+  if (!Build.HARDWARE.equals("ranchu") && !Build.HARDWARE.equals("goldfish")) throw new SecurityException("Emulator only");
+  float x=Float.parseFloat(args[0]), y=Float.parseFloat(args[1]);
+  Class<?> cls=Class.forName("android.hardware.input.InputManager");
+  Object manager=cls.getMethod("getInstance").invoke(null);
+  java.lang.reflect.Method inject=cls.getMethod("injectInputEvent",InputEvent.class,int.class);
+  MotionEvent.PointerProperties p=new MotionEvent.PointerProperties(); p.id=0; p.toolType=MotionEvent.TOOL_TYPE_FINGER;
+  MotionEvent.PointerCoords c=new MotionEvent.PointerCoords(); c.x=x; c.y=y; c.size=1; c.pressure=1;
+  long down=SystemClock.uptimeMillis();
+  for (int action : new int[]{MotionEvent.ACTION_DOWN,MotionEvent.ACTION_UP}) {
+   if (action==MotionEvent.ACTION_UP) { SystemClock.sleep(80); c.pressure=0; }
+   MotionEvent e=MotionEvent.obtain(down,SystemClock.uptimeMillis(),action,1,new MotionEvent.PointerProperties[]{p},new MotionEvent.PointerCoords[]{c},0,0,1,1,0,0,InputDevice.SOURCE_TOUCHSCREEN,0);
+   if (e.getToolType(0)!=MotionEvent.TOOL_TYPE_FINGER) throw new AssertionError("Missing finger type");
+   if (!Boolean.TRUE.equals(inject.invoke(manager,e,2))) throw new AssertionError("Input injection rejected");
+   e.recycle();
+  }
+  System.out.println("FINGER_TOUCH source=4098 tool=1 accepted");
+ }
+}
+'''
+            java=work/'PocketTouch.java'; java.write_text(source)
+            android=SDK/'platforms/android-35/android.jar'
+            subprocess.run(['javac','-encoding','UTF-8','-cp',str(android),'-d',str(work),str(java)],check=True,timeout=40)
+            jar=work/'pocket-touch.jar'
+            subprocess.run([str(SDK/'build-tools/35.0.0/d8'),'--lib',str(android),'--min-api','26','--output',str(jar),str(work/'PocketTouch.class')],check=True,timeout=40)
+            run([adb,'-s',SERIAL,'push',str(jar),'/data/local/tmp/pocket-touch.jar'])
+            touch_ready=True
+        print(run([adb,'-s',SERIAL,'shell','CLASSPATH=/data/local/tmp/pocket-touch.jar','app_process','/system/bin','PocketTouch',str(x),str(y)],capture=True).stdout.strip(),flush=True)
+    def wait_text(*values,timeout=25):
+        deadline=time.monotonic()+timeout
+        while time.monotonic()<deadline:
+            found=[n.get('text','') for n in nodes() if n.get('text')]
+            for v in values:
+                if any(v.casefold() in text.casefold() for text in found): return True
+            time.sleep(.25)
+        raise AssertionError('restore picker did not expose '+repr(values)+'; actual='+repr(found))
+    def picker_row(name):
+        tap('选择备份文件')
+        wait_text(name)
+        deadline=time.monotonic()+10
+        while time.monotonic()<deadline:
+            for n in nodes():
+                if 'List view'==n.get('content-desc',''):
+                    tap_node(n); time.sleep(.8); break
+            matches=[n for n in nodes() if n.get('resource-id','').endswith(':id/item_root') and any(c.get('text')==name for c in n.iter('node'))]
+            if matches: break
+            time.sleep(.25)
+        assert len(matches)==1,'expected exactly one disposable restore fixture row'
+        target=matches[0]
+        x1,y1,x2,y2=map(int,re.findall(r'\d+',target.get('bounds')))
+        finger_touch((x1+x2)//2,(y1+y2)//2)
+        time.sleep(.8)
+    def restore_counts(table,current,incoming):return desc('restore-row-'+table).get('text')==table+'：当前 '+str(current)+' 条 / 恢复后 '+str(incoming)+' 条'
     try:
         start()
         ok(find(text='还剩 0 件 / 共 0 件') is not None,'new UI database starts empty without fabricated activities')
@@ -264,6 +330,35 @@ def verify_native_ui(adb):
         select_days([1,2,3]); shot('05-selected-dates.png')
         restart(); tap('活动'); ready(); touch('activity-1'); ready(); tap('日历账本'); ready(); select_days([1,2,3])
         ok(metric('EXPENSE','支出 ¥80.00') and metric('NET_EXPENSE','净支出 ¥75.00') and metric('NET_CASH','净现金 ¥-72.50'),'native ledger exact totals survive stopped-process restart')
+        tap('返回活动'); ready()
+        # Full backup is private and unencrypted. This is an explicit replacement gate,
+        # not a share action. Disposable download fixture never contains user data.
+        export=Path(os.environ['RUNNER_TEMP'])/'v12-ui-export.zip'
+        run([adb,'-s',SERIAL,'shell','am','instrument','-w','-r','-e','phase','prepare_ui_backup','-e','expectedApi',str(API),PKG+'.test/com.supercubegame.pockettodo.V12DeviceTest'],timeout=180)
+        run([adb,'-s',SERIAL,'pull','/storage/emulated/0/Download/PocketTodo-v12-backup.zip',str(export)],timeout=60)
+        digest=hashlib.sha256(export.read_bytes()).hexdigest()
+        assert export.stat().st_size>0 and digest!='','exported restore fixture is nonempty on disposable storage'
+        shell('input','keyevent','KEYCODE_HOME'); shell('am','start','-W','-n',PKG+'/com.supercubegame.pockettodo.MainActivity'); ready()
+        tap('全部替换为'); ready(); picker_row('PocketTodo-v12-backup.zip')
+        ok(restore_counts('todos',2,2) and restore_counts('categories',2,2) and restore_counts('activities',1,1) and restore_counts('ledger',6,6) and restore_counts('media',1,1),'restore preview shows exact replacement impact across every data area')
+        shot('06-restore-preview.png')
+        tap('取消恢复'); ready(); ok(named_todo('Fresh milk') is not None,'cancel restore preview preserves exact todo list')
+        tap('全部替换为'); ready(); picker_row('PocketTodo-v12-backup.zip')
+        add_todo('New after preview')
+        ok(desc('restore-confirm').get('enabled')=='false','ordinary write invalidates visible stale restore confirmation')
+        tap('重新预览'); ready(); picker_row('PocketTodo-v12-backup.zip')
+        tap('确认替换'); ready()
+        ok(absent('New after preview') and named_todo('Fresh milk') is not None and named_todo('Walk outside') is not None,'explicit confirmation replaces rather than merging local todo')
+        tap('活动'); ready(); touch('activity-1'); ready(); tap('日历账本'); ready(); select_days([1,2,3])
+        ok(metric('EXPENSE','支出 ¥80.00') and metric('NET_EXPENSE','净支出 ¥75.00'),'restored exact-cent ledger usable after visible confirmation')
+        restart(); ok(named_todo('Fresh milk') is not None and absent('New after preview'),'visible restore survives actual process restart')
+        bad=Path(os.environ['RUNNER_TEMP'])/'PocketTodo-v12-backup.zip'
+        bad.write_bytes(b'broken full backup\n')
+        run([adb,'-s',SERIAL,'push',str(bad),'/storage/emulated/0/Download/PocketTodo-v12-backup.zip'],timeout=30)
+        assert hashlib.sha256(bad.read_bytes()).hexdigest()!=digest,'corrupt fixture actually changed backup bytes'
+        tap('全部替换为'); ready(); picker_row('PocketTodo-v12-backup.zip')
+        ok(find(text='备份文件无效或已损坏，未更改本机数据') is not None,'corrupt backup through real picker fails visibly without touching data')
+        tap('活动'); ready(); ok(desc('activity-1').get('text')=='Daily reward','rejected visible restore keeps activity records')
         stop()
         with sqlite3.connect(copy_db('ledger-after.db')) as db:
             expected=[('2026-09-01','EXPENSE',1500),('2026-09-02','EXPENSE',2000),('2026-09-02','REFUND',500),('2026-09-03','EXPENSE',4500),('2026-09-03','INCOME',250),('2026-09-03','PLANNED',10000)]
@@ -271,7 +366,8 @@ def verify_native_ui(adb):
             ok(db.execute('SELECT count(*),count(DISTINCT batch_id),count(DISTINCT id) FROM ledger').fetchone()==(6,6,6),'native saves have distinct entry and batch identities without selection-generated writes')
             ok(db.execute('SELECT count(*) FROM batches WHERE undone=0').fetchone()[0]==6,'cancel and invalid amount leave no batch journal residue')
             ok(db.execute('SELECT activity_id,day,status,recorded_at FROM checkins').fetchall()==marks,'money and date filtering never mutate the check-in history')
-        result={'status':'PASS','scope':'NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_SLICE','ledger_calendar':'NATIVE_MULTI_DATE_LEDGER_PASS','api':API,'count':len(checks),'checks':checks,'screenshots':shots,'restore_ui':'NOT_TESTED','photos':'NOT_TESTED','sharing':'NOT_TESTED','release_ready':False}
+            ok(db.execute('SELECT id,title FROM todos ORDER BY position').fetchall()==[(aid,'Fresh milk'),(bid,'Walk outside')],'visible restore retained exact prior todo identities without local write merge')
+        result={'status':'PASS','scope':'NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_SLICE','ledger_calendar':'NATIVE_MULTI_DATE_LEDGER_PASS','saf_restore':'NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS','api':API,'count':len(checks),'checks':checks,'screenshots':shots,'restore_ui':'PREVIEW_CONFIRM_TESTED_UNDO_PENDING','photos':'NOT_TESTED','sharing':'NOT_TESTED','release_ready':False}
     except Exception as exc:
         result={'status':'FAIL','api':API,'count':len(checks),'checks':checks,'error':repr(exc),'screenshots':shots,'release_ready':False}
         try: shot('failure.png')

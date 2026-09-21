@@ -2,11 +2,13 @@ package com.supercubegame.pockettodo;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
@@ -42,6 +44,10 @@ public final class TodayScreen {
     private boolean busy, closed;
     private final Map<View,Boolean> paused=new IdentityHashMap<>();
     final ActivitiesScreen activities;
+    static final int PICK_RESTORE=1202;
+    private RestoreScreen restore;
+    private Runnable restoreCancel;
+    private Uri restoreFile;
 
     public TodayScreen(Activity activity) {
         this.activity=activity;
@@ -61,11 +67,12 @@ public final class TodayScreen {
         content=column();LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,0,1);cp.topMargin=dp(12);root.addView(content,cp);
         LinearLayout nav=new LinearLayout(activity);
         nav.addView(button("今天",()->navigate(0)),new LinearLayout.LayoutParams(0,dp(52),1));
-        nav.addView(button("活动",()->navigate(1)),new LinearLayout.LayoutParams(0,dp(52),1));root.addView(nav);
+        nav.addView(button("活动",()->navigate(1)),new LinearLayout.LayoutParams(0,dp(52),1));
+        nav.addView(button("备份",()->navigate(2)),new LinearLayout.LayoutParams(0,dp(52),1));root.addView(nav);
         refresh();
     }
-    private void navigate(int next){if(busy)return;rememberDraft();page=next;refresh();}
-    void refresh(){if(page==1)activities.load();else loadTodos();}
+    private void navigate(int next){if(busy)return;rememberDraft();if(page==2&&next!=2)closeRestoreSession();page=next;refresh();}
+    void refresh(){if(page==2)loadRestore();else if(page==1)activities.load();else loadTodos();}
     LinearLayout content(){input=null;content.removeAllViews();return content;}
     private void rememberDraft(){if(input!=null)draft=input.getText().toString();}
     private static final class TodoRow {
@@ -151,7 +158,12 @@ public final class TodayScreen {
     Button button(String value,Runnable action){Button b=new Button(activity);b.setText(value);b.setTextSize(14);b.setAllCaps(false);b.setTextColor(ACCENT);b.setMinWidth(0);b.setMinimumWidth(0);b.setMinHeight(dp(48));b.setPadding(dp(5),0,dp(5),0);b.setBackgroundTintList(ColorStateList.valueOf(TINT));b.setOnClickListener(v->{if(!busy)action.run();});return b;}
     GradientDrawable shape(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
     int dp(int value){return Math.round(value*activity.getResources().getDisplayMetrics().density);}
+    private void loadRestore(){if(restore==null)restore=new RestoreScreen(this);restore.show(restoreFile);}
+    private void chooseRestore(Runnable cancel){if(busy)return;restoreCancel=cancel;Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/zip");activity.startActivityForResult(intent,PICK_RESTORE);}
+    void fileResult(int request,int result,Intent data){if(request!=PICK_RESTORE)return;if(result!=Activity.RESULT_OK||data==null||data.getData()==null){Runnable cancel=restoreCancel;restoreCancel=null;if(cancel!=null)cancel.run();return;}restoreFile=data.getData();loadRestore();}
+    void beginRestorePlan(AppDatabase.RestorePlan plan,Runnable invalid){closeRestoreSession();restore=new RestoreScreen(this);restore.attach(plan,invalid);}
+    private void closeRestoreSession(){if(restore!=null)restore.cancelSilently();restore=null;restoreCancel=null;}
     public void save(Bundle out){rememberDraft();out.putInt("page",page);out.putInt("filter",filter);out.putString("draft",draft);out.putLong("activity",activities.selected);}
-    public boolean back(){if(busy)return true;if(page==1&&activities.selected!=0){activities.selected=0;activities.load();return true;}return false;}
-    public void close(){if(closed)return;closed=true;io.execute(db::close);io.shutdown();}
+    public boolean back(){if(busy)return true;if(page==2){closeRestoreSession();page=0;refresh();return true;}if(page==1&&activities.selected!=0){activities.selected=0;activities.load();return true;}return false;}
+    public void close(){if(closed)return;closeRestoreSession();closed=true;io.execute(db::close);io.shutdown();}
 }

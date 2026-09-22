@@ -245,7 +245,7 @@ def verify_native_ui(adb):
         ok(find(text='Checkins') is not None and absent('Daily'),'category rename updates visible label')
         touch('category-add-1'); touch('活动名称'); type_text('Daily reward'); tap('保存'); ready()
         ok(desc('activity-1').get('text')=='Daily reward','activity created under selected category')
-        touch('activity-1'); ready(); swipe_up(); tap('编辑路径'); touch('活动路径'); type_text('Home'); shell('input','keyevent','KEYCODE_ENTER'); type_text('Daily rewards'); tap('保存'); ready()
+        touch('activity-1'); ready(); swipe_up(); tap('编辑路径'); touch('活动路径'); type_text('Home'); shell('input','keyevent','KEYCODE_ENTER'); type_text('Daily rewards'); tap('保存'); ready(); swipe_up()
         ok(find(text='1. Home') is not None and find(text='2. Daily rewards') is not None,'ordered multiline manual path displays without collapse')
         tap('标记完成'); ready(); ok(find(text='今天：已完成') is not None,'daily check-in writes visible done state')
         tap('标记完成'); ready(); ok(find(text='今天：已完成') is not None,'repeated daily mark remains one visible day')

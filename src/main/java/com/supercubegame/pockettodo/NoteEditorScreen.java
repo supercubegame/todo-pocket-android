@@ -49,7 +49,7 @@ public final class NoteEditorScreen {
         ScrollView scroll=new ScrollView(host.activity);LinearLayout list=host.column();scroll.addView(list);body.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         if(s.blocks.isEmpty()){TextView empty=host.text("写点什么，或加一张图。",18,TodayScreen.MUTED);empty.setPadding(0,host.dp(24),0,0);list.addView(empty);}
         for(int i=0;i<s.blocks.size();i++){
-            NoteDocument.Block b=s.blocks.get(i);final int index=i;
+            NoteDocument.Block b=s.blocks.get(i);
             if(b.kind==NoteDocument.Kind.TEXT){
                 TextView text=host.text(b.text,17,TodayScreen.INK);text.setContentDescription("note-text-"+b.id);text.setPadding(host.dp(10),host.dp(10),host.dp(10),host.dp(10));text.setBackground(host.shape(TodayScreen.WHITE,10));list.addView(text);
             }else{
@@ -67,13 +67,25 @@ public final class NoteEditorScreen {
             }
         }
     }
+    /** Own dialog, not the shared editor helper: that one intentionally accepts blank
+     * multiline input for path clearing, while a note text block must never be blank. */
     private void editText(State s,String existingId){
         String initial="";
         if(existingId!=null)for(NoteDocument.Block b:s.blocks)if(b.id.equals(existingId)&&b.kind==NoteDocument.Kind.TEXT)initial=b.text;
-        host.editor(existingId==null?"加入文字":"修改文字","文字内容",initial,true,value->{
-            String id=existingId==null?UUID.randomUUID().toString():existingId;
-            persist(s,NoteDocument.Block.text(id,value,false),existingId!=null);
-        },this::load);
+        LinearLayout body=host.column();body.setPadding(host.dp(20),host.dp(4),host.dp(20),host.dp(8));
+        EditText field=host.field("文字内容",true);field.setText(initial);body.addView(field,new LinearLayout.LayoutParams(-1,-2));
+        TextView validation=host.text("文字不能为空，之后可随时修改。",14,TodayScreen.MUTED);body.addView(validation);
+        AlertDialog dialog=new AlertDialog.Builder(host.activity).setTitle(existingId==null?"加入文字":"修改文字").setView(body).setNegativeButton("取消",null).setPositiveButton("保存",null).create();
+        dialog.setOnShowListener(unused->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+            String value=field.getText().toString().trim();
+            if(value.isEmpty()){validation.setText("内容不能为空");validation.setTextColor(TodayScreen.ERROR);return;}
+            final String id=existingId==null?UUID.randomUUID().toString():existingId;
+            dialog.setCancelable(false);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);field.setEnabled(false);
+            host.work(()->{persist(s,NoteDocument.Block.text(id,value,false),existingId!=null);return true;},ignored->{dialog.dismiss();load();},()->{
+                dialog.setCancelable(true);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);field.setEnabled(true);validation.setText("未能保存，请检查内容后重试");validation.setTextColor(TodayScreen.ERROR);
+            });
+        }));
+        dialog.show();
     }
     /** Synthetic solid square. Real photo selection, decoding and derivative checks are separate. */
     private void addImage(State s){

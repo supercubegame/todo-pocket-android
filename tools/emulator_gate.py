@@ -318,7 +318,7 @@ def verify_native_ui(adb):
             ok(rows==[('Fresh milk',1),('Walk outside',0)],'independent SQLite read matches exact SAF restored state')
             ok(db.execute('SELECT count(*) FROM ledger').fetchone()[0]==6,'SAF restore retains exact ledger after independent readback')
             ok(db.execute('SELECT activity_id,day,status,recorded_at FROM checkins').fetchall()==marks,'SAF restore retains exact check-in history')
-        result={'status':'PASS','scope':'NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_RESTORE_SLICE','ledger_calendar':'NATIVE_MULTI_DATE_LEDGER_PASS','saf_restore':'NATIVE_SAF_PREVIEW_CONSENT_RESTORE_PASS','api':API,'count':len(checks),'checks':checks,'screenshots':shots,'restore_undo':'NOT_IMPLEMENTED','restore_preview_lifecycle':'NOT_TESTED','photos':'NOT_TESTED','sharing':'NOT_TESTED','release_ready':False}
+        result={'status':'PASS','scope':'NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_RESTORE_SLICE','ledger_calendar':'NATIVE_MULTI_DATE_LEDGER_PASS','saf_restore':'NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS','api':API,'count':len(checks),'checks':checks,'screenshots':shots,'restore_undo':'NOT_IMPLEMENTED','restore_preview_lifecycle':'NOT_TESTED','photos':'NOT_TESTED','sharing':'NOT_TESTED','release_ready':False}
     except Exception as exc:
         result={'status':'FAIL','api':API,'count':len(checks),'checks':checks,'error':repr(exc),'screenshots':shots,'release_ready':False}
         try: shot('failure.png')

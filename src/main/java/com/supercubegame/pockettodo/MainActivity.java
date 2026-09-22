@@ -29,10 +29,18 @@ public final class MainActivity extends Activity {
         Uri uri=data.getData();
         try{
             if(request==EXPORT_BACKUP){
-                Path temp=Files.createTempFile(getCacheDir().toPath(),"export-",".zip");
-                try(InputStream in=Files.newInputStream(temp);java.io.OutputStream out=openDestination(uri)){
-                    screen.exportBackup(temp);byte[] buffer=new byte[16384];int n;while((n=in.read(buffer))!=-1){if(n==0)throw new IOException("备份读取未取得进展");out.write(buffer,0,n);}screen.backupExported();
-                }finally{Files.deleteIfExists(temp);}
+                // The archive writer deliberately refuses an existing destination, so the
+                // temporary path must not exist yet. The validated archive is streamed to
+                // the SAF destination only after it has been fully written and closed.
+                Path dir=Files.createTempDirectory(getCacheDir().toPath(),"export-");
+                Path temp=dir.resolve("backup.zip");
+                try{
+                    screen.exportBackup(temp);
+                    try(InputStream in=Files.newInputStream(temp);java.io.OutputStream out=openDestination(uri)){
+                        byte[] buffer=new byte[16384];int n;while((n=in.read(buffer))!=-1){if(n==0)throw new IOException("备份读取未取得进展");out.write(buffer,0,n);}
+                    }
+                    screen.backupExported();
+                }finally{Files.deleteIfExists(temp);Files.deleteIfExists(dir);}
             }else if(request==IMPORT_BACKUP){
                 Path chosen=Files.createTempFile(getCacheDir().toPath(),"chosen-",".zip");boolean success=false;
                 try(InputStream in=getContentResolver().openInputStream(uri)){

@@ -150,6 +150,12 @@ def verify_native_ui(adb):
         assert condition,label
         checks.append(label); print('UI_PASS '+label,flush=True)
     def absent(text): return not any(n.get('text')==text for n in nodes())
+    def gone(text):
+        deadline=time.monotonic()+20
+        while time.monotonic()<deadline:
+            if absent(text): return
+            time.sleep(.25)
+        raise AssertionError('UI still shows '+repr(text))
     def ready(): find(**{'content-desc':'v12-status','text':'已保存到本机'})
     def start():
         shell('am','start','-W','-n',PKG+'/com.supercubegame.pockettodo.MainActivity'); desc('v12-home'); ready()
@@ -193,13 +199,18 @@ def verify_native_ui(adb):
     def export_backup():
         tap('活动'); ready(); tap('备份 / 恢复'); ready()
         tap('导出完整备份')
-        save=find(text='SAVE'); tap_node(save); ready()
+        save=find(text='SAVE'); tap_node(save)
+        find(**{'content-desc':'v12-status','text':'备份已保存到你选的位置'})
         tap('返回活动'); ready()
     def import_backup(label):
-        tap('备份 / 恢复'); ready(); tap('恢复完整备份')
+        tap('活动'); ready()
+        if absent('恢复完整备份'): tap('备份 / 恢复'); ready()
+        tap('恢复完整备份')
         file=find(text=label); tap_node(file); ready()
         dialog=desc('restore-consent')
         assert dialog.get('enabled')=='true' and dialog.get('checked')=='false','consent checkbox starts visible and unchecked'
+        counts=desc('restore-counts').get('text')
+        assert counts is not None and '普通待办：本机 3 → 备份 2' in counts,'restore preview shows exact current and incoming todo counts; actual='+repr(counts)
         ok(True,'SAF file selection shows visible restore preview and replacement counts')
         return dialog
     try:
@@ -282,10 +293,10 @@ def verify_native_ui(adb):
             ok(db.execute('SELECT count(*),count(DISTINCT batch_id),count(DISTINCT id) FROM ledger').fetchone()==(6,6,6),'native saves have distinct entry and batch identities without selection-generated writes')
             ok(db.execute('SELECT count(*) FROM batches WHERE undone=0').fetchone()[0]==6,'cancel and invalid amount leave no batch journal residue')
             ok(db.execute('SELECT activity_id,day,status,recorded_at FROM checkins').fetchall()==marks,'money and date filtering never mutate the check-in history')
-        start(); export_backup(); tap('返回今天'); ready()
+        start(); export_backup(); tap('今天'); ready()
         add_todo('After backup'); shot('06-backup.png')
         import_backup('pocket-todo-backup.zip')
-        tap('取消'); ready()
+        tap('取消'); ready(); tap('今天'); ready()
         ok(find(text='After backup') is not None and absent('确认恢复'),'canceling SAF restore preview makes no database write')
         stop()
         with sqlite3.connect(copy_db('before-restore.db')) as db:
@@ -294,10 +305,10 @@ def verify_native_ui(adb):
             ok(db.execute('SELECT count(*) FROM ledger').fetchone()[0]==6,'cancelled restore retains exact ledger rows')
         start(); import_backup('pocket-todo-backup.zip'); shot('07-restore-preview.png')
         tap('确认恢复'); ready()
-        ok(find(text='After backup') is not None and find(text='请先勾选：我明白会替换本机数据') is not None,'unchecked consent cannot restore even with visible confirmation control')
+        ok(find(text='请先勾选：我明白会替换本机数据') is not None and find(text='确认恢复') is not None,'unchecked consent cannot restore even with visible confirmation control')
         tap('取消'); ready(); import_backup('pocket-todo-backup.zip')
-        touch('restore-consent'); tap('确认恢复'); ready()
-        tap('返回今天'); ready()
+        touch('restore-consent'); tap('确认恢复'); gone('确认恢复'); ready()
+        tap('今天'); ready()
         ok(absent('After backup') and named_todo('Fresh milk') is not None,'explicit SAF consent replaces data with previewed backup')
         restart()
         ok(absent('After backup') and named_todo('Walk outside') is not None,'SAF restored data survives a separate stopped-process restart')

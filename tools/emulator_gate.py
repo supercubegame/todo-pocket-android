@@ -206,7 +206,7 @@ def verify_native_ui(adb):
         tap('活动'); ready()
         if absent('恢复完整备份'): tap('备份 / 恢复'); ready()
         tap('恢复完整备份')
-        file=find(text=label); tap_node(file); ready()
+        file=find(text=label); tap_node(file)
         dialog=desc('restore-consent')
         assert dialog.get('enabled')=='true' and dialog.get('checked')=='false','consent checkbox starts visible and unchecked'
         counts=desc('restore-counts').get('text')
@@ -304,7 +304,7 @@ def verify_native_ui(adb):
             ok(rows==[('Fresh milk',1),('Walk outside',0),('After backup',0)],'cancelled restore leaves exact new todo and old state independent')
             ok(db.execute('SELECT count(*) FROM ledger').fetchone()[0]==6,'cancelled restore retains exact ledger rows')
         start(); import_backup('pocket-todo-backup.zip'); shot('07-restore-preview.png')
-        tap('确认恢复'); ready()
+        tap('确认恢复')
         ok(find(text='请先勾选：我明白会替换本机数据') is not None and find(text='确认恢复') is not None,'unchecked consent cannot restore even with visible confirmation control')
         tap('取消'); ready(); import_backup('pocket-todo-backup.zip')
         touch('restore-consent'); tap('确认恢复'); gone('确认恢复'); ready()

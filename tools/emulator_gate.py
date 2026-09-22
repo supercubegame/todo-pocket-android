@@ -430,7 +430,57 @@ public class VerifyNotePng {
             ok(db.execute('SELECT * FROM media ORDER BY id').fetchall()==before_media and db.execute('SELECT * FROM ledger ORDER BY id').fetchall()==before_ledger,'editing note leaves exact media registry and complete ledger unchanged')
         after_image=subprocess.check_output([str(adb),'-s',SERIAL,'exec-out','run-as',PKG,'cat','files/media/'+asset],timeout=30)
         ok(after_image==image_bytes,'text editing and restart preserve exact private image bytes')
+        # Public fixtures are generated locally; never upload real user photos.
+        import struct, zlib
+        def png(w,h):
+            def chunk(kind,data):
+                return struct.pack('>I',len(data))+kind+data+struct.pack('>I',zlib.crc32(kind+data)&0xffffffff)
+            pixels=b''.join(b'\0'+bytes((220,70,40,255))*(w//2)+bytes((35,90,210,255))*(w-w//2) for _ in range(h))
+            return b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',w,h,8,6,0,0,0))+chunk(b'IDAT',zlib.compress(pixels))+chunk(b'IEND',b'')
+        chosen=png(1536,768)
+        fixtures={'pocket-selected.png':chosen,'pocket-broken.png':b'not a PNG',
+                  'pocket-wide.png':png(20000,1),'pocket-large.png':chosen+b'\0'*(8*1024*1024+1-len(chosen))}
+        fixture_dir=Path('build/ci-picked-images'); fixture_dir.mkdir(parents=True,exist_ok=True)
+        for name,data in fixtures.items():
+            path=fixture_dir/name;path.write_bytes(data)
+            run([adb,'-s',SERIAL,'push',path,'/sdcard/Download/'+name])
+        def note_screen():
+            start(); tap('活动'); ready(); touch('activity-1'); ready(); tap('笔记'); ready()
+        def pick_image(name=None):
+            tap('加入图片'); tap('从文件选择')
+            if name is not None: tap_node(find(text=name))
+        note_screen(); pick_image()
+        ok(any(n.get('package','').endswith('documentsui') for n in nodes()),'image import opens the actual system document picker')
+        shell('input','keyevent','KEYCODE_BACK')
+        ok(find(**{'content-desc':'v12-status','text':'已取消选图，没有改变笔记'}) is not None,'cancel system image picker reports no note change')
+        stop()
+        with sqlite3.connect(copy_db('pick-cancel.db')) as db:
+            baseline={t:db.execute('SELECT * FROM '+t+' ORDER BY rowid').fetchall() for t in TABLES}
+            ok(db.execute('SELECT * FROM blocks ORDER BY note_id,position').fetchall()==[tuple(row) for row in expected_blocks] and db.execute('SELECT * FROM media ORDER BY id').fetchall()==before_media,'cancel picker leaves exact blocks and media registrations unchanged')
+        for filename,label in [('pocket-broken.png','malformed'),('pocket-wide.png','oversized dimensions'),('pocket-large.png','excess byte budget')]:
+            note_screen(); pick_image(filename)
+            ok(find(**{'content-desc':'v12-status','text':'图片未加入：仅支持有效 PNG/JPEG，最大 8 MiB、2000 万像素、单边 16384'}) is not None,label+' selected image rejected visibly')
+            stop()
+            with sqlite3.connect(copy_db('reject-'+filename+'.db')) as db:
+                ok({t:db.execute('SELECT * FROM '+t+' ORDER BY rowid').fetchall() for t in TABLES}==baseline,label+' rejection preserves every database table including revision')
+        note_screen(); pick_image('pocket-selected.png'); ready(); stop()
+        chosen_id=hashlib.sha256(chosen).hexdigest()
+        with sqlite3.connect(copy_db('pick-success.db')) as db:
+            selected_blocks=db.execute('SELECT * FROM blocks ORDER BY note_id,position').fetchall()
+            ok(len(selected_blocks)==3 and selected_blocks[:2]==[tuple(row) for row in expected_blocks] and selected_blocks[2][2:]==(2,'IMAGE','',chosen_id,'',0),'SAF image appends one exact ordered block without replacing text or prior image')
+            ok(db.execute('SELECT id,mime,bytes FROM media WHERE id=?',(chosen_id,)).fetchall()==[(chosen_id,'image/png',len(chosen))],'SAF original bytes registered by exact hash MIME and length')
+            ok(all(db.execute('SELECT * FROM '+t+' ORDER BY rowid').fetchall()==baseline[t] for t in TABLES if t not in ('revision','blocks','media')),'image import preserves notes identity and all unrelated tables')
+        copied=subprocess.check_output([str(adb),'-s',SERIAL,'exec-out','run-as',PKG,'cat','files/media/'+chosen_id],timeout=30)
+        ok(copied==chosen,'SAF private copy equals independently generated two-color PNG byte for byte')
+        shell('rm','/sdcard/Download/pocket-selected.png')
+        note_screen(); swipe_up()
+        ok(desc('note-image-'+selected_blocks[2][1]).get('class')=='android.widget.ImageView','selected image still renders after source deletion and stopped-process restart')
+        shot('11-selected-image.png'); stop()
+        with sqlite3.connect(copy_db('pick-restart.db')) as db:
+            ok(db.execute('SELECT * FROM blocks ORDER BY note_id,position').fetchall()==selected_blocks,'selected image block identity order and reference survive restart')
+        ok(subprocess.check_output([str(adb),'-s',SERIAL,'exec-out','run-as',PKG,'cat','files/media/'+chosen_id],timeout=30)==chosen,'source deletion never removes or changes the private selected image')
         result={'status':'PASS','scope':'NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE','ledger_calendar':'NATIVE_MULTI_DATE_LEDGER_PASS','saf_restore':'NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS','checkin_history':'NATIVE_CHECKIN_HISTORY_BACKDATE_PASS','note_editor':'NATIVE_TEXT_IMAGE_NOTE_PASS','api':API,'count':len(checks),'checks':checks,'screenshots':shots,'infra_retries':infra_retries,'restore_undo':'NOT_IMPLEMENTED','restore_preview_lifecycle':'NOT_TESTED','checkin_schedules':'NOT_IMPLEMENTED','real_photo_selection':'NOT_IMPLEMENTED','photos':'NOT_TESTED','sharing':'NOT_TESTED','release_ready':False}
+        result.update(real_photo_selection='NATIVE_SAF_PNG_PASS',photos='SYNTHETIC_PNG_ONLY',image_picker_lifecycle='CANCEL_AND_RESTART_ONLY',jpeg='NOT_TESTED',camera='NOT_IMPLEMENTED')
     except Exception as exc:
         result={'status':'FAIL','api':API,'count':len(checks),'checks':checks,'error':repr(exc),'screenshots':shots,'infra_retries':infra_retries,'release_ready':False}
         try: shot('failure.png')

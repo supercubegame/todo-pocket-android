@@ -1,1 +1,220 @@
-PLACEHOLDER_WORKFLOW
+name: V1.2 staged verification
+on:
+  push:
+    branches: [feature/v1.2-activity-notes-ledger]
+  pull_request:
+    branches: [main, feature/v1.1-edit-backup]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  core:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Use Java 17
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+      - name: Legacy, domain and real JVM file boundary contracts
+        run: |
+          set -euo pipefail
+          python3 tools/verify.py v12 2>&1 | tee core.log
+      - name: Verify unfinished delivery cannot be mislabeled
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' 2>&1 | tee -a core.log
+          import subprocess
+          result = subprocess.run(['python3','tools/verify.py','build'],capture_output=True,text=True)
+          assert result.returncode != 0, 'Unfinished delivery gate must fail'
+          assert 'V1.2 Android phase is not wired' in result.stderr, 'Unexpected failure is not proof of release guard'
+          print('PASS unfinished V1.2 delivery explicitly blocked')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: core-evidence
+          path: core.log
+          if-no-files-found: error
+  database:
+    needs: core
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [26, 34]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      TEST_API: ${{ matrix.api }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Fixed Android build setup
+        run: |
+          set -euo pipefail
+          exec > >(tee setup.log) 2>&1
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip.sha256 -o /tmp/gradle.sha256
+          echo "$(cat /tmp/gradle.sha256)  /tmp/gradle.zip" | sha256sum -c -
+          unzip -q /tmp/gradle.zip -d /tmp
+          echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+      - name: Compile internal test APKs and lint (not deliverable)
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --console=plain assembleDebug assembleDebugAndroidTest lintDebug 2>&1 | tee build.log
+      - name: Database, semantic backups and actual native UI interactions
+        run: |
+          set -euo pipefail
+          python3 tools/emulator_gate.py 2>&1 | tee ui.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: database-api-${{ matrix.api }}
+          path: |
+            setup.log
+            build.log
+            ui.log
+            emulator.log
+            device-*.txt
+            device-result.json
+            native-ui/native-result.json
+            native-ui/*.png
+            build/reports/lint-results-debug.html
+          if-no-files-found: error
+  report:
+    needs: [core, database]
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          path: collected
+      - name: Preserve matrix and synthetic native screenshots with exact readback
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import base64,hashlib,json,os,re,urllib.request,urllib.error
+          from pathlib import Path
+          root=Path('collected')
+          repo=os.environ['GITHUB_REPOSITORY']
+          source=os.environ['GITHUB_SHA']
+          run=os.environ['GITHUB_RUN_ID']
+          def api(path,method='GET',body=None):
+            req=urllib.request.Request('https://api.github.com/repos/'+repo+'/'+path,data=json.dumps(body).encode() if body is not None else None,method=method,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+            with urllib.request.urlopen(req,timeout=30) as response:return json.load(response)
+          def publish(path,data):
+            body={'message':'Record synthetic native UI evidence','branch':'evidence','content':base64.b64encode(data).decode()}
+            try:body['sha']=api('contents/'+path+'?ref=evidence')['sha']
+            except urllib.error.HTTPError as exc:
+              if exc.code!=404:raise
+            written=api('contents/'+path,'PUT',body)
+            actual=api('contents/'+path+'?ref='+written['commit']['sha'])
+            assert base64.b64decode(actual['content'])==data,'native evidence readback mismatch'
+            return {'url':actual['html_url'],'raw_url':actual['download_url'],'sha256':hashlib.sha256(data).hexdigest()}
+          required={
+            'seed':[
+              'restore preview does not mutate any live table or publish media',
+              'preview shows independent exact current and incoming counts for every table',
+              'restore preview summary cannot be modified by caller',
+              'cancel twice clears private staging without altering live state',
+              'canceled restore plan cannot be confirmed',
+              'semantic-invalid preview refuses and cleans staging without touching live data',
+              'restore preview is bound to its exact database helper owner',
+              'ordinary write after preview rejects stale restore',
+              'stale rejection preserves every new row and revision and clears stage',
+              'failed stale plan is single use and requires a new preview',
+              'full snapshot guard rejects another connection write even without revision bump',
+              'same-revision stale rejection retains exact externally changed state',
+              'changed staged media is rejected on confirmation with complete old state intact',
+              'guarded confirmation late injected failure rolls back every replaced table',
+              'failed commit plan cannot be reused after removing the fault',
+              'confirmation uses the exact validated preview not a subsequently replaced source file',
+              'confirmed snapshot publishes exact media and cleans staging before commit',
+              'successful confirmation cannot be replayed',
+              'exact idempotent retry remains a genuine no-op while preview is open',
+              'unchanged state after no-op can still confirm the reviewed snapshot'],
+            'reopen':[
+              'guarded restore survives a separate Android process with all tables exact',
+              'guarded restore retains usable import journal and exact-cent totals after restart']}
+          def coverage(text,phase):
+            labels=re.findall(r'(?:^|stream=)PASS ([^\r\n]+)',text,re.M)
+            result=re.findall(r'DEVICE_DATABASE_RESULT '+phase+r' (\d+)/(\d+) PASS',text)
+            finished=re.findall(r'^INSTRUMENTATION_CODE: (-?\d+)\s*$',text,re.M)==['-1']
+            return (finished and 'DEVICE_DATABASE_FAILED' not in text and 'INSTRUMENTATION_FAILED' not in text and len(result)==1 and result[0][0]==result[0][1] and int(result[0][0])==len(labels) and all(labels.count(x)==1 for x in required[phase])),labels
+          # Parser self-checks, NOT device behavior. Missing a required check must fail
+          # even if remaining labels and the declared count are internally consistent.
+          for phase,labels in required.items():
+            def sample(rows):return '\n'.join('PASS '+x for x in rows)+'\nDEVICE_DATABASE_RESULT '+phase+' '+str(len(rows))+'/'+str(len(rows))+' PASS\nINSTRUMENTATION_CODE: -1\n'
+            assert coverage(sample(labels),phase)[0]
+            assert not coverage(sample(labels[:-1]),phase)[0]
+            assert not coverage(sample(labels)+'DEVICE_DATABASE_FAILED\n',phase)[0]
+            assert not coverage(sample(labels).replace('INSTRUMENTATION_CODE: -1','INSTRUMENTATION_CODE: 0'),phase)[0]
+          devices={}
+          native={}
+          guarded={}
+          for api_level in (26,34):
+            folder=root/('database-api-'+str(api_level))
+            logs={}
+            for name in ('setup.log','build.log','ui.log','emulator.log'):
+              path=folder/name
+              if path.exists():
+                logs[name]=path.read_text(errors='replace')[-24000:]
+                path.rename(folder/(str(api_level)+'-'+name))
+              else:logs[name]='NOT_OBSERVED'
+            result=folder/'device-result.json'
+            devices[str(api_level)]={'result':json.loads(result.read_text()) if result.exists() else {'status':'NOT_OBSERVED'},'logs':logs}
+            phases={}
+            for phase in required:
+              path=folder/('device-'+phase+'.txt')
+              text=path.read_text(errors='replace') if path.exists() else ''
+              passed,labels=coverage(text,phase)
+              phases[phase]={'status':'PASS' if passed else 'NOT_VERIFIED','required_checks':required[phase],'observed_required':[x for x in required[phase] if x in labels],'missing':[x for x in required[phase] if x not in labels],'total_device_pass_records':len(labels),'failure_tail':None if passed else text[-7000:]}
+            guarded[str(api_level)]={'status':'PASS' if devices[str(api_level)]['result'].get('status')=='PASS' and all(p['status']=='PASS' for p in phases.values()) else 'NOT_VERIFIED','phases':phases}
+            result=folder/'native-ui/native-result.json'
+            native[str(api_level)]=json.loads(result.read_text()) if result.exists() else {'status':'NOT_OBSERVED'}
+            published=[]
+            for image in sorted((folder/'native-ui').glob('*.png')):
+              data=image.read_bytes()
+              assert data.startswith(b'\x89PNG\r\n\x1a\n'),'invalid native screenshot'
+              asset=publish('screenshots/'+source+'-'+run+'/'+str(api_level)+'/'+image.name,data)
+              asset['file']=image.name
+              published.append(asset)
+            native[str(api_level)]['published_screenshots']=published
+          restore='SCHEMA2_DB_MEDIA_BYTES_PASS' if all(d['result'].get('status')=='PASS' and d['result'].get('full_backup_restore')=='SCHEMA2_DB_MEDIA_BYTES_PASS' for d in devices.values()) else 'NOT_VERIFIED'
+          native_status='PASS' if all(n.get('status')=='PASS' and n.get('scope')=='NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_SLICE' and n.get('count',0)>0 and n.get('saf_restore')=='NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS' for n in native.values()) else 'NOT_VERIFIED'
+          guarded_status='PASS' if all(g['status']=='PASS' for g in guarded.values()) else 'NOT_VERIFIED'
+          guarded_asset=publish('reports/restore-plan-'+source+'-'+run+'.json',(json.dumps({'commit':source,'run_id':run,'status':guarded_status,'scope':'GUARDED_RESTORE_BACKEND_NOT_SAF_UI','devices':guarded,'saf_restore_ui':'SEE_NATIVE_INDEX','undo_restore':'NOT_IMPLEMENTED','release_ready':False},ensure_ascii=False,indent=2)+'\n').encode())
+          index={'commit':source,'run_id':run,'scope':'NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_SLICE','status':native_status,'devices':native,'release_ready':False}
+          index_asset=publish('reports/native-'+source+'-'+run+'.json',(json.dumps(index,ensure_ascii=False,indent=2)+'\n').encode())
+          saf_ui='PASS' if all(n.get('saf_restore')=='NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS' for n in native.values()) else 'NOT_VERIFIED'
+          scope=root/'scope';scope.mkdir(exist_ok=True)
+          (scope/'ui-result.json').write_text(json.dumps({'status':native_status,'scope':'NATIVE_SLICE_AND_DATABASE_NOT_FULL_PRODUCT','devices':devices,'native':native,'native_index':index_asset,'guarded_restore':{'status':guarded_status,'evidence':guarded_asset},'screenshots':'SYNTHETIC_NATIVE_UI_ONLY','exports':'NOT_TESTED','full_database_media_restore':restore,'saf_restore_ui':saf_ui,'image_decoding':'NOT_TESTED','power_loss':'NOT_TESTED','release_ready':False}))
+          print('NATIVE_EVIDENCE '+index_asset['url'])
+          print('GUARDED_RESTORE_EVIDENCE '+guarded_asset['url'])
+          PY
+      - name: Publish and read back evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 tools/verify.py report
+      - name: Require actual guarded restore and SAF UI coverage
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          path=Path('collected/scope/ui-result.json')
+          assert path.exists(),'Guarded restore evidence missing, not a pass'
+          doc=json.loads(path.read_text())
+          assert doc.get('guarded_restore',{}).get('status')=='PASS','Guarded restore checks missing or failed; read published evidence'
+          assert doc.get('saf_restore_ui')=='PASS','SAF restore preview and explicit confirmation missing or failed; read native evidence'
+          PY

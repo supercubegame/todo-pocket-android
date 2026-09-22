@@ -300,7 +300,7 @@ def verify_native_ui(adb):
         tap('补记 / 修改'); touch('打卡日期'); type_text('2026-09-20'); tap('保存记录'); ready()
         ok(desc('checkin-2026-09-20').get('text')=='2026-09-20 · 已完成','backdated done check-in appears with its exact date')
         shot('06-checkin-history.png')
-        touch('edit-checkin-2026-09-20'); tap('标记未记录'); ready()
+        touch('edit-checkin-2026-09-20'); tap('标记未记录'); tap('保存记录'); ready()
         ok(absent('2026-09-20 · 已完成') and absent('checkin-2026-09-20'),'un-recording removes the visible history row')
         stop()
         with sqlite3.connect(copy_db('checkins-after.db')) as db:

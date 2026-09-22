@@ -1,5 +1,6 @@
 package com.supercubegame.pockettodo;
 
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.database.Cursor;
 import android.widget.*;
@@ -16,7 +17,8 @@ import java.util.List;
 public final class ActivitiesScreen {
     private final TodayScreen host;
     long selected;
-    private boolean backupPanel;
+    private boolean backupPanel, historyPanel;
+    private static final ZoneId CN=ZoneId.of("Asia/Shanghai");
     ActivitiesScreen(TodayScreen host){this.host=host;}
     private static final class Item {
         long id,category;String title;
@@ -27,7 +29,7 @@ public final class ActivitiesScreen {
         Category(long id,String name){this.id=id;this.name=name;}
     }
     private static final class Detail {String title,status;List<String> path;LocalDate day;}
-    void load(){if(backupPanel)renderBackup();else if(selected==0)loadCategories();else loadDetail(selected);}
+    void load(){if(backupPanel)renderBackup();else if(selected==0)loadCategories();else if(historyPanel)loadHistory(selected);else loadDetail(selected);}
     private long nextId(String table){
         // Only fixed internal table names, and one UI writer on the shared executor.
         if(!table.equals("categories")&&!table.equals("activities"))throw new IllegalArgumentException();
@@ -84,7 +86,7 @@ public final class ActivitiesScreen {
         host.work(()->{
             Detail d=new Detail();
             try(Cursor c=host.db.getReadableDatabase().rawQuery("SELECT title FROM activities WHERE id=?",new String[]{Long.toString(id)})){if(!c.moveToFirst())throw new IllegalArgumentException("活动不存在");d.title=c.getString(0);}
-            d.path=host.db.path(id);d.day=LocalDate.now(ZoneId.of("Asia/Shanghai"));d.status="未记录";
+            d.path=host.db.path(id);d.day=LocalDate.now(CN);d.status="未记录";
             for(CalendarRules.Mark mark:host.db.marks(id))if(mark.date.equals(d.day))d.status=mark.status==CalendarRules.Status.DONE?"已完成":"已跳过";
             return d;
         },d->renderDetail(id,d),null);
@@ -99,8 +101,9 @@ public final class ActivitiesScreen {
         details.addView(host.text(d.day+" · 中国时间",16,TodayScreen.MUTED));
         TextView stamp=host.text("今天："+d.status,24,TodayScreen.ACCENT);stamp.setPadding(host.dp(14),host.dp(16),host.dp(14),host.dp(16));stamp.setBackground(host.shape(TodayScreen.TINT,16));details.addView(stamp);
         LinearLayout marks=new LinearLayout(host.activity);
-        marks.addView(host.button("标记完成",()->mark(id,CalendarRules.Status.DONE)),new LinearLayout.LayoutParams(0,host.dp(52),1));
-        marks.addView(host.button("跳过今天",()->mark(id,CalendarRules.Status.SKIPPED)),new LinearLayout.LayoutParams(0,host.dp(52),1));details.addView(marks);
+        marks.addView(host.button("标记完成",()->mark(id,LocalDate.now(CN),CalendarRules.Status.DONE)),new LinearLayout.LayoutParams(0,host.dp(52),1));
+        marks.addView(host.button("跳过今天",()->mark(id,LocalDate.now(CN),CalendarRules.Status.SKIPPED)),new LinearLayout.LayoutParams(0,host.dp(52),1));details.addView(marks);
+        details.addView(host.button("打卡记录",()->{historyPanel=true;load();}));
         TextView pathTitle=host.text("去哪里操作",20,TodayScreen.INK);pathTitle.setPadding(0,host.dp(18),0,host.dp(8));details.addView(pathTitle);
         if(d.path.isEmpty())details.addView(host.text("把入口一行行记下来，下次不用找。",16,TodayScreen.MUTED));
         for(int i=0;i<d.path.size();i++){TextView step=host.text((i+1)+". "+d.path.get(i),17,TodayScreen.INK);step.setPadding(host.dp(8),host.dp(8),host.dp(8),host.dp(8));details.addView(step);}
@@ -109,5 +112,52 @@ public final class ActivitiesScreen {
             host.db.savePath(id,steps);
         },this::load)));
     }
-    private void mark(long id,CalendarRules.Status status){host.work(()->{host.db.putMark(new CalendarRules.Mark(id,LocalDate.now(ZoneId.of("Asia/Shanghai")),status,"",Instant.now()));return true;},ignored->load(),null);}
+    private void loadHistory(long id){host.work(()->host.db.marks(id),marks->renderHistory(id,marks),null);}
+    private void renderHistory(long id,List<CalendarRules.Mark> marks){
+        LinearLayout body=host.content();body.addView(host.text("打卡记录",24,TodayScreen.INK));
+        TextView note=host.text("记录的是哪一天，与哪天写下它分开保存。可以补记过去或改回未记录。",15,TodayScreen.MUTED);note.setPadding(0,host.dp(8),0,host.dp(16));body.addView(note);
+        body.addView(host.button("补记 / 修改",()->editMark(id,LocalDate.now(CN).toString(),CalendarRules.Status.DONE)));
+        ScrollView scroll=new ScrollView(host.activity);LinearLayout list=host.column();scroll.addView(list);body.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        if(marks.isEmpty()){TextView empty=host.text("还没有记录。",18,TodayScreen.MUTED);empty.setPadding(0,host.dp(24),0,0);list.addView(empty);}
+        for(int i=marks.size()-1;i>=0;i--){
+            CalendarRules.Mark mark=marks.get(i);String day=mark.date.toString();
+            LinearLayout row=new LinearLayout(host.activity);row.setGravity(android.view.Gravity.CENTER_VERTICAL);row.setPadding(host.dp(8),host.dp(4),host.dp(4),host.dp(4));row.setBackground(host.shape(TodayScreen.WHITE,14));
+            TextView text=host.text(day+" · "+(mark.status==CalendarRules.Status.DONE?"已完成":"已跳过"),17,TodayScreen.INK);text.setContentDescription("checkin-"+day);row.addView(text,new LinearLayout.LayoutParams(0,-2,1));
+            Button edit=host.button("修改",()->editMark(id,day,mark.status));edit.setContentDescription("edit-checkin-"+day);row.addView(edit,new LinearLayout.LayoutParams(host.dp(64),host.dp(48)));
+            host.addRow(list,row);
+        }
+        body.addView(host.button("返回活动",()->{historyPanel=false;load();}));
+    }
+    /** Backdate or correct a day. The chosen day is the activity date; the entry
+     * timestamp is written by the backend at save time and stays distinct.
+     * 未记录 deletes the row rather than storing a third visible state.
+     */
+    private void editMark(long id,String day,CalendarRules.Status current){
+        if(historyPanel==false)return;
+        LinearLayout body=host.column();body.setPadding(host.dp(20),host.dp(4),host.dp(20),host.dp(8));
+        EditText field=host.field("打卡日期",false);field.setText(day);body.addView(field,new LinearLayout.LayoutParams(-1,-2));
+        LinearLayout statuses=new LinearLayout(host.activity);
+        Button done=host.button("已完成",()->{});done.setContentDescription("checkin-status-DONE");
+        Button skipped=host.button("已跳过",()->{});skipped.setContentDescription("checkin-status-SKIPPED");
+        Button unrecorded=host.button("标记未记录",()->{});unrecorded.setContentDescription("checkin-status-UNRECORDED");
+        for(Button b:new Button[]{done,skipped,unrecorded})statuses.addView(b,new LinearLayout.LayoutParams(0,host.dp(48),1));body.addView(statuses);
+        TextView validation=host.text("",14,TodayScreen.ERROR);body.addView(validation);
+        final CalendarRules.Status[] picked={current==null?CalendarRules.Status.DONE:current};
+        done.setOnClickListener(v->{picked[0]=CalendarRules.Status.DONE;done.setBackgroundTintList(android.content.res.ColorStateList.valueOf(TodayScreen.ACCENT));done.setTextColor(TodayScreen.WHITE);skipped.setBackgroundTintList(android.content.res.ColorStateList.valueOf(TodayScreen.TINT));skipped.setTextColor(TodayScreen.ACCENT);unrecorded.setBackgroundTintList(android.content.res.ColorStateList.valueOf(TodayScreen.TINT));unrecorded.setTextColor(TodayScreen.ACCENT);});
+        skipped.setOnClickListener(v->{picked[0]=CalendarRules.Status.SKIPPED;skipped.setBackgroundTintList(android.content.res.ColorStateList.valueOf(TodayScreen.ACCENT));skipped.setTextColor(TodayScreen.WHITE);done.setBackgroundTintList(android.content.res.ColorStateList.valueOf(TodayScreen.TINT));done.setTextColor(TodayScreen.ACCENT);unrecorded.setBackgroundTintList(android.content.res.ColorStateList.valueOf(TodayScreen.TINT));unrecorded.setTextColor(TodayScreen.ACCENT);});
+        unrecorded.setOnClickListener(v->{picked[0]=CalendarRules.Status.UNRECORDED;unrecorded.setBackgroundTintList(android.content.res.ColorStateList.valueOf(TodayScreen.ACCENT));unrecorded.setTextColor(TodayScreen.WHITE);done.setBackgroundTintList(android.content.res.ColorStateList.valueOf(TodayScreen.TINT));done.setTextColor(TodayScreen.ACCENT);skipped.setBackgroundTintList(android.content.res.ColorStateList.valueOf(TodayScreen.TINT));skipped.setTextColor(TodayScreen.ACCENT);});
+        if(picked[0]==CalendarRules.Status.DONE)done.performClick();else if(picked[0]==CalendarRules.Status.SKIPPED)skipped.performClick();
+        AlertDialog dialog=new AlertDialog.Builder(host.activity).setTitle("补记 / 修改打卡").setView(body).setNegativeButton("取消",null).setPositiveButton("保存记录",null).create();
+        dialog.setOnShowListener(unused->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+            String input=field.getText().toString().trim();LocalDate date;
+            try{date=LocalDate.parse(input);if(!date.toString().equals(input))throw new IllegalArgumentException();}
+            catch(Exception e){validation.setText("日期格式应为 2026-09-21");return;}
+            dialog.setCancelable(false);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);field.setEnabled(false);
+            host.work(()->{host.db.putMark(new CalendarRules.Mark(id,date,picked[0],"",Instant.now()));return true;},ignored->{dialog.dismiss();load();},()->{
+                dialog.setCancelable(true);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);field.setEnabled(true);validation.setText("未能保存，请检查内容后重试");
+            });
+        }));
+        dialog.show();
+    }
+    private void mark(long id,LocalDate day,CalendarRules.Status status){host.work(()->{host.db.putMark(new CalendarRules.Mark(id,day,status,"",Instant.now()));return true;},ignored->load(),null);}
 }

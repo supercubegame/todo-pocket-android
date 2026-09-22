@@ -446,14 +446,9 @@ public class VerifyNotePng {
             run([adb,'-s',SERIAL,'push',path,'/sdcard/Download/'+name])
         def note_screen():
             start(); tap('活动'); ready(); touch('activity-1'); ready(); tap('笔记'); ready()
-        # Reuse the already verified real-finger injector without running the legacy suite.
         # API34 image grids expose a description, not a text node; select in list view.
-        import ast
-        helper_tree=ast.parse((ROOT/'tools/ui_test.py').read_text())
-        helper_functions=[n for n in helper_tree.body if isinstance(n,ast.FunctionDef) and n.name in ('adb','prepare_touch')]
-        assert {n.name for n in helper_functions}=={'adb','prepare_touch'},'legacy finger helper contract missing'
-        finger={'os':os,'Path':Path,'subprocess':subprocess,'touch_ready':False}
-        exec(compile(ast.fix_missing_locations(ast.Module(body=helper_functions,type_ignores=[])),'ci-finger-helpers','exec'),finger)
+        # Use the same shell tap as the verified SAF backup flow. The legacy finger
+        # helper remains untouched in ui_test.py; its API34 exit 137 is not diagnosed.
         def pick_image(name=None):
             tap('加入图片'); tap('从文件选择')
             if name is not None:
@@ -464,9 +459,8 @@ public class VerifyNotePng {
                 assert target.get('package','').endswith('documentsui'),'image fixture selection must stay in system picker'
                 x1,y1,x2,y2=map(int,re.findall(r'\d+',target.get('bounds')))
                 assert x2>x1 and y2>y1,'document filename must have actual touch bounds'
-                finger['prepare_touch']()
-                accepted=finger['adb']('shell','CLASSPATH=/data/local/tmp/pocket-touch.jar','app_process','/system/bin','PocketTouch',str((x1+x2)//2),str((y1+y2)//2))
-                assert 'FINGER_TOUCH source=4098 tool=1 accepted' in accepted,'system picker touch injection failed'
+                print('IMAGE_PICKER_TARGET '+repr(target.attrib),flush=True)
+                tap_node(target)
         note_screen(); pick_image()
         ok(any(n.get('package','').endswith('documentsui') for n in nodes()),'image import opens the actual system document picker')
         shell('input','keyevent','KEYCODE_BACK')

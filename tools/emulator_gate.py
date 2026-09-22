@@ -377,6 +377,59 @@ def verify_native_ui(adb):
             ok(len(media)==1 and media[0][1].startswith('image/') and media[0][2]>0,'image bytes registered under immutable content id')
             ok(blocks[1][2]==media[0][0],'image block references exact registered media id')
             ok(db.execute('SELECT count(*) FROM ledger').fetchone()[0]==6,'notes never mutate the ledger')
+            before_notes=db.execute('SELECT * FROM notes ORDER BY id').fetchall()
+            before_blocks=db.execute('SELECT * FROM blocks ORDER BY note_id,position').fetchall()
+            before_media=db.execute('SELECT * FROM media ORDER BY id').fetchall()
+            before_ledger=db.execute('SELECT * FROM ledger ORDER BY id').fetchall()
+        # Independent read of the actual private file, not just its registration.
+        asset,mime,registered_size=media[0]
+        assert re.fullmatch(r'[0-9a-f]{64}',asset), 'invalid media ID cannot enter adb path'
+        image_bytes=subprocess.check_output([str(adb),'-s',SERIAL,'exec-out','run-as',PKG,'cat','files/media/'+asset],timeout=30)
+        ok(len(image_bytes)==registered_size and hashlib.sha256(image_bytes).hexdigest()==asset,'actual private PNG bytes match registry size and content ID')
+        image_file=(out/'note-media.png').resolve(); image_file.write_bytes(image_bytes)
+        # Generated verification helper uses host JDK ImageIO, independent of Android Bitmap.
+        helper=Path('build/ci-note-image'); helper.mkdir(parents=True,exist_ok=True)
+        source=helper/'VerifyNotePng.java'
+        source.write_text('''import java.awt.image.BufferedImage;
+import java.io.File;
+import javax.imageio.ImageIO;
+public class VerifyNotePng {
+ public static void main(String[] args) throws Exception {
+  BufferedImage image=ImageIO.read(new File(args[0]));
+  if(image==null || image.getWidth()!=96 || image.getHeight()!=96) throw new AssertionError("Expected decoded 96x96 PNG");
+  for(int y=0;y<96;y++) for(int x=0;x<96;x++)
+   if(image.getRGB(x,y)!=0xff21785f) throw new AssertionError("Wrong or transparent pixel at "+x+","+y);
+  System.out.println("NOTE_PNG_PIXELS_PASS 9216");
+ }
+}
+''')
+        run(['javac','-d',helper,source],timeout=40)
+        decoded=run(['java','-Djava.awt.headless=true','-cp',helper,'VerifyNotePng',image_file],timeout=40,capture=True).stdout
+        ok(image_bytes[:8]==b'\x89PNG\r\n\x1a\n' and decoded.strip()=='NOTE_PNG_PIXELS_PASS 9216','independent PNG decoder verifies all 9216 opaque expected pixels')
+        text_id=before_blocks[0][1]
+        start(); tap('活动'); ready(); touch('activity-1'); ready(); tap('笔记'); ready()
+        touch('note-edit-'+text_id)
+        ok(desc('文字内容').get('text')=='Watered 20 min today','edit existing note opens with the exact stored text')
+        clear_field('文字内容'); type_text('Discard note edit'); tap('取消'); ready()
+        ok(desc('note-text-'+text_id).get('text')=='Watered 20 min today' and absent('Discard note edit'),'cancel note edit preserves original text and identity')
+        touch('note-edit-'+text_id); clear_field('文字内容'); tap('保存')
+        ok(find(text='内容不能为空') is not None and find(text='修改文字') is not None,'blank existing note edit stays open with visible validation')
+        tap('取消'); ready(); stop()
+        with sqlite3.connect(copy_db('note-cancel.db')) as db:
+            ok(db.execute('SELECT * FROM notes ORDER BY id').fetchall()==before_notes and db.execute('SELECT * FROM blocks ORDER BY note_id,position').fetchall()==before_blocks,'cancelled valid and blank note edits leave exact persisted note rows unchanged')
+        start(); tap('活动'); ready(); touch('activity-1'); ready(); tap('笔记'); ready()
+        touch('note-edit-'+text_id); clear_field('文字内容'); type_text('Watered 35 min today'); tap('保存'); ready()
+        ok(desc('note-text-'+text_id).get('text')=='Watered 35 min today' and absent('Watered 20 min today'),'note edit replaces text in place without leaving an old duplicate')
+        restart(); tap('活动'); ready(); touch('activity-1'); ready(); tap('笔记'); ready()
+        ok(desc('note-text-'+text_id).get('text')=='Watered 35 min today','edited note text and stable block identity survive stopped-process restart')
+        ok(desc('note-image-'+before_blocks[1][1]).get('class')=='android.widget.ImageView','image remains an image view after editing text and restarting')
+        shot('10-note-edited.png'); stop()
+        with sqlite3.connect(copy_db('note-edited.db')) as db:
+            expected_blocks=[list(row) for row in before_blocks]; expected_blocks[0][4]='Watered 35 min today'
+            ok(db.execute('SELECT * FROM notes ORDER BY id').fetchall()==before_notes and db.execute('SELECT * FROM blocks ORDER BY note_id,position').fetchall()==[tuple(row) for row in expected_blocks],'independent readback proves only text changed with note IDs block IDs order and privacy retained')
+            ok(db.execute('SELECT * FROM media ORDER BY id').fetchall()==before_media and db.execute('SELECT * FROM ledger ORDER BY id').fetchall()==before_ledger,'editing note leaves exact media registry and complete ledger unchanged')
+        after_image=subprocess.check_output([str(adb),'-s',SERIAL,'exec-out','run-as',PKG,'cat','files/media/'+asset],timeout=30)
+        ok(after_image==image_bytes,'text editing and restart preserve exact private image bytes')
         result={'status':'PASS','scope':'NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE','ledger_calendar':'NATIVE_MULTI_DATE_LEDGER_PASS','saf_restore':'NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS','checkin_history':'NATIVE_CHECKIN_HISTORY_BACKDATE_PASS','note_editor':'NATIVE_TEXT_IMAGE_NOTE_PASS','api':API,'count':len(checks),'checks':checks,'screenshots':shots,'infra_retries':infra_retries,'restore_undo':'NOT_IMPLEMENTED','restore_preview_lifecycle':'NOT_TESTED','checkin_schedules':'NOT_IMPLEMENTED','real_photo_selection':'NOT_IMPLEMENTED','photos':'NOT_TESTED','sharing':'NOT_TESTED','release_ready':False}
     except Exception as exc:
         result={'status':'FAIL','api':API,'count':len(checks),'checks':checks,'error':repr(exc),'screenshots':shots,'infra_retries':infra_retries,'release_ready':False}

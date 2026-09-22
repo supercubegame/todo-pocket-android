@@ -68,13 +68,17 @@ public final class NoteEditorScreen {
                 list.addView(edit,new LinearLayout.LayoutParams(-1,host.dp(48)));
             }else{
                 LinearLayout row=host.column();row.setPadding(host.dp(10),host.dp(8),host.dp(10),host.dp(8));row.setBackground(host.shape(TodayScreen.WHITE,10));
+                LinearLayout meta=new LinearLayout(host.activity);
+                TextView privacy=host.text(b.privateContent?"私有图片":"非私有图片",14,TodayScreen.MUTED);privacy.setContentDescription("note-image-privacy-"+b.id);
+                meta.addView(privacy,new LinearLayout.LayoutParams(0,-2,1));
+                Button edit=host.button("说明 / 私有",()->editImage(s,b));edit.setContentDescription("note-image-edit-"+b.id);meta.addView(edit,new LinearLayout.LayoutParams(-2,host.dp(48)));row.addView(meta);
+                if(!b.caption.isEmpty())row.addView(host.text(b.caption,14,TodayScreen.MUTED));
                 android.graphics.Bitmap image=s.previews.get(b.id);
                 if(image!=null){
                     ImageView view=new ImageView(host.activity);
                     view.setImageBitmap(image);view.setAdjustViewBounds(true);view.setMaxHeight(host.dp(220));
                     view.setContentDescription("note-image-"+b.id);row.addView(view);
                 }else{TextView broken=host.text("图片副本不可用",15,TodayScreen.ERROR);broken.setContentDescription("note-image-"+b.id);row.addView(broken);}
-                if(!b.caption.isEmpty())row.addView(host.text(b.caption,14,TodayScreen.MUTED));
                 list.addView(row);
             }
         }
@@ -123,6 +127,24 @@ public final class NoteEditorScreen {
             dialog.setCancelable(false);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);field.setEnabled(false);
             host.work(()->{persist(s,NoteDocument.Block.text(id,value,privateContent),existingId!=null);return true;},ignored->{dialog.dismiss();load();},()->{
                 dialog.setCancelable(true);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);field.setEnabled(true);validation.setText("未能保存，请检查内容后重试");validation.setTextColor(TodayScreen.ERROR);
+            });
+        }));
+        dialog.show();
+    }
+    /** Metadata only: stable block/asset identity and original bytes remain untouched.
+     * Private is a future sharing filter, not encryption or omission from full backups. */
+    private void editImage(State s,NoteDocument.Block existing){
+        LinearLayout body=host.column();body.setPadding(host.dp(20),host.dp(4),host.dp(20),host.dp(8));
+        body.addView(host.text("图片说明（可留空）",14,TodayScreen.MUTED));
+        EditText field=host.field("图片说明",true);field.setContentDescription("image-caption");field.setHint("");field.setText(existing.caption);body.addView(field,new LinearLayout.LayoutParams(-1,-2));
+        CheckBox privacy=new CheckBox(host.activity);privacy.setText("标记为私有图片");privacy.setContentDescription("image-private");privacy.setChecked(existing.privateContent);body.addView(privacy);
+        TextView validation=host.text("仅修改说明和标记，不改原图。私有不是加密，完整备份仍包含；分享排除尚未实现。",14,TodayScreen.MUTED);body.addView(validation);
+        AlertDialog dialog=new AlertDialog.Builder(host.activity).setTitle("图片说明与私有标记").setView(body).setNegativeButton("取消",null).setPositiveButton("保存",null).create();
+        dialog.setOnShowListener(unused->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+            String caption=field.getText().toString().trim();boolean privateContent=privacy.isChecked();
+            dialog.setCancelable(false);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);field.setEnabled(false);privacy.setEnabled(false);
+            host.work(()->{persist(s,NoteDocument.Block.image(existing.id,existing.assetId,caption,privateContent),true);return true;},ignored->{dialog.dismiss();load();},()->{
+                dialog.setCancelable(true);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);field.setEnabled(true);privacy.setEnabled(true);validation.setText("未能保存，请重试；原图不变");validation.setTextColor(TodayScreen.ERROR);
             });
         }));
         dialog.show();

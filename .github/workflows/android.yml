@@ -190,10 +190,10 @@ jobs:
               published.append(asset)
             native[str(api_level)]['published_screenshots']=published
           restore='SCHEMA2_DB_MEDIA_BYTES_PASS' if all(d['result'].get('status')=='PASS' and d['result'].get('full_backup_restore')=='SCHEMA2_DB_MEDIA_BYTES_PASS' for d in devices.values()) else 'NOT_VERIFIED'
-          native_status='PASS' if all(n.get('status')=='PASS' and n.get('scope')=='NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_RESTORE_SLICE' and n.get('count',0)>0 and n.get('saf_restore')=='NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS' for n in native.values()) else 'NOT_VERIFIED'
+          native_status='PASS' if all(n.get('status')=='PASS' and n.get('scope')=='NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE' and n.get('count',0)>0 and n.get('saf_restore')=='NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS' for n in native.values()) else 'NOT_VERIFIED'
           guarded_status='PASS' if all(g['status']=='PASS' for g in guarded.values()) else 'NOT_VERIFIED'
           guarded_asset=publish('reports/restore-plan-'+source+'-'+run+'.json',(json.dumps({'commit':source,'run_id':run,'status':guarded_status,'scope':'GUARDED_RESTORE_BACKEND_NOT_SAF_UI','devices':guarded,'saf_restore_ui':'SEE_NATIVE_INDEX','undo_restore':'NOT_IMPLEMENTED','release_ready':False},ensure_ascii=False,indent=2)+'\n').encode())
-          index={'commit':source,'run_id':run,'scope':'NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_RESTORE_SLICE','status':native_status,'devices':native,'release_ready':False}
+          index={'commit':source,'run_id':run,'scope':'NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE','status':native_status,'devices':native,'release_ready':False}
           index_asset=publish('reports/native-'+source+'-'+run+'.json',(json.dumps(index,ensure_ascii=False,indent=2)+'\n').encode())
           saf_ui='PASS' if all(n.get('saf_restore')=='NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS' for n in native.values()) else 'NOT_VERIFIED'
           scope=root/'scope';scope.mkdir(exist_ok=True)

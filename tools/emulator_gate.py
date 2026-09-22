@@ -346,7 +346,7 @@ def verify_native_ui(adb):
             marks2=db.execute('SELECT activity_id,day,status,recorded_at FROM checkins ORDER BY day').fetchall()
             ok(len(marks2)==2 and marks2[0][:3]==(1,'2026-09-20','DONE') and marks2[1]==marks[0] and all(row[3] for row in marks2),'SAF restore retains exact check-in history including the re-entered backdate')
         start(); tap('活动'); ready(); touch('activity-1'); ready(); tap('笔记'); ready()
-        ok(find(text='写点什么') is not None,'empty note starts visibly empty without fabricated content')
+        ok(find(text='写点什么，或加一张图。') is not None,'empty note starts visibly empty without fabricated content')
         tap('加入文字'); tap('保存'); ok(find(text='内容不能为空') is not None,'blank note save rejected visibly')
         tap('取消'); ready()
         tap('加入文字'); touch('文字内容'); type_text('今天浇水 20 分钟'); tap('保存'); ready()

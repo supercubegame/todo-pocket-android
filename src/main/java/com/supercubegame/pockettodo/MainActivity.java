@@ -30,8 +30,9 @@ public final class MainActivity extends Activity {
         try{
             if(request==EXPORT_BACKUP){
                 Path temp=Files.createTempFile(getCacheDir().toPath(),"export-",".zip");
-                try{screen.exportBackup(temp);Files.copy(temp,openDestination(uri),StandardCopyOption.REPLACE_EXISTING);screen.backupExported();}
-                finally{Files.deleteIfExists(temp);}
+                try(InputStream in=Files.newInputStream(temp);java.io.OutputStream out=openDestination(uri)){
+                    screen.exportBackup(temp);byte[] buffer=new byte[16384];int n;while((n=in.read(buffer))!=-1){if(n==0)throw new IOException("备份读取未取得进展");out.write(buffer,0,n);}screen.backupExported();
+                }finally{Files.deleteIfExists(temp);}
             }else if(request==IMPORT_BACKUP){
                 Path chosen=Files.createTempFile(getCacheDir().toPath(),"chosen-",".zip");boolean success=false;
                 try(InputStream in=getContentResolver().openInputStream(uri)){

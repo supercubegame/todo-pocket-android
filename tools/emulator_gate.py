@@ -310,7 +310,6 @@ def verify_native_ui(adb):
             ok(db.execute('SELECT day,kind,cents FROM ledger WHERE activity_id=1 ORDER BY day,kind').fetchall()==expected,'independent Android SQLite read matches all six exact typed dated entries')
             ok(db.execute('SELECT count(*),count(DISTINCT batch_id),count(DISTINCT id) FROM ledger').fetchone()==(6,6,6),'native saves have distinct entry and batch identities without selection-generated writes')
             ok(db.execute('SELECT count(*) FROM batches WHERE undone=0').fetchone()[0]==6,'cancel and invalid amount leave no batch journal residue')
-            ok(db.execute('SELECT count(*) FROM batches WHERE undone=0').fetchone()[0]==6,'cancel and invalid amount leave no batch journal residue')
             ok(db.execute('SELECT activity_id,day,status,recorded_at FROM checkins').fetchall()==marks,'money and date filtering never mutate the check-in history')
         start(); tap('活动'); ready(); touch('activity-1'); ready(); tap('打卡记录'); ready()
         tap('补记 / 修改'); clear_field('打卡日期'); type_text('not-a-date'); tap('保存记录')
@@ -333,7 +332,7 @@ def verify_native_ui(adb):
         add_todo('After backup'); shot('07-backup.png')
         import_backup('pocket-todo-backup.zip')
         tap('取消'); ready(); tap('今天'); ready()
-        ok(absent('确认恢复') and find(text='After backup') is not None,'canceling SAF restore preview makes no database write')
+        ok(find(text='After backup') is not None and absent('确认恢复'),'canceling SAF restore preview makes no database write')
         stop()
         with sqlite3.connect(copy_db('before-restore.db')) as db:
             rows=db.execute('SELECT title,done FROM todos ORDER BY position').fetchall()

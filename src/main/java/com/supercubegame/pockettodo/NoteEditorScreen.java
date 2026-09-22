@@ -3,12 +3,9 @@ package com.supercubegame.pockettodo;
 import android.app.AlertDialog;
 import android.database.Cursor;
 import android.graphics.Color;
-import android.graphics.drawable.GradientDrawable;
 import android.widget.*;
 import java.io.IOException;
 import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -90,7 +87,6 @@ public final class NoteEditorScreen {
                 ByteArrayOutputStream out=new ByteArrayOutputStream();
                 if(!image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out))throw new IOException("无法生成图片");
                 byte[] bytes=out.toByteArray();
-                State fresh=new State();fresh.media=s.media;
                 String assetId=s.media.copy(new java.io.ByteArrayInputStream(bytes));
                 host.db.registerMedia(assetId,"image/png",bytes.length);
                 String blockId=UUID.randomUUID().toString();
@@ -100,8 +96,8 @@ public final class NoteEditorScreen {
         }));
         pick.show();
     }
-    private void persist(State s,NoteDocument.Block block,boolean replacing)throws IOException{persistBlocks(s,block,replacing);}
-    private void persistBlocks(State s,NoteDocument.Block block,boolean replacing)throws IOException{
+    private void persist(State s,NoteDocument.Block block,boolean replacing){persistBlocks(s,block,replacing);}
+    private void persistBlocks(State s,NoteDocument.Block block,boolean replacing){
         String noteId=s.noteId;
         if(noteId==null){noteId=UUID.randomUUID().toString();host.db.createNote(noteId,activityId,"");s.noteId=noteId;}
         List<NoteDocument.Block> next=new ArrayList<>(s.blocks);

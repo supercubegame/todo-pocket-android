@@ -11,7 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-/** Native single-note editor for an activity: ordered text then image blocks.
+/** Native activity note editor: stable note selection and ordered text/image blocks.
  * SAF-selected PNG/JPEG originals are private immutable copies, with bounded previews.
  * Camera, EXIF orientation, crop and opaque redaction remain subsequent work.
  * Writes go through validated AppDatabase APIs; UI read queries never mutate raw SQL.
@@ -21,20 +21,24 @@ public final class NoteEditorScreen {
     private final long activityId;
     private final String title;
     private final Runnable back;
+    // Selection belongs to this screen instance; a fresh screen defaults to the first note.
+    private String selectedNote;
     private static final class State {
         String noteId;
+        final List<String> ids=new ArrayList<>(),titles=new ArrayList<>();
         final List<NoteDocument.Block> blocks=new ArrayList<>();
         MediaRepository media;
         final java.util.Map<String,android.graphics.Bitmap> previews=new java.util.HashMap<>();
     }
     NoteEditorScreen(TodayScreen host,long activityId,String title,Runnable back){this.host=host;this.activityId=activityId;this.title=title;this.back=back;}
     void load(){
+        final String requested=selectedNote;
         host.work(()->{
             State s=new State();
             s.media=new MediaRepository(host.activity.getFilesDir().toPath().resolve("media"),64L*1024*1024);
-            List<String> ids=new ArrayList<>();
-            try(Cursor c=host.db.getReadableDatabase().rawQuery("SELECT id FROM notes WHERE activity_id=? ORDER BY rowid",new String[]{Long.toString(activityId)})){while(c.moveToNext())ids.add(c.getString(0));}
-            if(!ids.isEmpty()){s.noteId=ids.get(0);s.blocks.addAll(host.db.noteBlocks(s.noteId));}
+            try(Cursor c=host.db.getReadableDatabase().rawQuery("SELECT id,title FROM notes WHERE activity_id=? ORDER BY rowid",new String[]{Long.toString(activityId)})){while(c.moveToNext()){s.ids.add(c.getString(0));s.titles.add(c.getString(1));}}
+            if(requested!=null&&!s.ids.contains(requested))throw new IllegalStateException("所选笔记已不存在，请返回活动重新打开");
+            if(!s.ids.isEmpty()){s.noteId=requested==null?s.ids.get(0):requested;s.blocks.addAll(host.db.noteBlocks(s.noteId));}
             for(NoteDocument.Block b:s.blocks)if(b.kind==NoteDocument.Kind.IMAGE){
                 try{s.previews.put(b.id,decodePreview(s.media.path(b.assetId)));}
                 catch(IOException ignored){/* Render an explicit unavailable marker, never a fake image. */}
@@ -43,11 +47,14 @@ public final class NoteEditorScreen {
         },this::render,null);
     }
     private void render(State s){
+        selectedNote=s.noteId;
         LinearLayout body=host.content();
         LinearLayout header=new LinearLayout(host.activity);
         header.addView(host.button("返回活动",back),new LinearLayout.LayoutParams(0,host.dp(48),1));
-        TextView name=host.text("笔记",22,TodayScreen.INK);name.setGravity(android.view.Gravity.CENTER);header.addView(name,new LinearLayout.LayoutParams(0,host.dp(48),1));body.addView(header);
-        TextView owner=host.text(title+" · 图文并存，图是登记的本地副本",15,TodayScreen.MUTED);owner.setMaxLines(2);owner.setPadding(0,host.dp(4),0,host.dp(10));body.addView(owner);
+        header.addView(host.button("新建笔记",this::createNote),new LinearLayout.LayoutParams(0,host.dp(48),1));
+        Button choose=host.button("切换笔记",()->chooseNote(s));choose.setEnabled(!s.ids.isEmpty());header.addView(choose,new LinearLayout.LayoutParams(0,host.dp(48),1));body.addView(header);
+        int index=s.ids.indexOf(s.noteId);
+        TextView owner=host.text(index<0?title+" · 尚无笔记":s.titles.get(index)+" · "+(index+1)+" / "+s.ids.size(),15,TodayScreen.MUTED);owner.setContentDescription("note-current");owner.setMaxLines(2);owner.setPadding(0,host.dp(4),0,host.dp(10));body.addView(owner);
         LinearLayout actions=new LinearLayout(host.activity);
         actions.addView(host.button("加入文字",()->editText(s,null)),new LinearLayout.LayoutParams(0,host.dp(48),1));
         actions.addView(host.button("加入图片",()->addImage(s)),new LinearLayout.LayoutParams(0,host.dp(48),1));body.addView(actions);
@@ -71,6 +78,31 @@ public final class NoteEditorScreen {
                 list.addView(row);
             }
         }
+    }
+    private void chooseNote(State s){
+        String[] labels=new String[s.ids.size()];
+        for(int i=0;i<labels.length;i++)labels[i]=(i+1)+". "+s.titles.get(i);
+        new AlertDialog.Builder(host.activity).setTitle("选择笔记").setItems(labels,(dialog,which)->{
+            selectedNote=s.ids.get(which);load();
+        }).setNegativeButton("取消",null).show();
+    }
+    /** Creating an explicitly named empty note is intentional; cancel and blank never write.
+     * IDs, not titles, drive selection, so duplicate titles never replace an existing note. */
+    private void createNote(){
+        LinearLayout body=host.column();body.setPadding(host.dp(20),host.dp(4),host.dp(20),host.dp(8));
+        EditText field=host.field("笔记标题",false);body.addView(field,new LinearLayout.LayoutParams(-1,-2));
+        TextView validation=host.text("创建后可加入文字和图片；同名笔记会分开保存。",14,TodayScreen.MUTED);body.addView(validation);
+        AlertDialog dialog=new AlertDialog.Builder(host.activity).setTitle("新建笔记").setView(body).setNegativeButton("取消",null).setPositiveButton("创建",null).create();
+        dialog.setOnShowListener(unused->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+            String value=field.getText().toString().trim();
+            if(value.isEmpty()){validation.setText("笔记标题不能为空");validation.setTextColor(TodayScreen.ERROR);return;}
+            String id=UUID.randomUUID().toString();
+            dialog.setCancelable(false);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);field.setEnabled(false);
+            host.work(()->{host.db.createNote(id,activityId,value);return id;},created->{selectedNote=created;dialog.dismiss();load();},()->{
+                dialog.setCancelable(true);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);field.setEnabled(true);validation.setText("未能创建，请重试");validation.setTextColor(TodayScreen.ERROR);
+            });
+        }));
+        dialog.show();
     }
     /** Own dialog, not the shared editor helper: that one intentionally accepts blank
      * multiline input for path clearing, while a note text block must never be blank. */

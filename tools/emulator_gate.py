@@ -124,11 +124,20 @@ def verify_native_ui(adb):
     """Only real taps/text input; independently read SQLite after force-stop, no seeding UI DB."""
     out = Path('native-ui'); out.mkdir(exist_ok=True)
     checks, shots = [], []
+    infra_retries = []
     def shell(*args):
         return subprocess.check_output([str(adb), '-s', SERIAL, 'shell', *args], text=True, timeout=40)
     def nodes():
-        shell('uiautomator', 'dump', '/sdcard/pocket-window.xml')
-        return list(ET.fromstring(shell('cat', '/sdcard/pocket-window.xml')).iter('node'))
+        last=None
+        for attempt in range(4):
+            try:
+                shell('uiautomator', 'dump', '/sdcard/pocket-window.xml')
+                return list(ET.fromstring(shell('cat', '/sdcard/pocket-window.xml')).iter('node'))
+            except (subprocess.CalledProcessError, ET.ParseError) as exc:
+                last=exc; infra_retries.append('uiautomator-snapshot')
+                print('INFRA_RETRY uiautomator snapshot attempt '+str(attempt+1)+' failed: '+repr(exc),flush=True)
+                time.sleep(1.5)
+        raise AssertionError('uiautomator snapshot failed repeatedly: '+repr(last))
     def tap_node(n):
         assert n.get('enabled')=='true', 'disabled touch target '+repr(n.attrib)
         x1,y1,x2,y2=map(int,re.findall(r'\d+',n.get('bounds')))
@@ -349,28 +358,28 @@ def verify_native_ui(adb):
         ok(find(text='写点什么，或加一张图。') is not None,'empty note starts visibly empty without fabricated content')
         tap('加入文字'); tap('保存'); ok(find(text='内容不能为空') is not None,'blank note save rejected visibly')
         tap('取消'); ready()
-        tap('加入文字'); touch('文字内容'); type_text('今天浇水 20 分钟'); tap('保存'); ready()
-        ok(find(text='今天浇水 20 分钟') is not None,'saved note text appears on activity')
+        tap('加入文字'); touch('文字内容'); type_text('Watered 20 min today'); tap('保存'); ready()
+        ok(find(text='Watered 20 min today') is not None,'saved note text appears on activity')
         shot('09-note.png')
         restart(); tap('活动'); ready(); touch('activity-1'); ready()
-        ok(find(text='今天浇水 20 分钟') is not None,'note survives process restart')
+        ok(find(text='Watered 20 min today') is not None,'note survives process restart')
         tap('笔记'); ready(); tap('加入图片'); ready()
         tap('加入合成图'); ready()
         ok(any(n.get('content-desc','').startswith('note-image-') for n in nodes()),'attached image is registered with note')
         stop()
         with sqlite3.connect(copy_db('note-after.db')) as db:
             notes=db.execute('SELECT id,activity_id,title FROM notes').fetchall()
-            ok(notes and notes[0][1]==1 and notes[0][2]=='','note stays untitled and bound to its activity')
+            ok(notes and notes[0][1]==1 and notes[0][2]=='Daily reward','note inherits its activity title and stays bound to that activity')
             blocks=db.execute('SELECT kind,text,asset_id,private FROM blocks ORDER BY position').fetchall()
-            ok(len(blocks)==2 and blocks[0][0]=='TEXT' and blocks[0][1]=='今天浇水 20 分钟' and blocks[1][0]=='IMAGE','note keeps ordered text then image blocks')
+            ok(len(blocks)==2 and blocks[0][0]=='TEXT' and blocks[0][1]=='Watered 20 min today' and blocks[1][0]=='IMAGE','note keeps ordered text then image blocks')
             ok(blocks[1][3]==0,'image block is not private by default')
             media=db.execute('SELECT id,mime,bytes FROM media').fetchall()
             ok(len(media)==1 and media[0][1].startswith('image/') and media[0][2]>0,'image bytes registered under immutable content id')
             ok(blocks[1][2]==media[0][0],'image block references exact registered media id')
             ok(db.execute('SELECT count(*) FROM ledger').fetchone()[0]==6,'notes never mutate the ledger')
-        result={'status':'PASS','scope':'NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE','ledger_calendar':'NATIVE_MULTI_DATE_LEDGER_PASS','saf_restore':'NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS','checkin_history':'NATIVE_CHECKIN_HISTORY_BACKDATE_PASS','note_editor':'NATIVE_TEXT_IMAGE_NOTE_PASS','api':API,'count':len(checks),'checks':checks,'screenshots':shots,'restore_undo':'NOT_IMPLEMENTED','restore_preview_lifecycle':'NOT_TESTED','checkin_schedules':'NOT_IMPLEMENTED','real_photo_selection':'NOT_IMPLEMENTED','photos':'NOT_TESTED','sharing':'NOT_TESTED','release_ready':False}
+        result={'status':'PASS','scope':'NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE','ledger_calendar':'NATIVE_MULTI_DATE_LEDGER_PASS','saf_restore':'NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS','checkin_history':'NATIVE_CHECKIN_HISTORY_BACKDATE_PASS','note_editor':'NATIVE_TEXT_IMAGE_NOTE_PASS','api':API,'count':len(checks),'checks':checks,'screenshots':shots,'infra_retries':infra_retries,'restore_undo':'NOT_IMPLEMENTED','restore_preview_lifecycle':'NOT_TESTED','checkin_schedules':'NOT_IMPLEMENTED','real_photo_selection':'NOT_IMPLEMENTED','photos':'NOT_TESTED','sharing':'NOT_TESTED','release_ready':False}
     except Exception as exc:
-        result={'status':'FAIL','api':API,'count':len(checks),'checks':checks,'error':repr(exc),'screenshots':shots,'release_ready':False}
+        result={'status':'FAIL','api':API,'count':len(checks),'checks':checks,'error':repr(exc),'screenshots':shots,'infra_retries':infra_retries,'release_ready':False}
         try: shot('failure.png')
         except Exception: pass
         (out/'native-result.json').write_text(json.dumps(result,ensure_ascii=False,indent=2))

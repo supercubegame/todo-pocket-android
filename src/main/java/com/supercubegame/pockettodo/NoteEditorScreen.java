@@ -111,7 +111,7 @@ public final class NoteEditorScreen {
     private void persist(State s,NoteDocument.Block block,boolean replacing){persistBlocks(s,block,replacing);}
     private void persistBlocks(State s,NoteDocument.Block block,boolean replacing){
         String noteId=s.noteId;
-        if(noteId==null){noteId=UUID.randomUUID().toString();host.db.createNote(noteId,activityId,"");s.noteId=noteId;}
+        if(noteId==null){noteId=UUID.randomUUID().toString();host.db.createNote(noteId,activityId,title);s.noteId=noteId;}
         List<NoteDocument.Block> next=new ArrayList<>(s.blocks);
         if(replacing){for(int i=0;i<next.size();i++)if(next.get(i).id.equals(block.id)){next.set(i,block);break;}}
         else next.add(block);

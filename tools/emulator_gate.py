@@ -491,8 +491,103 @@ public class VerifyNotePng {
         with sqlite3.connect(copy_db('pick-restart.db')) as db:
             ok(db.execute('SELECT * FROM blocks ORDER BY note_id,position').fetchall()==selected_blocks,'selected image block identity order and reference survive restart')
         ok(subprocess.check_output([str(adb),'-s',SERIAL,'exec-out','run-as',PKG,'cat','files/media/'+chosen_id],timeout=30)==chosen,'source deletion never removes or changes the private selected image')
+        # Stage14: prove actual JPEG selection, inclusive pixel budget and image-first note.
+        # Fixtures stay synthetic. Host ImageIO is independent of Android BitmapFactory.
+        edge_ok=png(5000,4000); edge_bad=png(5000,4001)
+        assert 5000*4000==20000000 and 5000*4001>20000000 and max(5000,4001)<16384
+        assert max(len(edge_ok),len(edge_bad))<8*1024*1024,'pixel fixtures must not hit byte or edge rejection first'
+        (fixture_dir/'pocket-pixel-limit.png').write_bytes(edge_ok)
+        (fixture_dir/'pocket-pixel-over.png').write_bytes(edge_bad)
+        source=helper/'ImageImportFixture.java'
+        source.write_text('''import java.awt.image.BufferedImage;
+import java.io.File;
+import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
+public class ImageImportFixture {
+ static void verify(File file,String format,int width,int height) throws Exception {
+  try(ImageInputStream in=ImageIO.createImageInputStream(file)){
+   ImageReader reader=ImageIO.getImageReaders(in).next(); reader.setInput(in);
+   if(!reader.getFormatName().equalsIgnoreCase(format))throw new AssertionError("format");
+   BufferedImage image=reader.read(0);
+   if(image.getWidth()!=width||image.getHeight()!=height)throw new AssertionError("dimensions");
+   int[] expected={0xffdc4628,0xff235ad2};
+   for(int half=0;half<2;half++){
+    int pixel=image.getRGB(half==0?10:width-11,height/2);
+    for(int shift:new int[]{0,8,16})if(Math.abs(((pixel>>shift)&255)-((expected[half]>>shift)&255))>3)
+     throw new AssertionError("fixture decoded color");
+   }
+   image.flush();reader.dispose();
+  }
+ }
+ public static void main(String[] args)throws Exception{
+  File dir=new File(args[0]); BufferedImage image=new BufferedImage(1600,900,BufferedImage.TYPE_INT_RGB);
+  for(int y=0;y<900;y++)for(int x=0;x<1600;x++)image.setRGB(x,y,x<800?0xffdc4628:0xff235ad2);
+  File jpeg=new File(dir,"pocket-first.jpg");
+  if(!ImageIO.write(image,"jpeg",jpeg))throw new AssertionError("JPEG encoder missing");
+  image.flush();verify(jpeg,"JPEG",1600,900);
+  verify(new File(dir,"pocket-pixel-limit.png"),"PNG",5000,4000);
+  verify(new File(dir,"pocket-pixel-over.png"),"PNG",5000,4001);
+  System.out.println("IMAGE_IMPORT_FIXTURES_PASS JPEG=1600x900 PNG=20000000/20005000");
+ }
+}
+''')
+        run(['javac','-d',helper,source],timeout=40)
+        fixture_result=run(['java','-Djava.awt.headless=true','-cp',helper,'ImageImportFixture',fixture_dir],timeout=60,capture=True).stdout
+        ok(fixture_result.strip()=='IMAGE_IMPORT_FIXTURES_PASS JPEG=1600x900 PNG=20000000/20005000','independent host decoder proves JPEG and both pixel boundary fixtures really decode with intended dimensions and colors')
+        jpeg=(fixture_dir/'pocket-first.jpg').read_bytes(); jpeg_id=hashlib.sha256(jpeg).hexdigest()
+        assert jpeg[:2]==b'\xff\xd8' and len(jpeg)<8*1024*1024,'JPEG fixture must satisfy its independent byte precondition'
+        for name in ('pocket-first.jpg','pocket-pixel-limit.png','pocket-pixel-over.png'):
+            run([adb,'-s',SERIAL,'push',fixture_dir/name,'/sdcard/Download/'+name])
+        start();tap('活动');ready();touch('category-add-1');touch('活动名称');type_text('Image first');tap('保存');ready()
+        first_desc=find(text='Image first').get('content-desc','')
+        assert re.fullmatch(r'activity-\d+',first_desc) and first_desc!='activity-1','new visible activity must have an independent identity'
+        first_activity=int(first_desc.split('-')[1]);stop()
+        def state_read(name):
+            with sqlite3.connect(copy_db(name)) as db:
+                return {t:db.execute('SELECT * FROM '+t+' ORDER BY rowid').fetchall() for t in TABLES}
+        first_base=state_read('first-image-base.db')
+        ok(not any(row[1]==first_activity for row in first_base['notes']),'new image-first activity has no existing note in independent SQLite read')
+        def first_screen():
+            start();tap('活动');ready();touch(first_desc);ready();tap('笔记');ready()
+        first_screen();ok(find(text='写点什么，或加一张图。') is not None,'image-first activity shows genuine empty note before any import')
+        pick_image();shell('input','keyevent','KEYCODE_BACK')
+        ok(find(**{'content-desc':'v12-status','text':'已取消选图，没有改变笔记'}) is not None,'canceling first image reports no note change')
+        stop();ok(state_read('first-image-cancel.db')==first_base,'first-image cancel creates no orphan note media block or revision')
+        for filename,label in [('pocket-broken.png','malformed first image'),('pocket-pixel-over.png','20005000-pixel first image')]:
+            first_screen();pick_image(filename)
+            ok(find(**{'content-desc':'v12-status','text':'图片未加入：仅支持有效 PNG/JPEG，最大 8 MiB、2000 万像素、单边 16384'}) is not None,label+' rejected visibly before note creation')
+            stop();ok(state_read('first-reject-'+filename+'.db')==first_base,label+' leaves every table unchanged with no orphan note or media registration')
+        first_screen();pick_image('pocket-first.jpg');ready();stop()
+        first_saved=state_read('first-image-saved.db')
+        new_notes=[row for row in first_saved['notes'] if row not in first_base['notes']]
+        ok(len(new_notes)==1 and new_notes[0][1:]==(first_activity,'Image first') and all(row in first_saved['notes'] for row in first_base['notes']),'JPEG-first import creates exactly one note with correct activity binding title and preserved prior notes')
+        first_note=new_notes[0][0]
+        new_blocks=[row for row in first_saved['blocks'] if row not in first_base['blocks']]
+        ok(len(new_blocks)==1 and new_blocks[0][0]==first_note and new_blocks[0][2:]==(0,'IMAGE','',jpeg_id,'',0) and all(row in first_saved['blocks'] for row in first_base['blocks']),'JPEG-first import creates exactly one position-zero public image block without touching previous blocks')
+        ok([row for row in first_saved['media'] if row not in first_base['media']]==[(jpeg_id,'image/jpeg',len(jpeg))] and all(row in first_saved['media'] for row in first_base['media']),'JPEG-first media registry has exact actual MIME digest and original byte length')
+        ok(all(first_saved[t]==first_base[t] for t in TABLES if t not in ('revision','notes','blocks','media')),'JPEG-first note creation preserves activities todos checkins ledger and all unrelated tables')
+        def private_bytes(asset_id):
+            assert re.fullmatch(r'[0-9a-f]{64}',asset_id),'only safe digest IDs enter private file paths'
+            return subprocess.check_output([str(adb),'-s',SERIAL,'exec-out','run-as',PKG,'cat','files/media/'+asset_id],timeout=30)
+        ok(private_bytes(jpeg_id)==jpeg,'selected JPEG private original is byte-exact rather than a recompressed preview')
+        shell('rm','/sdcard/Download/pocket-first.jpg');first_screen()
+        ok(desc('note-image-'+new_blocks[0][1]).get('class')=='android.widget.ImageView','JPEG-first note displays a real ImageView after external source deletion and process restart')
+        shot('12-jpeg-first-note.png');stop()
+        ok(state_read('first-image-restart.db')==first_saved and private_bytes(jpeg_id)==jpeg,'JPEG-first restart preserves every database table and exact private JPEG bytes')
+        first_screen();pick_image('pocket-pixel-limit.png');ready();stop()
+        limit_saved=state_read('pixel-limit-saved.db');limit_id=hashlib.sha256(edge_ok).hexdigest()
+        limit_blocks=[row for row in limit_saved['blocks'] if row not in first_saved['blocks']]
+        ok(len(limit_blocks)==1 and limit_blocks[0][0]==first_note and limit_blocks[0][2:]==(1,'IMAGE','',limit_id,'',0) and all(row in limit_saved['blocks'] for row in first_saved['blocks']),'exactly 20000000 pixels is accepted inclusively as one appended ordered image block')
+        ok([row for row in limit_saved['media'] if row not in first_saved['media']]==[(limit_id,'image/png',len(edge_ok))] and all(row in limit_saved['media'] for row in first_saved['media']) and private_bytes(limit_id)==edge_ok,'pixel-limit image keeps exact private original and matching media registry')
+        ok(all(limit_saved[t]==first_saved[t] for t in TABLES if t not in ('revision','blocks','media')),'pixel-limit import preserves note identity and unrelated complete tables')
+        shell('rm','/sdcard/Download/pocket-pixel-limit.png');first_screen();swipe_up()
+        ok(desc('note-image-'+limit_blocks[0][1]).get('class')=='android.widget.ImageView','20000000-pixel image remains an ImageView after source deletion and restart')
+        shot('13-pixel-limit-image.png');stop()
+        ok(state_read('pixel-limit-restart.db')==limit_saved and private_bytes(limit_id)==edge_ok,'pixel-limit restart preserves exact complete database and original image bytes')
         result={'status':'PASS','scope':'NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE','ledger_calendar':'NATIVE_MULTI_DATE_LEDGER_PASS','saf_restore':'NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS','checkin_history':'NATIVE_CHECKIN_HISTORY_BACKDATE_PASS','note_editor':'NATIVE_TEXT_IMAGE_NOTE_PASS','api':API,'count':len(checks),'checks':checks,'screenshots':shots,'infra_retries':infra_retries,'restore_undo':'NOT_IMPLEMENTED','restore_preview_lifecycle':'NOT_TESTED','checkin_schedules':'NOT_IMPLEMENTED','real_photo_selection':'NOT_IMPLEMENTED','photos':'NOT_TESTED','sharing':'NOT_TESTED','release_ready':False}
         result.update(real_photo_selection='NATIVE_SAF_PNG_PASS',photos='SYNTHETIC_PNG_ONLY',image_picker_lifecycle='CANCEL_AND_RESTART_ONLY',jpeg='NOT_TESTED',camera='NOT_IMPLEMENTED')
+        result.update(real_photo_selection='NATIVE_SAF_PNG_JPEG_PASS',photos='SYNTHETIC_PNG_JPEG_ONLY',jpeg='NATIVE_SAF_EXACT_PRIVATE_COPY_PASS',image_first_note='CANCEL_REJECT_CREATE_RESTART_PASS',image_pixel_budget='20000000_ACCEPTED_20005000_REJECTED',exif_orientation='NOT_TESTED',whole_note_memory='NOT_TESTED')
     except Exception as exc:
         result={'status':'FAIL','api':API,'count':len(checks),'checks':checks,'error':repr(exc),'screenshots':shots,'infra_retries':infra_retries,'release_ready':False}
         try: shot('failure.png')

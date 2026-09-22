@@ -12,8 +12,8 @@ import java.util.List;
 import java.util.UUID;
 
 /** Native single-note editor for an activity: ordered text then image blocks.
- * Text and a synthetic registered image only; real gallery/camera selection,
- * decoding, thumbnails, crop and opaque redaction remain subsequent work.
+ * SAF-selected PNG/JPEG originals are private immutable copies, with bounded previews.
+ * Camera, EXIF orientation, crop and opaque redaction remain subsequent work.
  * Writes go through validated AppDatabase APIs; UI read queries never mutate raw SQL.
  */
 public final class NoteEditorScreen {
@@ -25,6 +25,7 @@ public final class NoteEditorScreen {
         String noteId;
         final List<NoteDocument.Block> blocks=new ArrayList<>();
         MediaRepository media;
+        final java.util.Map<String,android.graphics.Bitmap> previews=new java.util.HashMap<>();
     }
     NoteEditorScreen(TodayScreen host,long activityId,String title,Runnable back){this.host=host;this.activityId=activityId;this.title=title;this.back=back;}
     void load(){
@@ -34,6 +35,10 @@ public final class NoteEditorScreen {
             List<String> ids=new ArrayList<>();
             try(Cursor c=host.db.getReadableDatabase().rawQuery("SELECT id FROM notes WHERE activity_id=? ORDER BY rowid",new String[]{Long.toString(activityId)})){while(c.moveToNext())ids.add(c.getString(0));}
             if(!ids.isEmpty()){s.noteId=ids.get(0);s.blocks.addAll(host.db.noteBlocks(s.noteId));}
+            for(NoteDocument.Block b:s.blocks)if(b.kind==NoteDocument.Kind.IMAGE){
+                try{s.previews.put(b.id,decodePreview(s.media.path(b.assetId)));}
+                catch(IOException ignored){/* Render an explicit unavailable marker, never a fake image. */}
+            }
             return s;
         },this::render,null);
     }
@@ -56,14 +61,12 @@ public final class NoteEditorScreen {
                 list.addView(edit,new LinearLayout.LayoutParams(-1,host.dp(48)));
             }else{
                 LinearLayout row=host.column();row.setPadding(host.dp(10),host.dp(8),host.dp(10),host.dp(8));row.setBackground(host.shape(TodayScreen.WHITE,10));
-                try{
-                    Path path=s.media.path(b.assetId);
-                    android.graphics.Bitmap image=android.graphics.BitmapFactory.decodeFile(path.toString());
+                android.graphics.Bitmap image=s.previews.get(b.id);
+                if(image!=null){
                     ImageView view=new ImageView(host.activity);
-                    if(image!=null){view.setImageBitmap(image);view.setAdjustViewBounds(true);view.setMaxHeight(host.dp(220));}
-                    else{view.setBackgroundColor(TodayScreen.TINT);view.setMinimumHeight(host.dp(96));}
+                    view.setImageBitmap(image);view.setAdjustViewBounds(true);view.setMaxHeight(host.dp(220));
                     view.setContentDescription("note-image-"+b.id);row.addView(view);
-                }catch(IOException e){TextView broken=host.text("图片副本不可用",15,TodayScreen.ERROR);broken.setContentDescription("note-image-"+b.id);row.addView(broken);}
+                }else{TextView broken=host.text("图片副本不可用",15,TodayScreen.ERROR);broken.setContentDescription("note-image-"+b.id);row.addView(broken);}
                 if(!b.caption.isEmpty())row.addView(host.text(b.caption,14,TodayScreen.MUTED));
                 list.addView(row);
             }
@@ -92,10 +95,57 @@ public final class NoteEditorScreen {
         }));
         dialog.show();
     }
-    /** Synthetic solid square. Real photo selection, decoding and derivative checks are separate. */
+    /** Resource policy, not a measured capacity promise. Per-image limits do not bound a whole note. */
+    private static final long IMAGE_BYTES=8L*1024*1024, IMAGE_PIXELS=20000000;
+    private static final int IMAGE_EDGE=16384, PREVIEW_EDGE=1024;
+    private static android.graphics.BitmapFactory.Options bounds(Path path)throws IOException{
+        if(java.nio.file.Files.size(path)<=0||java.nio.file.Files.size(path)>IMAGE_BYTES)throw new IOException("图片字节超限");
+        android.graphics.BitmapFactory.Options o=new android.graphics.BitmapFactory.Options();o.inJustDecodeBounds=true;
+        android.graphics.BitmapFactory.decodeFile(path.toString(),o);
+        if(o.outWidth<=0||o.outHeight<=0||o.outWidth>IMAGE_EDGE||o.outHeight>IMAGE_EDGE||
+            (long)o.outWidth*o.outHeight>IMAGE_PIXELS||!("image/png".equals(o.outMimeType)||"image/jpeg".equals(o.outMimeType)))throw new IOException("图片格式或尺寸无效");
+        return o;
+    }
+    private static android.graphics.Bitmap decodePreview(Path path)throws IOException{
+        android.graphics.BitmapFactory.Options header=bounds(path),o=new android.graphics.BitmapFactory.Options();
+        o.inSampleSize=1;o.inPreferredConfig=android.graphics.Bitmap.Config.ARGB_8888;
+        while((header.outWidth+o.inSampleSize-1)/o.inSampleSize>PREVIEW_EDGE||(header.outHeight+o.inSampleSize-1)/o.inSampleSize>PREVIEW_EDGE)o.inSampleSize*=2;
+        android.graphics.Bitmap image=android.graphics.BitmapFactory.decodeFile(path.toString(),o);
+        if(image==null)throw new IOException("图片解码失败");
+        if(image.getWidth()>PREVIEW_EDGE||image.getHeight()>PREVIEW_EDGE||image.getAllocationByteCount()>4*PREVIEW_EDGE*PREVIEW_EDGE){image.recycle();throw new IOException("图片解码预算超限");}
+        return image;
+    }
+    private void importImage(State s,android.net.Uri uri){
+        if(uri==null){host.message("已取消选图，没有改变笔记",false);return;}
+        host.work(()->{
+            Path temp=java.nio.file.Files.createTempFile(host.activity.getCacheDir().toPath(),"image-",".part");
+            try{
+                try(java.io.InputStream in=host.activity.getContentResolver().openInputStream(uri);
+                    java.io.OutputStream out=java.nio.file.Files.newOutputStream(temp)){
+                    if(in==null)throw new IOException("无法读取图片");
+                    byte[] buffer=new byte[16384];long size=0;int n;
+                    while((n=in.read(buffer))!=-1){if(n==0||n>IMAGE_BYTES-size)throw new IOException("图片读取超限");out.write(buffer,0,n);size+=n;}
+                }
+                String mime=bounds(temp).outMimeType;
+                android.graphics.Bitmap probe=decodePreview(temp);probe.recycle();
+                String assetId;
+                try(java.io.InputStream in=java.nio.file.Files.newInputStream(temp)){assetId=s.media.copy(in);}
+                android.database.sqlite.SQLiteDatabase sql=host.db.getWritableDatabase();
+                sql.beginTransaction();
+                try{
+                    host.db.registerMedia(assetId,mime,java.nio.file.Files.size(temp));
+                    persistBlocks(s,NoteDocument.Block.image(UUID.randomUUID().toString(),assetId,"",false),false);
+                    sql.setTransactionSuccessful();
+                }finally{sql.endTransaction();}
+                return true;
+            }finally{java.nio.file.Files.deleteIfExists(temp);}
+        },ignored->load(),()->host.message("图片未加入：仅支持有效 PNG/JPEG，最大 8 MiB、2000 万像素、单边 16384",true));
+    }
+    /** Original retained privately; backups include it and any metadata. No share path yet. */
     private void addImage(State s){
-        AlertDialog pick=new AlertDialog.Builder(host.activity).setTitle("加入图片").setMessage("当前切片使用合成图片验证登记与排序；相册与相机选择还没接。")
-            .setNegativeButton("取消",null).setPositiveButton("加入合成图",null).create();
+        AlertDialog pick=new AlertDialog.Builder(host.activity).setTitle("加入图片").setMessage("选择 PNG/JPEG，最大 8 MiB、2000 万像素、单边 16384。保留本机原图副本及元数据，完整备份也会包含；尚不支持相机、旋转校正、裁剪遮挡或分享。")
+            .setNegativeButton("取消",null).setNeutralButton("从文件选择",(dialog,which)->((MainActivity)host.activity).chooseNoteImage(uri->importImage(s,uri)))
+            .setPositiveButton("加入合成图",null).create();
         pick.setOnShowListener(unused->pick.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
             pick.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
             host.work(()->{
@@ -116,7 +166,7 @@ public final class NoteEditorScreen {
     private void persist(State s,NoteDocument.Block block,boolean replacing){persistBlocks(s,block,replacing);}
     private void persistBlocks(State s,NoteDocument.Block block,boolean replacing){
         String noteId=s.noteId;
-        if(noteId==null){noteId=UUID.randomUUID().toString();host.db.createNote(noteId,activityId,title);s.noteId=noteId;}
+        if(noteId==null){noteId=UUID.randomUUID().toString();host.db.createNote(noteId,activityId,title);}
         List<NoteDocument.Block> next=new ArrayList<>(s.blocks);
         if(replacing){for(int i=0;i<next.size();i++)if(next.get(i).id.equals(block.id)){next.set(i,block);break;}}
         else next.add(block);

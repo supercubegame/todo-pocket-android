@@ -551,7 +551,9 @@ public class ImageImportFixture {
         def first_screen():
             start();tap('活动');ready();touch(first_desc);ready();tap('笔记');ready()
         first_screen();ok(find(text='写点什么，或加一张图。') is not None,'image-first activity shows genuine empty note before any import')
-        pick_image();shell('input','keyevent','KEYCODE_BACK')
+        pick_image()
+        ok(find(text='pocket-first.jpg').get('package','').endswith('documentsui'),'first-image cancellation waits for a visible system picker before pressing Back')
+        shell('input','keyevent','KEYCODE_BACK')
         ok(find(**{'content-desc':'v12-status','text':'已取消选图，没有改变笔记'}) is not None,'canceling first image reports no note change')
         stop();ok(state_read('first-image-cancel.db')==first_base,'first-image cancel creates no orphan note media block or revision')
         for filename,label in [('pocket-broken.png','malformed first image'),('pocket-pixel-over.png','20005000-pixel first image')]:

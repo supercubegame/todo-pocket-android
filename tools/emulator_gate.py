@@ -363,7 +363,7 @@ def verify_native_ui(adb):
         shot('09-note.png')
         restart(); tap('活动'); ready(); touch('activity-1'); ready()
         ok(find(text='Watered 20 min today') is not None,'note survives process restart')
-        tap('笔记'); ready(); tap('加入图片'); ready()
+        tap('笔记'); ready(); tap('加入图片')
         tap('加入合成图'); ready()
         ok(any(n.get('content-desc','').startswith('note-image-') for n in nodes()),'attached image is registered with note')
         stop()

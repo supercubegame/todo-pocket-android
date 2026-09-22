@@ -67,10 +67,60 @@ jobs:
         run: |
           set -euo pipefail
           gradle --no-daemon --console=plain assembleDebug assembleDebugAndroidTest lintDebug 2>&1 | tee build.log
+      - name: Freeze API34 candidate bytes before device tests
+        if: matrix.api == 34
+        run: |
+          set -euo pipefail
+          sha256sum build/outputs/apk/debug/*.apk > tested-apk.sha256
       - name: Database, semantic backups and actual native UI interactions
         run: |
           set -euo pipefail
           python3 tools/emulator_gate.py 2>&1 | tee ui.log
+      - name: Package tested API34 preview candidate, not full V1.2
+        if: matrix.api == 34
+        run: |
+          set -euo pipefail
+          sha256sum -c tested-apk.sha256
+          python3 - <<'PY'
+          import hashlib,json,os,re,shutil,subprocess
+          from pathlib import Path
+          native=json.loads(Path('native-ui/native-result.json').read_text())
+          device=json.loads(Path('device-result.json').read_text())
+          assert native['status']=='PASS' and native['count']==len(native['checks']) and native['count']>=164
+          assert device['status']=='PASS' and device['checks']=={'seed':155,'reopen':25}
+          assert native['release_ready'] is False and device['release_ready'] is False
+          apks=list(Path('build/outputs/apk/debug').glob('*.apk'))
+          assert len(apks)==1
+          source=apks[0];tools=Path(os.environ['ANDROID_HOME'])/'build-tools/35.0.0'
+          def output(args):return subprocess.check_output(list(map(str,args)),text=True)
+          package=output([tools/'aapt','dump','badging',source])
+          permissions=output([tools/'aapt','dump','permissions',source])
+          signature=output([tools/'apksigner','verify','--verbose','--print-certs',source])
+          assert "name='com.supercubegame.pockettodo.v12.preview'" in package
+          assert "versionCode='3'" in package and "versionName='1.2'" in package and "sdkVersion:'26'" in package
+          assert 'uses-permission:' not in permissions
+          certs=re.findall(r'^Signer #1 certificate SHA-256 digest: ([0-9a-f]+)$',signature,re.M)
+          assert len(certs)==1 and len(certs[0])==64
+          folder=Path('preview-candidate');folder.mkdir()
+          name='PocketTodo-v1.2-preview-'+os.environ['GITHUB_SHA'][:12]+'.apk'
+          target=folder/name;shutil.copyfile(source,target)
+          assert target.read_bytes()==source.read_bytes()
+          digest=hashlib.sha256(target.read_bytes()).hexdigest()
+          (folder/'SHA256SUMS.txt').write_text(digest+'  '+name+'\n')
+          (folder/'signature.txt').write_text(signature)
+          (folder/'package.txt').write_text(package+'\n'+permissions)
+          meta={'commit':os.environ['GITHUB_SHA'],'run_id':os.environ['GITHUB_RUN_ID'],'apk':name,'sha256':digest,'bytes':target.stat().st_size,'certificate_sha256':certs[0],'package':'com.supercubegame.pockettodo.v12.preview','version_name':'1.2','version_code':3,'exact_binary_device_api':34,'release_ready':False,'durable_upgrade_ready':False}
+          (folder/'preview.json').write_text(json.dumps(meta,indent=2)+'\n')
+          (folder/'README.txt').write_text('口袋待办 v1.2 阶段开发预览，不是完整正式版。\n与旧版隔离安装；仅用于试用，请先备份。\n临时debug签名，不保证下一次CI生成的包可以覆盖安装。请勿为安装直接卸载有数据的旧预览；先导出完整备份。\n完整备份包含私有内容、原图与元数据，未加密。私有图片标记不是加密，分享过滤尚未实现。\n已接通待办、活动、打卡历史、日期账目、多笔记、PNG/JPEG导入、图片说明和私有标记、备份确认恢复。\n裁剪遮挡、PDF/图片/Markdown分享、应用目录与字段完整UI、恢复撤销、搜索模板日程、稳定签名和真机验收尚未完成。\n不含账号、网络权限或遥测。不要输入无法承担丢失风险的重要数据。\n此APK是API34实际测试过的同一字节；API26测试同源码的独立构建。源码和摘要见preview.json、SHA256SUMS.txt。\n下载Actions产物需要GitHub登录；压缩包解压后安装.apk，不要安装测试instrumentation包。\n',encoding='utf-8')
+          print('PREVIEW_CANDIDATE '+json.dumps(meta))
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: matrix.api == 34
+        with:
+          name: internal-preview-candidate
+          path: preview-candidate/
+          retention-days: 7
+          if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -93,6 +143,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
@@ -218,4 +269,85 @@ jobs:
           doc=json.loads(path.read_text())
           assert doc.get('guarded_restore',{}).get('status')=='PASS','Guarded restore checks missing or failed; read published evidence'
           assert doc.get('saf_restore_ui')=='PASS','SAF restore preview and explicit confirmation missing or failed; read native evidence'
+          PY
+      - name: Require both current-source devices before preview delivery
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+          needs=json.loads(os.environ['NEEDS_JSON'])
+          assert all(needs[name]['result']=='success' for name in ('core','database'))
+          report=json.loads(Path('collected/scope/ui-result.json').read_text())
+          assert report['status']=='PASS' and report['release_ready'] is False
+          for api in ('26','34'):
+            n=report['native'][api];d=report['devices'][api]['result']
+            assert n['status']=='PASS' and n['count']==len(n['checks']) and n['count']>=164
+            assert d['status']=='PASS' and d['checks']=={'seed':155,'reopen':25}
+          folder=Path('collected/internal-preview-candidate')
+          meta=json.loads((folder/'preview.json').read_text())
+          assert meta['commit']==os.environ['GITHUB_SHA'] and meta['run_id']==os.environ['GITHUB_RUN_ID']
+          assert meta['release_ready'] is False and meta['durable_upgrade_ready'] is False
+          assert {p.name for p in folder.iterdir()}=={meta['apk'],'preview.json','SHA256SUMS.txt','signature.txt','package.txt','README.txt'}
+          data=(folder/meta['apk']).read_bytes()
+          assert len(data)==meta['bytes'] and hashlib.sha256(data).hexdigest()==meta['sha256']
+          print('PREVIEW_DELIVERY_GATE_PASS; complete V1.2 remains blocked')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: preview
+        with:
+          name: PocketTodo-v1.2-preview-${{ github.sha }}
+          path: collected/internal-preview-candidate/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Download preview archive and prove exact bytes before publishing receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.preview.outputs.artifact-id }}
+          ARTIFACT_URL: ${{ steps.preview.outputs.artifact-url }}
+          ARTIFACT_DIGEST: ${{ steps.preview.outputs.artifact-digest }}
+        run: |
+          python3 - <<'PY'
+          import base64,hashlib,io,json,os,urllib.request,urllib.error,urllib.parse,zipfile
+          from pathlib import Path
+          repo=os.environ['GITHUB_REPOSITORY']
+          endpoint='https://api.github.com/repos/'+repo+'/'
+          headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'}
+          def api(path,method='GET',body=None):
+            req=urllib.request.Request(endpoint+path,data=None if body is None else json.dumps(body).encode(),headers=headers,method=method)
+            with urllib.request.urlopen(req,timeout=30) as r:return json.load(r)
+          artifact=api('actions/artifacts/'+os.environ['ARTIFACT_ID'])
+          assert not artifact['expired'] and str(artifact['workflow_run']['id'])==os.environ['GITHUB_RUN_ID']
+          assert artifact['workflow_run']['head_sha']==os.environ['GITHUB_SHA']
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self,req,fp,code,msg,h,newurl):return None
+          opener=urllib.request.build_opener(NoRedirect)
+          try:
+            opener.open(urllib.request.Request(endpoint+'actions/artifacts/'+os.environ['ARTIFACT_ID']+'/zip',headers=headers),timeout=30)
+            raise AssertionError('Expected signed archive redirect')
+          except urllib.error.HTTPError as exc:
+            assert exc.code==302
+            location=exc.headers['Location']
+          assert urllib.parse.urlparse(location).scheme=='https'
+          # Signed storage download is a new request: NEVER forward the GitHub token.
+          with urllib.request.urlopen(location,timeout=60) as response:
+            archive=response.read(artifact['size_in_bytes']+1)
+          archive_hash=hashlib.sha256(archive).hexdigest()
+          assert archive_hash==os.environ['ARTIFACT_DIGEST']
+          assert artifact['digest']=='sha256:'+archive_hash
+          folder=Path('collected/internal-preview-candidate')
+          with zipfile.ZipFile(io.BytesIO(archive)) as z:
+            expected={p.name:p.read_bytes() for p in folder.iterdir()}
+            assert len(z.namelist())==len(expected) and set(z.namelist())==set(expected)
+            for name,data in expected.items():assert z.read(name)==data,'download differs: '+name
+          meta=json.loads((folder/'preview.json').read_text())
+          meta.update(status='PASS',scope='TESTED_STAGE_PREVIEW_NOT_FULL_V12',artifact_id=artifact['id'],download_url=os.environ['ARTIFACT_URL'],expires_at=artifact['expires_at'],archive_sha256=archive_hash,download_readback='EXACT_ALL_FILES_PASS',github_login_required=True)
+          data=(json.dumps(meta,ensure_ascii=False,indent=2)+'\n').encode()
+          path='reports/preview-'+os.environ['GITHUB_SHA']+'-'+os.environ['GITHUB_RUN_ID']+'.json'
+          written=api('contents/'+path,'PUT',{'message':'Record verified staged APK download','branch':'evidence','content':base64.b64encode(data).decode()})
+          actual=api('contents/'+path+'?ref='+written['commit']['sha'])
+          assert base64.b64decode(actual['content'])==data
+          print('PREVIEW_DOWNLOAD '+os.environ['ARTIFACT_URL'])
+          print('PREVIEW_RECEIPT '+actual['html_url'])
           PY

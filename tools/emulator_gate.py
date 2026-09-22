@@ -129,20 +129,26 @@ def verify_native_ui(adb):
     def nodes():
         shell('uiautomator', 'dump', '/sdcard/pocket-window.xml')
         return list(ET.fromstring(shell('cat', '/sdcard/pocket-window.xml')).iter('node'))
+    def tap_node(n):
+        assert n.get('enabled')=='true', 'disabled touch target '+repr(n.attrib)
+        x1,y1,x2,y2=map(int,re.findall(r'\d+',n.get('bounds')))
+        assert x2>x1 and y2>y1, 'empty touch bounds'
+        shell('input','tap',str((x1+x2)//2),str((y1+y2)//2))
     def find(**attrs):
         deadline=time.monotonic()+20; last=[]
         while time.monotonic()<deadline:
             last=nodes()
             for n in last:
                 if all(n.get(k)==v for k,v in attrs.items()): return n
+            crash=[n for n in last if n.get('resource-id')=='android:id/aerr_close']
+            if crash:
+                title=' '.join(x for x in (n.get('text') for n in last if n.get('resource-id')=='android:id/alertTitle') if x)
+                assert '口袋待办' not in title and 'Pocket' not in title, 'own app crashed: '+title
+                print('DISMISS_FOREIGN_CRASH '+title,flush=True)
+                tap_node(crash[0]); time.sleep(.5); continue
             time.sleep(.25)
         raise AssertionError('UI missing '+repr(attrs)+'; actual='+repr([n.attrib for n in last if n.get('text') or n.get('content-desc')]))
     def desc(value): return find(**{'content-desc':value})
-    def tap_node(n):
-        assert n.get('enabled')=='true', 'disabled touch target '+repr(n.attrib)
-        x1,y1,x2,y2=map(int,re.findall(r'\d+',n.get('bounds')))
-        assert x2>x1 and y2>y1, 'empty touch bounds'
-        shell('input','tap',str((x1+x2)//2),str((y1+y2)//2))
     def tap(text): tap_node(find(text=text))
     def touch(value): tap_node(desc(value))
     def type_text(value): shell('input','text',value.replace(' ','%s'))
@@ -294,20 +300,20 @@ def verify_native_ui(adb):
             ok(db.execute('SELECT count(*) FROM batches WHERE undone=0').fetchone()[0]==6,'cancel and invalid amount leave no batch journal residue')
             ok(db.execute('SELECT activity_id,day,status,recorded_at FROM checkins').fetchall()==marks,'money and date filtering never mutate the check-in history')
         start(); tap('活动'); ready(); touch('activity-1'); ready(); tap('打卡记录'); ready()
-        tap('补记 / 修改'); touch('打卡日期'); type_text('not-a-date'); tap('保存记录')
+        tap('补记 / 修改'); clear_field('打卡日期'); type_text('not-a-date'); tap('保存记录')
         ok(find(text='日期格式应为 2026-09-21') is not None and find(text='保存记录') is not None,'native check-in editor rejects malformed date without closing')
         tap('取消'); ready()
-        tap('补记 / 修改'); touch('打卡日期'); type_text('2026-09-20'); tap('保存记录'); ready()
+        tap('补记 / 修改'); clear_field('打卡日期'); type_text('2026-09-20'); tap('保存记录'); ready()
         ok(desc('checkin-2026-09-20').get('text')=='2026-09-20 · 已完成','backdated done check-in appears with its exact date')
         shot('06-checkin-history.png')
         touch('edit-checkin-2026-09-20'); tap('标记未记录'); tap('保存记录'); ready()
-        ok(absent('2026-09-20 · 已完成') and absent('checkin-2026-09-20'),'un-recording removes the visible history row')
+        ok(absent('2026-09-20 · 已完成') and not any(n.get('content-desc')=='checkin-2026-09-20' for n in nodes()),'un-recording removes the visible history row')
         stop()
         with sqlite3.connect(copy_db('checkins-after.db')) as db:
             rows=db.execute('SELECT activity_id,day,status,recorded_at FROM checkins').fetchall()
             ok(rows==marks,'un-recorded backdate leaves the exact prior single mark in independent readback')
             ok(db.execute('SELECT count(*) FROM ledger').fetchone()[0]==6,'check-in editing never mutates the ledger')
-        start(); tap('活动'); ready(); touch('activity-1'); ready(); tap('打卡记录'); ready(); tap('补记 / 修改'); touch('打卡日期'); type_text('2026-09-20'); tap('保存记录'); ready()
+        start(); tap('活动'); ready(); touch('activity-1'); ready(); tap('打卡记录'); ready(); tap('补记 / 修改'); clear_field('打卡日期'); type_text('2026-09-20'); tap('保存记录'); ready()
         ok(desc('checkin-2026-09-20').get('text')=='2026-09-20 · 已完成','backdated check-in survives cancel then re-entered identically')
         tap('返回活动'); ready(); tap('返回分类'); ready()
         export_backup(); tap('今天'); ready()
@@ -334,7 +340,8 @@ def verify_native_ui(adb):
             rows=db.execute('SELECT title,done FROM todos ORDER BY position').fetchall()
             ok(rows==[('Fresh milk',1),('Walk outside',0)],'independent SQLite read matches exact SAF restored state')
             ok(db.execute('SELECT count(*) FROM ledger').fetchone()[0]==6,'SAF restore retains exact ledger after independent readback')
-            ok(db.execute('SELECT activity_id,day,status,recorded_at FROM checkins').fetchall()==marks,'SAF restore retains exact check-in history')
+            marks2=db.execute('SELECT activity_id,day,status,recorded_at FROM checkins ORDER BY day').fetchall()
+            ok(len(marks2)==2 and marks2[0][:3]==(1,'2026-09-20','DONE') and marks2[1]==marks[0] and all(row[3] for row in marks2),'SAF restore retains exact check-in history including the re-entered backdate')
         result={'status':'PASS','scope':'NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_RESTORE_SLICE','ledger_calendar':'NATIVE_MULTI_DATE_LEDGER_PASS','saf_restore':'NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS','checkin_history':'NATIVE_CHECKIN_HISTORY_BACKDATE_PASS','api':API,'count':len(checks),'checks':checks,'screenshots':shots,'restore_undo':'NOT_IMPLEMENTED','restore_preview_lifecycle':'NOT_TESTED','checkin_schedules':'NOT_IMPLEMENTED','photos':'NOT_TESTED','sharing':'NOT_TESTED','release_ready':False}
     except Exception as exc:
         result={'status':'FAIL','api':API,'count':len(checks),'checks':checks,'error':repr(exc),'screenshots':shots,'release_ready':False}

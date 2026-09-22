@@ -52,6 +52,8 @@ public final class NoteEditorScreen {
             NoteDocument.Block b=s.blocks.get(i);
             if(b.kind==NoteDocument.Kind.TEXT){
                 TextView text=host.text(b.text,17,TodayScreen.INK);text.setContentDescription("note-text-"+b.id);text.setPadding(host.dp(10),host.dp(10),host.dp(10),host.dp(10));text.setBackground(host.shape(TodayScreen.WHITE,10));list.addView(text);
+                Button edit=host.button("修改文字",()->editText(s,b.id));edit.setContentDescription("note-edit-"+b.id);
+                list.addView(edit,new LinearLayout.LayoutParams(-1,host.dp(48)));
             }else{
                 LinearLayout row=host.column();row.setPadding(host.dp(10),host.dp(8),host.dp(10),host.dp(8));row.setBackground(host.shape(TodayScreen.WHITE,10));
                 try{
@@ -70,8 +72,11 @@ public final class NoteEditorScreen {
     /** Own dialog, not the shared editor helper: that one intentionally accepts blank
      * multiline input for path clearing, while a note text block must never be blank. */
     private void editText(State s,String existingId){
-        String initial="";
-        if(existingId!=null)for(NoteDocument.Block b:s.blocks)if(b.id.equals(existingId)&&b.kind==NoteDocument.Kind.TEXT)initial=b.text;
+        NoteDocument.Block existing=null;
+        if(existingId!=null)for(NoteDocument.Block b:s.blocks)if(b.id.equals(existingId)&&b.kind==NoteDocument.Kind.TEXT)existing=b;
+        if(existingId!=null&&existing==null)throw new IllegalArgumentException("文字块不存在");
+        String initial=existing==null?"":existing.text;
+        final boolean privateContent=existing!=null&&existing.privateContent;
         LinearLayout body=host.column();body.setPadding(host.dp(20),host.dp(4),host.dp(20),host.dp(8));
         EditText field=host.field("文字内容",true);field.setText(initial);body.addView(field,new LinearLayout.LayoutParams(-1,-2));
         TextView validation=host.text("文字不能为空，之后可随时修改。",14,TodayScreen.MUTED);body.addView(validation);
@@ -81,7 +86,7 @@ public final class NoteEditorScreen {
             if(value.isEmpty()){validation.setText("内容不能为空");validation.setTextColor(TodayScreen.ERROR);return;}
             final String id=existingId==null?UUID.randomUUID().toString():existingId;
             dialog.setCancelable(false);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);field.setEnabled(false);
-            host.work(()->{persist(s,NoteDocument.Block.text(id,value,false),existingId!=null);return true;},ignored->{dialog.dismiss();load();},()->{
+            host.work(()->{persist(s,NoteDocument.Block.text(id,value,privateContent),existingId!=null);return true;},ignored->{dialog.dismiss();load();},()->{
                 dialog.setCancelable(true);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);field.setEnabled(true);validation.setText("未能保存，请检查内容后重试");validation.setTextColor(TodayScreen.ERROR);
             });
         }));

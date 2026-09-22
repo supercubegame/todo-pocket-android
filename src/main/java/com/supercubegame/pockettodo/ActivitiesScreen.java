@@ -1,5 +1,6 @@
 package com.supercubegame.pockettodo;
 
+import android.content.Intent;
 import android.database.Cursor;
 import android.widget.*;
 import java.time.Instant;
@@ -15,6 +16,7 @@ import java.util.List;
 public final class ActivitiesScreen {
     private final TodayScreen host;
     long selected;
+    private boolean backupPanel;
     ActivitiesScreen(TodayScreen host){this.host=host;}
     private static final class Item {
         long id,category;String title;
@@ -25,7 +27,7 @@ public final class ActivitiesScreen {
         Category(long id,String name){this.id=id;this.name=name;}
     }
     private static final class Detail {String title,status;List<String> path;LocalDate day;}
-    void load(){if(selected==0)loadCategories();else loadDetail(selected);}
+    void load(){if(backupPanel)renderBackup();else if(selected==0)loadCategories();else loadDetail(selected);}
     private long nextId(String table){
         // Only fixed internal table names, and one UI writer on the shared executor.
         if(!table.equals("categories")&&!table.equals("activities"))throw new IllegalArgumentException();
@@ -44,7 +46,9 @@ public final class ActivitiesScreen {
     }
     private void renderCategories(List<Category> categories){
         LinearLayout body=host.content();body.addView(host.text("长期的事，慢慢积累",22,TodayScreen.INK));
-        body.addView(host.button("新建分类",()->host.editor("新建分类","分类名称","",false,value->host.db.addCategory(nextId("categories"),value),this::load)));
+        LinearLayout top=new LinearLayout(host.activity);
+        top.addView(host.button("新建分类",()->host.editor("新建分类","分类名称","",false,value->host.db.addCategory(nextId("categories"),value),this::load)),new LinearLayout.LayoutParams(0,host.dp(48),1));
+        top.addView(host.button("备份 / 恢复",()->{backupPanel=true;load();}),new LinearLayout.LayoutParams(0,host.dp(48),1));body.addView(top);
         ScrollView scroll=new ScrollView(host.activity);LinearLayout list=host.column();scroll.addView(list);body.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         if(categories.isEmpty()){TextView empty=host.text("建一个自己的分类。\n例如：每日打卡、农场、提现。",18,TodayScreen.MUTED);empty.setPadding(0,host.dp(24),0,0);list.addView(empty);}
         for(int index=0;index<categories.size();index++){
@@ -61,6 +65,19 @@ public final class ActivitiesScreen {
             for(Item item:cat.items){Button open=host.button(item.title,()->{selected=item.id;load();});open.setContentDescription("activity-"+item.id);group.addView(open,new LinearLayout.LayoutParams(-1,-2));}
             host.addRow(list,group);
         }
+    }
+    private void renderBackup(){
+        LinearLayout body=host.content();body.addView(host.text("备份与恢复",24,TodayScreen.INK));
+        TextView note=host.text("完整备份包含私有内容，且没有加密；只保存到自己信任的位置。恢复会先显示替换数量，勾选明白后才会确认。",15,TodayScreen.MUTED);note.setPadding(0,host.dp(8),0,host.dp(16));body.addView(note);
+        body.addView(host.button("导出完整备份",()->{
+            Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/zip");intent.putExtra(Intent.EXTRA_TITLE,"pocket-todo-backup.zip");
+            host.activity.startActivityForResult(intent,MainActivity.EXPORT_BACKUP);
+        }));
+        body.addView(host.button("恢复完整备份",()->{
+            Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/zip");
+            host.activity.startActivityForResult(intent,MainActivity.IMPORT_BACKUP);
+        }));
+        body.addView(host.button("返回活动",()->{backupPanel=false;load();}));
     }
     private void move(long id,int position){host.work(()->{host.db.moveCategory(id,position);return true;},ignored->load(),null);}
     private void loadDetail(long id){

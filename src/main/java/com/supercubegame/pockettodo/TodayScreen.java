@@ -15,6 +15,10 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.*;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.IdentityHashMap;
@@ -71,7 +75,7 @@ public final class TodayScreen {
         nav.addView(button("备份",()->navigate(2)),new LinearLayout.LayoutParams(0,dp(52),1));root.addView(nav);
         refresh();
     }
-    private void navigate(int next){if(busy)return;rememberDraft();if(page==2&&next!=2)closeRestoreSession();page=next;refresh();}
+    private void navigate(int next){if(busy)return;rememberDraft();page=next;refresh();}
     void refresh(){if(page==2)loadRestore();else if(page==1)activities.load();else loadTodos();}
     LinearLayout content(){input=null;content.removeAllViews();return content;}
     private void rememberDraft(){if(input!=null)draft=input.getText().toString();}
@@ -100,7 +104,7 @@ public final class TodayScreen {
             LinearLayout row=new LinearLayout(activity);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(8),dp(5),dp(4),dp(5));row.setBackground(shape(WHITE,14));
             CheckBox box=new CheckBox(activity);box.setText(item.title);box.setTextSize(17);box.setTextColor(item.done?MUTED:INK);box.setMinHeight(dp(52));box.setButtonTintList(ColorStateList.valueOf(ACCENT));box.setContentDescription("todo-"+item.id);box.setChecked(item.done);
             if(item.done)box.setPaintFlags(box.getPaintFlags()|Paint.STRIKE_THRU_TEXT_FLAG);
-            box.setOnCheckedChangeListener((b,checked)->work(()->{db.editTodo(item.id,item.title,checked);return true;},ignored->loadTodos(),this::loadTodos));
+            box.setOnCheckedChangeListener((b,checked)->work(()->{db.editTodo(item.id,item.title,checked);return true;},ignored->{restoreWriteInvalidated();loadTodos();},this::loadTodos));
             row.addView(box,new LinearLayout.LayoutParams(0,-2,1));
             Button edit=button("编辑",()->editor("编辑待办","编辑待办输入",item.title,false,value->db.editTodo(item.id,value,item.done),this::loadTodos));edit.setContentDescription("edit-"+item.id);row.addView(edit,new LinearLayout.LayoutParams(dp(60),dp(52)));
             addRow(rows,row);
@@ -117,7 +121,7 @@ public final class TodayScreen {
         final String id=UUID.randomUUID().toString();
         work(()->{db.addTodo(id,title);return true;},ignored->{
             ((InputMethodManager)activity.getSystemService(Activity.INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(input.getWindowToken(),0);
-            input.setText("");draft="";filter=0;loadTodos();
+            input.setText("");draft="";filter=0;restoreWriteInvalidated();loadTodos();
         },null);
     }
     /** Dialog validation stays visible; save button cannot enqueue duplicate writes. */
@@ -131,7 +135,7 @@ public final class TodayScreen {
             String value=field.getText().toString().trim();
             if(!multiline&&value.isEmpty()){validation.setText("内容不能为空");validation.setTextColor(ERROR);return;}
             dialog.setCancelable(false);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);field.setEnabled(false);
-            work(()->{save.accept(value);return true;},ignored->{dialog.dismiss();success.run();},()->{
+            work(()->{save.accept(value);return true;},ignored->{dialog.dismiss();restoreWriteInvalidated();success.run();},()->{
                 dialog.setCancelable(true);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);field.setEnabled(true);validation.setText("未能保存，请检查内容后重试");validation.setTextColor(ERROR);
             });
         }));
@@ -158,12 +162,104 @@ public final class TodayScreen {
     Button button(String value,Runnable action){Button b=new Button(activity);b.setText(value);b.setTextSize(14);b.setAllCaps(false);b.setTextColor(ACCENT);b.setMinWidth(0);b.setMinimumWidth(0);b.setMinHeight(dp(48));b.setPadding(dp(5),0,dp(5),0);b.setBackgroundTintList(ColorStateList.valueOf(TINT));b.setOnClickListener(v->{if(!busy)action.run();});return b;}
     GradientDrawable shape(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
     int dp(int value){return Math.round(value*activity.getResources().getDisplayMetrics().density);}
-    private void loadRestore(){if(restore==null)restore=new RestoreScreen(this);restore.show(restoreFile);}
+    private void loadRestore(){if(restore==null)restore=new RestoreScreen();restore.show();}
     private void chooseRestore(Runnable cancel){if(busy)return;restoreCancel=cancel;Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/zip");activity.startActivityForResult(intent,PICK_RESTORE);}
-    void fileResult(int request,int result,Intent data){if(request!=PICK_RESTORE)return;if(result!=Activity.RESULT_OK||data==null||data.getData()==null){Runnable cancel=restoreCancel;restoreCancel=null;if(cancel!=null)cancel.run();return;}restoreFile=data.getData();loadRestore();}
-    void beginRestorePlan(AppDatabase.RestorePlan plan,Runnable invalid){closeRestoreSession();restore=new RestoreScreen(this);restore.attach(plan,invalid);}
-    private void closeRestoreSession(){if(restore!=null)restore.cancelSilently();restore=null;restoreCancel=null;}
+    void fileResult(int request,int result,Intent data){
+        if(request!=PICK_RESTORE)return;
+        Runnable cancel=restoreCancel;restoreCancel=null;
+        if(result!=Activity.RESULT_OK||data==null||data.getData()==null){if(cancel!=null)cancel.run();return;}
+        restoreFile=data.getData();if(restore==null)restore=new RestoreScreen();restore.onFileChosen(restoreFile);
+    }
+    void beginRestorePlan(AppDatabase.RestorePlan plan){closeRestoreSession();restore=new RestoreScreen();restore.attach(plan);refresh();}
+    /** Ordinary writes close an open preview immediately; confirmation stays guarded by the full-state compare. */
+    private void restoreWriteInvalidated(){if(restore!=null&&restore.markStale()&&page==2)refresh();}
+    private void closeRestoreSession(){if(restore!=null)restore.cancelSilently();restore=null;restoreCancel=null;restoreFile=null;}
     public void save(Bundle out){rememberDraft();out.putInt("page",page);out.putInt("filter",filter);out.putString("draft",draft);out.putLong("activity",activities.selected);}
     public boolean back(){if(busy)return true;if(page==2){closeRestoreSession();page=0;refresh();return true;}if(page==1&&activities.selected!=0){activities.selected=0;activities.load();return true;}return false;}
     public void close(){if(closed)return;closeRestoreSession();closed=true;io.execute(db::close);io.shutdown();}
+
+    /** Explicit full-backup replacement UI. Not sharing and not undo.
+     * Selection freezes a validated private preview; it never writes live rows.
+     * Confirmation stays attached to that exact preview and any later todo or
+     * dialog write disables it until a fresh preview. A preview prepared while
+     * a write is still queued can attach before that write lands; the backend
+     * full-state guard still rejects such a confirmation, only the button
+     * disable may appear late in that narrow race. */
+    private final class RestoreScreen {
+        private AppDatabase.RestorePlan plan;
+        private Map<String,Long> shownCurrent, shownIncoming;
+        private boolean choose, preparing, stale;
+        private Button confirm;
+        void attach(AppDatabase.RestorePlan value){plan=value;shownCurrent=value.currentCounts();shownIncoming=value.incomingCounts();choose=false;preparing=false;stale=false;}
+        boolean markStale(){
+            if(plan==null||stale)return false;
+            AppDatabase.RestorePlan active=plan;plan=null;
+            try{active.close();}catch(IOException ignored){}
+            stale=true;preparing=false;
+            return true;
+        }
+        void cancelSilently(){
+            AppDatabase.RestorePlan active=plan;plan=null;shownCurrent=null;shownIncoming=null;choose=false;preparing=false;stale=false;
+            if(active!=null)try{active.close();}catch(IOException ignored){}
+        }
+        void onFileChosen(Uri file){choose=true;preparing=true;stale=false;refresh();prepare(file);}
+        void pickerCancelled(){refresh();}
+        void show(){
+            LinearLayout body=content();
+            body.addView(text("备份",24,INK));
+            if(plan==null&&!stale&&!preparing&&!choose){
+                TextView about=text("完整备份包含私有内容且未加密。恢复会替换本机全部数据，不会合并。",15,MUTED);
+                about.setPadding(dp(14),dp(12),dp(14),dp(12));about.setBackground(shape(TINT,16));body.addView(about);
+                body.addView(button("全部替换为",()->{choose=true;refresh();}));
+                return;
+            }
+            if(plan==null&&!stale&&!preparing){
+                TextView privacy=text("请在系统文件选择器里确认来源。选择后先显示每张表的变化，确认后才替换。",15,MUTED);
+                privacy.setPadding(dp(14),dp(12),dp(14),dp(12));privacy.setBackground(shape(TINT,16));body.addView(privacy);
+                body.addView(button("选择备份文件",()->chooseRestore(this::pickerCancelled)));
+                return;
+            }
+            if(preparing){TextView checking=text("正在检查备份…",17,MUTED);checking.setPadding(0,dp(20),0,0);body.addView(checking);return;}
+            ScrollView scroll=new ScrollView(activity);LinearLayout rows=column();scroll.addView(rows);body.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+            TextView title=text(stale?"预览已过期":"确认替换影响",20,INK);title.setPadding(0,dp(14),0,dp(8));rows.addView(title);
+            for(Map.Entry<String,Long> item:shownCurrent.entrySet()){
+                String table=item.getKey();long incoming=shownIncoming.get(table);
+                TextView row=text(table+"：当前 "+item.getValue()+" 条 / 恢复后 "+incoming+" 条",15,INK);
+                row.setContentDescription("restore-row-"+table);row.setPadding(dp(10),dp(8),dp(10),dp(8));row.setBackground(shape(WHITE,12));addRow(rows,row);
+            }
+            if(stale){TextView notice=text("预览已过期，请重新选择备份",15,ERROR);notice.setPadding(dp(10),dp(6),dp(10),dp(6));rows.addView(notice);}
+            LinearLayout actions=new LinearLayout(activity);
+            actions.addView(button("取消恢复",this::cancelled),new LinearLayout.LayoutParams(0,dp(52),1));
+            Button again=button("重新预览",this::rechoose);again.setContentDescription("restore-refresh");actions.addView(again,new LinearLayout.LayoutParams(0,dp(52),1));
+            confirm=button("确认替换",this::confirmNow);confirm.setContentDescription("restore-confirm");confirm.setEnabled(!stale);actions.addView(confirm,new LinearLayout.LayoutParams(0,dp(52),1));body.addView(actions);
+        }
+        private Path copy(Uri uri)throws IOException{
+            Path temp=Files.createTempFile(activity.getCacheDir().toPath(),"restore-source-",".zip");
+            try(InputStream in=activity.getContentResolver().openInputStream(uri)){
+                if(in==null)throw new IOException("无法读取所选备份");
+                Files.copy(in,temp,java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }catch(IOException|RuntimeException e){Files.deleteIfExists(temp);throw new IOException("无法读取所选备份",e);}
+            return temp;
+        }
+        private void prepare(Uri uri){
+            work(()->{
+                Path temp=copy(uri);
+                try{return db.prepareRestore(temp,activity.getCacheDir().toPath(),1000000);}
+                finally{Files.deleteIfExists(temp);}
+            },selected->beginRestorePlan(selected),()->{preparing=false;message("备份文件无效或已损坏，未更改本机数据",true);refresh();});
+        }
+        private void confirmNow(){
+            AppDatabase.RestorePlan active=plan;if(active==null||stale||busy)return;
+            confirm.setEnabled(false);
+            work(()->{
+                try(AppDatabase.RestorePlan ignored=active){db.confirmRestore(active,new MediaRepository(activity.getFilesDir().toPath().resolve("pocket-v12-media"),1000000));}
+                return true;
+            },ignored->{plan=null;shownCurrent=null;shownIncoming=null;choose=false;stale=false;restoreFile=null;refresh();},()->{
+                plan=null;stale=shownIncoming!=null;
+                message("数据在预览后已有变化，或备份不完整；未替换本机数据。请重新预览。",true);refresh();
+            });
+        }
+        void cancelled(){cancelSilently();restoreFile=null;message("已取消恢复，未更改本机数据",false);refresh();}
+        void rechoose(){AppDatabase.RestorePlan active=plan;plan=null;shownCurrent=null;shownIncoming=null;stale=false;choose=true;preparing=false;if(active!=null)try{active.close();}catch(IOException ignored){}refresh();}
+    }
 }

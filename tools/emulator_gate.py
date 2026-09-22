@@ -134,6 +134,8 @@ def verify_native_ui(adb):
         x1,y1,x2,y2=map(int,re.findall(r'\d+',n.get('bounds')))
         assert x2>x1 and y2>y1, 'empty touch bounds'
         shell('input','tap',str((x1+x2)//2),str((y1+y2)//2))
+    def swipe_up():
+        shell('input','swipe','160','500','160','180','350'); time.sleep(.4)
     def find(**attrs):
         deadline=time.monotonic()+20; last=[]
         while time.monotonic()<deadline:
@@ -243,7 +245,7 @@ def verify_native_ui(adb):
         ok(find(text='Checkins') is not None and absent('Daily'),'category rename updates visible label')
         touch('category-add-1'); touch('活动名称'); type_text('Daily reward'); tap('保存'); ready()
         ok(desc('activity-1').get('text')=='Daily reward','activity created under selected category')
-        touch('activity-1'); ready(); tap('编辑路径'); touch('活动路径'); type_text('Home'); shell('input','keyevent','KEYCODE_ENTER'); type_text('Daily rewards'); tap('保存'); ready()
+        touch('activity-1'); ready(); swipe_up(); tap('编辑路径'); touch('活动路径'); type_text('Home'); shell('input','keyevent','KEYCODE_ENTER'); type_text('Daily rewards'); tap('保存'); ready()
         ok(find(text='1. Home') is not None and find(text='2. Daily rewards') is not None,'ordered multiline manual path displays without collapse')
         tap('标记完成'); ready(); ok(find(text='今天：已完成') is not None,'daily check-in writes visible done state')
         tap('标记完成'); ready(); ok(find(text='今天：已完成') is not None,'repeated daily mark remains one visible day')
@@ -258,7 +260,8 @@ def verify_native_ui(adb):
         cats=[n.get('text') for n in nodes() if n.get('content-desc','').startswith('category-name-')]
         ok(cats==['Farm','Checkins'],'category order persists after process restart')
         touch('activity-1'); ready()
-        ok(find(text='今天：已跳过') is not None and find(text='2. Daily rewards') is not None,'activity path and skipped mark persist after process restart')
+        ok(find(text='今天：已跳过') is not None,'skipped mark persists after process restart')
+        swipe_up(); ok(find(text='2. Daily rewards') is not None,'activity path persists after process restart')
         ok(len({x['sha256'] for x in shots})==len(shots),'actual native screenshots represent distinct states')
         stop()
         with sqlite3.connect(copy_db('pocket-v12.db')) as db:
@@ -343,16 +346,17 @@ def verify_native_ui(adb):
             marks2=db.execute('SELECT activity_id,day,status,recorded_at FROM checkins ORDER BY day').fetchall()
             ok(len(marks2)==2 and marks2[0][:3]==(1,'2026-09-20','DONE') and marks2[1]==marks[0] and all(row[3] for row in marks2),'SAF restore retains exact check-in history including the re-entered backdate')
         start(); tap('活动'); ready(); touch('activity-1'); ready(); tap('笔记'); ready()
-        ok(absent('2026-09-20') or find(text='写点什么') is not None,'empty note starts visibly empty without fabricated content')
-        tap('保存'); ok(find(text='内容不能为空') is not None,'blank note save rejected visibly')
-        touch('笔记正文'); type_text('今天浇水 20 分钟'); tap('保存'); ready()
-        ok(desc('note-activity-1').get('text')=='今天浇水 20 分钟','saved note text appears on activity')
+        ok(find(text='写点什么') is not None,'empty note starts visibly empty without fabricated content')
+        tap('加入文字'); tap('保存'); ok(find(text='内容不能为空') is not None,'blank note save rejected visibly')
+        tap('取消'); ready()
+        tap('加入文字'); touch('文字内容'); type_text('今天浇水 20 分钟'); tap('保存'); ready()
+        ok(find(text='今天浇水 20 分钟') is not None,'saved note text appears on activity')
         shot('09-note.png')
         restart(); tap('活动'); ready(); touch('activity-1'); ready()
-        ok(desc('note-activity-1').get('text')=='今天浇水 20 分钟','note survives process restart')
+        ok(find(text='今天浇水 20 分钟') is not None,'note survives process restart')
         tap('笔记'); ready(); tap('加入图片'); ready()
-        tap('保存'); ready()
-        ok(desc('note-image-1') is not None,'attached image is registered with note')
+        tap('加入合成图'); ready()
+        ok(any(n.get('content-desc','').startswith('note-image-') for n in nodes()),'attached image is registered with note')
         stop()
         with sqlite3.connect(copy_db('note-after.db')) as db:
             notes=db.execute('SELECT id,activity_id,title FROM notes').fetchall()

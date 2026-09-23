@@ -59,6 +59,37 @@ public final class NoteDocument {
          */
         public Set<String> currentAssets() { return Collections.singleton(assetId); }
     }
+    /** Immutable image edit draft, deliberately NOT a legacy Block.
+     * The schema2 saveNote adapter cannot persist an origin, so do not expose a
+     * lossy toBlock conversion. A future schema3 guarded writer must preserve both
+     * references and independently verify owner/session, full state and media bytes.
+     * This value is neither a stale-write token nor proof of image provenance.
+     */
+    public static final class ImageEdit {
+        public final String noteId,blockId,caption;
+        public final boolean privateContent;
+        private final ImageRevision revision;
+        public ImageEdit(String noteId,Block source,String originalAssetId) {
+            this.noteId=Ledger.identifier(noteId);
+            if(source==null||source.kind!=Kind.IMAGE)
+                throw new IllegalArgumentException("Image block required");
+            this.blockId=source.id;this.caption=source.caption;
+            this.privateContent=source.privateContent;
+            this.revision=new ImageRevision(source.assetId,originalAssetId);
+        }
+        private ImageEdit(ImageEdit before,ImageRevision revision,String caption,boolean privateContent) {
+            if(caption==null)throw new IllegalArgumentException("Caption cannot be null");
+            this.noteId=before.noteId;this.blockId=before.blockId;
+            this.revision=revision;this.caption=caption;this.privateContent=privateContent;
+        }
+        public ImageRevision revision(){return revision;}
+        public ImageEdit withDerivative(String nextAssetId) {
+            return new ImageEdit(this,revision.withDerivative(nextAssetId),caption,privateContent);
+        }
+        public ImageEdit withMetadata(String caption,boolean privateContent) {
+            return new ImageEdit(this,revision,caption,privateContent);
+        }
+    }
     private final List<Block> blocks=new ArrayList<>();
     public NoteDocument() {}
     private int index(String id) {

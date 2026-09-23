@@ -216,8 +216,61 @@ public final class V12CoreTest {
         reject(()->derive(second,null),"null derivative media digest rejected");
         ok(revisionId(second,"assetId").equals(c)&&revisionId(second,"originalAssetId").equals(a),"all invalid revisions leave existing relationship unchanged");
     }
+    static Object imageEdit(String note,NoteDocument.Block block,String original)throws Exception {
+        try{return cls("NoteDocument$ImageEdit").getConstructor(String.class,NoteDocument.Block.class,String.class).newInstance(note,block,original);}
+        catch(InvocationTargetException e){if(e.getCause() instanceof Exception)throw(Exception)e.getCause();throw e;}
+    }
+    static Object editField(Object edit,String name)throws Exception{return edit.getClass().getField(name).get(edit);}
+    static Object editMetadata(Object edit,String caption,boolean privacy)throws Exception{return call(edit,"withMetadata",new Class<?>[]{String.class,boolean.class},caption,privacy);}
+    static Object editRevision(Object edit)throws Exception{return call(edit,"revision",new Class<?>[]{});}
+    static void imageEdits()throws Exception {
+        String a="a".repeat(64),b="b".repeat(64),c="c".repeat(64);
+        NoteDocument.Block block=NoteDocument.Block.image("photo",a,"原图说明",true);
+        Object draft=imageEdit("second-note",block,null);
+        ok(editField(draft,"noteId").equals("second-note")&&editField(draft,"blockId").equals("photo"),"image edit binds stable note and block IDs not titles");
+        ok(editField(draft,"caption").equals("原图说明")&&(Boolean)editField(draft,"privateContent"),"image edit captures exact caption and privacy");
+        ok(revisionId(editRevision(draft),"assetId").equals(a)&&revisionId(editRevision(draft),"originalAssetId").equals(a),"image edit starts from current asset with legacy origin fallback");
+        Object first=derive(draft,b),second=derive(first,c);
+        ok(revisionId(editRevision(first),"assetId").equals(b)&&revisionId(editRevision(first),"originalAssetId").equals(a),"image block first edit retains original");
+        ok(revisionId(editRevision(second),"assetId").equals(c)&&revisionId(editRevision(second),"originalAssetId").equals(a),"image block second edit retains earliest original");
+        ok(editField(second,"noteId").equals("second-note")&&editField(second,"blockId").equals("photo"),"repeated image edits preserve both stable target identities");
+        ok(editField(second,"caption").equals("原图说明")&&(Boolean)editField(second,"privateContent"),"derivative replacement retains caption and private flag");
+        Object metadata=editMetadata(second,"新说明\n第二行",false);
+        ok(editField(metadata,"caption").equals("新说明\n第二行")&&!(Boolean)editField(metadata,"privateContent"),"image metadata edit preserves exact multiline caption and explicit false");
+        ok(revisionId(editRevision(metadata),"assetId").equals(c)&&revisionId(editRevision(metadata),"originalAssetId").equals(a),"caption privacy edit never resets current or original image");
+        Object privateAgain=editMetadata(metadata,"",true);
+        ok(editField(privateAgain,"caption").equals("")&&(Boolean)editField(privateAgain,"privateContent"),"empty caption and explicit private are valid independent values");
+        ok(editField(privateAgain,"noteId").equals("second-note")&&editField(privateAgain,"blockId").equals("photo"),"metadata changes cannot retarget another note or block");
+        ok(editField(second,"caption").equals("原图说明")&&(Boolean)editField(second,"privateContent"),"metadata edits leave earlier immutable draft unchanged");
+        ok(revisionId(editRevision(draft),"assetId").equals(a)&&revisionId(editRevision(first),"assetId").equals(b),"later derivative edits leave earlier immutable drafts unchanged");
+        ok(block.assetId.equals(a)&&block.caption.equals("原图说明")&&block.privateContent,"image draft does not modify source block");
+        Object restored=imageEdit("second-note",NoteDocument.Block.image("photo",c,"恢复说明",false),a);
+        ok(revisionId(editRevision(derive(restored,b)),"originalAssetId").equals(a),"editing restored image block keeps earliest original");
+        Object sibling=imageEdit("first-note",NoteDocument.Block.image("photo",c,"另一篇",true),b);
+        ok(revisionId(editRevision(sibling),"originalAssetId").equals(b)&&editField(sibling,"noteId").equals("first-note")&&revisionId(editRevision(restored),"originalAssetId").equals(a),"shared current bytes and block ID do not conflate per-note origins");
+        Object identical=derive(draft,a);
+        ok(call(editRevision(identical),"backupAssets",new Class<?>[]{}).equals(Set.of(a)),"no-op derivative keeps a single original reference");
+        ok(call(editRevision(second),"backupAssets",new Class<?>[]{}).equals(Set.of(a,c))&&call(editRevision(second),"currentAssets",new Class<?>[]{}).equals(Set.of(c)),"image draft backup obligation remains separate from current-only projection");
+        NoteDocument note=new NoteDocument();note.addText("before","文字");note.add(block);note.addImage("sibling",a,"共享原图");
+        List<NoteDocument.Block> snapshot=note.snapshot();derive(draft,b);editMetadata(draft,"未保存",false);
+        ok(note.blockIds().equals(List.of("before","photo","sibling"))&&note.snapshot().get(1)==block&&snapshot.get(2)==note.snapshot().get(2),"unsaved edits leave note order target and shared-image sibling untouched");
+        ok(!NoteDocument.Block.class.isAssignableFrom(draft.getClass()),"image edit cannot masquerade as a legacy block and silently lose original on save");
+        reject(()->imageEdit("n",null,a),"image edit rejects missing source block");
+        reject(()->imageEdit("n",NoteDocument.Block.text("text","内容",false),a),"image edit rejects text source");
+        reject(()->imageEdit(null,block,a),"image edit rejects missing note identity");
+        reject(()->imageEdit("",block,a),"image edit rejects empty note identity");
+        reject(()->imageEdit("n",NoteDocument.Block.image("photo","asset-placeholder","",false),null),"image edit rejects non-digest legacy placeholder before persistence");
+        reject(()->imageEdit("n",block,"../outside"),"image edit rejects invalid original digest");
+        reject(()->editMetadata(second,null,false),"image edit rejects null caption");
+        reject(()->derive(second,null),"image edit rejects missing derivative digest");
+        reject(()->derive(second,"A".repeat(64)),"image edit rejects noncanonical derivative digest");
+        ok(revisionId(editRevision(second),"assetId").equals(c)&&revisionId(editRevision(second),"originalAssetId").equals(a)&&editField(second,"caption").equals("原图说明")&&(Boolean)editField(second,"privateContent"),"all rejected image edits leave relationship and metadata exact");
+        ok(Modifier.isFinal(draft.getClass().getModifiers()),"image edit cannot be subclassed into mutable state");
+        boolean immutable=true;for(Field f:draft.getClass().getDeclaredFields())if(!Modifier.isStatic(f.getModifiers()))immutable&=Modifier.isFinal(f.getModifiers());
+        ok(immutable,"every image edit instance field is final");
+    }
     public static void main(String[] args) throws Exception {
-        ledger(); calendar(); notes(); safety(); categories(); fields(); imageRevisions();
+        ledger(); calendar(); notes(); safety(); categories(); fields(); imageRevisions(); imageEdits();
         System.out.println("V12_CORE_RESULT "+checks+"/"+checks+" PASS; DOMAIN_ONLY; ANDROID_EXPORT_RESTORE_NOT_TESTED");
     }
 }

@@ -26,7 +26,25 @@ android {
         abortOnError true
         checkReleaseBuilds true
     }
+    sourceSets {
+        androidTest.manifest.srcFile layout.buildDirectory.file('schema3-test/AndroidManifest.xml').get().asFile
+    }
 }
+// Generated build helper, not another repository source path. The existing runner
+// remains registered by AGP; the second runner has a distinct manifest name key.
+def schema3Manifest = tasks.register('generateSchema3TestManifest') {
+    def target = layout.buildDirectory.file('schema3-test/AndroidManifest.xml')
+    outputs.file(target)
+    doLast {
+        def file = target.get().asFile
+        file.parentFile.mkdirs()
+        file.text = '''<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <instrumentation android:name="com.supercubegame.pockettodo.Schema3DeviceTest" android:targetPackage="com.supercubegame.pockettodo.v12.preview" />
+</manifest>
+'''
+    }
+}
+tasks.named('preBuild').configure { dependsOn(schema3Manifest) }
 dependencies {
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
 }

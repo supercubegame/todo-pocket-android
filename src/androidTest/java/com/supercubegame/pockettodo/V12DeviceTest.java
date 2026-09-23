@@ -318,6 +318,94 @@ public final class V12DeviceTest extends Instrumentation {
         Object t=db("guarded.db");ok(Arrays.equals(fixture(t),Files.readAllBytes(getTargetContext().getFilesDir().toPath().resolve("restore-expected.bin"))),"guarded restore survives a separate Android process with all tables exact");
         ok(importLegacy(t,legacy())==0&&total(t,100,Set.of(LocalDate.of(2026,9,1),LocalDate.of(2026,9,3)),"NET_EXPENSE")==1000,"guarded restore retains usable import journal and exact-cent totals after restart");close(t);
     }
+    // Frozen historical schema2, not generated through current AppDatabase DDL/encoder.
+    // Keep this old format fixed when schema3 arrives. This suite has its own counter;
+    // failures throw through onStart and fail the existing mandatory seed/reopen gate.
+    private int legacyChecks;
+    private void legacyNeed(boolean value,String label){if(!value)throw new AssertionError(label);legacyChecks++;log.append("LEGACY_SCHEMA2_PASS ").append(label).append('\n');}
+    private static final String[] V2_EXTRA_DDL={
+        "CREATE TABLE fields(id TEXT PRIMARY KEY NOT NULL,name TEXT NOT NULL,type TEXT NOT NULL CHECK(type IN('TEXT','LONG_TEXT','NUMBER','DATE','SELECT','MULTI_SELECT','LINK','BOOLEAN')),archived INTEGER NOT NULL CHECK(archived IN(0,1)))",
+        "CREATE TABLE field_options(field_id TEXT NOT NULL REFERENCES fields(id),id TEXT NOT NULL,position INTEGER NOT NULL CHECK(position>=0),PRIMARY KEY(field_id,id),UNIQUE(field_id,position))",
+        "CREATE TABLE field_values(activity_id INTEGER NOT NULL REFERENCES activities(id),field_id TEXT NOT NULL REFERENCES fields(id),position INTEGER NOT NULL CHECK(position>=0),value TEXT NOT NULL,PRIMARY KEY(activity_id,field_id,position))",
+        "CREATE TABLE field_notes(note_id TEXT PRIMARY KEY NOT NULL REFERENCES notes(id),field_id TEXT NOT NULL REFERENCES fields(id))",
+        "CREATE TABLE todos(id TEXT PRIMARY KEY NOT NULL,title TEXT NOT NULL CHECK(length(trim(title))>0),done INTEGER NOT NULL CHECK(done IN(0,1)),position INTEGER NOT NULL CHECK(position>=0) UNIQUE)",
+        "CREATE TABLE legacy_imports(source_id TEXT PRIMARY KEY NOT NULL,item_count INTEGER NOT NULL CHECK(item_count>=0))"
+    };
+    private byte[] frozenV2(SQLiteDatabase db)throws Exception{
+        ByteArrayOutputStream bytes=new ByteArrayOutputStream();DataOutputStream out=new DataOutputStream(bytes);
+        out.writeInt(0x50544442);out.writeInt(1);out.writeInt(2);out.writeInt(TABLES.length);
+        for(String table:TABLES){
+            String columns=table.equals("blocks")?"note_id,id,position,kind,text,asset_id,caption,private":"*";
+            try(android.database.Cursor c=db.rawQuery("SELECT "+columns+" FROM "+table+" ORDER BY rowid",null)){
+                str(out,table);out.writeInt(c.getColumnCount());for(String name:c.getColumnNames())str(out,name);out.writeInt(c.getCount());
+                while(c.moveToNext())for(int i=0;i<c.getColumnCount();i++){int type=c.getType(i);out.writeByte(type);switch(type){case 0:break;case 1:out.writeLong(c.getLong(i));break;case 3:str(out,c.getString(i));break;case 4:bytes(out,c.getBlob(i));break;default:throw new AssertionError("unexpected frozen SQL type");}}
+            }
+        }out.flush();return bytes.toByteArray();
+    }
+    private void frozenSeed()throws Exception{
+        Context c=getTargetContext();c.deleteDatabase("frozen-v2.db");c.deleteDatabase("frozen-target.db");
+        Path root=c.getFilesDir().toPath();MediaRepository sourceMedia=new MediaRepository(root.resolve("frozen-source-media"),1000000),targetMedia=new MediaRepository(root.resolve("frozen-target-media"),1000000);
+        byte[] asset={97,98,99};String id=sourceMedia.copy(new ByteArrayInputStream(asset));byte[] legacy;
+        try(SQLiteDatabase old=c.openOrCreateDatabase("frozen-v2.db",0,null)){
+            old.setForeignKeyConstraintsEnabled(true);for(String sql:V1_DDL)old.execSQL(sql);for(String sql:V2_EXTRA_DDL)old.execSQL(sql);
+            old.execSQL("INSERT INTO revision VALUES(1,42)");old.execSQL("INSERT INTO categories VALUES(7,'旧分类',0)");old.execSQL("INSERT INTO activities VALUES(9,7,NULL,'旧活动',0)");
+            old.execSQL("INSERT INTO notes VALUES('first',9,'同名')");old.execSQL("INSERT INTO notes VALUES('second',9,'同名')");old.execSQL("INSERT INTO media VALUES(?,'application/octet-stream',3)",new Object[]{id});
+            old.execSQL("INSERT INTO blocks VALUES('first','photo',0,'IMAGE','',?,'原图说明',1)",new Object[]{id});old.execSQL("INSERT INTO blocks VALUES('second','photo',0,'IMAGE','',?,'同图另一篇',0)",new Object[]{id});
+            old.execSQL("INSERT INTO blocks VALUES('second','text',1,'TEXT','保留私有文字',NULL,'',1)");old.execSQL("INSERT INTO todos VALUES('old-todo','旧待办',1,0)");
+            old.execSQL("INSERT INTO fields VALUES('old-field','旧字段','TEXT',1)");old.execSQL("INSERT INTO field_values VALUES(9,'old-field',0,'归档值')");old.execSQL("INSERT INTO field_notes VALUES('second','old-field')");
+            old.setVersion(2);
+            try(android.database.Cursor cols=old.rawQuery("SELECT * FROM blocks LIMIT 0",null)){legacyNeed(old.getVersion()==2&&cols.getColumnCount()==8,"frozen fixture really uses schema2 and eight block columns");}
+            legacy=frozenV2(old);
+            byte[] changed;old.beginTransaction();try{old.execSQL("UPDATE blocks SET caption='corrupt' WHERE note_id='second' AND id='photo'");changed=frozenV2(old);}finally{old.endTransaction();}
+            legacyNeed(!Arrays.equals(legacy,changed)&&Arrays.equals(legacy,frozenV2(old)),"frozen serializer detects a real changed row and rollback restores fixture");
+        }
+        Files.write(root.resolve("frozen-v2-state.bin"),legacy);Files.write(root.resolve("frozen-v2-media-id.txt"),id.getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        Path good=root.resolve("frozen-v2.zip");Files.deleteIfExists(good);BackupArchive.write(good,legacy,Set.of(id),sourceMedia);
+        try(BackupArchive.Snapshot snap=BackupArchive.read(good,c.getCacheDir().toPath(),1000000)){legacyNeed(Arrays.equals(snap.state(),legacy)&&snap.assets().keySet().equals(Set.of(id)),"archive wraps frozen old bytes without current database encoder");}
+        Object upgraded=db("frozen-v2.db"),target=db("frozen-target.db");
+        try{
+            legacyNeed(Arrays.equals(frozenV2(raw(upgraded)),legacy),"opening frozen old database preserves all historical cells and ordering");
+            call(target,"addTodo",new Class[]{String.class,String.class},"sentinel","恢复前保留");byte[] before=state(target);
+            Path stage=c.getCacheDir().toPath().resolve("frozen-stage");Files.createDirectories(stage);
+            Object canceled=preview(target,good,stage);close(canceled);
+            legacyNeed(Arrays.equals(before,state(target))&&empty(stage)&&!Files.exists(root.resolve("frozen-target-media").resolve(id)),"cancel old-backup preview preserves live state and publishes no media");
+            Object accepted=preview(target,good,stage);confirm(target,accepted,targetMedia);
+            legacyNeed(Arrays.equals(frozenV2(raw(target)),legacy),"guarded old-backup restore preserves complete old-format projection");
+            legacyNeed(Arrays.equals(Files.readAllBytes(targetMedia.path(id)),asset),"guarded old-backup restore publishes exact original bytes");
+            legacyNeed(call(target,"fieldNoteIds",new Class[]{long.class,String.class},9L,"old-field").equals(List.of("second"))&&value(target,9,"old-field").equals(List.of("归档值")),"old archived field and note attachment survive restore");
+            @SuppressWarnings("unchecked") List<NoteDocument.Block> first=(List<NoteDocument.Block>)call(target,"noteBlocks",new Class[]{String.class},"first");
+            @SuppressWarnings("unchecked") List<NoteDocument.Block> second=(List<NoteDocument.Block>)call(target,"noteBlocks",new Class[]{String.class},"second");
+            legacyNeed(first.size()==1&&second.size()==2&&first.get(0).privateContent&&!second.get(0).privateContent&&second.get(1).privateContent&&first.get(0).assetId.equals(second.get(0).assetId),"duplicate titles and shared image retain separate block privacy and ownership");
+            byte[] stable=state(target);Path bad=root.resolve("frozen-v2-bad.zip");Files.deleteIfExists(bad);
+            BackupArchive.write(bad,Arrays.copyOf(legacy,legacy.length-1),Set.of(id),sourceMedia);
+            boolean refused=false;try{restore(target,bad,targetMedia);}catch(IOException|IllegalArgumentException|IllegalStateException e){refused=true;}
+            legacyNeed(refused&&Arrays.equals(stable,state(target)),"truncated frozen state cannot replace current live data");
+            Files.deleteIfExists(bad);BackupArchive.write(bad,legacy,Set.of(),sourceMedia);refused=false;
+            try{restore(target,bad,targetMedia);}catch(IOException|IllegalArgumentException|IllegalStateException e){refused=true;}
+            legacyNeed(refused&&Arrays.equals(stable,state(target)),"missing frozen original refuses restore without data loss");
+            raw(target).execSQL("CREATE TEMP TRIGGER frozen_fault BEFORE INSERT ON todos WHEN NEW.id='old-todo' BEGIN SELECT RAISE(ABORT,'frozen_v2_commit_failure'); END");
+            boolean exact=false;try{restore(target,good,targetMedia);}catch(Exception e){for(Throwable x=e;x!=null;x=x.getCause())if(String.valueOf(x.getMessage()).contains("frozen_v2_commit_failure"))exact=true;}
+            legacyNeed(exact&&Arrays.equals(stable,state(target)),"late old-backup restore failure rolls back every deleted and inserted table");
+            raw(target).execSQL("DROP TRIGGER frozen_fault");restore(target,good,targetMedia);
+            legacyNeed(Arrays.equals(stable,state(target))&&Arrays.equals(Files.readAllBytes(targetMedia.path(id)),asset),"lower-level old restore stays deterministic and retains original bytes");
+            Path round=root.resolve("frozen-roundtrip.zip");Files.deleteIfExists(round);backup(target,round,targetMedia);restore(upgraded,round,sourceMedia);
+            legacyNeed(Arrays.equals(state(upgraded),state(target))&&Arrays.equals(frozenV2(raw(upgraded)),legacy),"current-format export and restore retain historical semantic content");
+        }finally{close(upgraded);close(target);}
+        if(legacyChecks!=14)throw new AssertionError("frozen seed assertion coverage drift: "+legacyChecks);
+        log.append("LEGACY_SCHEMA2_RESULT seed ").append(legacyChecks).append('/').append(legacyChecks).append(" PASS\n");
+    }
+    private void frozenReopen()throws Exception{
+        Context c=getTargetContext();Path root=c.getFilesDir().toPath();Object target=db("frozen-target.db");
+        try{
+            legacyNeed(Arrays.equals(frozenV2(raw(target)),Files.readAllBytes(root.resolve("frozen-v2-state.bin"))),"separate process retains complete frozen old-backup content");
+            String id=new String(Files.readAllBytes(root.resolve("frozen-v2-media-id.txt")),java.nio.charset.StandardCharsets.US_ASCII);
+            MediaRepository media=new MediaRepository(root.resolve("frozen-target-media"),1000000);media.verify(id);
+            legacyNeed(Arrays.equals(Files.readAllBytes(media.path(id)),new byte[]{97,98,99}),"separate process retains exact shared original");
+            legacyNeed((Boolean)member(todo(target,"old-todo"),"done")&&((CustomFields.Definition)definition(target,"old-field")).archived,"restored todo and archived field remain usable after process restart");
+        }finally{close(target);}
+        if(legacyChecks!=3)throw new AssertionError("frozen reopen assertion coverage drift: "+legacyChecks);
+        log.append("LEGACY_SCHEMA2_RESULT reopen ").append(legacyChecks).append('/').append(legacyChecks).append(" PASS\n");
+    }
     private void prepareUiBackup()throws Exception{
         // Runs in the isolated test APK process after native checks force-stop the UI.
         // The app holds no storage permission, so the fixture stays in app-private
@@ -344,7 +432,7 @@ public final class V12DeviceTest extends Instrumentation {
         Bundle result=new Bundle();try{
             ok(getTargetContext().getPackageName().equals("com.supercubegame.pockettodo.v12.preview"),"tests target isolated v1.2 package");
             ok(android.os.Build.VERSION.SDK_INT==Integer.parseInt(args.getString("expectedApi")),"actual emulator API equals requested test matrix");
-            String phase=args.getString("phase");if("seed".equals(phase)){seed();fieldsSeed();backupSeed();guardedSeed();}else if("reopen".equals(phase)){reopen();fieldsReopen();backupReopen();guardedReopen();}else if("prepare_ui_backup".equals(phase))prepareUiBackup();else throw new IllegalArgumentException("unknown test phase");
+            String phase=args.getString("phase");if("seed".equals(phase)){seed();fieldsSeed();backupSeed();guardedSeed();frozenSeed();}else if("reopen".equals(phase)){reopen();fieldsReopen();backupReopen();guardedReopen();frozenReopen();}else if("prepare_ui_backup".equals(phase))prepareUiBackup();else throw new IllegalArgumentException("unknown test phase");
             log.append("DEVICE_DATABASE_RESULT ").append(phase).append(' ').append(checks).append('/').append(checks).append(" PASS\n");result.putString("stream",log.toString());finish(Activity.RESULT_OK,result);
         }catch(Throwable error){StringWriter text=new StringWriter();error.printStackTrace(new PrintWriter(text));result.putString("stream",log+"DEVICE_DATABASE_FAILED\n"+text);finish(Activity.RESULT_CANCELED,result);}
     }

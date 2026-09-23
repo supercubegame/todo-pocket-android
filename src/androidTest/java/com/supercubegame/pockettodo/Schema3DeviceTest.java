@@ -43,7 +43,19 @@ public final class Schema3DeviceTest extends Instrumentation {
         }out.flush();return bytes.toByteArray();
     }
     private long revision(SQLiteDatabase db){try(Cursor c=db.rawQuery("SELECT value FROM revision WHERE id=1",null)){if(!c.moveToFirst())throw new AssertionError("revision missing");return c.getLong(0);}}
-    private int columns(SQLiteDatabase db){try(Cursor c=db.rawQuery("SELECT * FROM blocks LIMIT 0",null)){return c.getColumnCount();}}
+    private int columns(SQLiteDatabase db){
+        List<String> names=new ArrayList<>();
+        try(Cursor c=db.rawQuery("PRAGMA table_info(blocks)",null)){while(c.moveToNext())names.add(c.getString(c.getColumnIndexOrThrow("name")));}
+        int cached;
+        try(Cursor c=db.rawQuery("SELECT * FROM blocks LIMIT 0",null)){cached=c.getColumnCount();}
+        // ALTER can leave cached SELECT-star metadata on older Android SQLite.
+        // Explicit names independently require every declared column to compile.
+        try(Cursor c=db.rawQuery("SELECT "+String.join(",",names)+" FROM blocks LIMIT 0",null)){
+            log.append("SCHEMA3_LAYOUT version=").append(db.getVersion()).append(" star=").append(cached).append(" declared=").append(names).append(" explicit=").append(Arrays.toString(c.getColumnNames())).append('\n');
+            if(!Arrays.equals(c.getColumnNames(),names.toArray(new String[0])))throw new AssertionError("declared and explicit block layout differ");
+        }
+        return names.size();
+    }
     private void seed()throws Exception{
         Context c=getTargetContext();Path root=c.getFilesDir().toPath();
         // The old runner created this from frozen V1_DDL+V2_EXTRA_DDL, not live DDL.
@@ -58,7 +70,11 @@ public final class Schema3DeviceTest extends Instrumentation {
         c.deleteDatabase(DB);Files.copy(source.toPath(),c.getDatabasePath(DB).toPath());
         try(Schema3Store store=new Schema3Store(c,DB)){
             SQLiteDatabase db=store.getWritableDatabase();
-            need(db.getVersion()==3&&columns(db)==9,"migration_version_and_column");
+            int migratedColumns=columns(db);
+            need(db.getVersion()==3&&migratedColumns==9,"migration_version_and_column");
+            try(Cursor layout=db.rawQuery("SELECT note_id,id,position,kind,text,asset_id,caption,private,original_asset_id FROM blocks LIMIT 0",null)){
+                if(!Arrays.equals(layout.getColumnNames(),new String[]{"note_id","id","position","kind","text","asset_id","caption","private","original_asset_id"}))throw new AssertionError("exact schema3 column names differ");
+            }
             need(Arrays.equals(before,oldCells(db))&&revision(db)==42,"migration_preserves_all_old_cells");
             NoteDocument.ImageEdit original=store.imageEdit("second","photo");
             String a=original.revision().assetId;

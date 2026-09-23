@@ -21,6 +21,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/verify.py v12 2>&1 | tee core.log
+          python3 tools/verify_schema3.py selftest 2>&1 | tee -a core.log
       - name: Verify unfinished delivery cannot be mislabeled
         run: |
           set -euo pipefail
@@ -75,7 +76,7 @@ jobs:
       - name: Database, semantic backups and actual native UI interactions
         run: |
           set -euo pipefail
-          python3 tools/verify_exports.py android 2>&1 | tee ui.log
+          python3 tools/verify_schema3.py android 2>&1 | tee ui.log
       - name: Package tested API34 preview candidate, not full V1.2
         if: matrix.api == 34
         run: |
@@ -341,6 +342,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: python3 tools/verify.py report
+      - name: Publish and require independently observed schema3 storage contracts
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/verify_schema3.py report
       - name: Require actual guarded restore and SAF UI coverage
         if: always()
         run: |

@@ -41,17 +41,14 @@ def observe(text, phase, api):
             "log_sha256": hashlib.sha256(text.encode()).hexdigest(),
             "failure_tail": None if passed else text[-9000:]}
 
-def registration(text):
+def registration(text, runner):
     package = "com.supercubegame.pockettodo.v12.preview"
-    expected = {
-        (package + ".test/com.supercubegame.pockettodo." + name, package)
-        for name in ("V12DeviceTest", "Schema3DeviceTest")
-    }
+    expected = [(package + ".test/com.supercubegame.pockettodo." + runner, package)]
     rows = re.findall(r"^instrumentation:(\S+) \(target=([^)]+)\)\s*$", text, re.M)
     relevant = [row for row in rows if row[0].startswith(package + ".test/")]
-    passed = len(relevant) == 2 and set(relevant) == expected
+    passed = relevant == expected
     return {"status": "PASS" if passed else "NOT_VERIFIED", "registered": relevant,
-            "log": text}
+            "expected_runner": runner, "log": text}
 
 def selftest():
     controls = {}
@@ -84,24 +81,29 @@ def selftest():
     prefix = "instrumentation:" + package + ".test/com.supercubegame.pockettodo."
     old = prefix + "V12DeviceTest (target=" + package + ")\n"
     new = prefix + "Schema3DeviceTest (target=" + package + ")\n"
-    assert registration(old + new)["status"] == "PASS"
-    assert registration(new + old)["status"] == "PASS"
-    bad = ("", old, new, old + new + new,
-           (old + new).replace("target=" + package, "target=wrong"),
-           old + new.replace("Schema3DeviceTest", "WrongRunner"))
+    assert registration(old, "V12DeviceTest")["status"] == "PASS"
+    assert registration(new, "Schema3DeviceTest")["status"] == "PASS"
+    assert registration(new + "instrumentation:other/Runner (target=other)\n", "Schema3DeviceTest")["status"] == "PASS"
+    bad = ("", old, new + new, old + new,
+           new.replace("target=" + package, "target=wrong"),
+           new.replace("Schema3DeviceTest", "WrongRunner"))
     for text in bad:
-        assert registration(text)["status"] != "PASS", "runner registration guard missed"
-    controls["registration"] = {"positive": 2, "negative": len(bad)}
+        assert registration(text, "Schema3DeviceTest")["status"] != "PASS", "runner registration guard missed"
+    assert registration(new, "V12DeviceTest")["status"] != "PASS"
+    controls["registration"] = {"positive": 3, "negative": len(bad) + 1}
     return controls
 
-def device(adb, gate):
+def require_registration(adb, gate, stage, runner):
     prefix = [str(adb), "-s", gate.SERIAL]
     p = subprocess.run(prefix + ["shell", "pm", "list", "instrumentation"],
                        capture_output=True, text=True, timeout=30)
     text = p.stdout + "\n" + p.stderr
-    Path("device-schema3-registration.txt").write_text(text)
+    Path("device-schema3-registration-" + stage + ".txt").write_text(text)
     print(text, flush=True)
-    assert p.returncode == 0 and registration(text)["status"] == "PASS", "installed test APK must register both exact runners and targets"
+    assert p.returncode == 0 and registration(text, runner)["status"] == "PASS", "installed test APK runner/target mismatch: " + stage
+
+def device(adb, gate):
+    prefix = [str(adb), "-s", gate.SERIAL]
     for phase in LABELS:
         if phase == "reopen":
             subprocess.run(prefix + ["shell", "am", "force-stop", gate.PKG], check=True, timeout=30)
@@ -116,6 +118,43 @@ def device(adb, gate):
         print(text, flush=True)
         assert p.returncode == 0 and observe(text, phase, gate.API)["status"] == "PASS", "schema3 " + phase + " failed; inspect device-schema3 log"
 
+def isolated_runner(adb, gate):
+    # One runner per test APK, selected through AGP's documented runner setting.
+    # Never uninstall or reinstall the product APK, and retain default test bytes.
+    import shutil
+    prefix = [str(adb), "-s", gate.SERIAL]
+    tests = list(Path("build/outputs/apk/androidTest/debug").glob("*.apk"))
+    apps = list(Path("build/outputs/apk/debug").glob("*.apk"))
+    assert len(tests) == len(apps) == 1, "ambiguous APK outputs"
+    test, app = tests[0], apps[0]
+    saved = Path("build/schema3-runner/default-test.apk")
+    saved.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(test, saved)
+    digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+    app_before, test_before = digest(app), digest(saved)
+    require_registration(adb, gate, "default", "V12DeviceTest")
+    try:
+        args = ["gradle", "--no-daemon", "--console=plain", "-PpocketSchema3Runner=true", "assembleDebugAndroidTest"]
+        p = subprocess.run(args, capture_output=True, text=True, timeout=300)
+        text = p.stdout + "\n" + p.stderr
+        Path("device-schema3-build.txt").write_text(text)
+        print(text, flush=True)
+        assert p.returncode == 0, "schema3 test APK build failed"
+        assert digest(app) == app_before, "product APK changed during test-only build"
+        subprocess.run(prefix + ["install", "-r", "-t", str(test)], check=True, timeout=120)
+        require_registration(adb, gate, "schema3", "Schema3DeviceTest")
+        device(adb, gate)
+    finally:
+        assert digest(saved) == test_before, "saved default test APK changed"
+        subprocess.run(prefix + ["install", "-r", "-t", str(saved)], check=True, timeout=120)
+        shutil.copyfile(saved, test)
+        require_registration(adb, gate, "restored", "V12DeviceTest")
+        assert digest(test) == test_before and digest(app) == app_before, "APK restoration changed bytes"
+        Path("device-schema3-apks.txt").write_text(json.dumps({
+            "status": "PASS", "product_before": app_before, "product_after": digest(app),
+            "default_test_before": test_before, "default_test_after": digest(test),
+            "scope": "HOST_APK_BYTES_AND_INSTALLED_RUNNER_NOT_DEVICE_APK_PULLBACK"}))
+
 def android():
     print("SCHEMA3_OBSERVER_SELFTEST " + json.dumps(selftest()), flush=True)
     import emulator_gate as gate
@@ -123,7 +162,7 @@ def android():
     original = gate.verify_database
     def database_and_schema3(adb):
         original(adb)
-        device(adb, gate)
+        isolated_runner(adb, gate)
     gate.verify_database = database_and_schema3
     # Existing codec wrapper still invokes our wrapper, then all old native tests.
     verify_exports.android_main()
@@ -135,9 +174,18 @@ def report():
     for api in (26, 34):
         folder = Path("collected") / ("database-api-" + str(api))
         devices[str(api)] = {}
-        path = folder / "device-schema3-registration.txt"
-        text = path.read_text(errors="replace") if path.exists() else ""
-        devices[str(api)]["registration"] = registration(text)
+        for stage, runner in (("default", "V12DeviceTest"), ("schema3", "Schema3DeviceTest"), ("restored", "V12DeviceTest")):
+            path = folder / ("device-schema3-registration-" + stage + ".txt")
+            text = path.read_text(errors="replace") if path.exists() else ""
+            devices[str(api)]["registration_" + stage] = registration(text, runner)
+        path = folder / "device-schema3-apks.txt"
+        identity = json.loads(path.read_text()) if path.exists() else {}
+        valid = (identity.get("status") == "PASS" and
+                 re.fullmatch(r"[0-9a-f]{64}", identity.get("product_before", "")) and
+                 re.fullmatch(r"[0-9a-f]{64}", identity.get("default_test_before", "")) and
+                 identity.get("product_before") == identity.get("product_after") and
+                 identity.get("default_test_before") == identity.get("default_test_after"))
+        devices[str(api)]["apk_preservation"] = {"status": "PASS" if valid else "NOT_VERIFIED", "evidence": identity}
         for phase in LABELS:
             path = folder / ("device-schema3-" + phase + ".txt")
             text = path.read_text(errors="replace") if path.exists() else ""

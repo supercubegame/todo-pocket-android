@@ -29,7 +29,12 @@ public final class AppDatabase extends SQLiteOpenHelper {
         if(name==null||!name.matches("[A-Za-z0-9_-]+\\.db"))throw new IllegalArgumentException("无效数据库文件名");return name;
     }
     @Override public void onConfigure(SQLiteDatabase db) {db.setForeignKeyConstraintsEnabled(true);}
-    @Override public void onCreate(SQLiteDatabase db) {
+    @Override public void onCreate(SQLiteDatabase db) {createSchema2(db);}
+    /** Frozen schema2 DDL for historical backup validation. Future live-schema
+     * additions belong after this call in onCreate, NOT inside this old factory.
+     * Keep addV2 frozen too; candidate must never infer old columns from live DDL.
+     */
+    private static void createSchema2(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE revision(id INTEGER PRIMARY KEY CHECK(id=1), value INTEGER NOT NULL CHECK(value>=0))");
         db.execSQL("INSERT INTO revision VALUES(1,0)");
         db.execSQL("CREATE TABLE categories(id INTEGER PRIMARY KEY CHECK(id>0),name TEXT NOT NULL CHECK(length(trim(name))>0),position INTEGER NOT NULL CHECK(position>=0))");
@@ -264,10 +269,13 @@ public final class AppDatabase extends SQLiteOpenHelper {
         }}
         try(Cursor c=db.rawQuery("SELECT source_id FROM legacy_imports",null)){while(c.moveToNext())MediaRepository.validId(c.getString(0));}
     }
-    /** Fresh in-memory DB from trusted DDL: validates SQL constraints plus domain invariants. */
+    /** Frozen-format candidate. The old canonical equality check is mandatory BEFORE
+     * any future migration to a newer candidate; never decode old bytes into live DDL.
+     * Currently only schema2 is supported, and no migration/normalization is performed.
+     */
     private SQLiteDatabase candidate(byte[] bytes){
         require(bytes!=null&&bytes.length>0&&bytes.length<=STATE_LIMIT,"备份状态为空或超过预算");SQLiteDatabase stage=SQLiteDatabase.create(null);boolean success=false;
-        try{stage.setForeignKeyConstraintsEnabled(true);onCreate(stage);stage.beginTransaction();try{
+        try{stage.setForeignKeyConstraintsEnabled(true);createSchema2(stage);stage.beginTransaction();try{
             deleteRows(stage);decodeRows(stage,bytes);validateSemantics(stage);require(Arrays.equals(encodeState(stage),bytes),"备份规范回读不一致");stage.setTransactionSuccessful();
         }finally{stage.endTransaction();}success=true;return stage;
         }catch(IOException|RuntimeException e){throw new IllegalArgumentException("备份状态校验失败",e);}finally{if(!success)stage.close();}
@@ -297,7 +305,10 @@ public final class AppDatabase extends SQLiteOpenHelper {
     public synchronized void restoreBackup(Path archive,Path stagingRoot,long byteBudget,MediaRepository media)throws IOException{
         if(media==null)throw new IllegalArgumentException("媒体仓库不能为空");
         try(BackupArchive.Snapshot snapshot=BackupArchive.read(archive,stagingRoot,byteBudget);SQLiteDatabase staged=candidate(snapshot.state())){
-            byte[] expected=snapshot.state();Map<String,Long> registry=registeredMedia(staged);Map<String,Path> files=snapshot.assets();
+            // Bind commit equality to the validated candidate, not the transport bytes.
+            // These are still identical in schema2; future version conversion belongs
+            // inside candidate AFTER historical-format canonical validation succeeds.
+            byte[] expected=encodeState(staged);Map<String,Long> registry=registeredMedia(staged);Map<String,Path> files=snapshot.assets();
             if(!registry.keySet().equals(files.keySet()))throw new IOException("媒体集合与数据库引用不一致");
             for(Map.Entry<String,Long> item:registry.entrySet())if(Files.size(files.get(item.getKey()))!=item.getValue())throw new IOException("媒体登记大小不一致");
             for(String id:registry.keySet())try(InputStream in=Files.newInputStream(files.get(id),StandardOpenOption.READ,LinkOption.NOFOLLOW_LINKS)){
@@ -348,9 +359,12 @@ public final class AppDatabase extends SQLiteOpenHelper {
     public synchronized RestorePlan prepareRestore(Path archive,Path stagingRoot,long byteBudget)throws IOException{
         BackupArchive.Snapshot snapshot=BackupArchive.read(archive,stagingRoot,byteBudget);boolean success=false;
         try{
-            byte[] expected=snapshot.state(),before=exportState();
-            try(SQLiteDatabase incoming=candidate(expected);SQLiteDatabase current=candidate(before)){
+            byte[] source=snapshot.state(),before=exportState();
+            try(SQLiteDatabase incoming=candidate(source);SQLiteDatabase current=candidate(before)){
                 validateFiles(incoming,snapshot);
+                // Freeze exactly the validated candidate shown in the preview. Do not
+                // remove candidate's old-format equality check to make conversion pass.
+                byte[] expected=encodeState(incoming);
                 RestorePlan plan=new RestorePlan(this,snapshot,before,expected,summary(current),summary(incoming));success=true;return plan;
             }
         }finally{if(!success)snapshot.close();}

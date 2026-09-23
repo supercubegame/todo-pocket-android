@@ -218,7 +218,17 @@ public final class AndroidCodecTest {
  }
  static void reject(Action action,String label)throws Exception {boolean bad=false;try{action.run();}catch(IOException|IllegalArgumentException e){bad=true;}ok(bad,label);}
  static void save(File p,byte[] b)throws IOException {try(OutputStream o=new FileOutputStream(p)){o.write(b);}}
- public static void main(String[] args)throws Exception {
+ public static void main(String[] args) {
+  try {
+   if(args.length==1&&args[0].equals("--diagnostic-selftest"))throw new AssertionError("codec_diagnostic_sentinel");
+   verify(args);
+  }catch(Throwable failure){
+   System.err.println("CODEC_FATAL "+failure.getClass().getName()+": "+failure.getMessage());
+   failure.printStackTrace(System.err);System.err.flush();System.out.flush();
+   System.exit(1);
+  }
+ }
+ static void verify(String[] args)throws Exception {
   File root=new File(args[0]);ok(android.os.Build.VERSION.SDK_INT==Integer.parseInt(args[1]),"actual_android_api");
   // Loaded from the exact application APK, not a recompiled product test copy.
   ok(Class.forName("com.supercubegame.pockettodo.ShareExporter").getClassLoader()==AndroidCodecTest.class.getClassLoader(),"apk_class_available_in_device_runtime");
@@ -357,7 +367,23 @@ def android_codec(adb, gate):
     run([*prefix,"push",dex,remote+"/test.jar"])
     sources=("source.png","alpha.png","limit.png","over.png","source.jpg","rotated.jpg","exif.png","edge.png","wide.png")
     for name in sources:run([*prefix,"push",folder/name,remote+"/"+name])
-    text=run([*prefix,"shell","CLASSPATH="+remote+"/test.jar:"+remote+"/app.apk","app_process","/system/bin","AndroidCodecTest",remote,str(gate.API)])
+    command=[*prefix,"shell","CLASSPATH="+remote+"/test.jar:"+remote+"/app.apk","app_process","/system/bin","AndroidCodecTest"]
+    # Prove an assertion becomes visible text AND exit 1, not a silent Android kill.
+    probe=subprocess.run([*command,"--diagnostic-selftest"],text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=90)
+    assert probe.returncode==1 and "CODEC_FATAL java.lang.AssertionError: codec_diagnostic_sentinel" in probe.stdout,probe.stdout
+    print("CODEC_DIAGNOSTIC_SELFTEST PASS exit=1 sentinel_stack_visible",flush=True)
+    try:
+        text=run([*command,remote,str(gate.API)])
+    except Exception:
+        # Only disposable synthetic CI data. Capture before emulator cleanup; never retry.
+        try:
+            diagnostic=subprocess.run([*prefix,"logcat","-d","-t","120","-v","brief"],text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=15)
+            print("CODEC_FAILURE_LOGCAT_BEGIN rc="+str(diagnostic.returncode),flush=True)
+            print(diagnostic.stdout[-12000:],flush=True)
+            print("CODEC_FAILURE_LOGCAT_END",flush=True)
+        except Exception as diagnostic_error:
+            print("CODEC_FAILURE_LOGCAT_UNAVAILABLE "+repr(diagnostic_error),flush=True)
+        raise
     labels=re.findall(r"^CODEC_PASS (.+)$",text,re.M)
     summary=re.findall(r"^ANDROID_CODEC_RESULT (\d+)/(\d+) PASS$",text,re.M)
     assert len(summary)==1 and summary[0]==(str(len(labels)),str(len(labels))) and len(labels)==29 and len(set(labels))==29

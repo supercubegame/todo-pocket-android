@@ -318,6 +318,151 @@ public final class CodecHostCheck {
 }
 '''
 
+EXIF_TEST = r'''
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import java.io.*;
+import java.lang.reflect.*;
+import java.nio.*;
+import java.util.*;
+public final class AndroidExifTest {
+ static int checks;
+ static byte[] jpeg;
+ static void ok(boolean b,String name){if(!b)throw new AssertionError(name);checks++;System.out.println("EXIF_PASS "+name);}
+ static byte[] join(byte[]... pieces)throws Exception{ByteArrayOutputStream o=new ByteArrayOutputStream();for(byte[] p:pieces)o.write(p);return o.toByteArray();}
+ static byte[] tiff(boolean le,int... values){
+  ByteBuffer b=ByteBuffer.allocate(14+12*values.length).order(le?ByteOrder.LITTLE_ENDIAN:ByteOrder.BIG_ENDIAN);
+  b.put((byte)(le?'I':'M')).put((byte)(le?'I':'M')).putShort((short)42).putInt(8).putShort((short)values.length);
+  for(int v:values)b.putShort((short)274).putShort((short)3).putInt(1).putShort((short)v).putShort((short)0);
+  b.putInt(0);byte[] result=b.array();
+  // Independent fixture self-check via ByteBuffer, not the product TIFF reader.
+  ByteBuffer read=ByteBuffer.wrap(result).order(le?ByteOrder.LITTLE_ENDIAN:ByteOrder.BIG_ENDIAN);
+  if(read.getShort(2)!=42||read.getInt(4)!=8||read.getShort(8)!=values.length)throw new AssertionError("fixture_header");
+  for(int i=0;i<values.length;i++)if(read.getShort(10+12*i)!=274||read.getShort(18+12*i)!=values[i])throw new AssertionError("fixture_orientation");
+  return result;
+ }
+ static byte[] image(byte[]... tiffs)throws Exception{
+  ByteArrayOutputStream o=new ByteArrayOutputStream();o.write(jpeg,0,2);
+  for(byte[] t:tiffs){o.write(255);o.write(225);int n=t.length+8;o.write(n>>>8);o.write(n);o.write(new byte[]{69,120,105,102,0,0});o.write(t);}
+  o.write(jpeg,2,jpeg.length-2);return o.toByteArray();
+ }
+ static void parse(byte[] b)throws Exception{
+  Method m=Class.forName("com.supercubegame.pockettodo.ShareExporter").getDeclaredMethod("jpegOrientation",byte[].class);m.setAccessible(true);
+  try{m.invoke(null,(Object)b);}catch(InvocationTargetException e){if(e.getCause() instanceof Exception)throw(Exception)e.getCause();throw e;}
+ }
+ static void accepted(byte[] b,String name)throws Exception{byte[] before=b.clone();parse(b);ok(Arrays.equals(b,before),name);}
+ static void rejected(byte[] b,String name)throws Exception{
+  byte[] before=b.clone();boolean bad=false;try{parse(b);}catch(IOException e){bad=true;}
+  ok(bad&&Arrays.equals(b,before),name);
+ }
+ static void codec(byte[] b,boolean reject,String name)throws Exception{
+  byte[] before=b.clone(),out=null;boolean bad=false;
+  Bitmap fixture=BitmapFactory.decodeByteArray(b,0,b.length);
+  if(fixture==null||fixture.getWidth()!=8||fixture.getHeight()!=6)throw new AssertionError("fixture_real_jpeg_"+name);
+  fixture.recycle();
+  try{out=AndroidCodecTest.png(b,0,0,8,6,new int[][]{{0,0,8,6}},48);}catch(IOException e){bad=true;}
+  if(reject){ok(bad&&Arrays.equals(b,before),name);return;}
+  if(bad||out==null)throw new AssertionError(name);
+  Bitmap d=BitmapFactory.decodeByteArray(out,0,out.length);
+  boolean pixels=d!=null&&d.getWidth()==8&&d.getHeight()==6;
+  if(pixels){int[] p=new int[48];d.getPixels(p,0,8,0,0,8,6);for(int v:p)if(v!=0xff000000)pixels=false;}
+  if(d!=null)d.recycle();ok(pixels&&Arrays.equals(b,before),name);
+ }
+ static void basic()throws Exception{
+  accepted(jpeg,"parser_no_exif_accepted");
+  accepted(image(tiff(true,1)),"parser_little_normal_accepted");
+  accepted(image(tiff(false,1)),"parser_big_normal_accepted");
+  codec(jpeg,false,"codec_no_exif_exact_black");
+  codec(image(tiff(true,1)),false,"codec_little_normal_exact_black");
+  codec(image(tiff(false,1)),false,"codec_big_normal_exact_black");
+ }
+ static void rotated()throws Exception{
+  for(boolean le:new boolean[]{true,false})for(int v=2;v<=8;v++){
+   rejected(image(tiff(le,v)),"parser_orientation_"+(le?"II":"MM")+"_"+v);
+   codec(image(tiff(le,v)),true,"codec_orientation_"+(le?"II":"MM")+"_"+v);
+  }
+ }
+ static void duplicate()throws Exception{
+  rejected(image(tiff(true,1),tiff(true,1)),"parser_duplicate_exif_rejected");
+ }
+ static void all()throws Exception{
+  basic();rotated();duplicate();
+  for(boolean le:new boolean[]{true,false}){
+   String e=le?"II":"MM";ByteOrder order=le?ByteOrder.LITTLE_ENDIAN:ByteOrder.BIG_ENDIAN;
+   rejected(image(tiff(le,0)),"parser_undefined_"+e+"_rejected");
+   rejected(image(tiff(le,9)),"parser_invalid_value_"+e+"_rejected");
+   rejected(image(tiff(le)),"parser_missing_orientation_"+e+"_rejected");
+   rejected(image(tiff(le,1,1)),"parser_duplicate_field_"+e+"_rejected");
+   byte[] type=tiff(le,1);ByteBuffer.wrap(type).order(order).putShort(12,(short)4);
+   rejected(image(type),"parser_wrong_type_"+e+"_rejected");
+   byte[] count=tiff(le,1);ByteBuffer.wrap(count).order(order).putInt(14,2);
+   rejected(image(count),"parser_wrong_count_"+e+"_rejected");
+   byte[] zero=tiff(le,1);ByteBuffer.wrap(zero).order(order).putInt(4,0);
+   rejected(image(zero),"parser_zero_offset_"+e+"_rejected");
+   byte[] huge=tiff(le,1);ByteBuffer.wrap(huge).order(order).putInt(4,-1);
+   rejected(image(huge),"parser_unsigned_offset_"+e+"_rejected");
+   byte[] entries=tiff(le,1);ByteBuffer.wrap(entries).order(order).putShort(8,(short)65535);
+   rejected(image(entries),"parser_truncated_entries_"+e+"_rejected");
+   rejected(image(Arrays.copyOf(tiff(le,1),7)),"parser_short_header_"+e+"_rejected");
+   rejected(image(Arrays.copyOf(tiff(le,1),25)),"parser_missing_ifd_tail_"+e+"_rejected");
+   byte[] magic=tiff(le,1);ByteBuffer.wrap(magic).order(order).putShort(2,(short)43);
+   rejected(image(magic),"parser_wrong_magic_"+e+"_rejected");
+  }
+  byte[] endian=tiff(true,1);endian[0]=88;rejected(image(endian),"parser_invalid_byte_order_rejected");
+  rejected(new byte[]{(byte)255,(byte)216,(byte)255},"parser_truncated_marker_rejected");
+  rejected(new byte[]{(byte)255,(byte)216,(byte)255,(byte)225,0,1},"parser_short_segment_rejected");
+  rejected(new byte[]{(byte)255,(byte)216,(byte)255,(byte)225,127,(byte)255},"parser_segment_outside_bytes_rejected");
+ }
+ public static void main(String[] args){
+  try{
+   jpeg=AndroidCodecTest.read(new File(args[0],"source.jpg"));
+   if(args[1].equals("basic"))basic();else if(args[1].equals("rotated"))rotated();else if(args[1].equals("duplicate"))duplicate();else if(args[1].equals("all"))all();else throw new AssertionError("unknown mode");
+   System.out.println("EXIF_RESULT "+checks+"/"+checks+" PASS");
+  }catch(Throwable failure){failure.printStackTrace(System.err);System.err.flush();System.out.flush();System.exit(1);}
+ }
+}
+'''
+
+def exif_boundaries(folder, classes, android, prefix, remote, gate):
+    """APK parser/codec coverage, then explicitly separate recompiled mutant jars."""
+    import os
+    source_path=ROOT/"src/main/java/com/supercubegame/pockettodo/ShareExporter.java"
+    source=source_path.read_text(encoding="utf-8")
+    test=folder/"AndroidExifTest.java";test.write_text(EXIF_TEST,encoding="utf-8")
+    run(["javac","-encoding","UTF-8","--release","8","-cp",str(android)+os.pathsep+str(classes),"-d",classes,test])
+    def dex_and_push(where,name):
+        jar=where/(name+".jar")
+        run([gate.SDK/"build-tools/35.0.0/d8","--min-api","26","--lib",android,"--output",jar,*sorted(where.rglob("*.class"))])
+        run([*prefix,"push",jar,remote+"/"+name+".jar"])
+        assert subprocess.check_output([*prefix,"exec-out","cat",remote+"/"+name+".jar"],timeout=30)==jar.read_bytes()
+        return remote+"/"+name+".jar"
+    test_jar=dex_and_push(classes,"exif-tests")
+    def command(extra,mode):
+        cp=test_jar+(":"+extra if extra else "")+":"+remote+"/app.apk"
+        return [*prefix,"shell","CLASSPATH="+cp,"app_process","/system/bin","AndroidExifTest",remote,mode]
+    output=run(command(None,"all"))
+    labels=re.findall(r"^EXIF_PASS (.+)$",output,re.M)
+    summary=re.findall(r"^EXIF_RESULT (\d+)/(\d+) PASS$",output,re.M)
+    assert len(labels)==63 and len(set(labels))==63 and summary==[("63","63")],output
+    mutations=(
+        ("allow_rotated","if(u16(b,q+8,little)!=1)","if(u16(b,q+8,little)<1)","rotated","parser_orientation_II_2"),
+        ("allow_duplicate","if(++exifCount!=1)","if(++exifCount<1)","duplicate","parser_duplicate_exif_rejected"),
+    )
+    for name,old,new,mode,failure in mutations:
+        assert source.count(old)==1,"EXIF mutation anchor drift: "+name
+        changed=source.replace(old,new,1);assert changed!=source
+        target=folder/name;target.mkdir(exist_ok=True)
+        java=target/"ShareExporter.java";java.write_text(changed,encoding="utf-8")
+        run(["javac","-encoding","UTF-8","--release","8","-cp",android,"-d",target,java,SOURCE])
+        mutant_jar=dex_and_push(target,name)
+        positive=run(command(mutant_jar,"basic"))
+        assert "EXIF_RESULT 6/6 PASS" in positive
+        run(command(mutant_jar,mode),expected_failure=failure)
+    return {"scope":"ACTUAL_APK_ANDROID_PRIVATE_PARSER_AND_PUBLIC_CODEC",
+            "checks":len(labels),"labels":labels,"mutants_rejected":len(mutations),
+            "mutant_scope":"SEPARATE_RECOMPILED_PRODUCT_JARS_NOT_DELIVERY_APK",
+            "source_sha256":hashlib.sha256(source.encode()).hexdigest()}
+
 def android_codec(adb, gate):
     """Run APK code under real Android app_process, no product hidden entrypoints.
 
@@ -413,13 +558,14 @@ def android_codec(adb, gate):
         run(["java","-Djava.awt.headless=true","-cp",folder,"CodecHostCheck","check",mutant],expected_failure=label)
     assert apks[0].read_bytes()==original_apk
     assert subprocess.check_output([*prefix,"exec-out","cat",remote+"/app.apk"],timeout=30)==original_apk
+    exif_report=exif_boundaries(folder,classes,android,prefix,remote,gate)
     report={"commit":os.environ["GITHUB_SHA"],"run_id":os.environ["GITHUB_RUN_ID"],
             "api":gate.API,"status":"PASS","scope":"ANDROID_APK_CODEC_SHELL_NOT_APP_UI_OR_PERSISTENCE",
             "apk_sha256":hashlib.sha256(original_apk).hexdigest(),"checks":len(labels),"labels":labels,
             "independent_host_decodes":list(files),"original_files_unchanged":True,
             "host_negative_controls":len(mutations),"device_apk_readback":"EXACT_BYTES",
             "output_metadata":"PNG_CHUNK_ALLOWLIST_NO_TEXT_EXIF_TRAILING_BYTES",
-            "release_ready":False}
+            "exif_boundaries":exif_report,"release_ready":False}
     out=ROOT/"native-ui";out.mkdir(exist_ok=True)
     (out/"codec-result.json").write_text(json.dumps(report,indent=2)+"\n")
     print("ANDROID_CODEC_EVIDENCE "+json.dumps(report),flush=True)

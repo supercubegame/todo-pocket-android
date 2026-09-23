@@ -132,6 +132,40 @@ public final class Schema3DeviceTest extends Instrumentation {
         try(SQLiteDatabase db=c.openOrCreateDatabase("schema3-conflict.db",0,null)){db.execSQL("ALTER TABLE blocks ADD COLUMN original_asset_id TEXT");conflict=oldCells(db);}
         boolean conflictRefused=false;try(Schema3Store store=new Schema3Store(c,"schema3-conflict.db")){store.getWritableDatabase();}catch(RuntimeException e){conflictRefused=true;}
         try(SQLiteDatabase db=c.openOrCreateDatabase("schema3-conflict.db",0,null)){need(conflictRefused&&db.getVersion()==2&&columns(db)==9&&Arrays.equals(conflict,oldCells(db)),"partial_schema_conflict_not_hidden");}
+        try(Schema3Store store=new Schema3Store(c,DB)){budgetChecks(store);}
+    }
+    private void budgetChecks(Schema3Store store)throws Exception{
+        Schema3Store.ComparisonBuffer buffer=new Schema3Store.ComparisonBuffer(5);
+        buffer.write(new byte[]{1,2,3},0,3);
+        byte[] prefix=buffer.toByteArray();
+        refused(()->buffer.write(new byte[]{4,5,6},0,3));
+        if(!Arrays.equals(prefix,buffer.toByteArray()))throw new AssertionError("partial rejected write");
+        buffer.write(4);buffer.write(5);
+        refused(()->buffer.write(6));
+        Schema3Store.ComparisonBuffer growth=new Schema3Store.ComparisonBuffer(1500);
+        byte[] expected=new byte[1500];for(int i=0;i<expected.length;i++)expected[i]=(byte)i;
+        growth.write(expected,0,1023);
+        refused(()->growth.write(new byte[478],0,478));
+        if(growth.size()!=1023)throw new AssertionError("rejected expansion wrote partial bytes");
+        growth.write(expected,1023,477);
+        need(Arrays.equals(buffer.toByteArray(),new byte[]{1,2,3,4,5})&&buffer.capacity()==5&&growth.capacity()==1500&&Arrays.equals(expected,growth.toByteArray()),"comparison_buffer_exact_limit_and_atomic_rejection");
+        SQLiteDatabase db=store.getWritableDatabase();
+        byte[] before=store.snapshot();long rev=revision(db);
+        NoteDocument.ImageEdit edit=store.imageEdit("second","photo");
+        boolean snapshotRejected=false,saveRejected=false;
+        db.beginTransaction();
+        try{
+            String payload="x".repeat(256*1024);
+            for(int i=0;i<40;i++)db.execSQL("INSERT INTO blocks(note_id,id,position,kind,text,asset_id,caption,private,original_asset_id) VALUES('first',?,?,'TEXT',?,NULL,'',0,NULL)",new Object[]{"budget-"+i,1000+i,payload});
+            try(Cursor count=db.rawQuery("SELECT count(*),sum(length(text)) FROM blocks WHERE id LIKE 'budget-%'",null)){
+                if(!count.moveToFirst()||count.getInt(0)!=40||count.getLong(1)!=10485760L)throw new AssertionError("oversize fixture not established");
+            }
+            try{store.snapshot();}catch(IllegalArgumentException e){snapshotRejected="Comparison snapshot exceeds budget".equals(e.getMessage());}
+            need(snapshotRejected,"oversize_comparison_snapshot_rejected");
+            try{store.saveImageEdit(edit.withMetadata("must not persist",true),before);}catch(IllegalArgumentException e){saveRejected="Comparison snapshot exceeds budget".equals(e.getMessage());}
+            if(revision(db)!=rev||!store.imageEdit("second","photo").caption.equals(edit.caption))throw new AssertionError("oversize save modified target or revision");
+        }finally{db.endTransaction();} // Intentionally roll back only this test fixture.
+        need(saveRejected&&Arrays.equals(before,store.snapshot()),"oversize_save_and_fixture_rollback_preserve_state");
     }
     private void reopen()throws Exception{
         Context c=getTargetContext();Path root=c.getFilesDir().toPath();

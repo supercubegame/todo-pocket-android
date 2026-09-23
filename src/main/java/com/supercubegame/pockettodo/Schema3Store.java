@@ -13,6 +13,29 @@ import java.util.*;
  * Keep AppDatabase's old format frozen until compatible backup adapters are ready.
  */
 public final class Schema3Store extends SQLiteOpenHelper {
+    private static final int COMPARISON_LIMIT=8*1024*1024;
+    /** Bounds encoded output growth, not CursorWindow, cell copies or total heap. */
+    static final class ComparisonBuffer extends ByteArrayOutputStream {
+        private final int limit;
+        ComparisonBuffer(int limit){
+            super(Math.min(1024,checkedLimit(limit)));this.limit=limit;
+        }
+        private static int checkedLimit(int limit){
+            require(limit>0&&limit<=COMPARISON_LIMIT,"Invalid comparison buffer limit");return limit;
+        }
+        private void reserve(int length){
+            require(length>=0&&length<=limit-count,"Comparison snapshot exceeds budget");
+            int required=count+length;
+            if(required>buf.length)buf=Arrays.copyOf(buf,Math.min(limit,Math.max(required,buf.length*2)));
+        }
+        @Override public synchronized void write(int value){reserve(1);buf[count++]=(byte)value;}
+        @Override public synchronized void write(byte[] bytes,int offset,int length){
+            Objects.requireNonNull(bytes);
+            if(offset<0||length<0||offset>bytes.length-length)throw new IndexOutOfBoundsException();
+            reserve(length);System.arraycopy(bytes,offset,buf,count,length);count+=length;
+        }
+        synchronized int capacity(){return buf.length;}
+    }
     private static final String[] TABLES={"revision","categories","applications","activities","paths","tags","batches","ledger","checkins","media","notes","blocks","fields","field_options","field_values","field_notes","todos","legacy_imports"};
     private static final String[] OLD_BLOCKS={"note_id","id","position","kind","text","asset_id","caption","private"};
     public Schema3Store(Context context,String name){
@@ -69,7 +92,7 @@ public final class Schema3Store extends SQLiteOpenHelper {
     private static byte[] snapshot(SQLiteDatabase db){
         validate(db);
         try{
-            ByteArrayOutputStream buffer=new ByteArrayOutputStream();DataOutputStream out=new DataOutputStream(buffer);
+            ComparisonBuffer buffer=new ComparisonBuffer(COMPARISON_LIMIT);DataOutputStream out=new DataOutputStream(buffer);
             out.writeInt(0x53334350);out.writeInt(3);
             for(String table:TABLES)try(Cursor c=db.rawQuery("SELECT * FROM "+table+" ORDER BY rowid",null)){
                 text(out,table);out.writeInt(c.getColumnCount());for(String n:c.getColumnNames())text(out,n);out.writeInt(c.getCount());
@@ -80,7 +103,6 @@ public final class Schema3Store extends SQLiteOpenHelper {
                     else if(type==Cursor.FIELD_TYPE_BLOB)bytes(out,c.getBlob(i));
                     else require(type==Cursor.FIELD_TYPE_NULL,"Unsupported SQL type");
                 }
-                require(buffer.size()<=8*1024*1024,"Comparison snapshot exceeds budget");
             }
             out.flush();return buffer.toByteArray();
         }catch(IOException e){throw new IllegalStateException("Cannot encode comparison state",e);}
@@ -98,7 +120,7 @@ public final class Schema3Store extends SQLiteOpenHelper {
      * Full-state equality catches external writes even without revision increments.
      */
     public synchronized void saveImageEdit(NoteDocument.ImageEdit edit,byte[] before){
-        require(edit!=null&&before!=null&&before.length>0&&before.length<=8*1024*1024,"Missing reviewed state");
+        require(edit!=null&&before!=null&&before.length>0&&before.length<=COMPARISON_LIMIT,"Missing reviewed state");
         byte[] expected=before.clone();SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
         try{
             require(Arrays.equals(expected,snapshot(db)),"Database changed; review again");

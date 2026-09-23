@@ -21,6 +21,9 @@ LABELS = {
         "late_sql_fault_rolls_back_target_and_revision", "all_original_and_derived_bytes_unchanged",
         "snapshot_caller_mutation_isolated", "old_helper_refuses_without_damage",
         "partial_schema_conflict_not_hidden",
+        "comparison_buffer_exact_limit_and_atomic_rejection",
+        "oversize_comparison_snapshot_rejected",
+        "oversize_save_and_fixture_rollback_preserve_state",
     ],
     "reopen": [
         "separate_process_exact_state", "separate_process_pair_metadata",

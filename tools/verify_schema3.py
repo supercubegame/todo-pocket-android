@@ -118,7 +118,15 @@ def device(adb, gate):
         print(text, flush=True)
         assert p.returncode == 0 and observe(text, phase, gate.API)["status"] == "PASS", "schema3 " + phase + " failed; inspect device-schema3 log"
 
-def isolated_runner(adb, gate):
+def certificate(apk, gate):
+    tool = gate.SDK / "build-tools/35.0.0/apksigner"
+    p = subprocess.run([str(tool), "verify", "--verbose", "--print-certs", str(apk)],
+                       capture_output=True, text=True, timeout=30)
+    values = re.findall(r"^Signer #\d+ certificate SHA-256 digest: ([0-9a-f]{64})$", p.stdout, re.M)
+    assert p.returncode == 0 and len(values) == 1, "APK must have one verified signing certificate"
+    return values[0]
+
+def isolated_runner(adb, gate, build_env):
     # One runner per test APK, selected through AGP's documented runner setting.
     # Never uninstall or reinstall the product APK, and retain default test bytes.
     import shutil
@@ -132,15 +140,24 @@ def isolated_runner(adb, gate):
     shutil.copyfile(test, saved)
     digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
     app_before, test_before = digest(app), digest(saved)
+    app_certificate, test_certificate = certificate(app, gate), certificate(saved, gate)
+    assert app_certificate == test_certificate, "default app/test signing certificates differ"
     require_registration(adb, gate, "default", "V12DeviceTest")
     try:
         args = ["gradle", "--no-daemon", "--console=plain", "-PpocketSchema3Runner=true", "assembleDebugAndroidTest"]
-        p = subprocess.run(args, capture_output=True, text=True, timeout=300)
+        # Emulator setup changes ANDROID_USER_HOME. Build with the environment
+        # captured before that setup so AGP reuses the original debug keystore.
+        p = subprocess.run(args, capture_output=True, text=True, timeout=300, env=build_env)
         text = p.stdout + "\n" + p.stderr
         Path("device-schema3-build.txt").write_text(text)
         print(text, flush=True)
         assert p.returncode == 0, "schema3 test APK build failed"
         assert digest(app) == app_before, "product APK changed during test-only build"
+        new_certificate = certificate(test, gate)
+        Path("device-schema3-certificates.txt").write_text(json.dumps({
+            "app": app_certificate, "default_test": test_certificate,
+            "schema3_test": new_certificate}))
+        assert new_certificate == app_certificate, "schema3 test signing certificate differs; refuse installation"
         subprocess.run(prefix + ["install", "-r", "-t", str(test)], check=True, timeout=120)
         require_registration(adb, gate, "schema3", "Schema3DeviceTest")
         device(adb, gate)
@@ -153,16 +170,18 @@ def isolated_runner(adb, gate):
         Path("device-schema3-apks.txt").write_text(json.dumps({
             "status": "PASS", "product_before": app_before, "product_after": digest(app),
             "default_test_before": test_before, "default_test_after": digest(test),
+            "app_certificate": app_certificate, "default_test_certificate": test_certificate,
             "scope": "HOST_APK_BYTES_AND_INSTALLED_RUNNER_NOT_DEVICE_APK_PULLBACK"}))
 
 def android():
+    build_env = os.environ.copy()
     print("SCHEMA3_OBSERVER_SELFTEST " + json.dumps(selftest()), flush=True)
     import emulator_gate as gate
     import verify_exports
     original = gate.verify_database
     def database_and_schema3(adb):
         original(adb)
-        isolated_runner(adb, gate)
+        isolated_runner(adb, gate, build_env)
     gate.verify_database = database_and_schema3
     # Existing codec wrapper still invokes our wrapper, then all old native tests.
     verify_exports.android_main()
@@ -186,6 +205,11 @@ def report():
                  identity.get("product_before") == identity.get("product_after") and
                  identity.get("default_test_before") == identity.get("default_test_after"))
         devices[str(api)]["apk_preservation"] = {"status": "PASS" if valid else "NOT_VERIFIED", "evidence": identity}
+        path = folder / "device-schema3-certificates.txt"
+        certs = json.loads(path.read_text()) if path.exists() else {}
+        verified = (re.fullmatch(r"[0-9a-f]{64}", certs.get("app", "")) and
+                    certs.get("app") == certs.get("default_test") == certs.get("schema3_test"))
+        devices[str(api)]["certificates"] = {"status": "PASS" if verified else "NOT_VERIFIED", "evidence": certs}
         for phase in LABELS:
             path = folder / ("device-schema3-" + phase + ".txt")
             text = path.read_text(errors="replace") if path.exists() else ""

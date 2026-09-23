@@ -160,7 +160,8 @@ def v12():
         run(["javac", "-encoding", "UTF-8", "-d", out, *map(str, sources), str(test)])
         run(["java", "-cp", out, "V12CoreTest"])
         run(["java", "-cp", out, "FileBoundaryTest"])
-    print("V12_ACCEPTANCE PARTIAL: JVM domain/file boundaries only; Android/database/image decoding/full restore/export NOT_TESTED")
+    run([sys.executable, "tools/verify_exports.py"])
+    print("V12_ACCEPTANCE PARTIAL: JVM domain/file/pixel contracts only; Android codecs/persisted derivatives/UI/share NOT_TESTED by this fast gate")
 
 def build():
     # The inherited V1.1 Gradle/UI configuration is not a V1.2 product. No dormant

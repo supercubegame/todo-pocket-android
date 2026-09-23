@@ -25,6 +25,40 @@ public final class NoteDocument {
             return new Block(id,Kind.IMAGE,"",assetId,caption,privateContent);
         }
     }
+    /**
+     * Immutable current/original digest pair for the forthcoming schema3 adapter.
+     * Reference algebra only: not a decoded-image proof, redaction certificate,
+     * sharing permission, persistence API or a replacement for Block.
+     * Kept separate until storage/backup can preserve BOTH references atomically.
+     */
+    public static final class ImageRevision {
+        public final String assetId;
+        public final String originalAssetId;
+        public ImageRevision(String assetId,String originalAssetId) {
+            this.assetId=digestId(assetId);
+            this.originalAssetId=originalAssetId==null?this.assetId:digestId(originalAssetId);
+        }
+        private static String digestId(String id) {
+            if(id==null||!id.matches("[0-9a-f]{64}"))
+                throw new IllegalArgumentException("Invalid immutable media digest");
+            return id;
+        }
+        /** Continue from the displayed revision without forgetting the first original. */
+        public ImageRevision withDerivative(String nextAssetId) {
+            return new ImageRevision(nextAssetId,originalAssetId);
+        }
+        /** Full backup obligations. This set must NEVER be reused as share selection. */
+        public Set<String> backupAssets() {
+            Set<String> ids=new LinkedHashSet<>();
+            ids.add(assetId);ids.add(originalAssetId);
+            return Collections.unmodifiableSet(ids);
+        }
+        /** Current-only references, NOT permission to share or evidence of redaction.
+         * When IDs are equal, these bytes are also the original; callers still need
+         * actual output validation, explicit selection and private-content filtering.
+         */
+        public Set<String> currentAssets() { return Collections.singleton(assetId); }
+    }
     private final List<Block> blocks=new ArrayList<>();
     public NoteDocument() {}
     private int index(String id) {

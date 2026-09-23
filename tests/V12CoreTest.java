@@ -177,8 +177,47 @@ public final class V12CoreTest {
         ok(call(f,"value",new Class<?>[]{long.class,String.class},100L,"invite").equals(List.of("3")),"field archive retains values for recovery");
         reject(()->call(f,"put",put,100L,"invite",List.of("4")),"archived field prevents silent new writes");
     }
+    static Object imageRevision(String current,String original)throws Exception {
+        try{return cls("NoteDocument$ImageRevision").getConstructor(String.class,String.class).newInstance(current,original);}
+        catch(InvocationTargetException e){if(e.getCause() instanceof Exception)throw(Exception)e.getCause();throw e;}
+    }
+    static String revisionId(Object value,String field)throws Exception{return(String)value.getClass().getField(field).get(value);}
+    static Object derive(Object value,String asset)throws Exception{return call(value,"withDerivative",new Class<?>[]{String.class},asset);}
+    static void imageRevisions()throws Exception {
+        String a="a".repeat(64),b="b".repeat(64),c="c".repeat(64);
+        Object original=imageRevision(a,null);
+        ok(revisionId(original,"assetId").equals(a)&&revisionId(original,"originalAssetId").equals(a),"image revision normalizes legacy missing origin to current asset");
+        ok(call(original,"backupAssets",new Class<?>[]{}).equals(Set.of(a)),"unmodified image backup references deduplicate");
+        Object first=derive(original,b),second=derive(first,c);
+        ok(revisionId(first,"assetId").equals(b)&&revisionId(first,"originalAssetId").equals(a),"first derivative retains earliest original");
+        ok(revisionId(second,"assetId").equals(c)&&revisionId(second,"originalAssetId").equals(a),"second derivative never promotes prior derivative to original");
+        ok(revisionId(original,"assetId").equals(a)&&revisionId(first,"assetId").equals(b),"later image edits leave prior immutable revisions exact");
+        ok(call(second,"backupAssets",new Class<?>[]{}).equals(Set.of(a,c)),"backup keeps current and earliest original but not obsolete intermediate");
+        ok(call(second,"currentAssets",new Class<?>[]{}).equals(Set.of(c)),"current-only reference projection excludes distinct original");
+        Object restored=imageRevision(c,a);
+        ok(call(restored,"backupAssets",new Class<?>[]{}).equals(call(second,"backupAssets",new Class<?>[]{})),"explicit restored image pair retains same references");
+        ok(revisionId(derive(restored,b),"originalAssetId").equals(a),"editing reconstructed revision keeps original");
+        Object other=imageRevision(c,b);
+        ok(revisionId(other,"originalAssetId").equals(b)&&revisionId(second,"originalAssetId").equals(a),"identical derived bytes can have different per-block originals");
+        Object same=derive(original,a);
+        ok(call(same,"backupAssets",new Class<?>[]{}).equals(Set.of(a))&&revisionId(same,"originalAssetId").equals(a),"identical output digest is valid without duplicate asset entries");
+        @SuppressWarnings("unchecked") Set<String> backup=(Set<String>)call(second,"backupAssets",new Class<?>[]{});
+        boolean frozen=false;try{backup.clear();}catch(UnsupportedOperationException e){frozen=true;}ok(frozen&&backup.equals(Set.of(a,c)),"backup asset set is immutable");
+        @SuppressWarnings("unchecked") Set<String> current=(Set<String>)call(second,"currentAssets",new Class<?>[]{});
+        frozen=false;try{current.add(a);}catch(UnsupportedOperationException e){frozen=true;}ok(frozen&&current.equals(Set.of(c)),"current asset set cannot acquire original through caller mutation");
+        String[] bad={"","../outside","https://example.com/photo","A".repeat(64),"a".repeat(63),"a".repeat(65),"g".repeat(64)};
+        for(int i=0;i<bad.length;i++){
+            final String id=bad[i];
+            reject(()->imageRevision(id,a),"invalid current media digest rejected "+i);
+            reject(()->imageRevision(a,id),"invalid original media digest rejected "+i);
+            reject(()->derive(second,id),"invalid derivative media digest rejected "+i);
+        }
+        reject(()->imageRevision(null,a),"null current media digest rejected");
+        reject(()->derive(second,null),"null derivative media digest rejected");
+        ok(revisionId(second,"assetId").equals(c)&&revisionId(second,"originalAssetId").equals(a),"all invalid revisions leave existing relationship unchanged");
+    }
     public static void main(String[] args) throws Exception {
-        ledger(); calendar(); notes(); safety(); categories(); fields();
+        ledger(); calendar(); notes(); safety(); categories(); fields(); imageRevisions();
         System.out.println("V12_CORE_RESULT "+checks+"/"+checks+" PASS; DOMAIN_ONLY; ANDROID_EXPORT_RESTORE_NOT_TESTED");
     }
 }

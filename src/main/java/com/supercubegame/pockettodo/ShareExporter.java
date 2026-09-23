@@ -28,8 +28,61 @@ public final class ShareExporter {
     }
 
     /** Raw raster coordinates only. Reject orientation metadata we cannot yet honor. */
+    private static int u16(byte[] b,int p,boolean little) {
+        return little?(b[p]&255)|((b[p+1]&255)<<8):((b[p]&255)<<8)|(b[p+1]&255);
+    }
+    private static long u32(byte[] b,int p,boolean little) {
+        return little?((long)u16(b,p+2,true)<<16)|u16(b,p,true):
+            ((long)u16(b,p,false)<<16)|u16(b,p+2,false);
+    }
+    /** Check primary TIFF orientation independently of version-dependent framework parsing.
+     * Bounded JPEG segment walk, not a general EXIF reader. Ambiguity fails closed.
+     * EXIF without an explicit primary orientation is not editable in this stage.
+     */
+    private static void jpegOrientation(byte[] b)throws IOException {
+        if(b.length<4||(b[0]&255)!=255||(b[1]&255)!=216)throw new IOException("Invalid JPEG");
+        int p=2,exifCount=0;
+        while(p<b.length) {
+            if((b[p++]&255)!=255)throw new IOException("Invalid JPEG marker");
+            while(p<b.length&&(b[p]&255)==255)p++;
+            if(p>=b.length)throw new IOException("Truncated JPEG marker");
+            int marker=b[p++]&255;
+            if(marker==218||marker==217)return; // Do not scan entropy-coded image bytes.
+            if(marker==1||(marker>=208&&marker<=215))continue;
+            if(marker==0||marker==216||p>b.length-2)throw new IOException("Invalid JPEG segment");
+            int n=u16(b,p,false);
+            if(n<2||n>b.length-p)throw new IOException("Truncated JPEG segment");
+            int start=p+2,end=p+n;
+            if(marker==225&&end-start>=6&&b[start]==69&&b[start+1]==120&&b[start+2]==105&&
+               b[start+3]==102&&b[start+4]==0&&b[start+5]==0) {
+                if(++exifCount!=1)throw new IOException("Ambiguous JPEG EXIF");
+                int t=start+6;
+                if(end-t<8)throw new IOException("Truncated TIFF header");
+                boolean little=b[t]==73&&b[t+1]==73;
+                if(!little&&!(b[t]==77&&b[t+1]==77))throw new IOException("Invalid TIFF byte order");
+                if(u16(b,t+2,little)!=42)throw new IOException("Invalid TIFF header");
+                long offset=u32(b,t+4,little);
+                if(offset<8||offset>(long)end-t-2)throw new IOException("Invalid primary IFD");
+                int ifd=t+(int)offset,count=u16(b,ifd,little);
+                if((long)ifd+2+12L*count+4>end)throw new IOException("Truncated primary IFD");
+                boolean seen=false;
+                for(int i=0,q=ifd+2;i<count;i++,q+=12) {
+                    if(u16(b,q,little)!=274)continue;
+                    if(seen||u16(b,q+2,little)!=3||u32(b,q+4,little)!=1)
+                        throw new IOException("Ambiguous primary orientation");
+                    seen=true;
+                    if(u16(b,q+8,little)!=1)throw new IOException("Image orientation must be normalized before editing");
+                }
+                if(!seen)throw new IOException("EXIF orientation cannot be confirmed");
+            }
+            p=end;
+        }
+        throw new IOException("Incomplete JPEG header");
+    }
+
     private static void orientation(byte[] source,String mime)throws IOException {
         if("image/jpeg".equals(mime)) {
+            jpegOrientation(source);
             ExifInterface exif=new ExifInterface(new ByteArrayInputStream(source));
             int value=exif.getAttributeInt(ExifInterface.TAG_ORIENTATION,ExifInterface.ORIENTATION_UNDEFINED);
             if(value!=ExifInterface.ORIENTATION_UNDEFINED&&value!=ExifInterface.ORIENTATION_NORMAL)

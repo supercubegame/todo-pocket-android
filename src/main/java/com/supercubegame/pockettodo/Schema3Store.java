@@ -130,6 +130,70 @@ public final class Schema3Store extends SQLiteOpenHelper {
         }
     }
     public synchronized NoteDocument.ImageEdit imageEdit(String note,String block){return imageEdit(getReadableDatabase(),note,block);}
+    private static void requireNote(SQLiteDatabase db,String note){
+        try(Cursor c=db.rawQuery("SELECT 1 FROM notes WHERE id=?",new String[]{note})){require(c.moveToFirst(),"Note not found");}
+    }
+    private static List<NoteDocument.Block> noteBlocks(SQLiteDatabase db,String note){
+        requireNote(db,note);List<NoteDocument.Block> blocks=new ArrayList<>();
+        try(Cursor c=db.rawQuery("SELECT id,kind,text,asset_id,caption,private FROM blocks WHERE note_id=? ORDER BY position",new String[]{note})){
+            while(c.moveToNext())blocks.add("IMAGE".equals(c.getString(1))
+                ?NoteDocument.Block.image(c.getString(0),c.getString(3),c.getString(4),c.getInt(5)!=0)
+                :NoteDocument.Block.text(c.getString(0),c.getString(2),c.getInt(5)!=0));
+        }return Collections.unmodifiableList(blocks);
+    }
+    /** Legacy-shaped UI projection; saveNote preserves origins from the database. */
+    public synchronized List<NoteDocument.Block> noteBlocks(String note){
+        Ledger.identifier(note);return noteBlocks(getReadableDatabase(),note);
+    }
+    /** Full-state guarded ordinary edit, not a session/single-use UI token.
+     * Existing stable IDs cannot change kind or image asset through this path.
+     * Preserve stored origin including NULL; new registered images start at NULL.
+     * Removed blocks release references only, never delete shared media.
+     */
+    public synchronized void saveNote(String note,List<NoteDocument.Block> blocks,byte[] before){
+        Ledger.identifier(note);
+        require(blocks!=null&&!Ledger.hasNull(blocks),"Missing note blocks");
+        require(before!=null&&before.length>0&&before.length<=COMPARISON_LIMIT,"Missing reviewed state");
+        List<NoteDocument.Block> owned=new ArrayList<>(blocks);NoteDocument validator=new NoteDocument();
+        for(NoteDocument.Block block:owned)validator.add(block);
+        byte[] expected=before.clone();SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
+        try{
+            require(Arrays.equals(expected,snapshot(db)),"Database changed; review again");requireNote(db,note);
+            Map<String,String> kinds=new HashMap<>(),assets=new HashMap<>(),origins=new HashMap<>();
+            try(Cursor c=db.rawQuery("SELECT id,kind,asset_id,original_asset_id FROM blocks WHERE note_id=?",new String[]{note})){
+                while(c.moveToNext()){String id=c.getString(0);kinds.put(id,c.getString(1));assets.put(id,c.isNull(2)?null:c.getString(2));origins.put(id,c.isNull(3)?null:c.getString(3));}
+            }
+            db.delete("blocks","note_id=?",new String[]{note});
+            for(int i=0;i<owned.size();i++){
+                NoteDocument.Block block=owned.get(i);String origin=null;
+                if(kinds.containsKey(block.id)){
+                    require(kinds.get(block.id).equals(block.kind.name()),"Existing block kind cannot change");
+                    if(block.kind==NoteDocument.Kind.IMAGE){
+                        require(block.assetId.equals(assets.get(block.id)),"Use derivative writer to change existing image");
+                        origin=origins.get(block.id);
+                    }
+                }
+                if(block.kind==NoteDocument.Kind.IMAGE){
+                    new NoteDocument.ImageRevision(block.assetId,origin);
+                    try(Cursor c=db.rawQuery("SELECT bytes FROM media WHERE id=?",new String[]{block.assetId})){
+                        require(c.moveToFirst()&&c.getLong(0)>0,"Unregistered image");
+                    }
+                }
+                db.execSQL("INSERT INTO blocks(note_id,id,position,kind,text,asset_id,caption,private,original_asset_id) VALUES(?,?,?,?,?,?,?,?,?)",
+                    new Object[]{note,block.id,i,block.kind.name(),block.text,block.kind==NoteDocument.Kind.IMAGE?block.assetId:null,block.caption,block.privateContent?1:0,origin});
+            }
+            long next=Math.incrementExact(revision(db));db.execSQL("UPDATE revision SET value=? WHERE id=1",new Object[]{next});validate(db);
+            try(Cursor c=db.rawQuery("SELECT id,kind,text,asset_id,caption,private,original_asset_id,position FROM blocks WHERE note_id=? ORDER BY position",new String[]{note})){
+                int position=0;
+                for(NoteDocument.Block block:owned){
+                    String asset=block.kind==NoteDocument.Kind.IMAGE?block.assetId:null;
+                    String origin=block.kind==NoteDocument.Kind.IMAGE?origins.get(block.id):null;
+                    require(c.moveToNext()&&block.id.equals(c.getString(0))&&block.kind.name().equals(c.getString(1))&&block.text.equals(c.getString(2))&&Objects.equals(asset,c.isNull(3)?null:c.getString(3))&&block.caption.equals(c.getString(4))&&(block.privateContent?1:0)==c.getInt(5)&&Objects.equals(origin,c.isNull(6)?null:c.getString(6))&&c.getInt(7)==position++,"Note write readback differs");
+                }require(!c.moveToNext(),"Unexpected note rows");
+            }
+            db.setTransactionSuccessful();
+        }finally{db.endTransaction();}
+    }
     /** Reference-only atomic update. Caller must verify actual immutable bytes and
      * explicit UI consent; this is not a single-use/session preview token.
      * Full-state equality catches external writes even without revision increments.

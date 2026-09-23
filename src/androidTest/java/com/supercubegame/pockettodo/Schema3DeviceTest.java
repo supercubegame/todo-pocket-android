@@ -137,6 +137,7 @@ public final class Schema3DeviceTest extends Instrumentation {
         try(SQLiteDatabase db=c.openOrCreateDatabase("schema3-conflict.db",0,null)){need(conflictRefused&&db.getVersion()==2&&columns(db)==9&&Arrays.equals(conflict,oldCells(db)),"partial_schema_conflict_not_hidden");}
         try(Schema3Store store=new Schema3Store(c,DB)){budgetChecks(store);}
         lifecycleSeed();
+        ordinaryNoteSeed();
     }
     private String schema(SQLiteDatabase db){
         StringBuilder out=new StringBuilder();
@@ -216,6 +217,54 @@ public final class Schema3DeviceTest extends Instrumentation {
             need(rejected&&db.getVersion()==99&&schema(db).equals(layout)&&value.moveToFirst()&&value.getString(0).equals("keep")&&!value.moveToNext(),"future_schema_refused_without_damage");
         }
     }
+    private void ordinaryNoteSeed()throws Exception{
+        Context c=getTargetContext();Path root=c.getFilesDir().toPath();
+        String a="1".repeat(64),b="2".repeat(64);
+        try(Schema3Store store=new Schema3Store(c,"schema3-new.db")){
+            SQLiteDatabase db=store.getWritableDatabase();
+            db.execSQL("INSERT INTO notes VALUES('sibling',9,'新笔记')");
+            db.execSQL("INSERT INTO blocks VALUES('sibling','photo',0,'IMAGE','',?,'兄弟说明',0,?)",new Object[]{b,a});
+            List<NoteDocument.Block> shown=store.noteBlocks("fresh");
+            boolean immutable=false;try{shown.clear();}catch(UnsupportedOperationException e){immutable=true;}
+            refused(()->store.noteBlocks("missing"));
+            need(immutable&&shown.size()==1&&shown.get(0).id.equals("photo")&&shown.get(0).assetId.equals(b)&&shown.get(0).privateContent,"ordinary_note_read_owned_projection");
+            long rev=revision(db);
+            List<NoteDocument.Block> edited=List.of(NoteDocument.Block.text("intro","编辑后的文字",true),NoteDocument.Block.image("photo",b,"普通编辑说明",false),NoteDocument.Block.image("added",a,"新增图片",true));
+            store.saveNote("fresh",edited,store.snapshot());
+            NoteDocument.ImageEdit main=store.imageEdit("fresh","photo"),added=store.imageEdit("fresh","added");
+            List<NoteDocument.Block> after=store.noteBlocks("fresh");
+            try(Cursor raw=db.rawQuery("SELECT original_asset_id FROM blocks WHERE note_id='fresh' AND id='added'",null)){
+                if(!raw.moveToFirst()||!raw.isNull(0))throw new AssertionError("new image must retain raw NULL origin");
+            }
+            need(main.revision().assetId.equals(b)&&main.revision().originalAssetId.equals(a)&&!main.privateContent&&main.caption.equals("普通编辑说明")&&added.revision().originalAssetId.equals(a)&&after.size()==3&&after.get(0).text.equals("编辑后的文字")&&after.get(0).privateContent&&after.get(1).id.equals("photo")&&revision(db)==rev+1,"ordinary_metadata_order_and_origin_preserved");
+            NoteDocument.ImageEdit sibling=store.imageEdit("sibling","photo");
+            need(sibling.caption.equals("兄弟说明")&&!sibling.privateContent&&sibling.revision().assetId.equals(b)&&sibling.revision().originalAssetId.equals(a),"ordinary_save_sibling_isolated");
+            byte[] exact=store.snapshot();
+            refused(()->store.saveNote("fresh",List.of(NoteDocument.Block.image("photo",a,"wrong",false)),exact));
+            refused(()->store.saveNote("fresh",List.of(NoteDocument.Block.text("photo","wrong kind",false)),exact));
+            refused(()->store.saveNote("fresh",List.of(NoteDocument.Block.image("intro",a,"wrong kind",false)),exact));
+            refused(()->store.saveNote("fresh",List.of(edited.get(0),edited.get(0)),exact));
+            refused(()->store.saveNote("missing",List.of(),exact));
+            need(Arrays.equals(exact,store.snapshot()),"ordinary_replacement_kind_duplicate_and_missing_refused");
+            refused(()->store.saveNote("fresh",List.of(NoteDocument.Block.text("one","先写入",false),NoteDocument.Block.image("unregistered","f".repeat(64),"不得保留",false)),exact));
+            need(Arrays.equals(exact,store.snapshot()),"ordinary_late_missing_media_rolls_back");
+            db.execSQL("INSERT INTO todos VALUES('external','相同修订的外部写入',0,0)");
+            byte[] external=store.snapshot();
+            refused(()->store.saveNote("fresh",edited,exact));
+            need(revision(db)==rev+1&&Arrays.equals(external,store.snapshot()),"ordinary_same_revision_stale_rejected");
+            db.execSQL("CREATE TEMP TRIGGER ordinary_fault BEFORE INSERT ON blocks WHEN NEW.note_id='fresh' AND NEW.id='photo' BEGIN SELECT RAISE(ABORT,'ordinary_note_late_fault'); END");
+            boolean fault=false;try{store.saveNote("fresh",edited,external);}catch(Exception e){for(Throwable x=e;x!=null;x=x.getCause())if(String.valueOf(x.getMessage()).contains("ordinary_note_late_fault"))fault=true;}
+            need(fault&&Arrays.equals(external,store.snapshot()),"ordinary_late_sql_fault_rolls_back");
+            db.execSQL("DROP TRIGGER ordinary_fault");
+            db.execSQL("INSERT INTO notes VALUES('remove',9,'只移除引用')");
+            db.execSQL("INSERT INTO blocks VALUES('remove','photo',0,'IMAGE','',?,'',0,?)",new Object[]{b,a});
+            store.saveNote("remove",List.of(),store.snapshot());
+            try(Cursor media=db.rawQuery("SELECT count(*) FROM media",null)){
+                need(store.noteBlocks("remove").isEmpty()&&media.moveToFirst()&&media.getInt(0)==2&&store.imageEdit("sibling","photo").revision().originalAssetId.equals(a)&&store.imageEdit("fresh","photo").revision().originalAssetId.equals(a),"ordinary_remove_keeps_shared_registry");
+            }
+            Files.write(root.resolve("schema3-new-expected.bin"),store.snapshot());
+        }
+    }
     private void budgetChecks(Schema3Store store)throws Exception{
         Schema3Store.ComparisonBuffer buffer=new Schema3Store.ComparisonBuffer(5);
         buffer.write(new byte[]{1,2,3},0,3);
@@ -264,6 +313,8 @@ public final class Schema3DeviceTest extends Instrumentation {
         }
         try(Schema3Store store=new Schema3Store(c,"schema3-new.db")){
             need(store.getReadableDatabase().getVersion()==3&&Arrays.equals(Files.readAllBytes(root.resolve("schema3-new-expected.bin")),store.snapshot()),"fresh_schema3_separate_process_exact");
+            List<NoteDocument.Block> blocks=store.noteBlocks("fresh");NoteDocument.ImageEdit edit=store.imageEdit("fresh","photo");
+            need(blocks.size()==3&&blocks.get(0).id.equals("intro")&&blocks.get(0).text.equals("编辑后的文字")&&blocks.get(0).privateContent&&blocks.get(1).id.equals("photo")&&!edit.privateContent&&edit.caption.equals("普通编辑说明")&&edit.revision().assetId.equals("2".repeat(64))&&edit.revision().originalAssetId.equals("1".repeat(64)),"ordinary_note_separate_process_origin_and_order");
         }
         try(Schema3Store store=new Schema3Store(c,"schema3-v1.db")){
             need(store.getReadableDatabase().getVersion()==3&&Arrays.equals(Files.readAllBytes(root.resolve("schema3-v1-expected.bin")),store.snapshot()),"v1_to_3_separate_process_exact");

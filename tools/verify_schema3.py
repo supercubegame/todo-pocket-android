@@ -41,6 +41,18 @@ def observe(text, phase, api):
             "log_sha256": hashlib.sha256(text.encode()).hexdigest(),
             "failure_tail": None if passed else text[-9000:]}
 
+def registration(text):
+    package = "com.supercubegame.pockettodo.v12.preview"
+    expected = {
+        (package + ".test/com.supercubegame.pockettodo." + name, package)
+        for name in ("V12DeviceTest", "Schema3DeviceTest")
+    }
+    rows = re.findall(r"^instrumentation:(\S+) \(target=([^)]+)\)\s*$", text, re.M)
+    relevant = [row for row in rows if row[0].startswith(package + ".test/")]
+    passed = len(relevant) == 2 and set(relevant) == expected
+    return {"status": "PASS" if passed else "NOT_VERIFIED", "registered": relevant,
+            "log": text}
+
 def selftest():
     controls = {}
     for phase, labels in LABELS.items():
@@ -68,10 +80,28 @@ def selftest():
             assert text != good, "mutation not applied: " + name
             assert observe(text, phase, 26)["status"] != "PASS", "missed: " + name
         controls[phase] = {"positive": 2, "negative": len(bad), "mutants": list(bad)}
+    package = "com.supercubegame.pockettodo.v12.preview"
+    prefix = "instrumentation:" + package + ".test/com.supercubegame.pockettodo."
+    old = prefix + "V12DeviceTest (target=" + package + ")\n"
+    new = prefix + "Schema3DeviceTest (target=" + package + ")\n"
+    assert registration(old + new)["status"] == "PASS"
+    assert registration(new + old)["status"] == "PASS"
+    bad = ("", old, new, old + new + new,
+           (old + new).replace("target=" + package, "target=wrong"),
+           old + new.replace("Schema3DeviceTest", "WrongRunner"))
+    for text in bad:
+        assert registration(text)["status"] != "PASS", "runner registration guard missed"
+    controls["registration"] = {"positive": 2, "negative": len(bad)}
     return controls
 
 def device(adb, gate):
     prefix = [str(adb), "-s", gate.SERIAL]
+    p = subprocess.run(prefix + ["shell", "pm", "list", "instrumentation"],
+                       capture_output=True, text=True, timeout=30)
+    text = p.stdout + "\n" + p.stderr
+    Path("device-schema3-registration.txt").write_text(text)
+    print(text, flush=True)
+    assert p.returncode == 0 and registration(text)["status"] == "PASS", "installed test APK must register both exact runners and targets"
     for phase in LABELS:
         if phase == "reopen":
             subprocess.run(prefix + ["shell", "am", "force-stop", gate.PKG], check=True, timeout=30)
@@ -105,6 +135,9 @@ def report():
     for api in (26, 34):
         folder = Path("collected") / ("database-api-" + str(api))
         devices[str(api)] = {}
+        path = folder / "device-schema3-registration.txt"
+        text = path.read_text(errors="replace") if path.exists() else ""
+        devices[str(api)]["registration"] = registration(text)
         for phase in LABELS:
             path = folder / ("device-schema3-" + phase + ".txt")
             text = path.read_text(errors="replace") if path.exists() else ""

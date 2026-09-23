@@ -1,6 +1,15 @@
 plugins {
     id 'com.android.application' version '8.7.3'
 }
+// Materialize before AGP discovers manifest inputs. preBuild is too late for
+// a manifest absent during configuration. Keep generated input outside build/
+// so a subsequent clean task cannot remove it from this configured build.
+def schema3Manifest = file('.gradle/pocket-test-manifest/AndroidManifest.xml')
+schema3Manifest.parentFile.mkdirs()
+schema3Manifest.setText('''<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <instrumentation android:name="com.supercubegame.pockettodo.Schema3DeviceTest" android:targetPackage="com.supercubegame.pockettodo.v12.preview" />
+</manifest>
+''', 'UTF-8')
 android {
     namespace 'com.supercubegame.pockettodo'
     compileSdk 35
@@ -27,24 +36,9 @@ android {
         checkReleaseBuilds true
     }
     sourceSets {
-        androidTest.manifest.srcFile layout.buildDirectory.file('schema3-test/AndroidManifest.xml').get().asFile
+        androidTest.manifest.srcFile schema3Manifest
     }
 }
-// Generated build helper, not another repository source path. The existing runner
-// remains registered by AGP; the second runner has a distinct manifest name key.
-def schema3Manifest = tasks.register('generateSchema3TestManifest') {
-    def target = layout.buildDirectory.file('schema3-test/AndroidManifest.xml')
-    outputs.file(target)
-    doLast {
-        def file = target.get().asFile
-        file.parentFile.mkdirs()
-        file.text = '''<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <instrumentation android:name="com.supercubegame.pockettodo.Schema3DeviceTest" android:targetPackage="com.supercubegame.pockettodo.v12.preview" />
-</manifest>
-'''
-    }
-}
-tasks.named('preBuild').configure { dependsOn(schema3Manifest) }
 dependencies {
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
 }

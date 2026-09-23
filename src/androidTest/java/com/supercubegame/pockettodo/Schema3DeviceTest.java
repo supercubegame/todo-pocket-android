@@ -29,8 +29,11 @@ public final class Schema3DeviceTest extends Instrumentation {
     private static void text(DataOutputStream out,String value)throws IOException{byte[] b=value.getBytes(java.nio.charset.StandardCharsets.UTF_8);out.writeInt(b.length);out.write(b);}
     /** Independent exact old-cell projection, no production fingerprint method. */
     private byte[] oldCells(SQLiteDatabase db)throws Exception{
+        return oldCells(db,TABLES);
+    }
+    private byte[] oldCells(SQLiteDatabase db,String[] tables)throws Exception{
         ByteArrayOutputStream bytes=new ByteArrayOutputStream();DataOutputStream out=new DataOutputStream(bytes);
-        for(String table:TABLES){
+        for(String table:tables){
             String cols=table.equals("blocks")?"note_id,id,position,kind,text,asset_id,caption,private":"*";
             try(Cursor c=db.rawQuery("SELECT "+cols+" FROM "+table+" ORDER BY rowid",null)){
                 text(out,table);out.writeInt(c.getCount());out.writeInt(c.getColumnCount());
@@ -133,6 +136,85 @@ public final class Schema3DeviceTest extends Instrumentation {
         boolean conflictRefused=false;try(Schema3Store store=new Schema3Store(c,"schema3-conflict.db")){store.getWritableDatabase();}catch(RuntimeException e){conflictRefused=true;}
         try(SQLiteDatabase db=c.openOrCreateDatabase("schema3-conflict.db",0,null)){need(conflictRefused&&db.getVersion()==2&&columns(db)==9&&Arrays.equals(conflict,oldCells(db)),"partial_schema_conflict_not_hidden");}
         try(Schema3Store store=new Schema3Store(c,DB)){budgetChecks(store);}
+        lifecycleSeed();
+    }
+    private String schema(SQLiteDatabase db){
+        StringBuilder out=new StringBuilder();
+        try(Cursor c=db.rawQuery("SELECT type,name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name",null)){
+            while(c.moveToNext())out.append(c.getString(0)).append('\t').append(c.getString(1)).append('\t').append(c.getString(2)).append('\n');
+        }return out.toString();
+    }
+    private void createFrozenV1(SQLiteDatabase db)throws Exception{
+        java.lang.reflect.Field ddl=V12DeviceTest.class.getDeclaredField("V1_DDL");ddl.setAccessible(true);
+        for(String sql:((String[])ddl.get(null)).clone())db.execSQL(sql);
+        db.execSQL("INSERT INTO revision VALUES(1,42)");
+        db.execSQL("INSERT INTO categories VALUES(7,'历史分类',0)");
+        db.execSQL("INSERT INTO activities VALUES(9,7,NULL,'历史活动',0)");
+        db.execSQL("INSERT INTO paths VALUES(9,0,'首页')");
+        db.execSQL("INSERT INTO tags VALUES(9,0,'历史')");
+        db.execSQL("INSERT INTO checkins VALUES(9,'2026-09-01','DONE','补记','2026-09-21T12:00:00Z')");
+        db.execSQL("INSERT INTO media VALUES(?,'application/octet-stream',3)",new Object[]{"1".repeat(64)});
+        db.execSQL("INSERT INTO notes VALUES('old',9,'旧笔记')");
+        db.execSQL("INSERT INTO blocks VALUES('old','photo',0,'IMAGE','',?,'历史图片',1)",new Object[]{"1".repeat(64)});
+        db.execSQL("INSERT INTO blocks VALUES('old','text',1,'TEXT','旧文字',NULL,'',1)");
+        db.setVersion(1);
+    }
+    private void lifecycleSeed()throws Exception{
+        Context c=getTargetContext();Path root=c.getFilesDir().toPath();
+        String a="1".repeat(64),b="2".repeat(64);
+        c.deleteDatabase("schema3-new.db");
+        try(Schema3Store store=new Schema3Store(c,"schema3-new.db")){
+            SQLiteDatabase db=store.getWritableDatabase();boolean empty=true;
+            for(String table:TABLES)try(Cursor rows=db.rawQuery("SELECT count(*) FROM "+table,null)){
+                if(!rows.moveToFirst()||rows.getLong(0)!=(table.equals("revision")?1:0))empty=false;
+            }
+            need(empty&&db.getVersion()==3&&columns(db)==9&&revision(db)==0&&!c.getDatabasePath("schema3-ddl-adapter.db").exists(),"fresh_schema3_empty_layout");
+            db.execSQL("INSERT INTO categories VALUES(7,'新分类',0)");
+            db.execSQL("INSERT INTO activities VALUES(9,7,NULL,'新活动',0)");
+            db.execSQL("INSERT INTO notes VALUES('fresh',9,'新笔记')");
+            db.execSQL("INSERT INTO media VALUES(?,'application/octet-stream',3)",new Object[]{a});
+            db.execSQL("INSERT INTO media VALUES(?,'application/octet-stream',4)",new Object[]{b});
+            db.execSQL("INSERT INTO blocks VALUES('fresh','photo',0,'IMAGE','',?,'原图',0,NULL)",new Object[]{a});
+            store.saveImageEdit(store.imageEdit("fresh","photo").withDerivative(b).withMetadata("新库派生",true),store.snapshot());
+            NoteDocument.ImageEdit edit=store.imageEdit("fresh","photo");
+            need(edit.revision().assetId.equals(b)&&edit.revision().originalAssetId.equals(a)&&edit.privateContent&&edit.caption.equals("新库派生")&&revision(db)==1,"fresh_schema3_reference_write");
+            Files.write(root.resolve("schema3-new-expected.bin"),store.snapshot());
+        }
+        String[] v1=Arrays.copyOf(TABLES,12);byte[] before;
+        c.deleteDatabase("schema3-v1.db");
+        try(SQLiteDatabase db=c.openOrCreateDatabase("schema3-v1.db",0,null)){
+            db.setForeignKeyConstraintsEnabled(true);createFrozenV1(db);before=oldCells(db,v1);
+            try(Cursor count=db.rawQuery("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('fields','todos','legacy_imports')",null)){
+                need(count.moveToFirst()&&count.getInt(0)==0&&db.getVersion()==1&&columns(db)==8&&revision(db)==42,"frozen_v1_input");
+            }
+        }
+        try(Schema3Store store=new Schema3Store(c,"schema3-v1.db")){
+            SQLiteDatabase db=store.getWritableDatabase();
+            need(db.getVersion()==3&&columns(db)==9&&revision(db)==42&&Arrays.equals(before,oldCells(db,v1)),"v1_to_3_preserves_old_cells");
+            db.execSQL("INSERT INTO media VALUES(?,'application/octet-stream',4)",new Object[]{b});
+            store.saveImageEdit(store.imageEdit("old","photo").withDerivative(b),store.snapshot());
+            NoteDocument.ImageEdit edit=store.imageEdit("old","photo");
+            need(edit.revision().assetId.equals(b)&&edit.revision().originalAssetId.equals(a)&&edit.privateContent&&edit.caption.equals("历史图片")&&revision(db)==43,"v1_to_3_reference_write");
+            Files.write(root.resolve("schema3-v1-expected.bin"),store.snapshot());
+        }
+        // Collision is encountered only AFTER the 1->2 callback creates six tables.
+        c.deleteDatabase("schema3-v1-conflict.db");String layout;byte[] cells;
+        try(SQLiteDatabase db=c.openOrCreateDatabase("schema3-v1-conflict.db",0,null)){
+            createFrozenV1(db);db.execSQL("ALTER TABLE blocks ADD COLUMN original_asset_id TEXT");
+            layout=schema(db);cells=oldCells(db,v1);
+        }
+        boolean rejected=false;try(Schema3Store store=new Schema3Store(c,"schema3-v1-conflict.db")){store.getWritableDatabase();}catch(IllegalArgumentException e){rejected="Historical block layout mismatch".equals(e.getMessage());}
+        try(SQLiteDatabase db=c.openOrCreateDatabase("schema3-v1-conflict.db",0,null)){
+            need(rejected&&db.getVersion()==1&&schema(db).equals(layout)&&Arrays.equals(cells,oldCells(db,v1)),"v1_late_conflict_rolls_back_all_ddl");
+        }
+        c.deleteDatabase("schema3-future.db");
+        try(SQLiteDatabase db=c.openOrCreateDatabase("schema3-future.db",0,null)){
+            db.execSQL("CREATE TABLE sentinel(value TEXT)");db.execSQL("INSERT INTO sentinel VALUES('keep')");db.setVersion(99);layout=schema(db);
+        }
+        rejected=false;try(Schema3Store store=new Schema3Store(c,"schema3-future.db")){store.getWritableDatabase();}catch(IllegalStateException e){rejected="Newer database; preserve data".equals(e.getMessage());}
+        try(SQLiteDatabase db=c.openOrCreateDatabase("schema3-future.db",0,null);Cursor value=db.rawQuery("SELECT value FROM sentinel",null)){
+            need(rejected&&db.getVersion()==99&&schema(db).equals(layout)&&value.moveToFirst()&&value.getString(0).equals("keep")&&!value.moveToNext(),"future_schema_refused_without_damage");
+        }
     }
     private void budgetChecks(Schema3Store store)throws Exception{
         Schema3Store.ComparisonBuffer buffer=new Schema3Store.ComparisonBuffer(5);
@@ -179,6 +261,12 @@ public final class Schema3DeviceTest extends Instrumentation {
             need(Arrays.equals(Files.readAllBytes(media.path(ids[0])),new byte[]{97,98,99})&&Arrays.equals(Files.readAllBytes(media.path(ids[2])),new byte[]{5,6,7,8}),"separate_process_media_bytes");
             store.saveImageEdit(edit.withMetadata("重启后编辑",true),store.snapshot());
             need(store.imageEdit("second","photo").caption.equals("重启后编辑")&&store.imageEdit("second","photo").revision().originalAssetId.equals(ids[0]),"separate_process_write_usable");
+        }
+        try(Schema3Store store=new Schema3Store(c,"schema3-new.db")){
+            need(store.getReadableDatabase().getVersion()==3&&Arrays.equals(Files.readAllBytes(root.resolve("schema3-new-expected.bin")),store.snapshot()),"fresh_schema3_separate_process_exact");
+        }
+        try(Schema3Store store=new Schema3Store(c,"schema3-v1.db")){
+            need(store.getReadableDatabase().getVersion()==3&&Arrays.equals(Files.readAllBytes(root.resolve("schema3-v1-expected.bin")),store.snapshot()),"v1_to_3_separate_process_exact");
         }
     }
     @Override public void onStart(){

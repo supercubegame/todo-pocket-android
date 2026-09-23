@@ -24,10 +24,14 @@ LABELS = {
         "comparison_buffer_exact_limit_and_atomic_rejection",
         "oversize_comparison_snapshot_rejected",
         "oversize_save_and_fixture_rollback_preserve_state",
+        "fresh_schema3_empty_layout", "fresh_schema3_reference_write", "frozen_v1_input",
+        "v1_to_3_preserves_old_cells", "v1_to_3_reference_write",
+        "v1_late_conflict_rolls_back_all_ddl", "future_schema_refused_without_damage",
     ],
     "reopen": [
         "separate_process_exact_state", "separate_process_pair_metadata",
         "separate_process_media_bytes", "separate_process_write_usable",
+        "fresh_schema3_separate_process_exact", "v1_to_3_separate_process_exact",
     ],
 }
 

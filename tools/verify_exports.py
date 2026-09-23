@@ -201,5 +201,216 @@ def main():
             "release_ready": False
         }), flush=True)
 
+ANDROID_TEST = r'''
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import java.io.*;
+import java.lang.reflect.*;
+import java.util.*;
+public final class AndroidCodecTest {
+ static int checks;
+ static void ok(boolean b,String label) {if(!b)throw new AssertionError(label);checks++;System.out.println("CODEC_PASS "+label);}
+ interface Action {void run()throws Exception;}
+ static byte[] read(File p)throws IOException {ByteArrayOutputStream o=new ByteArrayOutputStream();try(InputStream i=new FileInputStream(p)){byte[] b=new byte[8192];int n;while((n=i.read(b))!=-1)o.write(b,0,n);}return o.toByteArray();}
+ static byte[] png(byte[] b,int l,int t,int r,int d,int[][] masks,long budget)throws Exception {
+  try {return(byte[])Class.forName("com.supercubegame.pockettodo.ShareExporter").getMethod("png",byte[].class,int.class,int.class,int.class,int.class,int[][].class,long.class).invoke(null,b,l,t,r,d,masks,budget);}
+  catch(InvocationTargetException e){if(e.getCause() instanceof Exception)throw(Exception)e.getCause();throw e;}
+ }
+ static void reject(Action action,String label)throws Exception {boolean bad=false;try{action.run();}catch(IOException|IllegalArgumentException e){bad=true;}ok(bad,label);}
+ static void save(File p,byte[] b)throws IOException {try(OutputStream o=new FileOutputStream(p)){o.write(b);}}
+ public static void main(String[] args)throws Exception {
+  File root=new File(args[0]);ok(android.os.Build.VERSION.SDK_INT==Integer.parseInt(args[1]),"actual_android_api");
+  // Loaded from the exact application APK, not a recompiled product test copy.
+  ok(Class.forName("com.supercubegame.pockettodo.ShareExporter").getClassLoader()==AndroidCodecTest.class.getClassLoader(),"apk_class_available_in_device_runtime");
+  byte[] source=read(new File(root,"source.png")),before=source.clone();
+  byte[] result=png(source,2,1,6,4,new int[][]{{1,0,3,2},{2,1,4,3}},12);
+  save(new File(root,"derived.png"),result);
+  Bitmap decoded=BitmapFactory.decodeByteArray(result,0,result.length);
+  ok(decoded!=null&&decoded.getWidth()==4&&decoded.getHeight()==3,"android_output_decodes_at_crop_dimensions");
+  int[] expected={0xff0a141e,0xff000000,0xff000000,0xff0d1a27,0xff112233,0xff000000,0xff000000,0xff000000,0xff183048,0xff19324b,0xff000000,0xff000000};
+  int[] actual=new int[12];decoded.getPixels(actual,0,4,0,0,4,3);decoded.recycle();
+  ok(Arrays.equals(actual,expected),"android_exact_crop_and_opaque_mask_pixels");
+  ok(Arrays.equals(source,before),"successful_codec_preserves_original_bytes");
+  ok(!Arrays.equals(source,result),"derivative_is_not_original_container");
+  byte[] again=png(source,2,1,6,4,new int[][]{{2,1,4,3},{1,0,3,2}},12);
+  ok(Arrays.equals(result,again),"same_pixels_repeat_without_accumulating_edits");
+  reject(()->png(source,2,1,6,4,new int[][]{{0,0,5,3}},12),"invalid_output_mask_rejected");
+  reject(()->png(source,2,1,8,4,new int[0][],12),"out_of_source_crop_rejected");
+  reject(()->png(source,2,1,6,4,new int[][]{{0,0,1,1},{1}},12),"late_malformed_mask_rejected");
+  reject(()->png(source,2,1,6,4,null,12),"null_masks_rejected");
+  reject(()->png(source,2,1,6,4,new int[][]{null},12),"null_mask_row_rejected");
+  reject(()->png(source,2,1,6,4,new int[0][],11),"exact_output_budget_enforced");
+  reject(()->png(source,2,1,6,4,new int[0][],0),"zero_output_budget_rejected");
+  reject(()->png(source,2,1,6,4,new int[0][],1000001),"output_policy_not_relaxed");
+  reject(()->png(null,0,0,1,1,new int[0][],1),"null_source_rejected");
+  reject(()->png(new byte[0],0,0,1,1,new int[0][],1),"empty_source_rejected");
+  reject(()->png(new byte[]{1,2,3,4},0,0,1,1,new int[0][],1),"non_image_rejected");
+  reject(()->png(new byte[8*1024*1024+1],0,0,1,1,new int[0][],1),"over_byte_policy_rejected");
+  byte[] limit=read(new File(root,"limit.png")),over=read(new File(root,"over.png"));
+  save(new File(root,"limit-derived.png"),png(limit,999,999,1000,1000,new int[0][],1));
+  ok(true,"exact_android_source_pixel_budget_accepted");
+  reject(()->png(over,0,0,1,1,new int[0][],1),"valid_image_over_source_budget_rejected");
+  byte[] alpha=read(new File(root,"alpha.png"));
+  save(new File(root,"alpha-derived.png"),png(alpha,0,0,2,2,new int[][]{{0,0,2,2}},4));
+  ok(true,"transparent_source_mask_encoded");
+  byte[] jpeg=read(new File(root,"source.jpg")),jpegBefore=jpeg.clone();
+  save(new File(root,"jpeg-derived.png"),png(jpeg,0,0,8,6,new int[][]{{0,0,8,6}},48));
+  ok(Arrays.equals(jpeg,jpegBefore),"jpeg_decode_preserves_original_bytes");
+  byte[] rotated=read(new File(root,"rotated.jpg"));
+  reject(()->png(rotated,0,0,8,6,new int[0][],48),"non_normal_exif_requires_orientation_support");
+  byte[] pngExif=read(new File(root,"exif.png"));
+  reject(()->png(pngExif,0,0,1,1,new int[0][],1),"png_exif_refused_on_both_platforms");
+  byte[] edge=read(new File(root,"edge.png")),wide=read(new File(root,"wide.png"));
+  ok(png(edge,2047,0,2048,1,new int[0][],1).length>0,"exact_android_edge_accepted");
+  reject(()->png(wide,0,0,1,1,new int[0][],1),"valid_wide_image_rejected");
+  ok(Arrays.equals(source,before),"all_rejections_preserve_source_bytes");
+  ok(Arrays.equals(result,read(new File(root,"derived.png"))),"later_operations_preserve_earlier_derivative");
+  System.out.println("ANDROID_CODEC_RESULT "+checks+"/"+checks+" PASS");
+ }
+}
+'''
+
+HOST_CODEC = r'''
+import java.awt.image.BufferedImage;
+import java.io.*;
+import java.nio.file.*;
+import java.util.*;
+import javax.imageio.ImageIO;
+public final class CodecHostCheck {
+ static void need(boolean b,String s){if(!b)throw new AssertionError(s);}
+ static void check(Path file,int w,int h,int[] expected)throws Exception {
+  BufferedImage image=ImageIO.read(file.toFile());
+  need(image!=null&&image.getWidth()==w&&image.getHeight()==h,"host_decode_dimensions");
+  need(Arrays.equals(image.getRGB(0,0,w,h,null,0,w),expected),"host_decode_exact_pixels");
+  byte[] bytes=Files.readAllBytes(file);
+  DataInputStream in=new DataInputStream(new ByteArrayInputStream(bytes));
+  need(in.readLong()==0x89504e470d0a1a0aL,"PNG_signature");
+  Set<String> allowed=Set.of("IHDR","IDAT","IEND","sRGB","gAMA","cHRM","sBIT");
+  boolean end=false;while(!end){int n=in.readInt();need(n>=0&&n<=bytes.length,"chunk_length");byte[] name=new byte[4];in.readFully(name);String kind=new String(name,java.nio.charset.StandardCharsets.US_ASCII);need(allowed.contains(kind),"unexpected_metadata_"+kind);byte[] data=new byte[n];in.readFully(data);in.readInt();end=kind.equals("IEND");}
+  need(in.available()==0,"no_trailing_original_bytes");
+  need(!new String(bytes,java.nio.charset.StandardCharsets.ISO_8859_1).contains("PRIVATE_GPS_SECRET"),"no_private_marker");
+  System.out.println("HOST_CODEC_PASS "+file.getFileName());
+ }
+ public static void main(String[] args)throws Exception {
+  Path root=Paths.get(args[1]);
+  if(args[0].equals("fixture")){
+   BufferedImage image=new BufferedImage(8,6,BufferedImage.TYPE_INT_RGB);
+   for(int y=0;y<6;y++)for(int x=0;x<8;x++)image.setRGB(x,y,0xff345678);
+   need(ImageIO.write(image,"jpeg",root.resolve("source.jpg").toFile()),"jpeg_encoder");
+   BufferedImage actual=ImageIO.read(root.resolve("source.jpg").toFile());need(actual.getWidth()==8&&actual.getHeight()==6,"jpeg_fixture_real");
+  }else{
+   check(root.resolve("derived.png"),4,3,new int[]{0xff0a141e,0xff000000,0xff000000,0xff0d1a27,0xff112233,0xff000000,0xff000000,0xff000000,0xff183048,0xff19324b,0xff000000,0xff000000});
+   check(root.resolve("limit-derived.png"),1,1,new int[]{0xff2468ac});
+   int[] alpha=new int[4];Arrays.fill(alpha,0xff000000);check(root.resolve("alpha-derived.png"),2,2,alpha);
+   int[] jpeg=new int[48];Arrays.fill(jpeg,0xff000000);check(root.resolve("jpeg-derived.png"),8,6,jpeg);
+  }
+ }
+}
+'''
+
+def android_codec(adb, gate):
+    """Run APK code under real Android app_process, no product hidden entrypoints.
+
+    This is a codec/API check as shell, NOT an app sandbox/lifecycle/UI acceptance.
+    The outer runner still executes all existing DB and native UI suites exactly once.
+    """
+    import os
+    import struct
+    import zlib
+    folder = ROOT / "build/codec-contract"
+    folder.mkdir(parents=True, exist_ok=True)
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+    def fixture(name, width, height, row):
+        raw = b"".join(b"\0" + row(y) for y in range(height))
+        data = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+        data += chunk(b"tEXt", b"Comment\0PRIVATE_GPS_SECRET")
+        data += chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+        (folder / name).write_bytes(data)
+        return data
+    fixture("source.png", 7, 5, lambda y: b"".join(bytes((i, i*2, i*3, 255)) for i in range(y*7+1,y*7+8)))
+    fixture("alpha.png", 2, 2, lambda y: bytes((10,20,30,0,40,50,60,64)))
+    for name, h in (("limit.png",1000),("over.png",1001)):
+        fixture(name,1000,h,lambda y: bytes((36,104,172,255))*1000)
+    host = folder / "CodecHostCheck.java";host.write_text(HOST_CODEC,encoding="utf-8")
+    run(["javac","-encoding","UTF-8","-d",folder,host])
+    run(["java","-Djava.awt.headless=true","-cp",folder,"CodecHostCheck","fixture",folder])
+    jpeg=(folder/"source.jpg").read_bytes()
+    exif=b"Exif\0\0"+b"II"+struct.pack("<H",42)+struct.pack("<I",8)+struct.pack("<H",1)+struct.pack("<HHI",0x112,3,1)+struct.pack("<H",6)+b"\0\0"+struct.pack("<I",0)
+    (folder/"rotated.jpg").write_bytes(jpeg[:2]+b"\xff\xe1"+struct.pack(">H",len(exif)+2)+exif+jpeg[2:])
+    base=(folder/"source.png").read_bytes()
+    (folder/"exif.png").write_bytes(base[:-12]+chunk(b"eXIf",exif[6:])+base[-12:])
+    fixture("edge.png",2048,1,lambda y:bytes((36,104,172,255))*2048)
+    fixture("wide.png",2049,1,lambda y:bytes((36,104,172,255))*2049)
+    test=folder/"AndroidCodecTest.java";test.write_text(ANDROID_TEST,encoding="utf-8")
+    classes=folder/"classes";classes.mkdir(exist_ok=True)
+    android=gate.SDK/"platforms/android-35/android.jar"
+    run(["javac","-encoding","UTF-8","--release","8","-cp",android,"-d",classes,test])
+    dex=folder/"codec-test.jar"
+    run([gate.SDK/"build-tools/35.0.0/d8","--min-api","26","--lib",android,"--output",dex,*sorted(classes.glob("*.class"))])
+    apks=list((ROOT/"build/outputs/apk/debug").glob("*.apk"));assert len(apks)==1
+    original_apk=apks[0].read_bytes()
+    remote="/data/local/tmp/pocket-codec-contract"
+    prefix=[str(adb),"-s",gate.SERIAL]
+    run([*prefix,"shell","mkdir","-p",remote])
+    run([*prefix,"push",apks[0],remote+"/app.apk"])
+    run([*prefix,"push",dex,remote+"/test.jar"])
+    sources=("source.png","alpha.png","limit.png","over.png","source.jpg","rotated.jpg","exif.png","edge.png","wide.png")
+    for name in sources:run([*prefix,"push",folder/name,remote+"/"+name])
+    text=run([*prefix,"shell","CLASSPATH="+remote+"/test.jar:"+remote+"/app.apk","app_process","/system/bin","AndroidCodecTest",remote,str(gate.API)])
+    labels=re.findall(r"^CODEC_PASS (.+)$",text,re.M)
+    summary=re.findall(r"^ANDROID_CODEC_RESULT (\d+)/(\d+) PASS$",text,re.M)
+    assert len(summary)==1 and summary[0]==(str(len(labels)),str(len(labels))) and len(labels)==29 and len(set(labels))==29
+    for name in sources:
+        actual=subprocess.check_output([*prefix,"exec-out","cat",remote+"/"+name],timeout=30)
+        assert actual==(folder/name).read_bytes(),"device fixture/source changed: "+name
+    files=("derived.png","limit-derived.png","alpha-derived.png","jpeg-derived.png")
+    for name in files:run([*prefix,"pull",remote+"/"+name,folder/name])
+    host_result=run(["java","-Djava.awt.headless=true","-cp",folder,"CodecHostCheck","check",folder])
+    assert re.findall(r"^HOST_CODEC_PASS (.+)$",host_result,re.M)==list(files)
+    # The SAME independent host reader first passed genuine outputs. Each mutation
+    # remains a readable file, but breaks one privacy/pixel boundary intentionally.
+    import shutil
+    original=(folder/"derived.png").read_bytes()
+    wrong=fixture("wrong-pixels.png",4,3,lambda y:bytes((255,255,255,255))*4)
+    # Strip fixture metadata so the pixel mutant differs on pixels, not metadata.
+    marker=chunk(b"tEXt",b"Comment\0PRIVATE_GPS_SECRET")
+    wrong=wrong.replace(marker,b"")
+    mutations=(("wrong_pixels",wrong,"host_decode_exact_pixels"),
+               ("metadata",original[:-12]+marker+original[-12:],"unexpected_metadata_tEXt"),
+               ("trailing_original",original+(folder/"source.png").read_bytes(),"no_trailing_original_bytes"),
+               ("original_substitution",(folder/"source.png").read_bytes(),"host_decode_dimensions"))
+    for name,bad,label in mutations:
+        mutant=folder/name;mutant.mkdir(exist_ok=True)
+        for item in files:shutil.copyfile(folder/item,mutant/item)
+        (mutant/"derived.png").write_bytes(bad)
+        run(["java","-Djava.awt.headless=true","-cp",folder,"CodecHostCheck","check",mutant],expected_failure=label)
+    assert apks[0].read_bytes()==original_apk
+    assert subprocess.check_output([*prefix,"exec-out","cat",remote+"/app.apk"],timeout=30)==original_apk
+    report={"commit":os.environ["GITHUB_SHA"],"run_id":os.environ["GITHUB_RUN_ID"],
+            "api":gate.API,"status":"PASS","scope":"ANDROID_APK_CODEC_SHELL_NOT_APP_UI_OR_PERSISTENCE",
+            "apk_sha256":hashlib.sha256(original_apk).hexdigest(),"checks":len(labels),"labels":labels,
+            "independent_host_decodes":list(files),"original_files_unchanged":True,
+            "host_negative_controls":len(mutations),"device_apk_readback":"EXACT_BYTES",
+            "output_metadata":"PNG_CHUNK_ALLOWLIST_NO_TEXT_EXIF_TRAILING_BYTES",
+            "release_ready":False}
+    out=ROOT/"native-ui";out.mkdir(exist_ok=True)
+    (out/"codec-result.json").write_text(json.dumps(report,indent=2)+"\n")
+    print("ANDROID_CODEC_EVIDENCE "+json.dumps(report),flush=True)
+
+def android_main():
+    # Explicit composition: call the untouched DB runner, then codec checks, then
+    # emulator_gate.main continues its untouched native UI runner and shutdown.
+    import emulator_gate as gate
+    original=gate.verify_database
+    def database_and_codec(adb):
+        original(adb)
+        android_codec(adb,gate)
+    gate.verify_database=database_and_codec
+    gate.main()
+
 if __name__ == "__main__":
-    main()
+    import sys
+    if sys.argv[1:]==["android"]:android_main()
+    elif not sys.argv[1:]:main()
+    else:raise SystemExit("usage: verify_exports.py [android]")

@@ -75,7 +75,7 @@ jobs:
       - name: Database, semantic backups and actual native UI interactions
         run: |
           set -euo pipefail
-          python3 tools/emulator_gate.py 2>&1 | tee ui.log
+          python3 tools/verify_exports.py android 2>&1 | tee ui.log
       - name: Package tested API34 preview candidate, not full V1.2
         if: matrix.api == 34
         run: |
@@ -133,6 +133,7 @@ jobs:
             device-*.txt
             device-result.json
             native-ui/native-result.json
+            native-ui/codec-result.json
             native-ui/*.png
             build/reports/lint-results-debug.html
           if-no-files-found: error
@@ -207,12 +208,13 @@ jobs:
           for phase,labels in required.items():
             def sample(rows):return '\n'.join('PASS '+x for x in rows)+'\nDEVICE_DATABASE_RESULT '+phase+' '+str(len(rows))+'/'+str(len(rows))+' PASS\nINSTRUMENTATION_CODE: -1\n'
             assert coverage(sample(labels),phase)[0]
-            assert not coverage(sample(labels[:-1]),phase)[0]
+            assert not coverage(sample(labels[:-1],phase)[0]
             assert not coverage(sample(labels)+'DEVICE_DATABASE_FAILED\n',phase)[0]
             assert not coverage(sample(labels).replace('INSTRUMENTATION_CODE: -1','INSTRUMENTATION_CODE: 0'),phase)[0]
           devices={}
           native={}
           guarded={}
+          codecs={}
           for api_level in (26,34):
             folder=root/('database-api-'+str(api_level))
             logs={}
@@ -233,6 +235,8 @@ jobs:
             guarded[str(api_level)]={'status':'PASS' if devices[str(api_level)]['result'].get('status')=='PASS' and all(p['status']=='PASS' for p in phases.values()) else 'NOT_VERIFIED','phases':phases}
             result=folder/'native-ui/native-result.json'
             native[str(api_level)]=json.loads(result.read_text()) if result.exists() else {'status':'NOT_OBSERVED'}
+            codec=folder/'native-ui/codec-result.json'
+            codecs[str(api_level)]=json.loads(codec.read_text()) if codec.exists() else {'status':'NOT_OBSERVED'}
             published=[]
             for image in sorted((folder/'native-ui').glob('*.png')):
               data=image.read_bytes()
@@ -244,6 +248,8 @@ jobs:
           restore='SCHEMA2_DB_MEDIA_BYTES_PASS' if all(d['result'].get('status')=='PASS' and d['result'].get('full_backup_restore')=='SCHEMA2_DB_MEDIA_BYTES_PASS' for d in devices.values()) else 'NOT_VERIFIED'
           native_status='PASS' if all(n.get('status')=='PASS' and n.get('scope')=='NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE' and n.get('count',0)>0 and n.get('saf_restore')=='NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS' for n in native.values()) else 'NOT_VERIFIED'
           guarded_status='PASS' if all(g['status']=='PASS' for g in guarded.values()) else 'NOT_VERIFIED'
+          codec_status='PASS' if all(c.get('status')=='PASS' and c.get('commit')==source and c.get('run_id')==run and c.get('checks')==29 and len(c.get('labels',[]))==29 and c.get('host_negative_controls')==4 and c.get('device_apk_readback')=='EXACT_BYTES' for c in codecs.values()) else 'NOT_VERIFIED'
+          codec_asset=publish('reports/codec-'+source+'-'+run+'.json',(json.dumps({'commit':source,'run_id':run,'status':codec_status,'scope':'ANDROID_APK_CODEC_NOT_UI_OR_PERSISTENCE','devices':codecs,'release_ready':False},ensure_ascii=False,indent=2)+'\n').encode())
           guarded_asset=publish('reports/restore-plan-'+source+'-'+run+'.json',(json.dumps({'commit':source,'run_id':run,'status':guarded_status,'scope':'GUARDED_RESTORE_BACKEND_NOT_SAF_UI','devices':guarded,'saf_restore_ui':'SEE_NATIVE_INDEX','undo_restore':'NOT_IMPLEMENTED','release_ready':False},ensure_ascii=False,indent=2)+'\n').encode())
           index={'commit':source,'run_id':run,'scope':'NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE','status':native_status,'devices':native,'release_ready':False}
           index_asset=publish('reports/native-'+source+'-'+run+'.json',(json.dumps(index,ensure_ascii=False,indent=2)+'\n').encode())
@@ -252,6 +258,9 @@ jobs:
           (scope/'ui-result.json').write_text(json.dumps({'status':native_status,'scope':'NATIVE_SLICE_AND_DATABASE_NOT_FULL_PRODUCT','devices':devices,'native':native,'native_index':index_asset,'guarded_restore':{'status':guarded_status,'evidence':guarded_asset},'screenshots':'SYNTHETIC_NATIVE_UI_ONLY','exports':'NOT_TESTED','full_database_media_restore':restore,'saf_restore_ui':saf_ui,'image_decoding':'NOT_TESTED','power_loss':'NOT_TESTED','release_ready':False}))
           print('NATIVE_EVIDENCE '+index_asset['url'])
           print('GUARDED_RESTORE_EVIDENCE '+guarded_asset['url'])
+          # Persist an independent marker for the required post-publication gate.
+          (scope/'codec-result.json').write_text(json.dumps({'status':codec_status,'evidence':codec_asset}))
+          print('CODEC_EVIDENCE '+codec_asset['url'])
           PY
       - name: Publish and read back evidence
         env:
@@ -269,6 +278,7 @@ jobs:
           doc=json.loads(path.read_text())
           assert doc.get('guarded_restore',{}).get('status')=='PASS','Guarded restore checks missing or failed; read published evidence'
           assert doc.get('saf_restore_ui')=='PASS','SAF restore preview and explicit confirmation missing or failed; read native evidence'
+          assert json.loads(Path('collected/scope/codec-result.json').read_text()).get('status')=='PASS','Android codec coverage missing or failed'
           PY
       - name: Require both current-source devices before preview delivery
         env:

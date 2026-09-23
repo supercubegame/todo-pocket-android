@@ -208,7 +208,7 @@ jobs:
           for phase,labels in required.items():
             def sample(rows):return '\n'.join('PASS '+x for x in rows)+'\nDEVICE_DATABASE_RESULT '+phase+' '+str(len(rows))+'/'+str(len(rows))+' PASS\nINSTRUMENTATION_CODE: -1\n'
             assert coverage(sample(labels),phase)[0]
-            assert not coverage(sample(labels[:-1],phase)[0]
+            assert not coverage(sample(labels[:-1]),phase)[0]
             assert not coverage(sample(labels)+'DEVICE_DATABASE_FAILED\n',phase)[0]
             assert not coverage(sample(labels).replace('INSTRUMENTATION_CODE: -1','INSTRUMENTATION_CODE: 0'),phase)[0]
           devices={}

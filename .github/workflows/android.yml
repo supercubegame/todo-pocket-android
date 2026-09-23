@@ -211,10 +211,76 @@ jobs:
             assert not coverage(sample(labels[:-1]),phase)[0]
             assert not coverage(sample(labels)+'DEVICE_DATABASE_FAILED\n',phase)[0]
             assert not coverage(sample(labels).replace('INSTRUMENTATION_CODE: -1','INSTRUMENTATION_CODE: 0'),phase)[0]
+          # Independent observer of the frozen historical suite: lives outside the
+          # instrumentation methods whose calls could accidentally be removed.
+          legacy_required={
+            'seed':[
+              'frozen fixture really uses schema2 and eight block columns',
+              'frozen serializer detects a real changed row and rollback restores fixture',
+              'archive wraps frozen old bytes without current database encoder',
+              'opening frozen old database preserves all historical cells and ordering',
+              'cancel old-backup preview preserves live state and publishes no media',
+              'guarded old-backup restore preserves complete old-format projection',
+              'guarded old-backup restore publishes exact original bytes',
+              'old archived field and note attachment survive restore',
+              'duplicate titles and shared image retain separate block privacy and ownership',
+              'truncated frozen state cannot replace current live data',
+              'missing frozen original refuses restore without data loss',
+              'late old-backup restore failure rolls back every deleted and inserted table',
+              'lower-level old restore stays deterministic and retains original bytes',
+              'current-format export and restore retain historical semantic content'],
+            'reopen':[
+              'separate process retains complete frozen old-backup content',
+              'separate process retains exact shared original',
+              'restored todo and archived field remain usable after process restart']}
+          assert {p:len(v) for p,v in legacy_required.items()}=={'seed':14,'reopen':3}
+          def legacy_coverage(text,phase):
+            labels=re.findall(r'(?:^|stream=)LEGACY_SCHEMA2_PASS ([^\r\n]+)',text,re.M)
+            results=re.findall(r'(?:^|stream=)LEGACY_SCHEMA2_RESULT ([^\r\n]+)',text,re.M)
+            expected=legacy_required[phase]
+            total=str(len(expected))
+            passed=(coverage(text,phase)[0] and labels==expected and
+                    results==[phase+' '+total+'/'+total+' PASS'] and
+                    'LEGACY_SCHEMA2_FAILED' not in text)
+            return passed,labels
+          legacy_controls={}
+          for phase,expected in legacy_required.items():
+            # Old gate passes without ANY legacy output: demonstrate the original
+            # blind spot, then require the same new checker to reject each mutant.
+            base=sample(required[phase])
+            assert coverage(base,phase)[0] and not legacy_coverage(base,phase)[0]
+            records='\n'.join('LEGACY_SCHEMA2_PASS '+x for x in expected)+'\n'
+            marker='LEGACY_SCHEMA2_RESULT '+phase+' '+str(len(expected))+'/'+str(len(expected))+' PASS\n'
+            def embed(extra):return base.replace('INSTRUMENTATION_CODE: -1',extra+'INSTRUMENTATION_CODE: -1',1)
+            good=embed(records+marker)
+            assert legacy_coverage(good,phase)[0]
+            assert legacy_coverage(good.replace('\n','\r\n'),phase)[0]
+            mutants={
+              'missing_entire_suite':base,
+              'missing_result':embed(records),
+              'wrong_count':embed(records+marker.replace(str(len(expected))+'/',str(len(expected)-1)+'/',1)),
+              'duplicate_result':embed(records+marker+marker),
+              'wrong_phase':embed(records+marker.replace('RESULT '+phase,'RESULT other',1)),
+              'missing_named_check':embed(records.replace('LEGACY_SCHEMA2_PASS '+expected[-1]+'\n','',1)+marker),
+              'self_consistent_missing_check':embed(records.replace('LEGACY_SCHEMA2_PASS '+expected[-1]+'\n','',1)+marker.replace(str(len(expected)),str(len(expected)-1))),
+              'duplicate_named_check':embed(records+'LEGACY_SCHEMA2_PASS '+expected[0]+'\n'+marker),
+              'substituted_named_check':embed(records.replace(expected[-1],'unknown check',1)+marker),
+              'failed_suite':good+'LEGACY_SCHEMA2_FAILED\n',
+              'failed_instrumentation':good.replace('INSTRUMENTATION_CODE: -1','INSTRUMENTATION_CODE: 0',1),
+              'missing_instrumentation_finish':good.replace('INSTRUMENTATION_CODE: -1','',1)}
+            assert len(mutants)==12
+            for name,bad in mutants.items():
+              assert bad!=good,'Legacy mutation did not apply: '+name
+              if name not in ('failed_instrumentation','missing_instrumentation_finish'):
+                assert coverage(bad,phase)[0],'Legacy fixture broke the old positive control: '+name
+              assert not legacy_coverage(bad,phase)[0],'Legacy observer missed: '+name
+            legacy_controls[phase]={'positive_controls':2,'negative_controls':len(mutants),'mutants':list(mutants)}
+          print('LEGACY_OBSERVER_SELFTEST '+json.dumps(legacy_controls))
           devices={}
           native={}
           guarded={}
           codecs={}
+          legacy_devices={}
           for api_level in (26,34):
             folder=root/('database-api-'+str(api_level))
             logs={}
@@ -227,11 +293,15 @@ jobs:
             result=folder/'device-result.json'
             devices[str(api_level)]={'result':json.loads(result.read_text()) if result.exists() else {'status':'NOT_OBSERVED'},'logs':logs}
             phases={}
+            legacy_phases={}
             for phase in required:
               path=folder/('device-'+phase+'.txt')
               text=path.read_text(errors='replace') if path.exists() else ''
               passed,labels=coverage(text,phase)
               phases[phase]={'status':'PASS' if passed else 'NOT_VERIFIED','required_checks':required[phase],'observed_required':[x for x in required[phase] if x in labels],'missing':[x for x in required[phase] if x not in labels],'total_device_pass_records':len(labels),'failure_tail':None if passed else text[-7000:]}
+              legacy_passed,legacy_labels=legacy_coverage(text,phase)
+              legacy_phases[phase]={'status':'PASS' if legacy_passed else 'NOT_VERIFIED','checks':len(legacy_labels),'expected_checks':len(legacy_required[phase]),'labels':legacy_labels,'required_labels':legacy_required[phase],'decoded_log_text_sha256':hashlib.sha256(text.encode()).hexdigest(),'failure_tail':None if legacy_passed else text[-7000:]}
+            legacy_devices[str(api_level)]={'status':'PASS' if devices[str(api_level)]['result'].get('status')=='PASS' and all(p['status']=='PASS' for p in legacy_phases.values()) else 'NOT_VERIFIED','phases':legacy_phases}
             guarded[str(api_level)]={'status':'PASS' if devices[str(api_level)]['result'].get('status')=='PASS' and all(p['status']=='PASS' for p in phases.values()) else 'NOT_VERIFIED','phases':phases}
             result=folder/'native-ui/native-result.json'
             native[str(api_level)]=json.loads(result.read_text()) if result.exists() else {'status':'NOT_OBSERVED'}
@@ -248,6 +318,8 @@ jobs:
           restore='SCHEMA2_DB_MEDIA_BYTES_PASS' if all(d['result'].get('status')=='PASS' and d['result'].get('full_backup_restore')=='SCHEMA2_DB_MEDIA_BYTES_PASS' for d in devices.values()) else 'NOT_VERIFIED'
           native_status='PASS' if all(n.get('status')=='PASS' and n.get('scope')=='NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE' and n.get('count',0)>0 and n.get('saf_restore')=='NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS' for n in native.values()) else 'NOT_VERIFIED'
           guarded_status='PASS' if all(g['status']=='PASS' for g in guarded.values()) else 'NOT_VERIFIED'
+          legacy_status='PASS' if set(legacy_devices)=={'26','34'} and all(d['status']=='PASS' for d in legacy_devices.values()) else 'NOT_VERIFIED'
+          legacy_asset=publish('reports/legacy-schema2-'+source+'-'+run+'.json',(json.dumps({'commit':source,'run_id':run,'status':legacy_status,'scope':'FROZEN_SCHEMA2_DB_BACKUP_COMPATIBILITY_NOT_SCHEMA3_IMPLEMENTATION','devices':legacy_devices,'observer_selftests':legacy_controls,'release_ready':False},ensure_ascii=False,indent=2)+'\n').encode())
           codec_status='PASS' if all(c.get('status')=='PASS' and c.get('commit')==source and c.get('run_id')==run and c.get('checks')==29 and len(c.get('labels',[]))==29 and c.get('host_negative_controls')==4 and c.get('device_apk_readback')=='EXACT_BYTES' for c in codecs.values()) else 'NOT_VERIFIED'
           codec_asset=publish('reports/codec-'+source+'-'+run+'.json',(json.dumps({'commit':source,'run_id':run,'status':codec_status,'scope':'ANDROID_APK_CODEC_NOT_UI_OR_PERSISTENCE','devices':codecs,'release_ready':False},ensure_ascii=False,indent=2)+'\n').encode())
           guarded_asset=publish('reports/restore-plan-'+source+'-'+run+'.json',(json.dumps({'commit':source,'run_id':run,'status':guarded_status,'scope':'GUARDED_RESTORE_BACKEND_NOT_SAF_UI','devices':guarded,'saf_restore_ui':'SEE_NATIVE_INDEX','undo_restore':'NOT_IMPLEMENTED','release_ready':False},ensure_ascii=False,indent=2)+'\n').encode())
@@ -261,6 +333,8 @@ jobs:
           # Persist an independent marker for the required post-publication gate.
           (scope/'codec-result.json').write_text(json.dumps({'status':codec_status,'evidence':codec_asset}))
           print('CODEC_EVIDENCE '+codec_asset['url'])
+          (scope/'legacy-schema2-result.json').write_text(json.dumps({'commit':source,'run_id':run,'status':legacy_status,'evidence':legacy_asset}))
+          print('LEGACY_SCHEMA2_EVIDENCE '+legacy_asset['url'])
           PY
       - name: Publish and read back evidence
         env:
@@ -279,6 +353,7 @@ jobs:
           assert doc.get('guarded_restore',{}).get('status')=='PASS','Guarded restore checks missing or failed; read published evidence'
           assert doc.get('saf_restore_ui')=='PASS','SAF restore preview and explicit confirmation missing or failed; read native evidence'
           assert json.loads(Path('collected/scope/codec-result.json').read_text()).get('status')=='PASS','Android codec coverage missing or failed'
+          assert json.loads(Path('collected/scope/legacy-schema2-result.json').read_text()).get('status')=='PASS','Frozen schema2 compatibility missing or failed; read legacy evidence'
           PY
       - name: Require both current-source devices before preview delivery
         env:
@@ -289,6 +364,8 @@ jobs:
           from pathlib import Path
           needs=json.loads(os.environ['NEEDS_JSON'])
           assert all(needs[name]['result']=='success' for name in ('core','database'))
+          legacy=json.loads(Path('collected/scope/legacy-schema2-result.json').read_text())
+          assert legacy['status']=='PASS' and legacy['commit']==os.environ['GITHUB_SHA'] and legacy['run_id']==os.environ['GITHUB_RUN_ID']
           report=json.loads(Path('collected/scope/ui-result.json').read_text())
           assert report['status']=='PASS' and report['release_ready'] is False
           for api in ('26','34'):

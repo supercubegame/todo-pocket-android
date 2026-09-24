@@ -144,7 +144,80 @@ public final class Schema3RestoreTests extends Instrumentation {
         }
         restoreShape("old",root.resolve("frozen-v2.zip"),null,stage);
         restoreShape("full",archives.resolve("full.zip"),Files.readAllBytes(archives.resolve("full-state.bin")),stage);
+        facadeChecks();
         restoreShape("empty",archives.resolve("empty.zip"),Files.readAllBytes(archives.resolve("empty-state.bin")),stage);
+    }
+    /** The real UI-facing API, on isolated files. Default constructor stays v2. */
+    private void facadeChecks()throws Exception{
+        Context context=getTargetContext();Path root=context.getFilesDir().toPath();
+        String name="schema3-facade.db";context.deleteDatabase(name);
+        byte[] old;
+        try(AppDatabase legacy=new AppDatabase(context,name)){
+            legacy.addCategory(71,"兼容分类");legacy.addActivity(72,71,0,"兼容活动");
+            legacy.addTodo("facade-todo","迁移前");legacy.createNote("facade-note",72,"兼容笔记");
+            legacy.saveNote("facade-note",Arrays.asList(NoteDocument.Block.text("text","迁移前正文",false)));
+            old=legacy.exportState();check(legacy.getReadableDatabase().getVersion()==2,"default constructor changed");
+        }
+        Path stage=context.getCacheDir().toPath().resolve("schema3-facade-stage");Files.createDirectories(stage);
+        MediaRepository media=new MediaRepository(root.resolve("schema3-facade-media"),1000000);
+        try(AppDatabase app=AppDatabase.openSchema3(context,name)){
+            SQLiteDatabase sql=app.getWritableDatabase();
+            check(sql==app.getReadableDatabase()&&sql.getVersion()==3,"facade connection not shared");
+            check(Arrays.equals(old,legacyWire(sql)),"facade migration changed old cells");
+            app.editTodo("facade-todo","迁移后",true);app.renameCategory(71,"新分类");
+            app.savePath(72,Arrays.asList("打开","进入"));app.saveTags(72,Arrays.asList("标签"));
+            app.saveNote("facade-note",Arrays.asList(NoteDocument.Block.text("text","迁移后正文",true)));
+            check(app.todo("facade-todo").done&&app.categoryName(71).equals("新分类")&&
+                app.path(72).equals(Arrays.asList("打开","进入"))&&app.tags(72).equals(Arrays.asList("标签"))&&
+                app.noteBlocks("facade-note").get(0).privateContent,"facade ordinary APIs not persisted");
+            byte[] before=app.exportState();
+            AppDatabase.RestorePlan cancel=app.prepareRestore(root.resolve("schema3-archives/good.zip"),stage,1000000);
+            check(cancel.currentCounts().equals(counts(sql)),"facade current preview counts differ");
+            cancel.close();rejected(()->app.confirmRestore(cancel,media),"恢复预览");
+            check(empty(stage)&&Arrays.equals(before,app.exportState()),"facade cancellation wrote data");
+            AppDatabase.RestorePlan plan=app.prepareRestore(root.resolve("schema3-archives/good.zip"),stage,1000000);
+            try(AppDatabase foreign=AppDatabase.openSchema3(context,name)){
+                rejected(()->foreign.confirmRestore(plan,media),"不属于");
+            }
+            app.confirmRestore(plan,media);
+            check(Arrays.equals(Files.readAllBytes(root.resolve("schema3-wire.bin")),app.exportState()),"facade new restore differs");
+            rejected(()->app.confirmRestore(plan,media),"恢复预览");plan.close();
+            String[] ids=new String(Files.readAllBytes(root.resolve("schema3-ids.txt")),java.nio.charset.StandardCharsets.US_ASCII).trim().split("\\s+");
+            List<NoteDocument.Block> next=new ArrayList<>(app.noteBlocks("second"));boolean found=false;
+            for(int i=0;i<next.size();i++)if(next.get(i).id.equals("photo")){
+                next.set(i,NoteDocument.Block.image("photo",ids[2],"接入层说明",true));found=true;
+            }
+            check(found,"facade photo fixture missing");app.saveNote("second",next);
+            try(Cursor c=sql.rawQuery("SELECT asset_id,original_asset_id,caption,private FROM blocks WHERE note_id='second' AND id='photo'",null)){
+                check(c.moveToFirst()&&ids[2].equals(c.getString(0))&&ids[0].equals(c.getString(1))&&
+                    "接入层说明".equals(c.getString(2))&&c.getInt(3)==1,"facade ordinary save lost image provenance");
+            }
+            byte[] preserved=app.exportState();
+            List<NoteDocument.Block> bad=new ArrayList<>(next);
+            for(int i=0;i<bad.size();i++)if(bad.get(i).id.equals("photo"))bad.set(i,NoteDocument.Block.image("photo",ids[0],"错误替换",false));
+            rejected(()->app.saveNote("second",bad),"derivative writer");
+            check(Arrays.equals(preserved,app.exportState()),"facade failed edit changed state");
+            sql.beginTransaction();
+            try{app.addTodo("rolled-back","外层回滚");}finally{sql.endTransaction();}
+            check(Arrays.equals(preserved,app.exportState()),"facade writer escaped outer transaction");
+            Path zip=root.resolve("schema3-facade.zip");app.exportBackup(zip,media);
+            try(BackupArchive.Snapshot snapshot=BackupArchive.read(zip,stage,1000000);
+                SQLiteDatabase candidate=Schema3Store.archiveCandidate(snapshot)){
+                check(Arrays.equals(preserved,snapshot.state())&&counts(candidate).equals(counts(sql)),"facade backup differs");
+            }
+            AppDatabase.RestorePlan expired=app.prepareRestore(zip,stage,1000000);
+            app.close();rejected(()->app.confirmRestore(expired,media),"恢复预览");expired.close();
+            check(empty(stage)&&Arrays.equals(preserved,app.exportState()),"facade close/reopen changed state");
+            Files.write(root.resolve("schema3-facade-expected.bin"),preserved);
+            try(AppDatabase target=AppDatabase.openSchema3(context,"schema3-facade-old.db")){
+                target.addTodo("remove","应被替换");
+                try(AppDatabase.RestorePlan legacy=target.prepareRestore(root.resolve("frozen-v2.zip"),stage,1000000)){
+                    target.confirmRestore(legacy,media);
+                }
+                check(Arrays.equals(Files.readAllBytes(root.resolve("frozen-v2-state.bin")),legacyWire(target.getReadableDatabase())),"facade old restore differs");
+            }
+        }
+        log.append("SCHEMA3_FACADE migration=PASS ordinary_apis=PASS origin_preserved=PASS old_new_restore=PASS default_schema=2\n");
     }
     /** Hold the real publication monitor, not a product test hook. The worker can
      * reach publishNewFile ONLY after early state/asset checks have completed.
@@ -269,6 +342,11 @@ public final class Schema3RestoreTests extends Instrumentation {
     }
     private void reopen()throws Exception{
         Context context=getTargetContext();Path root=context.getFilesDir().toPath();
+        try(AppDatabase app=AppDatabase.openSchema3(context,"schema3-facade.db")){
+            check(app.getReadableDatabase().getVersion()==3&&Arrays.equals(
+                Files.readAllBytes(root.resolve("schema3-facade-expected.bin")),app.exportState()),"facade independent reopen differs");
+            check(app.noteBlocks("second").stream().anyMatch(b->b.id.equals("photo")&&b.caption.equals("接入层说明")&&b.privateContent),"facade reopened UI projection differs");
+        }
         for(String name:new String[]{"new","old","full","empty"}){
             String stem=name.equals("new")?"schema3-restore":"schema3-restore-"+name;
             try(Schema3Store store=new Schema3Store(context,stem+".db")){

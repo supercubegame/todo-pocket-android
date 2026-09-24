@@ -102,7 +102,7 @@ public final class Schema3RestoreTests extends Instrumentation {
             Path file=stagedAsset(stage,id);byte[] content=Files.readAllBytes(file);content[0]^=1;Files.write(file,content);
             rejected(()->store.confirmRestore(damaged,media),"digest differs");
             rejected(()->store.confirmRestore(damaged,media),"no longer active");
-            need(empty(stage)&&Arrays.equals(changed,store.exportState()),"restore_staged_tamper_refused_before_publication");
+            need(empty(stage)&&empty(root.resolve("schema3-restore-media"))&&Arrays.equals(changed,store.exportState()),"restore_staged_tamper_refused_before_publication");
 
             Schema3Store.RestorePlan invalidMedia=store.prepareRestore(archives.resolve("good.zip"),stage,1000000);
             rejected(()->store.confirmRestore(invalidMedia,null),"Missing restore media");
@@ -370,7 +370,7 @@ public final class Schema3RestoreTests extends Instrumentation {
             AppDatabase.RestorePlan cancel=app.prepareRestore(root.resolve("schema3-archives/good.zip"),stage,1000000);
             check(cancel.currentCounts().equals(counts(sql)),"facade current preview counts differ");
             cancel.close();rejected(()->app.confirmRestore(cancel,media),"恢复预览");
-            check(Arrays.equals(before,app.exportState()),"facade cancellation wrote data");
+            check(empty(stage)&&Arrays.equals(before,app.exportState()),"facade cancellation wrote data");
             AppDatabase.RestorePlan plan=app.prepareRestore(root.resolve("schema3-archives/good.zip"),stage,1000000);
             try(AppDatabase foreign=AppDatabase.openSchema3(context,name)){
                 rejected(()->foreign.confirmRestore(plan,media),"不属于");

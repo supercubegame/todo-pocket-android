@@ -31,12 +31,15 @@ LABELS = {
         "ordinary_save_sibling_isolated", "ordinary_replacement_kind_duplicate_and_missing_refused",
         "ordinary_late_missing_media_rolls_back", "ordinary_same_revision_stale_rejected",
         "ordinary_late_sql_fault_rolls_back", "ordinary_remove_keeps_shared_registry",
+        "ordinary_postwrite_budget_rolls_back", "image_postwrite_budget_rolls_back",
+        "postwrite_budget_small_edits_usable",
     ],
     "reopen": [
         "separate_process_exact_state", "separate_process_pair_metadata",
         "separate_process_media_bytes", "separate_process_write_usable",
         "fresh_schema3_separate_process_exact", "ordinary_note_separate_process_origin_and_order",
         "v1_to_3_separate_process_exact",
+        "postwrite_budget_separate_process_exact",
     ],
 }
 

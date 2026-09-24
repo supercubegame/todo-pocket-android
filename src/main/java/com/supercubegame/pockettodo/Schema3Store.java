@@ -191,6 +191,9 @@ public final class Schema3Store extends SQLiteOpenHelper {
                     require(c.moveToNext()&&block.id.equals(c.getString(0))&&block.kind.name().equals(c.getString(1))&&block.text.equals(c.getString(2))&&Objects.equals(asset,c.isNull(3)?null:c.getString(3))&&block.caption.equals(c.getString(4))&&(block.privateContent?1:0)==c.getInt(5)&&Objects.equals(origin,c.isNull(6)?null:c.getString(6))&&c.getInt(7)==position++,"Note write readback differs");
                 }require(!c.moveToNext(),"Unexpected note rows");
             }
+            // Reject an otherwise valid edit that would make future comparisons
+            // impossible. Must run AFTER writes but BEFORE transaction success.
+            snapshot(db);
             db.setTransactionSuccessful();
         }finally{db.endTransaction();}
     }
@@ -214,6 +217,7 @@ public final class Schema3Store extends SQLiteOpenHelper {
             validate(db);
             NoteDocument.ImageEdit actual=imageEdit(db,edit.noteId,edit.blockId);
             require(actual.revision().assetId.equals(edit.revision().assetId)&&actual.revision().originalAssetId.equals(edit.revision().originalAssetId)&&actual.caption.equals(edit.caption)&&actual.privateContent==edit.privateContent,"Image write readback differs");
+            snapshot(db); // Include the new caption/origin bytes in the commit budget.
             db.setTransactionSuccessful();
         }finally{db.endTransaction();}
     }

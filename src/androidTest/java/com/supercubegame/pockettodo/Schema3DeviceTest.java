@@ -138,6 +138,7 @@ public final class Schema3DeviceTest extends Instrumentation {
         try(Schema3Store store=new Schema3Store(c,DB)){budgetChecks(store);}
         lifecycleSeed();
         ordinaryNoteSeed();
+        postWriteBudgetSeed();
     }
     private String schema(SQLiteDatabase db){
         StringBuilder out=new StringBuilder();
@@ -265,6 +266,40 @@ public final class Schema3DeviceTest extends Instrumentation {
             Files.write(root.resolve("schema3-new-expected.bin"),store.snapshot());
         }
     }
+    private void postWriteBudgetSeed()throws Exception{
+        Context c=getTargetContext();Path root=c.getFilesDir().toPath();
+        c.deleteDatabase("schema3-write-budget.db");
+        try(Schema3Store store=new Schema3Store(c,"schema3-write-budget.db")){
+            SQLiteDatabase db=store.getWritableDatabase();String asset="3".repeat(64),payload="x".repeat(256*1024);
+            List<NoteDocument.Block> near=new ArrayList<>(),over=new ArrayList<>();
+            for(int i=0;i<33;i++){NoteDocument.Block block=NoteDocument.Block.text("text-"+i,payload,false);over.add(block);if(i<30)near.add(block);}
+            db.beginTransaction();
+            try{
+                db.execSQL("INSERT INTO categories VALUES(1,'预算分类',0)");
+                db.execSQL("INSERT INTO activities VALUES(1,1,NULL,'预算活动',0)");
+                db.execSQL("INSERT INTO notes VALUES('text',1,'接近预算')");
+                db.execSQL("INSERT INTO notes VALUES('image',1,'图片说明')");
+                db.execSQL("INSERT INTO media VALUES(?,'application/octet-stream',3)",new Object[]{asset});
+                db.execSQL("INSERT INTO blocks VALUES('image','photo',0,'IMAGE','',?,'原说明',1,NULL)",new Object[]{asset});
+                for(int i=0;i<30;i++)db.execSQL("INSERT INTO blocks VALUES('text',?,?,'TEXT',?,NULL,'',0,NULL)",new Object[]{"text-"+i,i,payload});
+                db.setTransactionSuccessful();
+            }finally{db.endTransaction();}
+            byte[] before=store.snapshot();long rev=revision(db);
+            if(db.inTransaction()||before.length<=7*1024*1024||before.length>=8*1024*1024)throw new AssertionError("committed near-limit fixture invalid");
+            boolean rejected=false;
+            try{store.saveNote("text",over,before);}catch(IllegalArgumentException e){rejected="Comparison snapshot exceeds budget".equals(e.getMessage());}
+            need(rejected&&!db.inTransaction()&&revision(db)==rev&&Arrays.equals(before,store.snapshot()),"ordinary_postwrite_budget_rolls_back");
+            NoteDocument.ImageEdit image=store.imageEdit("image","photo");rejected=false;
+            try{store.saveImageEdit(image.withMetadata("c".repeat(768*1024),false),before);}catch(IllegalArgumentException e){rejected="Comparison snapshot exceeds budget".equals(e.getMessage());}
+            need(rejected&&!db.inTransaction()&&revision(db)==rev&&Arrays.equals(before,store.snapshot()),"image_postwrite_budget_rolls_back");
+            near.set(0,NoteDocument.Block.text("text-0","小编辑",true));
+            store.saveNote("text",near,before);
+            store.saveImageEdit(image.withMetadata("预算内说明",false),store.snapshot());
+            NoteDocument.ImageEdit saved=store.imageEdit("image","photo");
+            need(revision(db)==rev+2&&store.noteBlocks("text").get(0).text.equals("小编辑")&&store.noteBlocks("text").get(0).privateContent&&saved.caption.equals("预算内说明")&&!saved.privateContent&&saved.revision().originalAssetId.equals(asset)&&store.snapshot().length<8*1024*1024,"postwrite_budget_small_edits_usable");
+            Files.write(root.resolve("schema3-write-budget-expected.bin"),store.snapshot());
+        }
+    }
     private void budgetChecks(Schema3Store store)throws Exception{
         Schema3Store.ComparisonBuffer buffer=new Schema3Store.ComparisonBuffer(5);
         buffer.write(new byte[]{1,2,3},0,3);
@@ -318,6 +353,9 @@ public final class Schema3DeviceTest extends Instrumentation {
         }
         try(Schema3Store store=new Schema3Store(c,"schema3-v1.db")){
             need(store.getReadableDatabase().getVersion()==3&&Arrays.equals(Files.readAllBytes(root.resolve("schema3-v1-expected.bin")),store.snapshot()),"v1_to_3_separate_process_exact");
+        }
+        try(Schema3Store store=new Schema3Store(c,"schema3-write-budget.db")){
+            need(Arrays.equals(Files.readAllBytes(root.resolve("schema3-write-budget-expected.bin")),store.snapshot())&&store.imageEdit("image","photo").caption.equals("预算内说明")&&store.noteBlocks("text").get(0).text.equals("小编辑"),"postwrite_budget_separate_process_exact");
         }
     }
     @Override public void onStart(){

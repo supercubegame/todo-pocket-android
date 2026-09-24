@@ -120,7 +120,7 @@ public final class Schema3Store extends SQLiteOpenHelper {
         Ledger.identifier(note);Ledger.identifier(block);
         try(Cursor c=db.rawQuery("SELECT kind,asset_id,caption,private,original_asset_id FROM blocks WHERE note_id=? AND id=?",new String[]{note,block})){
             require(c.moveToFirst()&&"IMAGE".equals(c.getString(0)),"Image target not found");
-            return new NoteDocument.ImageEdit(note,NoteDocument.Block.image(block,c.getString(1),c.getString(3),c.getInt(4)!=0),c.isNull(5)?null:c.getString(5));
+            return new NoteDocument.ImageEdit(note,NoteDocument.Block.image(block,c.getString(1),c.getString(2),c.getInt(3)!=0),c.isNull(4)?null:c.getString(4));
         }
     }
     public synchronized NoteDocument.ImageEdit imageEdit(String note,String block){return imageEdit(getReadableDatabase(),note,block);}

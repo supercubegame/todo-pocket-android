@@ -17,6 +17,148 @@ import java.util.UUID;
  * Writes go through validated AppDatabase APIs; UI read queries never mutate raw SQL.
  */
 public final class NoteEditorScreen {
+    /** Local derivative session. Caller runs prepare/confirm off the UI thread and
+     * closes on abandonment. Lock order: Editor then AppDatabase, never reversed.
+     * Separate from the pure codec so its compiled mutation controls stay isolated.
+     */
+    public static final class Editor implements AutoCloseable {
+        private static final int MAX_BYTES=8*1024*1024;
+        private final AppDatabase app;
+        private final MediaRepository media;
+        private final android.database.sqlite.SQLiteDatabase connection;
+        private final java.util.Set<Preview> previews=new java.util.HashSet<>();
+        private boolean closed;
+        public Editor(AppDatabase app,MediaRepository media){
+            if(app==null||media==null)throw new IllegalArgumentException("Missing editor storage");
+            this.app=app;this.media=media;
+            synchronized(app){
+                connection=app.getWritableDatabase();
+                if(connection.getVersion()!=3)throw new IllegalArgumentException("Editor requires schema3");
+            }
+        }
+        private void active(){
+            if(closed||!connection.isOpen()||app.getWritableDatabase()!=connection)
+                throw new IllegalStateException("Editor no longer active");
+        }
+        private void noOuter(){
+            if(connection.inTransaction())throw new IllegalStateException("Editor refuses outer transaction");
+        }
+        private NoteDocument.ImageEdit target(String note,String block){
+            Ledger.identifier(note);Ledger.identifier(block);
+            try(Cursor c=connection.rawQuery("SELECT kind,asset_id,caption,private,original_asset_id FROM blocks WHERE note_id=? AND id=?",new String[]{note,block})){
+                if(!c.moveToFirst()||!"IMAGE".equals(c.getString(0)))throw new IllegalArgumentException("Image target not found");
+                return new NoteDocument.ImageEdit(note,NoteDocument.Block.image(block,c.getString(1),c.getString(2),c.getInt(3)!=0),c.isNull(4)?null:c.getString(4));
+            }
+        }
+        private long registeredSize(String id){
+            try(Cursor c=connection.rawQuery("SELECT bytes FROM media WHERE id=?",new String[]{id})){
+                if(!c.moveToFirst()||c.getLong(0)<=0||c.getLong(0)>MAX_BYTES)throw new IllegalArgumentException("Image registry size invalid");
+                return c.getLong(0);
+            }
+        }
+        private byte[] actual(String id,long expected)throws IOException{
+            media.verify(id);Path path=media.path(id);
+            if(java.nio.file.Files.size(path)!=expected)throw new IOException("Image registered size differs");
+            byte[] bytes=new byte[(int)expected];
+            try(java.io.DataInputStream in=new java.io.DataInputStream(java.nio.file.Files.newInputStream(path,java.nio.file.StandardOpenOption.READ,java.nio.file.LinkOption.NOFOLLOW_LINKS))){
+                in.readFully(bytes);
+                if(in.read()!=-1)throw new IOException("Image grew while reading");
+            }
+            if(!id.equals(MediaRepository.digest(bytes)))throw new IOException("Image digest differs");
+            return bytes;
+        }
+        private void unchanged(Preview plan){
+            active();
+            if(!java.util.Arrays.equals(plan.before,app.exportState()))throw new IllegalStateException("Database changed; review image again");
+        }
+        public synchronized Preview prepare(String note,String block,int left,int top,int right,int bottom,int[][] masks)throws IOException{
+            synchronized(app){
+                active();noOuter();
+                byte[] before;NoteDocument.ImageEdit edit;long currentSize,originalSize;
+                connection.beginTransaction();
+                try{
+                    before=app.exportState();edit=target(note,block);
+                    currentSize=registeredSize(edit.revision().assetId);originalSize=registeredSize(edit.revision().originalAssetId);
+                    connection.setTransactionSuccessful();
+                }finally{connection.endTransaction();}
+                byte[] source=actual(edit.revision().assetId,currentSize);
+                if(!edit.revision().assetId.equals(edit.revision().originalAssetId))actual(edit.revision().originalAssetId,originalSize);
+                byte[] output=ShareExporter.png(source,left,top,right,bottom,masks,1000000L);
+                Preview plan=new Preview(this,before,edit,output,currentSize,originalSize);
+                try{
+                    connection.beginTransaction();
+                    try{unchanged(plan);connection.setTransactionSuccessful();}finally{connection.endTransaction();}
+                    previews.add(plan);return plan;
+                }catch(RuntimeException failure){plan.clear();throw failure;}
+            }
+        }
+        /** UI consent remains the caller's responsibility. Owner attempts consume
+         * the token. Late rollback may leave an immutable orphan: never delete it,
+         * because a concurrent writer might already reference the published bytes.
+         */
+        public synchronized void confirm(Preview plan)throws IOException{
+            if(plan==null||plan.owner!=this)throw new IllegalArgumentException("Preview belongs to a different editor");
+            synchronized(app){
+                if(plan.terminal)throw new IllegalStateException("Preview no longer active");
+                plan.terminal=true;
+                try{
+                    active();noOuter();
+                    connection.beginTransaction();
+                    try{unchanged(plan);connection.setTransactionSuccessful();}finally{connection.endTransaction();}
+                    actual(plan.edit.revision().assetId,plan.currentSize);
+                    if(!plan.edit.revision().assetId.equals(plan.edit.revision().originalAssetId))actual(plan.edit.revision().originalAssetId,plan.originalSize);
+                    String id=MediaRepository.digest(plan.output);
+                    if(!id.equals(media.copy(new java.io.ByteArrayInputStream(plan.output))))throw new IOException("Derivative publication differs");
+                    actual(id,plan.output.length);
+                    connection.beginTransaction();
+                    try{
+                        unchanged(plan);
+                        try(Cursor c=connection.rawQuery("SELECT mime,bytes FROM media WHERE id=?",new String[]{id})){
+                            if(c.moveToFirst()){
+                                if(!"image/png".equals(c.getString(0))||c.getLong(1)!=plan.output.length)throw new IllegalStateException("Derivative registry conflict");
+                            }else connection.execSQL("INSERT INTO media VALUES(?,?,?)",new Object[]{id,"image/png",plan.output.length});
+                        }
+                        connection.execSQL("UPDATE blocks SET asset_id=?,original_asset_id=? WHERE note_id=? AND id=?",
+                            new Object[]{id,plan.edit.revision().originalAssetId,plan.edit.noteId,plan.edit.blockId});
+                        long next;
+                        try(Cursor c=connection.rawQuery("SELECT value FROM revision WHERE id=1",null)){
+                            if(!c.moveToFirst())throw new IllegalStateException("Missing revision");
+                            next=Math.incrementExact(c.getLong(0));
+                        }
+                        connection.execSQL("UPDATE revision SET value=? WHERE id=1",new Object[]{next});
+                        NoteDocument.ImageEdit saved=target(plan.edit.noteId,plan.edit.blockId);
+                        if(!saved.revision().assetId.equals(id)||!saved.revision().originalAssetId.equals(plan.edit.revision().originalAssetId)||
+                            !saved.caption.equals(plan.edit.caption)||saved.privateContent!=plan.edit.privateContent)
+                            throw new IllegalStateException("Derivative readback differs");
+                        app.exportState(); // Full semantics and encoded-state budget before commit.
+                        connection.setTransactionSuccessful();
+                    }finally{connection.endTransaction();}
+                }finally{plan.clear();previews.remove(plan);}
+            }
+        }
+        @Override public synchronized void close(){
+            closed=true;for(Preview plan:previews)plan.clear();previews.clear();
+        }
+    }
+    /** Owned output only; closing drops the in-memory output and comparison bytes. */
+    public static final class Preview implements AutoCloseable {
+        private final Editor owner;
+        private final NoteDocument.ImageEdit edit;
+        private final long currentSize,originalSize;
+        private byte[] before,output;
+        private boolean terminal;
+        private Preview(Editor owner,byte[] before,NoteDocument.ImageEdit edit,byte[] output,long currentSize,long originalSize){
+            this.owner=owner;this.before=before;this.edit=edit;this.output=output;this.currentSize=currentSize;this.originalSize=originalSize;
+        }
+        public byte[] png(){
+            synchronized(owner){synchronized(owner.app){
+                if(terminal)throw new IllegalStateException("Preview no longer active");
+                owner.active();return output.clone();
+            }}
+        }
+        private void clear(){terminal=true;before=null;output=null;}
+        @Override public void close(){synchronized(owner){clear();owner.previews.remove(this);}}
+    }
     private final TodayScreen host;
     private final long activityId;
     private final String title;

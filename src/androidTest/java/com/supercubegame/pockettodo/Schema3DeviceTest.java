@@ -171,6 +171,71 @@ public final class Schema3DeviceTest extends Instrumentation {
         }
         if(!rejected)throw new AssertionError("wire rejection missing: "+cause);
     }
+    /** Locate mutation offsets by parsing the independent, valid fixture first.
+     * No hardcoded byte offsets and no product decoder supplies these positions.
+     */
+    private Map<String,Integer> wireOffsets(byte[] wire)throws Exception{
+        Map<String,Integer> offsets=new LinkedHashMap<>();
+        ByteArrayInputStream bytes=new ByteArrayInputStream(wire);DataInputStream in=new DataInputStream(bytes);
+        if(in.readInt()!=0x50544442||in.readInt()!=2||in.readInt()!=3||in.readInt()!=TABLES.length)throw new AssertionError("wire offset fixture header");
+        for(String table:TABLES){
+            offsets.put(table+"/length",wire.length-bytes.available());
+            int length=in.readInt();byte[] name=new byte[length];in.readFully(name);
+            if(!table.equals(new String(name,java.nio.charset.StandardCharsets.UTF_8)))throw new AssertionError("wire offset fixture table");
+            offsets.put(table+"/columns",wire.length-bytes.available());
+            int count=in.readInt();List<String> names=new ArrayList<>();
+            for(int col=0;col<count;col++){
+                int at=wire.length-bytes.available();length=in.readInt();name=new byte[length];in.readFully(name);
+                String column=new String(name,java.nio.charset.StandardCharsets.UTF_8);names.add(column);offsets.put(table+"/"+column+"/name",at);
+            }
+            offsets.put(table+"/rows",wire.length-bytes.available());int rows=in.readInt();
+            for(int row=0;row<rows;row++)for(String column:names){
+                int at=wire.length-bytes.available(),tag=in.readUnsignedByte();
+                if(row==0)offsets.put(table+"/"+column+"/cell",at);
+                if(tag==1)in.readLong();
+                else if(tag==3||tag==4){length=in.readInt();if(length<0||in.skipBytes(length)!=length)throw new AssertionError("wire offset fixture length");}
+                else if(tag!=0)throw new AssertionError("wire offset fixture tag");
+            }
+        }
+        if(bytes.available()!=0)throw new AssertionError("wire offset fixture trailing bytes");
+        return offsets;
+    }
+    private void wireBoundaryChecks(byte[] wire)throws Exception{
+        Map<String,Integer> at=wireOffsets(wire);
+        try(SQLiteDatabase valid=Schema3Store.stateCandidate(wire)){
+            if(!Arrays.equals(wire,newWire(valid,false)))throw new AssertionError("boundary positive control differs");
+        }
+        int controls=0;
+        String[] intKeys={"revision/length","revision/length","revision/length","revision/columns","revision/columns","revision/rows","revision/rows","categories/name/cell","categories/name/cell","categories/name/cell"};
+        int[] values={-1,Integer.MAX_VALUE,wire.length+1,0,3,-1,Integer.MAX_VALUE,-1,Integer.MAX_VALUE,wire.length+1};
+        for(int i=0;i<intKeys.length;i++){
+            byte[] bad=wire.clone();int offset=at.get(intKeys[i])+(intKeys[i].endsWith("/cell")?1:0);
+            java.nio.ByteBuffer.wrap(bad).putInt(offset,values[i]);
+            if(Arrays.equals(bad,wire))throw new AssertionError("integer boundary mutation unchanged: "+intKeys[i]);
+            String cause=i<3||i>=7?"Invalid wire value length":i<5?"Schema3 column count differs":"Invalid schema3 row count";
+            wireRejected(bad,cause);controls++;
+        }
+        String[] cellKeys={"revision/id/cell","revision/id/cell","revision/id/cell","revision/id/cell","revision/id/cell","categories/name/cell","categories/name/cell","batches/payload/cell"};
+        int[] tags={0,2,3,4,255,1,4,3};
+        String[] causes={"Forbidden wire NULL","Unknown wire cell type","Wire text type differs","Wire blob type differs","Unknown wire cell type","Wire integer type differs","Wire blob type differs","Wire text type differs"};
+        for(int i=0;i<cellKeys.length;i++){
+            Integer offset=at.get(cellKeys[i]);if(offset==null)throw new AssertionError("missing typed boundary fixture: "+cellKeys[i]);
+            byte[] bad=wire.clone();if((bad[offset]&255)==tags[i])throw new AssertionError("tag mutation unchanged");
+            bad[offset]=(byte)tags[i];wireRejected(bad,causes[i]);controls++;
+        }
+        byte[] bad=wire.clone();bad[at.get("revision/length")+4]='x';wireRejected(bad,"Missing or reordered schema3 table");controls++;
+        bad=wire.clone();bad[at.get("revision/id/name")+4]='x';wireRejected(bad,"Schema3 column name differs");controls++;
+        // Truncate inside each payload family, not merely at the archive tail.
+        for(String key:new String[]{"revision/id/cell","categories/name/cell","batches/payload/cell"}){
+            int offset=at.get(key);wireRejected(Arrays.copyOf(wire,offset+2),null);controls++;
+        }
+        // A rejected candidate must not poison the next independent invocation.
+        try(SQLiteDatabase valid=Schema3Store.stateCandidate(wire)){
+            if(valid.inTransaction()||valid.getVersion()!=3||!Arrays.equals(wire,newWire(valid,false)))throw new AssertionError("boundary rejection contaminated valid candidate");
+        }
+        if(controls!=23)throw new AssertionError("boundary control count differs: "+controls);
+        log.append("SCHEMA3_WIRE_BOUNDARY controls=").append(controls).append(" positive=2\n");
+    }
     private void wireSeed()throws Exception{
         Context c=getTargetContext();Path root=c.getFilesDir().toPath();
         byte[] old=Files.readAllBytes(root.resolve("frozen-v2-state.bin")),wire;
@@ -211,6 +276,11 @@ public final class Schema3DeviceTest extends Instrumentation {
         wireRejected(Arrays.copyOf(wire,wire.length+1),"Trailing schema3 state bytes");
         for(int offset:new int[]{0,7,11,15,20}){
             byte[] bad=wire.clone();bad[offset]=(byte)0xff;wireRejected(bad,null);
+        }
+        // Frozen media-only fixture has no batch payload. Use the old suite's
+        // independently asserted nonempty-all-table backup for typed BLOB controls.
+        try(SQLiteDatabase full=Schema3Store.stateCandidate(Files.readAllBytes(root.resolve("restore-expected.bin")))){
+            wireBoundaryChecks(newWire(full,false));
         }
         need(true,"wire_rejects_invalid_header_lengths_utf8_and_trailing");
         try(SQLiteDatabase candidate=Schema3Store.stateCandidate(wire)){

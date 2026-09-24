@@ -52,6 +52,21 @@ LABELS = {
         "postwrite_budget_separate_process_exact",
         "wire_separate_process_exact_candidate",
     ],
+    "restore_seed": [
+        "restore_preview_owned_read_only_counts", "restore_cancel_idempotent_consumed",
+        "restore_foreign_same_file_helper_refused", "restore_helper_close_invalidates_session",
+        "restore_other_connection_same_revision_stale_refused",
+        "restore_staged_tamper_refused_before_publication",
+        "restore_failed_attempt_consumed_and_cleaned", "restore_outer_transaction_refused",
+        "restore_late_sql_rollback_keeps_old_state_and_published_blobs",
+        "restore_new_exact_state_origins_and_all_assets", "restore_success_duplicate_refused",
+        "restore_old_complete_replacement", "restore_full_complete_replacement",
+        "restore_empty_complete_replacement",
+    ],
+    "restore_reopen": [
+        "restore_new_independent_process_exact", "restore_old_independent_process_exact",
+        "restore_full_independent_process_exact", "restore_empty_independent_process_exact",
+    ],
 }
 
 def observe(text, phase, api):
@@ -247,16 +262,16 @@ def require_registration(adb, gate, stage, runner):
     print(text, flush=True)
     assert p.returncode == 0 and registration(text, runner)["status"] == "PASS", "installed test APK runner/target mismatch: " + stage
 
-def device(adb, gate):
+def device(adb, gate, runner="Schema3DeviceTest", phases=("seed", "reopen")):
     prefix = [str(adb), "-s", gate.SERIAL]
-    for phase in LABELS:
-        if phase == "reopen":
+    for phase in phases:
+        if phase.endswith("reopen"):
             subprocess.run(prefix + ["shell", "am", "force-stop", gate.PKG], check=True, timeout=30)
             p = subprocess.run(prefix + ["shell", "pidof", gate.PKG], capture_output=True, text=True, timeout=10)
             assert p.returncode == 1 and not p.stdout.strip(), "prior app process still alive"
         args = prefix + ["shell", "am", "instrument", "-w", "-r", "-e", "phase", phase,
                          "-e", "expectedApi", str(gate.API),
-                         gate.PKG + ".test/com.supercubegame.pockettodo.Schema3DeviceTest"]
+                         gate.PKG + ".test/com.supercubegame.pockettodo." + runner]
         p = subprocess.run(args, capture_output=True, text=True, timeout=180)
         text = p.stdout + "\n" + p.stderr
         Path("device-schema3-" + phase + ".txt").write_text(text)
@@ -306,6 +321,20 @@ def isolated_runner(adb, gate, build_env):
         subprocess.run(prefix + ["install", "-r", "-t", str(test)], check=True, timeout=120)
         require_registration(adb, gate, "schema3", "Schema3DeviceTest")
         device(adb, gate)
+        args = ["gradle", "--no-daemon", "--console=plain", "-PpocketSchema3RestoreRunner=true", "assembleDebugAndroidTest"]
+        p = subprocess.run(args, capture_output=True, text=True, timeout=300, env=build_env)
+        text = p.stdout + "\n" + p.stderr
+        Path("device-schema3-restore-build.txt").write_text(text)
+        print(text, flush=True)
+        assert p.returncode == 0 and digest(app) == app_before, "restore runner build failed or changed product"
+        restore_certificate = certificate(test, gate)
+        Path("device-schema3-certificates.txt").write_text(json.dumps({
+            "app": app_certificate, "default_test": test_certificate,
+            "schema3_test": new_certificate, "restore_test": restore_certificate}))
+        assert restore_certificate == app_certificate, "restore test signing certificate differs"
+        subprocess.run(prefix + ["install", "-r", "-t", str(test)], check=True, timeout=120)
+        require_registration(adb, gate, "restore", "Schema3RestoreTests")
+        device(adb, gate, "Schema3RestoreTests", ("restore_seed", "restore_reopen"))
     finally:
         assert digest(saved) == test_before, "saved default test APK changed"
         subprocess.run(prefix + ["install", "-r", "-t", str(saved)], check=True, timeout=120)
@@ -344,7 +373,7 @@ def report():
     for api in (26, 34):
         folder = Path("collected") / ("database-api-" + str(api))
         devices[str(api)] = {}
-        for stage, runner in (("default", "V12DeviceTest"), ("schema3", "Schema3DeviceTest"), ("restored", "V12DeviceTest")):
+        for stage, runner in (("default", "V12DeviceTest"), ("schema3", "Schema3DeviceTest"), ("restore", "Schema3RestoreTests"), ("restored", "V12DeviceTest")):
             path = folder / ("device-schema3-registration-" + stage + ".txt")
             text = path.read_text(errors="replace") if path.exists() else ""
             devices[str(api)]["registration_" + stage] = registration(text, runner)
@@ -359,7 +388,7 @@ def report():
         path = folder / "device-schema3-certificates.txt"
         certs = json.loads(path.read_text()) if path.exists() else {}
         verified = (re.fullmatch(r"[0-9a-f]{64}", certs.get("app", "")) and
-                    certs.get("app") == certs.get("default_test") == certs.get("schema3_test"))
+                    certs.get("app") == certs.get("default_test") == certs.get("schema3_test") == certs.get("restore_test"))
         devices[str(api)]["certificates"] = {"status": "PASS" if verified else "NOT_VERIFIED", "evidence": certs}
         for phase in LABELS:
             path = folder / ("device-schema3-" + phase + ".txt")
@@ -367,9 +396,12 @@ def report():
             devices[str(api)][phase] = observe(text, phase, api)
     passed = all(p["status"] == "PASS" for phases in devices.values() for p in phases.values())
     doc = {"commit": source, "run_id": run, "status": "PASS" if passed else "NOT_VERIFIED",
-           "scope": "OPT_IN_SCHEMA2_TO_3_REGISTERED_REFERENCE_STORAGE_NOT_BACKUP_OR_UI",
+           "scope": "OPT_IN_SCHEMA3_STORAGE_ARCHIVE_AND_GUARDED_RESTORE_NOT_DEFAULT_UI",
            "devices": devices, "observer_selftests": controls, "release_ready": False,
-           "archive_compatibility": "NOT_IMPLEMENTED", "default_app_schema": 2,
+           "archive_compatibility": {"export_and_candidate": "PASS" if passed else "NOT_VERIFIED",
+                                     "guarded_live_restore": "PASS" if passed else "NOT_VERIFIED",
+                                     "default_ui_activation": False},
+           "default_app_schema": 2,
            "guarded_derivative_plan": "NOT_IMPLEMENTED"}
     data = (json.dumps(doc, ensure_ascii=False, indent=2) + "\n").encode()
     endpoint = "https://api.github.com/repos/" + os.environ["GITHUB_REPOSITORY"] + "/"

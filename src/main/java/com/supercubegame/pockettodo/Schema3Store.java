@@ -13,7 +13,7 @@ import java.util.*;
 
 /** Opt-in migration and registered-reference storage. NOT the default UI database.
  * Supports new databases, schema1/2 migration and strict state wire candidates.
- * ZIP export and validated archive candidates, but no guarded live restore/UI activation.
+ * ZIP export/candidates and guarded restore. No default UI activation.
  * Keep AppDatabase's old format frozen until compatible backup adapters are ready.
  */
 public final class Schema3Store extends SQLiteOpenHelper {
@@ -42,6 +42,8 @@ public final class Schema3Store extends SQLiteOpenHelper {
     }
     private static final String[] TABLES={"revision","categories","applications","activities","paths","tags","batches","ledger","checkins","media","notes","blocks","fields","field_options","field_values","field_notes","todos","legacy_imports"};
     private static final String[] OLD_BLOCKS={"note_id","id","position","kind","text","asset_id","caption","private"};
+    private Object restoreSession=new Object();
+    @Override public synchronized void close(){restoreSession=new Object();super.close();}
     public Schema3Store(Context context,String name){
         super(context.getApplicationContext(),name(name),null,3);setWriteAheadLoggingEnabled(true);
     }
@@ -278,6 +280,104 @@ public final class Schema3Store extends SQLiteOpenHelper {
             BackupArchive.write(destination,state,expected.keySet(),media);
         }
     }
+    /** In-memory, exact-helper/session-bound, single-attempt replacement preview.
+     * Caller must obtain explicit UI consent and close on cancel/abandonment.
+     * Closing the helper invalidates its tokens; callers still own cleanup.
+     */
+    public static final class RestorePlan implements AutoCloseable {
+        private final Schema3Store owner;
+        private final Object session;
+        private final SQLiteDatabase connection;
+        private final BackupArchive.Snapshot staged;
+        private final byte[] before,expected;
+        private final Map<String,Long> current,incoming;
+        private boolean terminal;
+        private RestorePlan(Schema3Store owner,SQLiteDatabase connection,BackupArchive.Snapshot staged,
+                            byte[] before,byte[] expected,Map<String,Long> current,Map<String,Long> incoming){
+            this.owner=owner;this.session=owner.restoreSession;this.connection=connection;this.staged=staged;
+            this.before=before.clone();this.expected=expected.clone();
+            this.current=Collections.unmodifiableMap(new LinkedHashMap<>(current));
+            this.incoming=Collections.unmodifiableMap(new LinkedHashMap<>(incoming));
+        }
+        public Map<String,Long> currentCounts(){return current;}
+        public Map<String,Long> incomingCounts(){return incoming;}
+        @Override public void close()throws IOException{synchronized(owner){terminal=true;staged.close();}}
+    }
+    private static Map<String,Long> restoreCounts(SQLiteDatabase db){
+        Map<String,Long> result=new LinkedHashMap<>();
+        for(String table:TABLES)try(Cursor c=db.rawQuery("SELECT count(*) FROM "+table,null)){
+            require(c.moveToFirst(),"Missing count");result.put(table,c.getLong(0));
+        }return result;
+    }
+    private static void noOuterTransaction(SQLiteDatabase db){
+        if(db.inTransaction())throw new IllegalStateException("Restore refuses outer transaction");
+    }
+    /** Staging and complete validation only. No live media publication or row writes.
+     * Bind expected bytes to the normalized candidate, never to old transport bytes.
+     */
+    public synchronized RestorePlan prepareRestore(Path archive,Path stagingRoot,long byteBudget)throws IOException{
+        SQLiteDatabase live=getWritableDatabase();noOuterTransaction(live);
+        BackupArchive.Snapshot staged=BackupArchive.read(archive,stagingRoot,byteBudget);boolean success=false;
+        try(SQLiteDatabase candidate=archiveCandidate(staged)){
+            byte[] before=exportState(),expected=wireState(candidate,false);
+            try(SQLiteDatabase current=stateCandidate(before)){
+                RestorePlan plan=new RestorePlan(this,live,staged,before,expected,restoreCounts(current),restoreCounts(candidate));
+                success=true;return plan;
+            }
+        }finally{if(!success)staged.close();}
+    }
+    private static void restoreUnchanged(SQLiteDatabase db,RestorePlan plan)throws IOException{
+        if(db!=plan.connection||!db.isOpen()||db.getVersion()!=3||
+           !Arrays.equals(plan.before,wireState(db,false)))
+            throw new IllegalStateException("Database changed; review restore again");
+    }
+    private static void replaceWireRows(SQLiteDatabase db,byte[] expected)throws IOException{
+        DataInputStream in=new DataInputStream(new ByteArrayInputStream(expected));
+        require(in.readInt()==0x50544442&&in.readInt()==2&&in.readInt()==3,"Invalid normalized restore state");
+        for(int i=TABLES.length-1;i>=0;i--)db.delete(TABLES[i],null,null);
+        decodeWireRows(db,in);
+    }
+    /** Logical atomic replacement, not power-loss durability or restore undo.
+     * All attempts by the owner consume the token. Foreign callers cannot consume it.
+     * Assets are immutable and published first. A late failure may leave unreferenced
+     * blobs: NEVER blindly delete them, because another writer might reference them.
+     * The final complete-state comparison and replacement share one write transaction.
+     */
+    public synchronized void confirmRestore(RestorePlan plan,MediaRepository media)throws IOException{
+        if(plan==null||plan.owner!=this)throw new IllegalArgumentException("Restore belongs to a different helper");
+        if(plan.terminal||plan.session!=restoreSession){
+            plan.close();throw new IllegalStateException("Restore plan no longer active");
+        }
+        plan.terminal=true;
+        try(BackupArchive.Snapshot staged=plan.staged){
+            require(media!=null,"Missing restore media");
+            SQLiteDatabase live=getWritableDatabase();noOuterTransaction(live);
+            live.beginTransaction();
+            try{restoreUnchanged(live,plan);live.setTransactionSuccessful();}finally{live.endTransaction();}
+            // Verify actual staged bytes again, before ANY live asset publication.
+            try(SQLiteDatabase candidate=archiveCandidate(staged)){
+                require(Arrays.equals(plan.expected,wireState(candidate,false)),"Reviewed restore candidate changed");
+                Map<String,Long> assets=registeredMedia(candidate);
+                for(String id:assets.keySet()){
+                    try(InputStream in=Files.newInputStream(staged.assets().get(id),StandardOpenOption.READ,LinkOption.NOFOLLOW_LINKS)){
+                        if(!id.equals(media.copy(in)))throw new IOException("Restore asset digest changed");
+                    }
+                    media.verify(id);verifyRegisteredFile(id,assets.get(id),media.path(id));
+                }
+                // Cleanup failure must precede the live commit, never report failure after it.
+                staged.close();
+                live.beginTransaction();
+                try{
+                    restoreUnchanged(live,plan);
+                    replaceWireRows(live,plan.expected);
+                    validate(live);
+                    require(Arrays.equals(plan.expected,wireState(live,false)),"Restore transaction readback differs");
+                    snapshot(live);
+                    live.setTransactionSuccessful();
+                }finally{live.endTransaction();}
+            }
+        }
+    }
     private static long revision(SQLiteDatabase db){
         try(Cursor c=db.rawQuery("SELECT id,value FROM revision",null)){
             require(c.moveToFirst()&&c.getLong(0)==1&&c.getLong(1)>=0,"Invalid revision");
@@ -323,7 +423,7 @@ public final class Schema3Store extends SQLiteOpenHelper {
         Ledger.identifier(note);Ledger.identifier(block);
         try(Cursor c=db.rawQuery("SELECT kind,asset_id,caption,private,original_asset_id FROM blocks WHERE note_id=? AND id=?",new String[]{note,block})){
             require(c.moveToFirst()&&"IMAGE".equals(c.getString(0)),"Image target not found");
-            return new NoteDocument.ImageEdit(note,NoteDocument.Block.image(block,c.getString(1),c.getString(2),c.getInt(3)!=0),c.isNull(4)?null:c.getString(4));
+            return new NoteDocument.ImageEdit(note,NoteDocument.Block.image(block,c.getString(1),c.getString(3),c.getInt(4)!=0),c.isNull(5)?null:c.getString(5));
         }
     }
     public synchronized NoteDocument.ImageEdit imageEdit(String note,String block){return imageEdit(getReadableDatabase(),note,block);}

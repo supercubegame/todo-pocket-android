@@ -11,11 +11,12 @@ android {
         targetSdk 34
         versionCode 3
         versionName '1.2'
-        // Each test APK has one explicit runner. The host preserves/restores the
-        // default test APK around schema3; the product APK is never replaced.
-        testInstrumentationRunner (providers.gradleProperty('pocketSchema3Runner').orElse('false').get() == 'true'
-            ? 'com.supercubegame.pockettodo.Schema3DeviceTest'
-            : 'com.supercubegame.pockettodo.V12DeviceTest')
+        // One explicit runner per test APK; host restores the default test bytes.
+        testInstrumentationRunner (providers.gradleProperty('pocketSchema3RestoreRunner').orElse('false').get() == 'true'
+            ? 'com.supercubegame.pockettodo.Schema3RestoreTests'
+            : providers.gradleProperty('pocketSchema3Runner').orElse('false').get() == 'true'
+                ? 'com.supercubegame.pockettodo.Schema3DeviceTest'
+                : 'com.supercubegame.pockettodo.V12DeviceTest')
     }
     buildTypes {
         debug { applicationIdSuffix '.preview' }

@@ -30,7 +30,7 @@ public final class Schema3RestoreTests extends Instrumentation {
         }throw new AssertionError("accepted instead of "+message);
     }
     private static boolean empty(Path directory)throws IOException{
-        try(java.util.stream.Stream<Path> files=Files.list(directory)){return files.findAny().isEmpty();}
+        try(java.util.stream.Stream<Path> files=Files.list(directory)){return !files.findAny().isPresent();}
     }
     private static Map<String,Long> counts(SQLiteDatabase db){
         Map<String,Long> result=new LinkedHashMap<>();
@@ -97,7 +97,7 @@ public final class Schema3RestoreTests extends Instrumentation {
             need(empty(stage)&&empty(root.resolve("schema3-restore-media"))&&Arrays.equals(changed,store.exportState()),"restore_other_connection_same_revision_stale_refused");
 
             Schema3Store.RestorePlan damaged=store.prepareRestore(archives.resolve("good.zip"),stage,1000000);
-            String id=Files.readString(root.resolve("schema3-ids.txt")).trim().split("\\s+")[0];
+            String id=new String(Files.readAllBytes(root.resolve("schema3-ids.txt")),java.nio.charset.StandardCharsets.US_ASCII).trim().split("\\s+")[0];
             Path file=stagedAsset(stage,id);byte[] content=Files.readAllBytes(file);content[0]^=1;Files.write(file,content);
             rejected(()->store.confirmRestore(damaged,media),"digest differs");
             rejected(()->store.confirmRestore(damaged,media),"no longer active");
@@ -123,7 +123,7 @@ public final class Schema3RestoreTests extends Instrumentation {
             finally{db.execSQL("DROP TRIGGER restore_late_fault");}
             rejected(()->store.confirmRestore(fault,media),"no longer active");
             check(failed&&Arrays.equals(changed,store.exportState())&&empty(stage),"late fault did not roll back");
-            String[] ids=Files.readString(root.resolve("schema3-ids.txt")).trim().split("\\s+");
+            String[] ids=new String(Files.readAllBytes(root.resolve("schema3-ids.txt")),java.nio.charset.StandardCharsets.US_ASCII).trim().split("\\s+");
             for(String asset:ids)media.verify(asset);
             need(ids.length==3&&revision(db)==rev,"restore_late_sql_rollback_keeps_old_state_and_published_blobs");
 
@@ -205,7 +205,7 @@ public final class Schema3RestoreTests extends Instrumentation {
                     while(c.moveToNext()){media.verify(c.getString(0));check(Files.size(media.path(c.getString(0)))==c.getLong(1),"reopen size differs");}
                 }
                 if(name.equals("new")){
-                    String[] ids=Files.readString(root.resolve("schema3-ids.txt")).trim().split("\\s+");
+                    String[] ids=new String(Files.readAllBytes(root.resolve("schema3-ids.txt")),java.nio.charset.StandardCharsets.US_ASCII).trim().split("\\s+");
                     check(store.imageEdit("second","photo").revision().originalAssetId.equals(ids[0]),"reopen origin lost");
                 }
                 need(!store.getReadableDatabase().inTransaction(),"restore_"+name+"_independent_process_exact");

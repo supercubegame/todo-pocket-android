@@ -94,6 +94,7 @@ public final class Schema3RestoreTests extends Instrumentation {
             check(!Arrays.equals(before,changed)&&revision(db)==rev,"same revision fixture not established");
             rejected(()->store.confirmRestore(stale,media),"Database changed");
             rejected(()->store.confirmRestore(stale,media),"no longer active");
+            lateRaceChecks();
             need(empty(stage)&&empty(root.resolve("schema3-restore-media"))&&Arrays.equals(changed,store.exportState()),"restore_other_connection_same_revision_stale_refused");
 
             Schema3Store.RestorePlan damaged=store.prepareRestore(archives.resolve("good.zip"),stage,1000000);
@@ -144,6 +145,79 @@ public final class Schema3RestoreTests extends Instrumentation {
         restoreShape("old",root.resolve("frozen-v2.zip"),null,stage);
         restoreShape("full",archives.resolve("full.zip"),Files.readAllBytes(archives.resolve("full-state.bin")),stage);
         restoreShape("empty",archives.resolve("empty.zip"),Files.readAllBytes(archives.resolve("empty-state.bin")),stage);
+    }
+    /** Hold the real publication monitor, not a product test hook. The worker can
+     * reach publishNewFile ONLY after early state/asset checks have completed.
+     * A separate helper writes while publication is parked; no sleeps choose a race.
+     * Run a no-write positive control through exactly the same barrier first.
+     */
+    private void lateRaceChecks()throws Exception{
+        Context context=getTargetContext();Path root=context.getFilesDir().toPath();
+        Path archive=root.resolve("schema3-archives/good.zip");
+        String[] ids=new String(Files.readAllBytes(root.resolve("schema3-ids.txt")),java.nio.charset.StandardCharsets.US_ASCII).trim().split("\\s+");
+        for(boolean mutate:new boolean[]{false,true}){
+            String stem=mutate?"schema3-race-stale":"schema3-race-control";
+            context.deleteDatabase(stem+".db");
+            Path stage=context.getCacheDir().toPath().resolve(stem+"-stage");
+            Files.createDirectories(stage);
+            MediaRepository media=new MediaRepository(root.resolve(stem+"-media"),1000000);
+            try(Schema3Store store=new Schema3Store(context,stem+".db")){
+                SQLiteDatabase db=store.getWritableDatabase();
+                db.execSQL("INSERT INTO todos VALUES('race','并发前',0,0)");
+                db.execSQL("UPDATE revision SET value=11 WHERE id=1");
+                byte[] before=store.exportState();
+                Schema3Store.RestorePlan plan=store.prepareRestore(archive,stage,1000000);
+                java.util.concurrent.atomic.AtomicReference<Throwable> failure=new java.util.concurrent.atomic.AtomicReference<>();
+                Thread worker=new Thread(()->{
+                    try{store.confirmRestore(plan,media);}catch(Throwable error){failure.set(error);}
+                },"restore-publication-race");
+                worker.setDaemon(true);
+                byte[] externalState=null;
+                try{
+                    synchronized(MediaRepository.class){
+                        worker.start();
+                        long deadline=android.os.SystemClock.elapsedRealtime()+15000;
+                        boolean parked=false;
+                        while(android.os.SystemClock.elapsedRealtime()<deadline&&worker.isAlive()){
+                            if(worker.getState()==Thread.State.BLOCKED){
+                                for(StackTraceElement frame:worker.getStackTrace()){
+                                    if(frame.getClassName().equals(MediaRepository.class.getName())&&frame.getMethodName().equals("publishNewFile"))parked=true;
+                                }
+                            }
+                            if(parked)break;
+                            Thread.sleep(5); // Poll a proven state, never assume a timing window.
+                        }
+                        check(parked,"restore did not reach publication barrier: "+failure.get());
+                        // Publication has not occurred, yet early validation is behind us.
+                        for(String id:ids)check(!Files.exists(root.resolve(stem+"-media").resolve(id)),"asset published before barrier");
+                        try(Schema3Store external=new Schema3Store(context,stem+".db")){
+                            check(Arrays.equals(before,external.exportState())&&revision(external.getReadableDatabase())==11,"barrier current state differs");
+                            if(mutate)external.getWritableDatabase().execSQL("UPDATE todos SET title='早检查之后的写入' WHERE id='race'");
+                            externalState=external.exportState();
+                            check(revision(external.getReadableDatabase())==11,"external write changed revision");
+                            check(mutate?!Arrays.equals(before,externalState):Arrays.equals(before,externalState),"external mutation control differs");
+                        }
+                    }
+                }finally{
+                    // Never join while holding the publication monitor.
+                    worker.join(15000);
+                    check(!worker.isAlive(),"restore worker did not finish after barrier release");
+                }
+                Throwable actual=failure.get();
+                if(mutate){
+                    check(actual instanceof IllegalStateException&&actual.getMessage().contains("Database changed"),"late stale guard not observed: "+actual);
+                    check(Arrays.equals(externalState,store.exportState())&&revision(db)==11,"restore overwrote external writer");
+                }else{
+                    check(actual==null,"positive barrier control failed: "+actual);
+                    check(Arrays.equals(Files.readAllBytes(root.resolve("schema3-wire.bin")),store.exportState()),"positive barrier restore differs");
+                }
+                for(String id:ids)media.verify(id); // All publications preceded final rejection.
+                check(ids.length==3&&empty(stage)&&!db.inTransaction(),"late race cleanup or publication incomplete");
+                rejected(()->store.confirmRestore(plan,media),"no longer active");
+                plan.close();
+            }
+        }
+        log.append("SCHEMA3_RESTORE_LATE_RACE positive=PASS after_early_check=PROVEN same_revision_external_write=REFUSED full_state_preserved=PASS\n");
     }
     private void restoreShape(String name,Path archive,byte[] expected,Path stage)throws Exception{
         Context context=getTargetContext();Path root=context.getFilesDir().toPath();

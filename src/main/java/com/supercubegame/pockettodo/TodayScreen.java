@@ -50,7 +50,7 @@ public final class TodayScreen {
 
     public TodayScreen(Activity activity) {
         this.activity=activity;
-        db=new AppDatabase(activity,"pocket-v12.db");
+        db=AppDatabase.openSchema3(activity,"pocket-v12.db");
         activities=new ActivitiesScreen(this);
     }
     public void show(Bundle saved) {

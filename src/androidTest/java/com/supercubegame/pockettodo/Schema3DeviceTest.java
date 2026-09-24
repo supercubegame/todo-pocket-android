@@ -173,14 +173,18 @@ public final class Schema3DeviceTest extends Instrumentation {
         }
     }
     private void candidateRejected(byte[] bytes,String causeText)throws Exception{
+        // Both the frozen decoder and the production normalizer must refuse the
+        // same invalid input; migration cannot repair or bypass old validation.
+        for(boolean normalize:new boolean[]{false,true}){
         boolean rejected=false;
-        try(SQLiteDatabase ignored=legacyCandidate(bytes)){}
+        try(SQLiteDatabase ignored=normalize?Schema3Store.normalizeLegacyState(bytes):legacyCandidate(bytes)){}
         catch(IllegalArgumentException e){
             if(!"备份状态校验失败".equals(e.getMessage()))throw e;
             for(Throwable cause=e.getCause();cause!=null;cause=cause.getCause())
                 if(causeText==null||String.valueOf(cause.getMessage()).contains(causeText))rejected=true;
         }
         if(!rejected)throw new AssertionError("legacy candidate rejection/cause missing: "+causeText);
+        }
     }
     private void legacyCandidateSeed()throws Exception{
         Context c=getTargetContext();Path root=c.getFilesDir().toPath();
@@ -244,6 +248,26 @@ public final class Schema3DeviceTest extends Instrumentation {
                 // the caller transaction, without altering any on-disk helper DB.
             }finally{candidate.endTransaction();}
             if(columns(candidate)!=8||!Arrays.equals(frozen,legacyWire(candidate,false)))throw new AssertionError("candidate migration rollback failed");
+        }
+        byte[] input=frozen.clone();
+        try(SQLiteDatabase normalized=Schema3Store.normalizeLegacyState(input)){
+            input[0]^=1;
+            if(normalized.getVersion()!=3||columns(normalized)!=9||normalized.inTransaction()||revision(normalized)!=42||!Arrays.equals(sourceCells,oldCells(normalized)))throw new AssertionError("production normalized candidate changed old state/version/ownership");
+            try(Cursor origin=normalized.rawQuery("SELECT count(*) FROM blocks WHERE original_asset_id IS NOT NULL",null)){
+                if(!origin.moveToFirst()||origin.getInt(0)!=0)throw new AssertionError("legacy normalization invented origins");
+            }
+            // Returned in-memory DB is independently owned, usable and closeable.
+            // Mutating one candidate must not mutate its source or a later one.
+            normalized.execSQL("UPDATE todos SET title='仅候选变更' WHERE id='old-todo'");
+            if(Arrays.equals(sourceCells,oldCells(normalized)))throw new AssertionError("candidate mutation control did not change rows");
+        }
+        try(SQLiteDatabase again=Schema3Store.normalizeLegacyState(frozen)){
+            if(again.getVersion()!=3||!Arrays.equals(sourceCells,oldCells(again)))throw new AssertionError("normalization retained prior candidate mutation");
+        }
+        for(byte[] invalid:new byte[][]{null,new byte[0],new byte[8*1024*1024+1]}){
+            boolean rejected=false;try(SQLiteDatabase ignored=Schema3Store.normalizeLegacyState(invalid)){}
+            catch(IllegalArgumentException e){rejected="Missing or oversized legacy state".equals(e.getMessage());}
+            if(!rejected)throw new AssertionError("normalizer input budget guard missing");
         }
         try(SQLiteDatabase source=SQLiteDatabase.openDatabase(c.getDatabasePath("frozen-v2.db").getPath(),null,SQLiteDatabase.OPEN_READONLY);
             SQLiteDatabase again=legacyCandidate(frozen)){

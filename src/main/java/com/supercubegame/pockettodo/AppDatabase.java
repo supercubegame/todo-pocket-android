@@ -281,7 +281,11 @@ public final class AppDatabase extends SQLiteOpenHelper {
      * any future migration to a newer candidate; never decode old bytes into live DDL.
      * Currently only schema2 is supported, and no migration/normalization is performed.
      */
-    private SQLiteDatabase candidate(byte[] bytes){
+    private SQLiteDatabase candidate(byte[] bytes){return strictSchema2Candidate(bytes);}
+    /** Package-level frozen decoder for newer adapters. Caller closes the returned
+     * independent in-memory database. This method never migrates or opens live data.
+     */
+    static SQLiteDatabase strictSchema2Candidate(byte[] bytes){
         require(bytes!=null&&bytes.length>0&&bytes.length<=STATE_LIMIT,"备份状态为空或超过预算");SQLiteDatabase stage=SQLiteDatabase.create(null);boolean success=false;
         try{stage.setForeignKeyConstraintsEnabled(true);createSchema2(stage);stage.beginTransaction();try{
             deleteRows(stage);decodeRows(stage,bytes);validateSemantics(stage);require(Arrays.equals(encodeState(stage),bytes),"备份规范回读不一致");stage.setTransactionSuccessful();

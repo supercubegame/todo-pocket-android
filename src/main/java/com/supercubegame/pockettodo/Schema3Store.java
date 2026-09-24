@@ -68,6 +68,27 @@ public final class Schema3Store extends SQLiteOpenHelper {
         validate(db);
     }
     @Override public void onDowngrade(SQLiteDatabase db,int from,int to){throw new IllegalStateException("Newer database; preserve data");}
+    /** Strict old-state normalization only, NOT a ZIP restore or new wire codec.
+     * Frozen decoding, full historical semantics and old canonical byte equality
+     * must all succeed BEFORE migration. The returned in-memory DB is owned by
+     * the caller and must be closed; no live database/media is opened or replaced.
+     * Input must not be concurrently mutated while its defensive copy is made.
+     */
+    static SQLiteDatabase normalizeLegacyState(byte[] bytes){
+        require(bytes!=null&&bytes.length>0&&bytes.length<=COMPARISON_LIMIT,"Missing or oversized legacy state");
+        SQLiteDatabase stage=AppDatabase.strictSchema2Candidate(bytes.clone());
+        boolean success=false;
+        try{
+            stage.beginTransaction();
+            try{
+                addOrigin(stage);
+                stage.setVersion(3);
+                snapshot(stage); // New column metadata must also fit the comparison budget.
+                stage.setTransactionSuccessful();
+            }finally{stage.endTransaction();}
+            success=true;return stage;
+        }finally{if(!success)stage.close();}
+    }
     private static void tableSet(SQLiteDatabase db){
         Set<String> actual=new HashSet<>();
         try(Cursor c=db.rawQuery("SELECT name FROM sqlite_master WHERE type='table'",null)){
@@ -146,7 +167,7 @@ public final class Schema3Store extends SQLiteOpenHelper {
      */
     public synchronized void saveNote(String note,List<NoteDocument.Block> blocks,byte[] before){
         Ledger.identifier(note);
-        require(blocks!=null&&!Ledger.hasNull(blocks),"Missing note blocks");
+        require(blocks!=null&&!Ledger.hasNull(blocks)),"Missing note blocks");
         require(before!=null&&before.length>0&&before.length<=COMPARISON_LIMIT,"Missing reviewed state");
         List<NoteDocument.Block> owned=new ArrayList<>(blocks);NoteDocument validator=new NoteDocument();
         for(NoteDocument.Block block:owned)validator.add(block);

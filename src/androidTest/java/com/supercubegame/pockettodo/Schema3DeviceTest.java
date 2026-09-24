@@ -312,6 +312,102 @@ public final class Schema3DeviceTest extends Instrumentation {
         if(controls!=11)throw new AssertionError("archive adapter control count differs: "+controls);
         log.append("SCHEMA3_ARCHIVE controls=").append(controls).append(" no_live_restore=true\n");
     }
+    /** Exercise the adapter with empty and all-table populated states, not only
+     * the small image-reference fixture. Keep reusable ZIPs for process two.
+     */
+    private void archiveShapeChecks()throws Exception{
+        Context c=getTargetContext();Path root=c.getFilesDir().toPath(),dir=root.resolve("schema3-archives");
+        Path stage=c.getCacheDir().toPath().resolve("schema3-archive-stage");
+        c.deleteDatabase("schema3-empty-archive.db");
+        try(Schema3Store empty=new Schema3Store(c,"schema3-empty-archive.db")){
+            MediaRepository media=new MediaRepository(root.resolve("schema3-empty-media"),1000000);
+            byte[] expected=empty.exportState();Path zip=dir.resolve("empty.zip");Files.deleteIfExists(zip);
+            empty.exportBackup(zip,media);
+            try(BackupArchive.Snapshot snapshot=BackupArchive.read(zip,stage,1000000);
+                SQLiteDatabase candidate=Schema3Store.archiveCandidate(snapshot)){
+                if(!snapshot.assets().isEmpty()||!Arrays.equals(expected,newWire(candidate,false)))throw new AssertionError("empty archive exact roundtrip");
+                for(String table:TABLES)try(Cursor rows=candidate.rawQuery("SELECT count(*) FROM "+table,null)){
+                    if(!rows.moveToFirst()||rows.getLong(0)!=(table.equals("revision")?1:0))throw new AssertionError("empty archive invented rows: "+table);
+                }
+            }
+            Files.write(dir.resolve("empty-state.bin"),expected);
+        }
+        // Use the old mandatory suite's complete source, not the simplified
+        // frozen photo fixture. Its ZIP also proves old transport compatibility.
+        byte[] old=Files.readAllBytes(root.resolve("restore-expected.bin"));
+        byte[] normalized;
+        try(BackupArchive.Snapshot snapshot=BackupArchive.read(root.resolve("full-good.zip"),stage,1000000);
+            SQLiteDatabase candidate=Schema3Store.archiveCandidate(snapshot)){
+            if(!Arrays.equals(old,snapshot.state()))throw new AssertionError("full old ZIP differs from independent expected state");
+            for(String table:TABLES)try(Cursor rows=candidate.rawQuery("SELECT count(*) FROM "+table,null)){
+                if(!rows.moveToFirst()||rows.getLong(0)<=0)throw new AssertionError("full archive fixture has empty table: "+table);
+            }
+            try(SQLiteDatabase expected=Schema3Store.stateCandidate(old)){
+                if(!Arrays.equals(oldCells(candidate),oldCells(expected)))throw new AssertionError("full old ZIP lost historical cells");
+            }
+            normalized=newWire(candidate,false);
+        }
+        Path full=dir.resolve("full.zip");Files.deleteIfExists(full);
+        String mediaId=new String(Files.readAllBytes(root.resolve("restore-media-id.txt")),java.nio.charset.StandardCharsets.US_ASCII);
+        MediaRepository source=new MediaRepository(root.resolve("backup-source-media"),1000000);
+        BackupArchive.write(full,normalized,Set.of(mediaId),source);
+        try(BackupArchive.Snapshot snapshot=BackupArchive.read(full,stage,1000000);
+            SQLiteDatabase candidate=Schema3Store.archiveCandidate(snapshot)){
+            if(!Arrays.equals(normalized,snapshot.state())||!Arrays.equals(normalized,newWire(candidate,false))||!snapshot.assets().keySet().equals(Set.of(mediaId))||
+                !Arrays.equals(Files.readAllBytes(snapshot.assets().get(mediaId)),new byte[]{1,2,3,4,5}))throw new AssertionError("full new archive lost state or bytes");
+        }
+        Files.write(dir.resolve("full-state.bin"),normalized);
+        // Size budgets are transport limits, not inferred from compressed ZIP size.
+        Path good=dir.resolve("good.zip");long exact;
+        try(BackupArchive.Snapshot snapshot=BackupArchive.read(good,stage,1000000)){
+            exact=snapshot.state().length;
+            for(Path asset:snapshot.assets().values())exact=Math.addExact(exact,Files.size(asset));
+        }
+        try(BackupArchive.Snapshot snapshot=BackupArchive.read(good,stage,exact);
+            SQLiteDatabase candidate=Schema3Store.archiveCandidate(snapshot)){
+            if(candidate.getVersion()!=3)throw new AssertionError("exact archive budget positive control");
+        }
+        boolean rejected=false;
+        try(BackupArchive.Snapshot ignored=BackupArchive.read(good,stage,exact-1)){}
+        catch(IOException failure){rejected=String.valueOf(failure.getMessage()).contains("备份展开超过字节预算");}
+        if(!rejected)throw new AssertionError("one-byte-short archive budget accepted");
+        try(java.util.stream.Stream<Path> children=Files.list(stage)){if(children.findAny().isPresent())throw new AssertionError("archive shape/budget stage leak");}
+        // Persist digests separately so process two proves it read the same ZIPs.
+        for(String name:new String[]{"good","empty","full"})
+            Files.write(dir.resolve(name+"-digest.txt"),MediaRepository.digest(Files.readAllBytes(dir.resolve(name+".zip"))).getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        log.append("SCHEMA3_ARCHIVE_SHAPES empty=PASS all_tables=18 budget_exact=PASS budget_minus_one=REFUSED\n");
+    }
+    private void archiveReopenChecks(byte[] wire)throws Exception{
+        Context c=getTargetContext();Path root=c.getFilesDir().toPath(),dir=root.resolve("schema3-archives");
+        Path stage=c.getCacheDir().toPath().resolve("schema3-archive-stage");
+        String[] ids=new String(Files.readAllBytes(root.resolve("schema3-ids.txt")),java.nio.charset.StandardCharsets.US_ASCII).split("\n");
+        for(String name:new String[]{"good","empty","full"}){
+            Path zip=dir.resolve(name+".zip");String digest=new String(Files.readAllBytes(dir.resolve(name+"-digest.txt")),java.nio.charset.StandardCharsets.US_ASCII);
+            if(!digest.equals(MediaRepository.digest(Files.readAllBytes(zip))))throw new AssertionError("ZIP changed across processes: "+name);
+            byte[] expected=name.equals("good")?wire:Files.readAllBytes(dir.resolve(name+"-state.bin"));
+            try(BackupArchive.Snapshot snapshot=BackupArchive.read(zip,stage,1000000);
+                SQLiteDatabase candidate=Schema3Store.archiveCandidate(snapshot)){
+                if(candidate.getVersion()!=3||candidate.inTransaction()||!Arrays.equals(expected,snapshot.state())||!Arrays.equals(expected,newWire(candidate,false)))throw new AssertionError("process-two archive state differs: "+name);
+                Set<String> assets=name.equals("good")?new HashSet<>(Arrays.asList(ids)):name.equals("empty")?Set.of():Set.of(new String(Files.readAllBytes(root.resolve("restore-media-id.txt")),java.nio.charset.StandardCharsets.US_ASCII));
+                if(!snapshot.assets().keySet().equals(assets))throw new AssertionError("process-two archive asset set differs: "+name);
+                if(name.equals("good")){
+                    byte[][] bytes={{97,98,99},{1,2,3,4},{5,6,7,8}};
+                    for(int i=0;i<ids.length;i++)if(!Arrays.equals(bytes[i],Files.readAllBytes(snapshot.assets().get(ids[i]))))throw new AssertionError("process-two original/intermediate/current bytes differ");
+                }else if(name.equals("full")){
+                    for(Path asset:snapshot.assets().values())if(!Arrays.equals(new byte[]{1,2,3,4,5},Files.readAllBytes(asset)))throw new AssertionError("process-two full media differs");
+                }
+            }
+        }
+        // The frozen old ZIP remains readable in this independent process too.
+        try(BackupArchive.Snapshot snapshot=BackupArchive.read(root.resolve("frozen-v2.zip"),stage,1000000);
+            SQLiteDatabase candidate=Schema3Store.archiveCandidate(snapshot);
+            SQLiteDatabase expected=Schema3Store.stateCandidate(Files.readAllBytes(root.resolve("frozen-v2-state.bin")))){
+            if(!Arrays.equals(newWire(expected,false),newWire(candidate,false))||!snapshot.assets().keySet().equals(Set.of(ids[0]))||
+                !Arrays.equals(Files.readAllBytes(snapshot.assets().get(ids[0])),new byte[]{97,98,99}))throw new AssertionError("process-two old archive differs");
+        }
+        try(java.util.stream.Stream<Path> children=Files.list(stage)){if(children.findAny().isPresent())throw new AssertionError("process-two archive staging leaked");}
+        log.append("SCHEMA3_ARCHIVE_REOPEN new_archives=3 old_archives=1 exact_state_and_bytes=PASS\n");
+    }
     private void wireSeed()throws Exception{
         Context c=getTargetContext();Path root=c.getFilesDir().toPath();
         byte[] old=Files.readAllBytes(root.resolve("frozen-v2-state.bin")),wire;
@@ -334,6 +430,7 @@ public final class Schema3DeviceTest extends Instrumentation {
                 }
             }
             archiveChecks(store,wire);
+            archiveShapeChecks();
             need(Arrays.equals(before,store.snapshot()),"wire_schema3_exact_roundtrip_preserves_pairs");
             byte[] owned=wire.clone();
             try(SQLiteDatabase candidate=Schema3Store.stateCandidate(owned)){
@@ -754,6 +851,7 @@ public final class Schema3DeviceTest extends Instrumentation {
             need(Arrays.equals(Files.readAllBytes(root.resolve("schema3-write-budget-expected.bin")),store.snapshot())&&store.imageEdit("image","photo").caption.equals("预算内说明")&&store.noteBlocks("text").get(0).text.equals("小编辑"),"postwrite_budget_separate_process_exact");
         }
         byte[] wire=Files.readAllBytes(root.resolve("schema3-wire.bin"));
+        archiveReopenChecks(wire);
         try(SQLiteDatabase candidate=Schema3Store.stateCandidate(wire)){
             need(candidate.getVersion()==3&&columns(candidate)==9&&Arrays.equals(wire,newWire(candidate,false)),"wire_separate_process_exact_candidate");
         }

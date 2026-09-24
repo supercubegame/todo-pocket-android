@@ -38,10 +38,8 @@ public final class Schema3Store extends SQLiteOpenHelper {
     }
     private static final String[] TABLES={"revision","categories","applications","activities","paths","tags","batches","ledger","checkins","media","notes","blocks","fields","field_options","field_values","field_notes","todos","legacy_imports"};
     private static final String[] OLD_BLOCKS={"note_id","id","position","kind","text","asset_id","caption","private"};
-    private final Context context;
     public Schema3Store(Context context,String name){
         super(context.getApplicationContext(),name(name),null,3);setWriteAheadLoggingEnabled(true);
-        this.context=context.getApplicationContext();
     }
     private static String name(String value){
         if(value==null||!value.matches("[A-Za-z0-9_-]+\\.db"))throw new IllegalArgumentException("Invalid database name");
@@ -50,18 +48,14 @@ public final class Schema3Store extends SQLiteOpenHelper {
     private static void require(boolean value,String message){if(!value)throw new IllegalArgumentException(message);}
     @Override public void onConfigure(SQLiteDatabase db){db.setForeignKeyConstraintsEnabled(true);}
     @Override public void onCreate(SQLiteDatabase db){
-        // Callback-only adapter: never open its database or a second connection.
-        // Reuse frozen historical DDL on the outer helper's transaction.
-        try(AppDatabase historical=new AppDatabase(context,"schema3-ddl-adapter.db")){
-            historical.onCreate(db);
-        }
+        // Explicit frozen factory, never a live helper callback. The outer helper
+        // owns the same connection and the complete DDL/version transaction.
+        AppDatabase.createSchema2(db);
         addOrigin(db);
     }
     @Override public void onUpgrade(SQLiteDatabase db,int from,int to){
         if((from!=1&&from!=2)||to!=3)throw new IllegalStateException("Unsupported migration; preserve database");
-        if(from==1)try(AppDatabase historical=new AppDatabase(context,"schema3-ddl-adapter.db")){
-            historical.onUpgrade(db,1,2);
-        }
+        if(from==1)AppDatabase.migrateSchema1To2(db);
         addOrigin(db);
     }
     private static void addOrigin(SQLiteDatabase db){
@@ -126,7 +120,7 @@ public final class Schema3Store extends SQLiteOpenHelper {
         Ledger.identifier(note);Ledger.identifier(block);
         try(Cursor c=db.rawQuery("SELECT kind,asset_id,caption,private,original_asset_id FROM blocks WHERE note_id=? AND id=?",new String[]{note,block})){
             require(c.moveToFirst()&&"IMAGE".equals(c.getString(0)),"Image target not found");
-            return new NoteDocument.ImageEdit(note,NoteDocument.Block.image(block,c.getString(1),c.getString(2),c.getInt(3)!=0),c.isNull(4)?null:c.getString(4));
+            return new NoteDocument.ImageEdit(note,NoteDocument.Block.image(block,c.getString(1),c.getString(3),c.getInt(4)!=0),c.isNull(5)?null:c.getString(5));
         }
     }
     public synchronized NoteDocument.ImageEdit imageEdit(String note,String block){return imageEdit(getReadableDatabase(),note,block);}

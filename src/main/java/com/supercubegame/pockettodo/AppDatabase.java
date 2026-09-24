@@ -33,8 +33,10 @@ public final class AppDatabase extends SQLiteOpenHelper {
     /** Frozen schema2 DDL for historical backup validation. Future live-schema
      * additions belong after this call in onCreate, NOT inside this old factory.
      * Keep addV2 frozen too; candidate must never infer old columns from live DDL.
+     * Package entry for historical adapters; never call a live helper callback.
+     * Caller owns connection, foreign keys and any DDL/version transaction.
      */
-    private static void createSchema2(SQLiteDatabase db) {
+    static void createSchema2(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE revision(id INTEGER PRIMARY KEY CHECK(id=1), value INTEGER NOT NULL CHECK(value>=0))");
         db.execSQL("INSERT INTO revision VALUES(1,0)");
         db.execSQL("CREATE TABLE categories(id INTEGER PRIMARY KEY CHECK(id>0),name TEXT NOT NULL CHECK(length(trim(name))>0),position INTEGER NOT NULL CHECK(position>=0))");
@@ -62,6 +64,12 @@ public final class AppDatabase extends SQLiteOpenHelper {
     }
     @Override public void onUpgrade(SQLiteDatabase db,int oldVersion,int newVersion) {
         if(oldVersion!=1||newVersion!=2)throw new IllegalStateException("尚无已验证的迁移，保留原数据库");
+        migrateSchema1To2(db);
+    }
+    /** Frozen additive step, without helper construction or version/commit changes.
+     * Both helpers invoke it inside their own complete upgrade transaction.
+     */
+    static void migrateSchema1To2(SQLiteDatabase db) {
         // SQLiteOpenHelper wraps DDL and version change in one transaction.
         // No IF NOT EXISTS: a conflicting partial schema must fail, not be hidden.
         for(String table:Arrays.asList("revision","categories","applications","activities","paths","tags","batches","ledger","checkins","media","notes","blocks")) {

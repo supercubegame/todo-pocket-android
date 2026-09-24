@@ -38,6 +38,11 @@ LABELS = {
         "legacy_candidate_rejects_noncanonical_before_migration",
         "legacy_candidate_migration_preserves_old_cells",
         "legacy_candidate_rejections_and_migration_leave_source_unchanged",
+        "wire_legacy_dispatch_normalizes", "wire_schema3_exact_roundtrip_preserves_pairs",
+        "wire_input_output_and_candidate_owned", "wire_old_decoder_refuses_new_format",
+        "wire_rejects_invalid_header_lengths_utf8_and_trailing",
+        "wire_rejects_semantic_poison_and_noncanonical_order",
+        "wire_origin_constraints_without_global_digest_owner",
     ],
     "reopen": [
         "separate_process_exact_state", "separate_process_pair_metadata",
@@ -45,6 +50,7 @@ LABELS = {
         "fresh_schema3_separate_process_exact", "ordinary_note_separate_process_origin_and_order",
         "v1_to_3_separate_process_exact",
         "postwrite_budget_separate_process_exact",
+        "wire_separate_process_exact_candidate",
     ],
 }
 

@@ -5,11 +5,14 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 import java.io.*;
+import java.nio.ByteBuffer;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /** Opt-in migration and registered-reference storage. NOT the default UI database.
- * Supports new databases and schema1/2 migration. No archive import/export or codec.
+ * Supports new databases, schema1/2 migration and strict state wire candidates.
+ * No ZIP archive import/export, guarded restore or default UI activation.
  * Keep AppDatabase's old format frozen until compatible backup adapters are ready.
  */
 public final class Schema3Store extends SQLiteOpenHelper {
@@ -95,6 +98,121 @@ public final class Schema3Store extends SQLiteOpenHelper {
             while(c.moveToNext()){String n=c.getString(0);if(!n.equals("android_metadata")&&!n.startsWith("sqlite_"))actual.add(n);}
         }
         require(actual.equals(new HashSet<>(Arrays.asList(TABLES))),"Unknown or missing table");
+    }
+    /** Formal state wire: PTDB, wire2, schema3, all 18 tables and nine block cells.
+     * Not the internal comparison format. A legacy projection is used ONLY for
+     * frozen full-domain validation, never returned or substituted for new data.
+     * Encoding uses explicit declared names to avoid stale SELECT-star metadata.
+     */
+    private static byte[] wireState(SQLiteDatabase db,boolean legacy)throws IOException{
+        tableSet(db);
+        ComparisonBuffer buffer=new ComparisonBuffer(COMPARISON_LIMIT);
+        DataOutputStream out=new DataOutputStream(buffer);
+        out.writeInt(0x50544442);out.writeInt(legacy?1:2);out.writeInt(legacy?2:3);out.writeInt(TABLES.length);
+        for(String table:TABLES){
+            List<String> names=new ArrayList<>();
+            try(Cursor info=db.rawQuery("PRAGMA table_info("+table+")",null)){while(info.moveToNext())names.add(info.getString(1));}
+            if(table.equals("blocks")){
+                List<String> expected=new ArrayList<>(Arrays.asList(OLD_BLOCKS));expected.add("original_asset_id");
+                require(names.equals(expected),"Schema3 block layout differs");
+                if(legacy)names=new ArrayList<>(Arrays.asList(OLD_BLOCKS));
+            }
+            // Table/column identifiers originate from our own schema, not wire SQL.
+            for(String name:names)require(name.matches("[a-z_]+"),"Unexpected schema identifier");
+            try(Cursor c=db.rawQuery("SELECT "+String.join(",",names)+" FROM "+table+" ORDER BY rowid",null)){
+                text(out,table);out.writeInt(names.size());for(String name:names)text(out,name);out.writeInt(c.getCount());
+                while(c.moveToNext())for(int i=0;i<names.size();i++){
+                    int type=c.getType(i);out.writeByte(type);
+                    if(type==Cursor.FIELD_TYPE_INTEGER)out.writeLong(c.getLong(i));
+                    else if(type==Cursor.FIELD_TYPE_STRING)text(out,c.getString(i));
+                    else if(type==Cursor.FIELD_TYPE_BLOB)bytes(out,c.getBlob(i));
+                    else require(type==Cursor.FIELD_TYPE_NULL,"Unsupported wire SQL type");
+                }
+            }
+        }out.flush();return buffer.toByteArray();
+    }
+    private static byte[] readWireBlob(DataInputStream in)throws IOException{
+        int size=in.readInt();
+        require(size>=0&&size<=COMPARISON_LIMIT&&size<=in.available(),"Invalid wire value length");
+        byte[] value=new byte[size];in.readFully(value);return value;
+    }
+    private static String readWireText(DataInputStream in)throws IOException{
+        return StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(readWireBlob(in))).toString();
+    }
+    private static void decodeWireRows(SQLiteDatabase db,DataInputStream in)throws IOException{
+        require(in.readInt()==TABLES.length,"Incomplete schema3 table count");
+        for(String table:TABLES){
+            require(readWireText(in).equals(table),"Missing or reordered schema3 table");
+            List<String> names=new ArrayList<>(),types=new ArrayList<>();
+            try(Cursor info=db.rawQuery("PRAGMA table_info("+table+")",null)){
+                while(info.moveToNext()){names.add(info.getString(1));types.add(info.getString(2));}
+            }
+            require(in.readInt()==names.size(),"Schema3 column count differs");
+            for(String name:names)require(readWireText(in).equals(name),"Schema3 column name differs");
+            int rows=in.readInt();require(rows>=0&&rows<=in.available()/Math.max(1,names.size()),"Invalid schema3 row count");
+            String[] marks=new String[names.size()];Arrays.fill(marks,"?");
+            String sql="INSERT INTO "+table+"("+String.join(",",names)+") VALUES("+String.join(",",marks)+")";
+            for(int row=0;row<rows;row++){
+                Object[] values=new Object[names.size()];
+                for(int col=0;col<values.length;col++){
+                    int tag=in.readUnsignedByte();String name=names.get(col),type=types.get(col);
+                    if(tag==0){
+                        require((table.equals("activities")&&name.equals("application_id"))||
+                            (table.equals("blocks")&&(name.equals("asset_id")||name.equals("original_asset_id"))),"Forbidden wire NULL");
+                    }else if(tag==1){require(type.equals("INTEGER"),"Wire integer type differs");values[col]=in.readLong();}
+                    else if(tag==3){require(type.equals("TEXT"),"Wire text type differs");values[col]=readWireText(in);}
+                    else if(tag==4){require(type.equals("BLOB"),"Wire blob type differs");values[col]=readWireBlob(in);}
+                    else throw new IllegalArgumentException("Unknown wire cell type");
+                }
+                db.execSQL(sql,values);
+            }
+        }
+        require(in.available()==0,"Trailing schema3 state bytes");
+    }
+    /** Caller owns/closes the independent candidate. Legacy bytes must pass their
+     * exact old-format validator BEFORE migration. New bytes retain every origin,
+     * pass frozen full-domain semantics plus new constraints, and round-trip exactly.
+     * No live database/media/file access; this is not a guarded restore operation.
+     */
+    static SQLiteDatabase stateCandidate(byte[] input){
+        require(input!=null&&input.length>=12&&input.length<=COMPARISON_LIMIT,"Missing or oversized wire state");
+        byte[] owned=input.clone(); // No concurrent caller mutation during this copy.
+        try{
+            DataInputStream in=new DataInputStream(new ByteArrayInputStream(owned));
+            require(in.readInt()==0x50544442,"Unknown state magic");
+            int wire=in.readInt(),schema=in.readInt();
+            if(wire==1&&schema==2)return normalizeLegacyState(owned);
+            require(wire==2&&schema==3,"Unknown wire/schema version");
+            SQLiteDatabase stage=SQLiteDatabase.create(null);boolean success=false;
+            try{
+                stage.setForeignKeyConstraintsEnabled(true);AppDatabase.createSchema2(stage);addOrigin(stage);
+                stage.beginTransaction();
+                try{
+                    for(int i=TABLES.length-1;i>=0;i--)stage.delete(TABLES[i],null,null);
+                    decodeWireRows(stage,in);validate(stage);
+                    // Reuse ALL frozen semantics, including archived field values and
+                    // batch payload correspondence. Discard only the validation copy.
+                    try(SQLiteDatabase historical=AppDatabase.strictSchema2Candidate(wireState(stage,true))){}
+                    require(Arrays.equals(owned,wireState(stage,false)),"Schema3 canonical readback differs");
+                    stage.setVersion(3);stage.setTransactionSuccessful();
+                }finally{stage.endTransaction();}
+                success=true;return stage;
+            }finally{if(!success)stage.close();}
+        }catch(IOException|RuntimeException failure){throw new IllegalArgumentException("Schema3 state validation failed",failure);}
+    }
+    /** One consistent full-state export, fully checked before returning owned bytes.
+     * Registered media rows are included, but this method does not verify file bytes.
+     */
+    public synchronized byte[] exportState(){
+        SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
+        try{
+            require(db.getVersion()==3,"Export requires schema3");
+            byte[] encoded=wireState(db,false);
+            try(SQLiteDatabase checked=stateCandidate(encoded)){}
+            db.setTransactionSuccessful();return encoded;
+        }catch(IOException failure){throw new IllegalStateException("Cannot encode schema3 state",failure);}
+        finally{db.endTransaction();}
     }
     private static long revision(SQLiteDatabase db){
         try(Cursor c=db.rawQuery("SELECT id,value FROM revision",null)){

@@ -140,6 +140,121 @@ public final class Schema3DeviceTest extends Instrumentation {
         ordinaryNoteSeed();
         postWriteBudgetSeed();
         legacyCandidateSeed();
+        wireSeed();
+    }
+    /** Independent new wire fixture, including explicit ninth block column.
+     * Never call the product encoder to manufacture rejection controls.
+     */
+    private byte[] newWire(SQLiteDatabase db,boolean reverse)throws Exception{
+        ByteArrayOutputStream bytes=new ByteArrayOutputStream();DataOutputStream out=new DataOutputStream(bytes);
+        out.writeInt(0x50544442);out.writeInt(2);out.writeInt(3);out.writeInt(TABLES.length);
+        for(String table:TABLES){
+            String cols=table.equals("blocks")?"note_id,id,position,kind,text,asset_id,caption,private,original_asset_id":"*";
+            try(Cursor c=db.rawQuery("SELECT "+cols+" FROM "+table+" ORDER BY rowid"+(reverse&&table.equals("categories")?" DESC":""),null)){
+                text(out,table);out.writeInt(c.getColumnCount());for(String name:c.getColumnNames())text(out,name);out.writeInt(c.getCount());
+                while(c.moveToNext())for(int i=0;i<c.getColumnCount();i++){
+                    int type=c.getType(i);out.writeByte(type);
+                    if(type==1)out.writeLong(c.getLong(i));else if(type==3)text(out,c.getString(i));
+                    else if(type==4){byte[] value=c.getBlob(i);out.writeInt(value.length);out.write(value);}
+                    else if(type!=0)throw new AssertionError("unexpected wire fixture type");
+                }
+            }
+        }out.flush();return bytes.toByteArray();
+    }
+    private void wireRejected(byte[] input,String cause)throws Exception{
+        boolean rejected=false;
+        try(SQLiteDatabase ignored=Schema3Store.stateCandidate(input)){}
+        catch(IllegalArgumentException failure){
+            if(cause==null)rejected=true;
+            for(Throwable e=failure;e!=null;e=e.getCause())
+                if(cause!=null&&String.valueOf(e.getMessage()).contains(cause))rejected=true;
+        }
+        if(!rejected)throw new AssertionError("wire rejection missing: "+cause);
+    }
+    private void wireSeed()throws Exception{
+        Context c=getTargetContext();Path root=c.getFilesDir().toPath();
+        byte[] old=Files.readAllBytes(root.resolve("frozen-v2-state.bin")),wire;
+        try(SQLiteDatabase candidate=Schema3Store.stateCandidate(old)){
+            need(candidate.getVersion()==3&&columns(candidate)==9&&!candidate.inTransaction(),"wire_legacy_dispatch_normalizes");
+        }
+        try(Schema3Store store=new Schema3Store(c,DB)){
+            SQLiteDatabase db=store.getWritableDatabase();byte[] before=store.snapshot();
+            wire=store.exportState();
+            if(!Arrays.equals(wire,newWire(db,false)))throw new AssertionError("independent schema3 wire differs");
+            try(SQLiteDatabase candidate=Schema3Store.stateCandidate(wire)){
+                if(candidate.getVersion()!=3||columns(candidate)!=9||candidate.inTransaction()||!Arrays.equals(oldCells(db),oldCells(candidate))||!Arrays.equals(wire,newWire(candidate,false)))throw new AssertionError("wire roundtrip lost cells or ownership");
+                try(Cursor rows=candidate.rawQuery("SELECT note_id,id,asset_id,original_asset_id FROM blocks WHERE kind='IMAGE' ORDER BY note_id,id",null);
+                    Cursor expected=db.rawQuery("SELECT note_id,id,asset_id,original_asset_id FROM blocks WHERE kind='IMAGE' ORDER BY note_id,id",null)){
+                    int count=0;while(expected.moveToNext()){
+                        if(!rows.moveToNext())throw new AssertionError("image row missing");
+                        for(int i=0;i<4;i++)if(!Objects.equals(expected.isNull(i)?null:expected.getString(i),rows.isNull(i)?null:rows.getString(i)))throw new AssertionError("image origin pair changed");
+                        count++;
+                    }if(rows.moveToNext()||count<2)throw new AssertionError("pair fixture incomplete");
+                }
+            }
+            need(Arrays.equals(before,store.snapshot()),"wire_schema3_exact_roundtrip_preserves_pairs");
+            byte[] owned=wire.clone();
+            try(SQLiteDatabase candidate=Schema3Store.stateCandidate(owned)){
+                owned[0]^=1;candidate.execSQL("UPDATE todos SET title='独立副本' WHERE id='old-todo'");
+            }
+            byte[] exported=store.exportState();exported[0]^=1;
+            try(SQLiteDatabase candidate=Schema3Store.stateCandidate(wire)){
+                need(Arrays.equals(wire,newWire(candidate,false))&&Arrays.equals(wire,store.exportState())&&Arrays.equals(before,store.snapshot()),"wire_input_output_and_candidate_owned");
+            }
+            // Old software must reject the new version, never silently omit origins.
+            boolean rejected=false;try(SQLiteDatabase ignored=AppDatabase.strictSchema2Candidate(wire)){}
+            catch(IllegalArgumentException e){rejected=true;}
+            need(rejected&&Arrays.equals(before,store.snapshot()),"wire_old_decoder_refuses_new_format");
+        }
+        wireRejected(null,null);wireRejected(new byte[0],null);wireRejected(new byte[8*1024*1024+1],null);
+        wireRejected(Arrays.copyOf(wire,wire.length-1),null);
+        wireRejected(Arrays.copyOf(wire,wire.length+1),"Trailing schema3 state bytes");
+        for(int offset:new int[]{0,7,11,15,20}){
+            byte[] bad=wire.clone();bad[offset]=(byte)0xff;wireRejected(bad,null);
+        }
+        need(true,"wire_rejects_invalid_header_lengths_utf8_and_trailing");
+        try(SQLiteDatabase candidate=Schema3Store.stateCandidate(wire)){
+            String[] faults={"UPDATE categories SET name=' 未规范 '",
+                "UPDATE blocks SET caption='hidden' WHERE kind='TEXT'",
+                "UPDATE blocks SET position=9 WHERE note_id='second' AND id='text'",
+                "UPDATE fields SET type='NUMBER' WHERE id='old-field'"};
+            for(String sql:faults){
+                candidate.beginTransaction();byte[] bad;
+                try{candidate.execSQL(sql);bad=newWire(candidate,false);}finally{candidate.endTransaction();}
+                if(Arrays.equals(bad,wire))throw new AssertionError("wire poison fixture unchanged");
+                wireRejected(bad,"备份状态校验失败");
+            }
+            candidate.execSQL("INSERT INTO categories VALUES(8,'合法新增分类',1)");
+            byte[] canonical=newWire(candidate,false),reversed=newWire(candidate,true);
+            if(Arrays.equals(canonical,reversed))throw new AssertionError("noncanonical fixture unchanged");
+            try(SQLiteDatabase accepted=Schema3Store.stateCandidate(canonical)){
+                if(!Arrays.equals(canonical,newWire(accepted,false)))throw new AssertionError("canonical control changed");
+            }
+            wireRejected(reversed,"Schema3 canonical readback differs");
+        }
+        need(true,"wire_rejects_semantic_poison_and_noncanonical_order");
+        try(SQLiteDatabase candidate=Schema3Store.stateCandidate(wire)){
+            candidate.setForeignKeyConstraintsEnabled(false);
+            candidate.execSQL("UPDATE blocks SET original_asset_id=? WHERE note_id='second' AND id='photo'",new Object[]{"f".repeat(64)});
+            wireRejected(newWire(candidate,false),null);
+        }
+        try(SQLiteDatabase candidate=Schema3Store.stateCandidate(wire)){
+            candidate.execSQL("PRAGMA ignore_check_constraints=ON");
+            String original;
+            try(Cursor row=candidate.rawQuery("SELECT id FROM media ORDER BY id LIMIT 1",null)){if(!row.moveToFirst())throw new AssertionError("missing media fixture");original=row.getString(0);}
+            candidate.execSQL("UPDATE blocks SET original_asset_id=? WHERE kind='TEXT'",new Object[]{original});
+            wireRejected(newWire(candidate,false),null);
+        }
+        try(SQLiteDatabase candidate=Schema3Store.stateCandidate(wire)){
+            // Same current digest may legitimately have different per-block origins.
+            candidate.execSQL("UPDATE blocks SET asset_id=(SELECT asset_id FROM blocks WHERE note_id='second' AND id='photo') WHERE note_id='first' AND id='photo'");
+            byte[] shared=newWire(candidate,false);
+            try(SQLiteDatabase accepted=Schema3Store.stateCandidate(shared)){
+                if(!Arrays.equals(shared,newWire(accepted,false)))throw new AssertionError("shared digest origin pairs changed");
+            }
+        }
+        need(true,"wire_origin_constraints_without_global_digest_owner");
+        Files.write(root.resolve("schema3-wire.bin"),wire);
     }
     /** Independent historical wire encoder. Reverse INTEGER-PK category rows only
      * for a semantically valid but noncanonical transport negative control.
@@ -490,6 +605,10 @@ public final class Schema3DeviceTest extends Instrumentation {
         }
         try(Schema3Store store=new Schema3Store(c,"schema3-write-budget.db")){
             need(Arrays.equals(Files.readAllBytes(root.resolve("schema3-write-budget-expected.bin")),store.snapshot())&&store.imageEdit("image","photo").caption.equals("预算内说明")&&store.noteBlocks("text").get(0).text.equals("小编辑"),"postwrite_budget_separate_process_exact");
+        }
+        byte[] wire=Files.readAllBytes(root.resolve("schema3-wire.bin"));
+        try(SQLiteDatabase candidate=Schema3Store.stateCandidate(wire)){
+            need(candidate.getVersion()==3&&columns(candidate)==9&&Arrays.equals(wire,newWire(candidate,false)),"wire_separate_process_exact_candidate");
         }
     }
     @Override public void onStart(){

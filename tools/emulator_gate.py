@@ -274,6 +274,7 @@ def verify_native_ui(adb):
         ok(len({x['sha256'] for x in shots})==len(shots),'actual native screenshots represent distinct states')
         stop()
         with sqlite3.connect(copy_db('pocket-v12.db')) as db:
+            ok(db.execute('PRAGMA user_version').fetchone()==(3,) and [r[1] for r in db.execute('PRAGMA table_info(blocks)')]==['note_id','id','position','kind','text','asset_id','caption','private','original_asset_id'],'default native UI uses schema3 with exact nine-column block layout')
             ok(db.execute('SELECT id,title,done FROM todos ORDER BY position').fetchall()==[(aid,'Fresh milk',1),(bid,'Walk outside',0)],'independent SQLite read matches exact UI todo identities titles and states')
             ok(db.execute('SELECT id,name FROM categories ORDER BY position').fetchall()==[(2,'Farm'),(1,'Checkins')],'independent SQLite read matches renamed reordered categories')
             ok(db.execute('SELECT category_id,application_id,title FROM activities').fetchall()==[(1,None,'Daily reward')],'activity stays in its category without invented application')
@@ -479,7 +480,7 @@ public class VerifyNotePng {
         chosen_id=hashlib.sha256(chosen).hexdigest()
         with sqlite3.connect(copy_db('pick-success.db')) as db:
             selected_blocks=db.execute('SELECT * FROM blocks ORDER BY note_id,position').fetchall()
-            ok(len(selected_blocks)==3 and selected_blocks[:2]==[tuple(row) for row in expected_blocks] and selected_blocks[2][2:]==(2,'IMAGE','',chosen_id,'',0),'SAF image appends one exact ordered block without replacing text or prior image')
+            ok(len(selected_blocks)==3 and selected_blocks[:2]==[tuple(row) for row in expected_blocks] and selected_blocks[2][2:]==(2,'IMAGE','',chosen_id,'',0,None),'SAF image appends one exact ordered block without replacing text or prior image')
             ok(db.execute('SELECT id,mime,bytes FROM media WHERE id=?',(chosen_id,)).fetchall()==[(chosen_id,'image/png',len(chosen))],'SAF original bytes registered by exact hash MIME and length')
             ok(all(db.execute('SELECT * FROM '+t+' ORDER BY rowid').fetchall()==baseline[t] for t in TABLES if t not in ('revision','blocks','media')),'image import preserves notes identity and all unrelated tables')
         copied=subprocess.check_output([str(adb),'-s',SERIAL,'exec-out','run-as',PKG,'cat','files/media/'+chosen_id],timeout=30)
@@ -566,7 +567,7 @@ public class ImageImportFixture {
         ok(len(new_notes)==1 and new_notes[0][1:]==(first_activity,'Image first') and all(row in first_saved['notes'] for row in first_base['notes']),'JPEG-first import creates exactly one note with correct activity binding title and preserved prior notes')
         first_note=new_notes[0][0]
         new_blocks=[row for row in first_saved['blocks'] if row not in first_base['blocks']]
-        ok(len(new_blocks)==1 and new_blocks[0][0]==first_note and new_blocks[0][2:]==(0,'IMAGE','',jpeg_id,'',0) and all(row in first_saved['blocks'] for row in first_base['blocks']),'JPEG-first import creates exactly one position-zero public image block without touching previous blocks')
+        ok(len(new_blocks)==1 and new_blocks[0][0]==first_note and new_blocks[0][2:]==(0,'IMAGE','',jpeg_id,'',0,None) and all(row in first_saved['blocks'] for row in first_base['blocks']),'JPEG-first import creates exactly one position-zero public image block without touching previous blocks')
         ok([row for row in first_saved['media'] if row not in first_base['media']]==[(jpeg_id,'image/jpeg',len(jpeg))] and all(row in first_saved['media'] for row in first_base['media']),'JPEG-first media registry has exact actual MIME digest and original byte length')
         ok(all(first_saved[t]==first_base[t] for t in TABLES if t not in ('revision','notes','blocks','media')),'JPEG-first note creation preserves activities todos checkins ledger and all unrelated tables')
         def private_bytes(asset_id):
@@ -580,7 +581,7 @@ public class ImageImportFixture {
         first_screen();pick_image('pocket-pixel-limit.png');ready();stop()
         limit_saved=state_read('pixel-limit-saved.db');limit_id=hashlib.sha256(edge_ok).hexdigest()
         limit_blocks=[row for row in limit_saved['blocks'] if row not in first_saved['blocks']]
-        ok(len(limit_blocks)==1 and limit_blocks[0][0]==first_note and limit_blocks[0][2:]==(1,'IMAGE','',limit_id,'',0) and all(row in limit_saved['blocks'] for row in first_saved['blocks']),'exactly 20000000 pixels is accepted inclusively as one appended ordered image block')
+        ok(len(limit_blocks)==1 and limit_blocks[0][0]==first_note and limit_blocks[0][2:]==(1,'IMAGE','',limit_id,'',0,None) and all(row in limit_saved['blocks'] for row in first_saved['blocks']),'exactly 20000000 pixels is accepted inclusively as one appended ordered image block')
         ok([row for row in limit_saved['media'] if row not in first_saved['media']]==[(limit_id,'image/png',len(edge_ok))] and all(row in limit_saved['media'] for row in first_saved['media']) and private_bytes(limit_id)==edge_ok,'pixel-limit image keeps exact private original and matching media registry')
         ok(all(limit_saved[t]==first_saved[t] for t in TABLES if t not in ('revision','blocks','media')),'pixel-limit import preserves note identity and unrelated complete tables')
         shell('rm','/sdcard/Download/pocket-pixel-limit.png');first_screen();swipe_up()
@@ -602,7 +603,7 @@ public class ImageImportFixture {
         ok(len(added_notes)==1 and added_notes[0][1:]==(1,'Second note') and all(row in multi_saved['notes'] for row in limit_saved['notes']),'second note has one fresh identity correct owner title and unchanged old notes')
         second_id=added_notes[0][0]
         added_blocks=[row for row in multi_saved['blocks'] if row not in limit_saved['blocks']]
-        ok(len(added_blocks)==1 and added_blocks[0][0]==second_id and added_blocks[0][2:]==(0,'TEXT','Second content',None,'',0) and all(row in multi_saved['blocks'] for row in limit_saved['blocks']),'second note owns exactly its text block while all first-note and other-activity blocks remain exact')
+        ok(len(added_blocks)==1 and added_blocks[0][0]==second_id and added_blocks[0][2:]==(0,'TEXT','Second content',None,'',0,None) and all(row in multi_saved['blocks'] for row in limit_saved['blocks']),'second note owns exactly its text block while all first-note and other-activity blocks remain exact')
         ok(all(multi_saved[t]==limit_saved[t] for t in TABLES if t not in ('revision','notes','blocks')),'creating and editing second note preserves media ledger checkins and all unrelated tables')
         note_screen()
         ok(desc('note-current').get('text')=='Daily reward · 1 / 2' and find(text='Watered 35 min today') is not None,'restart opens original first note without replacing its content')
@@ -643,7 +644,7 @@ public class ImageImportFixture {
         ok(desc('note-current').get('text')=='Second note · 2 / 3' and find(text='Second edited') is not None,'image append retains the non-first selected note and its existing text')
         stop();second_image=state_read('second-image.db')
         image_rows=[row for row in second_image['blocks'] if row not in multi_duplicate['blocks']]
-        ok(len(image_rows)==1 and image_rows[0][0]==second_id and image_rows[0][2:]==(1,'IMAGE','',jpeg_id,'',0) and all(row in second_image['blocks'] for row in multi_duplicate['blocks']),'non-first image import appends exactly one correctly owned ordered block without modifying any old block')
+        ok(len(image_rows)==1 and image_rows[0][0]==second_id and image_rows[0][2:]==(1,'IMAGE','',jpeg_id,'',0,None) and all(row in second_image['blocks'] for row in multi_duplicate['blocks']),'non-first image import appends exactly one correctly owned ordered block without modifying any old block')
         second_image_row=image_rows[0];second_image_id=second_image_row[1]
         ok(all(second_image[t]==multi_duplicate[t] for t in TABLES if t not in ('revision','blocks')) and private_bytes(jpeg_id)==jpeg,'reused JPEG import preserves notes complete media registry unrelated tables and exact original')
         shell('rm','/sdcard/Download/pocket-first.jpg');second_screen()
@@ -681,11 +682,14 @@ public class ImageImportFixture {
         ok(desc('image-caption').get('text','')=='' and desc('image-private').get('checked')=='false','empty caption and false private flag persist after restart')
         tap('取消');ready();shot('17-second-image-public.png');stop()
         ok(state_read('image-final-restart.db')==public_saved and private_bytes(jpeg_id)==jpeg,'final metadata cancel and restart preserve every table and exact JPEG original')
+        with sqlite3.connect(copy_db('schema3-final.db')) as db:
+            ok(db.execute('PRAGMA user_version').fetchone()==(3,) and db.execute('SELECT count(*) FROM blocks').fetchone()[0]>0 and db.execute('SELECT count(*) FROM blocks WHERE original_asset_id IS NOT NULL').fetchone()==(0,),'native schema3 survives SAF restore and all ordinary edits without invented image origins')
         result={'status':'PASS','scope':'NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE','ledger_calendar':'NATIVE_MULTI_DATE_LEDGER_PASS','saf_restore':'NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS','checkin_history':'NATIVE_CHECKIN_HISTORY_BACKDATE_PASS','note_editor':'NATIVE_TEXT_IMAGE_NOTE_PASS','api':API,'count':len(checks),'checks':checks,'screenshots':shots,'infra_retries':infra_retries,'restore_undo':'NOT_IMPLEMENTED','restore_preview_lifecycle':'NOT_TESTED','checkin_schedules':'NOT_IMPLEMENTED','real_photo_selection':'NOT_IMPLEMENTED','photos':'NOT_TESTED','sharing':'NOT_TESTED','release_ready':False}
         result.update(real_photo_selection='NATIVE_SAF_PNG_PASS',photos='SYNTHETIC_PNG_ONLY',image_picker_lifecycle='CANCEL_AND_RESTART_ONLY',jpeg='NOT_TESTED',camera='NOT_IMPLEMENTED')
         result.update(real_photo_selection='NATIVE_SAF_PNG_JPEG_PASS',photos='SYNTHETIC_PNG_JPEG_ONLY',jpeg='NATIVE_SAF_EXACT_PRIVATE_COPY_PASS',image_first_note='CANCEL_REJECT_CREATE_RESTART_PASS',image_pixel_budget='20000000_ACCEPTED_20005000_REJECTED',exif_orientation='NOT_TESTED',whole_note_memory='NOT_TESTED')
         result.update(multiple_notes='CREATE_SWITCH_EDIT_DUPLICATE_TITLE_RESTART_PASS',note_selection_persistence='RESTART_DEFAULTS_FIRST_EXPLICIT_RESELECT',note_rename_delete_reorder='NOT_IMPLEMENTED')
         result.update(nonfirst_image='APPEND_ISOLATION_RESTART_PASS',image_metadata='CAPTION_PRIVATE_CANCEL_EDIT_CLEAR_RESTART_PASS',private_sharing='NOT_TESTED')
+        result.update(default_app_schema=3,default_schema3_ui='NATIVE_SCHEMA3_UI_PASS')
     except Exception as exc:
         result={'status':'FAIL','api':API,'count':len(checks),'checks':checks,'error':repr(exc),'screenshots':shots,'infra_retries':infra_retries,'release_ready':False}
         try: shot('failure.png')

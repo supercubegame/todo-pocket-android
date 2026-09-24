@@ -145,7 +145,100 @@ public final class Schema3RestoreTests extends Instrumentation {
         restoreShape("old",root.resolve("frozen-v2.zip"),null,stage);
         restoreShape("full",archives.resolve("full.zip"),Files.readAllBytes(archives.resolve("full-state.bin")),stage);
         facadeChecks();
+        domainFacadeChecks();
         restoreShape("empty",archives.resolve("empty.zip"),Files.readAllBytes(archives.resolve("empty-state.bin")),stage);
+    }
+    /** Real business writers, not raw-SQL population: every historical domain and
+     * all 18 tables must survive the same facade's export/restore/reopen path.
+     */
+    private static byte[] domainLegacy(){
+        TodoModel model=new TodoModel();long id=model.add("旧版已完成");model.toggle(id);model.add("旧版待办");
+        return BackupCodec.encode(model);
+    }
+    private void domainFacadeChecks()throws Exception{
+        Context context=getTargetContext();Path root=context.getFilesDir().toPath();
+        String name="schema3-domain.db";context.deleteDatabase(name);
+        MediaRepository media=new MediaRepository(root.resolve("schema3-domain-media"),1000000);
+        java.time.LocalDate day=java.time.LocalDate.of(2026,9,24),other=day.minusDays(1);
+        java.time.Instant at=java.time.Instant.parse("2026-09-24T12:00:00Z");
+        byte[] expected;
+        try(AppDatabase app=AppDatabase.openSchema3(context,name)){
+            app.addCategory(81,"分类甲");app.addCategory(82,"分类乙");app.moveCategory(82,0);
+            check(app.categoryIds().equals(Arrays.asList(82L,81L)),"domain category ordering differs");
+            app.addApplication(83,"目录应用","com.example.app");app.addActivity(84,81,83,"活动甲");app.addActivity(85,82,83,"活动乙");
+            app.savePath(84,Arrays.asList("打开","进入页面"));app.saveTags(84,Arrays.asList("甲","乙","甲"));
+            check(app.path(84).equals(Arrays.asList("打开","进入页面"))&&app.tags(84).equals(Arrays.asList("甲","乙")),"domain ordered strings differ");
+            app.putMark(new CalendarRules.Mark(84,day,CalendarRules.Status.DONE,"今日完成",at));
+            app.putMark(new CalendarRules.Mark(84,other,CalendarRules.Status.SKIPPED,"跳过",at));
+            app.putMark(new CalendarRules.Mark(84,other,CalendarRules.Status.UNRECORDED,"",at));
+            check(app.marks(84).size()==1&&app.marks(84).get(0).status==CalendarRules.Status.DONE,"domain marks not isolated");
+            app.createNote("domain-note",84,"活动笔记");
+            byte[] raw={11,22,33,44};String asset=media.copy(new ByteArrayInputStream(raw));
+            app.registerMedia(asset,"image/png",raw.length);
+            app.saveNote("domain-note",Arrays.asList(NoteDocument.Block.text("text","正文",false),NoteDocument.Block.image("photo",asset,"原始登记",true)));
+            byte[] registered=app.exportState();app.registerMedia(asset,"image/png",raw.length);
+            check(Arrays.equals(registered,app.exportState()),"domain duplicate registry wrote state");
+            rejected(()->app.registerMedia(asset,"image/jpeg",raw.length),"冲突");
+            check(Arrays.equals(registered,app.exportState()),"domain registry conflict changed state");
+            String[] types={"TEXT","LONG_TEXT","NUMBER","DATE","SELECT","MULTI_SELECT","LINK","BOOLEAN"};
+            String[] values={"短文","长文\n第二行","-12.50","2026-09-24","b","b","https://example.com/path","true"};
+            for(int i=0;i<types.length;i++){
+                String id="field-"+i;boolean choice=i==4||i==5;
+                app.defineField(id,"字段"+i,types[i],choice?Arrays.asList("a","b"):Collections.emptyList());
+                List<String> input=i==5?Arrays.asList("b","a","b"):Arrays.asList(values[i]);
+                app.putField(84,id,input);
+                check(app.fieldValue(84,id).equals(i==5?Arrays.asList("b","a"):Arrays.asList(values[i])),"domain field value "+types[i]);
+            }
+            app.renameField("field-2","历史金额");app.createFieldNote("domain-field-note",84,"field-2","字段笔记");
+            app.saveNote("domain-field-note",Arrays.asList(NoteDocument.Block.text("text","字段说明",true)));
+            app.archiveField("field-2",true);
+            check(app.fieldDefinition("field-2").archived&&app.fieldDefinition("field-2").name.equals("历史金额")&&
+                app.fieldNoteIds(84,"field-2").equals(Arrays.asList("domain-field-note")),"domain archived definition or note differs");
+            byte[] archived=app.exportState();
+            rejected(()->app.putField(84,"field-2",Arrays.asList("99")),"只读");
+            rejected(()->app.createFieldNote("forbidden",84,"field-2","禁止"),"归档");
+            check(Arrays.equals(archived,app.exportState()),"domain archived write changed state");
+            SQLiteDatabase sql=app.getWritableDatabase();
+            sql.execSQL("CREATE TRIGGER domain_field_fault BEFORE INSERT ON field_values BEGIN SELECT RAISE(ABORT,'domain field fault'); END");
+            boolean failed=false;
+            try{app.putField(84,"field-0",Arrays.asList("不能保存"));}
+            catch(IllegalArgumentException error){failed=error.getCause()!=null&&error.getCause().getMessage().contains("domain field fault");}
+            finally{sql.execSQL("DROP TRIGGER domain_field_fault");}
+            check(failed&&Arrays.equals(archived,app.exportState()),"domain field delete/insert fault did not fully roll back");
+            app.addTodo("domain-todo","本期待办");app.editTodo("domain-todo","编辑后",true);
+            check(app.importLegacy(domainLegacy())==2,"domain legacy import count");
+            byte[] imported=app.exportState();check(app.importLegacy(domainLegacy())==0&&Arrays.equals(imported,app.exportState()),"domain legacy duplicate wrote state");
+            List<Ledger.Entry> removed=Arrays.asList(new Ledger.Entry("removed-entry",84,day,Ledger.Kind.EXPENSE,999,"撤销"));
+            check(app.recordBatch("removed-batch",removed),"domain first batch not recorded");app.undoBatch("removed-batch");
+            byte[] undone=app.exportState();rejected(()->app.recordBatch("removed-batch",removed),"撤销");
+            check(Arrays.equals(undone,app.exportState()),"domain undo tombstone changed state");
+            rejected(()->app.recordBatch("bad-batch",Arrays.asList(new Ledger.Entry("bad",999,day,Ledger.Kind.EXPENSE,1,""))),"关联对象不存在");
+            check(Arrays.equals(undone,app.exportState()),"domain failed batch leaked revision or journal");
+            List<Ledger.Entry> rows=Arrays.asList(
+                new Ledger.Entry("expense",84,day,Ledger.Kind.EXPENSE,1234,"支出"),
+                new Ledger.Entry("refund",84,day,Ledger.Kind.REFUND,234,"退款"),
+                new Ledger.Entry("income",84,day,Ledger.Kind.INCOME,500,"收入"),
+                new Ledger.Entry("planned",84,day,Ledger.Kind.PLANNED,9000,"计划"),
+                new Ledger.Entry("other-day",84,other,Ledger.Kind.EXPENSE,111,"昨天"),
+                new Ledger.Entry("other-activity",85,day,Ledger.Kind.EXPENSE,222,"另一活动"));
+            check(app.recordBatch("live-batch",rows),"domain live batch not recorded");expected=app.exportState();
+            check(!app.recordBatch("live-batch",rows)&&Arrays.equals(expected,app.exportState()),"domain batch retry wrote state");
+            check(app.total(84,Collections.singleton(day),"NET_EXPENSE")==1000&&app.total(84,Collections.singleton(day),"NET_CASH")==-500&&
+                app.total(84,Collections.singleton(day),"PLANNED")==9000&&app.total(84,Collections.emptySet(),"EXPENSE")==0,"domain selected-date metrics differ");
+            check(Arrays.equals(expected,app.exportState()),"domain selected-date read wrote state");
+            for(long count:counts(sql).values())check(count>0,"domain fixture did not populate every table");
+            Path zip=root.resolve("schema3-domain.zip");app.exportBackup(zip,media);
+            Path stage=context.getCacheDir().toPath().resolve("schema3-domain-stage");Files.createDirectories(stage);
+            context.deleteDatabase("schema3-domain-restored.db");
+            try(AppDatabase target=AppDatabase.openSchema3(context,"schema3-domain-restored.db");
+                AppDatabase.RestorePlan plan=target.prepareRestore(zip,stage,1000000)){
+                target.confirmRestore(plan,new MediaRepository(root.resolve("schema3-domain-restored-media"),1000000));
+                check(Arrays.equals(expected,target.exportState()),"domain full-table facade restore differs");
+            }
+            check(empty(stage),"domain restore staging not cleaned");
+            Files.write(root.resolve("schema3-domain-expected.bin"),expected);
+        }
+        log.append("SCHEMA3_DOMAIN_FACADE all18=PASS writers=PASS rollback=PASS archive_roundtrip=PASS\n");
     }
     /** The real UI-facing API, on isolated files. Default constructor stays v2. */
     private void facadeChecks()throws Exception{
@@ -342,6 +435,23 @@ public final class Schema3RestoreTests extends Instrumentation {
     }
     private void reopen()throws Exception{
         Context context=getTargetContext();Path root=context.getFilesDir().toPath();
+        for(String name:new String[]{"schema3-domain","schema3-domain-restored"}){
+            try(AppDatabase app=AppDatabase.openSchema3(context,name+".db")){
+                check(Arrays.equals(Files.readAllBytes(root.resolve("schema3-domain-expected.bin")),app.exportState()),"domain independent-process exact state differs");
+                check(app.importLegacy(domainLegacy())==0&&app.count("todos")==3&&app.todo("domain-todo").done,"domain reopened legacy journal or todo differs");
+                check(app.fieldValue(84,"field-2").equals(Arrays.asList("-12.50"))&&app.fieldDefinition("field-2").archived&&
+                    app.fieldNoteIds(84,"field-2").equals(Arrays.asList("domain-field-note"))&&app.marks(84).size()==1,"domain reopened fields or marks differ");
+                MediaRepository media=new MediaRepository(root.resolve(name+"-media"),1000000);
+                try(Cursor c=app.getReadableDatabase().rawQuery("SELECT id FROM media",null)){
+                    check(c.moveToFirst(),"domain reopened media missing");media.verify(c.getString(0));
+                    check(Arrays.equals(Files.readAllBytes(media.path(c.getString(0))),new byte[]{11,22,33,44})&&!c.moveToNext(),"domain reopened media bytes differ");
+                }
+                app.undoBatch("live-batch");
+                check(app.count("ledger")==0&&app.count("batches")==2,"domain reopened latest batch undo differs");
+                byte[] after=app.exportState();rejected(()->app.undoBatch("live-batch"),"只能撤销");
+                check(Arrays.equals(after,app.exportState()),"domain repeated undo changed state");
+            }
+        }
         try(AppDatabase app=AppDatabase.openSchema3(context,"schema3-facade.db")){
             check(app.getReadableDatabase().getVersion()==3&&Arrays.equals(
                 Files.readAllBytes(root.resolve("schema3-facade-expected.bin")),app.exportState()),"facade independent reopen differs");

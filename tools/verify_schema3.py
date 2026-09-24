@@ -111,7 +111,126 @@ def selftest():
         assert registration(text, "Schema3DeviceTest")["status"] != "PASS", "runner registration guard missed"
     assert registration(new, "V12DeviceTest")["status"] != "PASS"
     controls["registration"] = {"positive": 3, "negative": len(bad) + 1}
+    controls["native_failure_diagnostics"] = diagnostics_selftest()
     return controls
+
+def diagnostics_selftest():
+    import tempfile
+    from types import SimpleNamespace
+    gate = SimpleNamespace(SERIAL="test-serial", PKG="test.package")
+    original = subprocess.CalledProcessError(255, ["adb", "shell", "run-as"],
+                                            output=b"stdout-sentinel\xff", stderr="stderr-sentinel")
+    calls = []
+    def probe(args, **kwargs):
+        calls.append((args, kwargs))
+        return SimpleNamespace(returncode=7, stdout="probe-output", stderr="probe-error")
+    evidence = native_failure_evidence("adb", gate, original, run=probe)
+    assert evidence["original"]["returncode"] == 255
+    assert evidence["original"]["stdout"]["tail"] == "stdout-sentinel\ufffd"
+    assert evidence["original"]["stderr"]["tail"] == "stderr-sentinel"
+    assert evidence["status"] == "DIAGNOSTIC_ONLY_NOT_RETRY_OR_ACCEPTANCE"
+    assert len(calls) == 4 and all(c[1]["timeout"] == 10 for c in calls)
+    assert all(p["returncode"] == 7 and p["stderr"]["tail"] == "probe-error"
+               for p in evidence["probes"])
+    assert output_evidence(None) == {"captured": False, "tail": None, "truncated": False}
+    assert output_evidence("x" * 9000) == {"captured": True, "tail": "x" * 4096, "truncated": True}
+    def broken_probe(*args, **kwargs):
+        raise subprocess.TimeoutExpired(["probe"], 10, output=b"partial", stderr=b"timeout-error")
+    timed = native_failure_evidence("adb", gate, original, run=broken_probe)
+    assert len(timed["probes"]) == 4
+    assert all(p["error"]["type"] == "TimeoutExpired" and
+               p["error"]["stderr"]["tail"] == "timeout-error" for p in timed["probes"])
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        baseline = {"status": "FAIL", "count": 47, "checks": ["sentinel"],
+                    "error": repr(original), "release_ready": False}
+        report_path = root / "native-result.json"
+        report_path.write_text(json.dumps(baseline))
+        invocation = []
+        def fail(adb):
+            invocation.append(adb)
+            raise original
+        def collect(*args):
+            return evidence
+        try:
+            native_with_diagnostics("adb", gate, fail, root=root, collect=collect)
+            raise AssertionError("native failure swallowed")
+        except subprocess.CalledProcessError as caught:
+            assert caught is original
+        result = json.loads(report_path.read_text())
+        assert result.pop("failure_diagnostics") == evidence and result == baseline
+        assert invocation == ["adb"], "original native suite retried"
+        assert json.loads((root / "native-failure-diagnostics.json").read_text()) == evidence
+        def forbidden(*args):
+            raise AssertionError("success must not run diagnostics")
+        assert native_with_diagnostics("adb", gate, lambda adb: "success",
+                                       root=root, collect=forbidden) == "success"
+        def failed_collect(*args):
+            raise OSError("diagnostic write/probe failure")
+        for collector, target in ((failed_collect, root), (collect, root / "missing")):
+            try:
+                native_with_diagnostics("adb", gate, fail, root=target, collect=collector)
+                raise AssertionError("diagnostic failure masked original")
+            except subprocess.CalledProcessError as caught:
+                assert caught is original
+    return {"checks": 8, "scope": "HOST_PYTHON_INJECTED_FAILURES_NOT_DEVICE_ROOT_CAUSE"}
+
+def output_evidence(value):
+    if value is None:
+        return {"captured": False, "tail": None, "truncated": False}
+    text = value.decode("utf-8", errors="replace") if isinstance(value, bytes) else str(value)
+    return {"captured": True, "tail": text[-4096:], "truncated": len(text) > 4096}
+
+def exception_evidence(exc):
+    return {"type": type(exc).__name__, "message": str(exc),
+            "command": getattr(exc, "cmd", None), "returncode": getattr(exc, "returncode", None),
+            "stdout": output_evidence(getattr(exc, "stdout", None)),
+            "stderr": output_evidence(getattr(exc, "stderr", None))}
+
+def native_failure_evidence(adb, gate, exc, run=None):
+    # Read-only probes are NOT retries and can never turn the original failure green.
+    # The old shell helper does not capture stderr: report that absence explicitly.
+    run = subprocess.run if run is None else run
+    prefix = [str(adb), "-s", gate.SERIAL]
+    commands = [
+        ("transport", ["get-state"]),
+        ("shell_identity", ["shell", "id"]),
+        ("app_identity", ["shell", "run-as", gate.PKG, "id"]),
+        ("database_directory", ["shell", "run-as", gate.PKG, "ls", "databases"]),
+    ]
+    result = {"status": "DIAGNOSTIC_ONLY_NOT_RETRY_OR_ACCEPTANCE",
+              "original": exception_evidence(exc), "probes": []}
+    for name, args in commands:
+        row = {"name": name, "command": prefix + args}
+        try:
+            p = run(prefix + args, capture_output=True, text=True, timeout=10)
+            row.update(returncode=p.returncode, stdout=output_evidence(p.stdout),
+                       stderr=output_evidence(p.stderr))
+        except Exception as failure:
+            row["error"] = exception_evidence(failure)
+        result["probes"].append(row)
+    return result
+
+def native_with_diagnostics(adb, gate, original, root=None, collect=None):
+    root = Path("native-ui") if root is None else root
+    collect = native_failure_evidence if collect is None else collect
+    try:
+        return original(adb)
+    except Exception as exc:
+        try:
+            evidence = collect(adb, gate, exc)
+            print("NATIVE_FAILURE_DIAGNOSTICS " + json.dumps(evidence, ensure_ascii=False), flush=True)
+            (root / "native-failure-diagnostics.json").write_text(
+                json.dumps(evidence, ensure_ascii=False, indent=2))
+            path = root / "native-result.json"
+            if path.exists():
+                result = json.loads(path.read_text())
+                # Preserve status, checks, count and the original error verbatim.
+                result["failure_diagnostics"] = evidence
+                path.write_text(json.dumps(result, ensure_ascii=False, indent=2))
+        except Exception as diagnostic_error:
+            print("NATIVE_DIAGNOSTICS_INCOMPLETE " + repr(diagnostic_error), flush=True)
+        raise
 
 def require_registration(adb, gate, stage, runner):
     prefix = [str(adb), "-s", gate.SERIAL]
@@ -203,8 +322,14 @@ def android():
         original(adb)
         isolated_runner(adb, gate, build_env)
     gate.verify_database = database_and_schema3
+    native = gate.verify_native_ui
+    gate.verify_native_ui = lambda adb: native_with_diagnostics(adb, gate, native)
     # Existing codec wrapper still invokes our wrapper, then all old native tests.
-    verify_exports.android_main()
+    try:
+        verify_exports.android_main()
+    finally:
+        gate.verify_native_ui = native
+        gate.verify_database = original
 
 def report():
     controls = selftest()

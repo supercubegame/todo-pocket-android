@@ -8,11 +8,12 @@ import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
 import java.util.*;
 
 /** Opt-in migration and registered-reference storage. NOT the default UI database.
  * Supports new databases, schema1/2 migration and strict state wire candidates.
- * No ZIP archive import/export, guarded restore or default UI activation.
+ * ZIP export and validated archive candidates, but no guarded live restore/UI activation.
  * Keep AppDatabase's old format frozen until compatible backup adapters are ready.
  */
 public final class Schema3Store extends SQLiteOpenHelper {
@@ -213,6 +214,69 @@ public final class Schema3Store extends SQLiteOpenHelper {
             db.setTransactionSuccessful();return encoded;
         }catch(IOException failure){throw new IllegalStateException("Cannot encode schema3 state",failure);}
         finally{db.endTransaction();}
+    }
+    /** Every registered asset is part of a full backup, even when unreferenced.
+     * The registry is read from the captured state candidate, not a later live read.
+     */
+    private static Map<String,Long> registeredMedia(SQLiteDatabase candidate){
+        Map<String,Long> result=new LinkedHashMap<>();
+        try(Cursor rows=candidate.rawQuery("SELECT id,bytes FROM media ORDER BY id",null)){
+            while(rows.moveToNext()){
+                String id=rows.getString(0);long size=rows.getLong(1);MediaRepository.validId(id);
+                require(size>0&&result.put(id,size)==null,"Invalid registered media");
+            }
+        }return result;
+    }
+    private static void verifyRegisteredFile(String id,long expected,Path path)throws IOException{
+        if(path==null||!Files.isRegularFile(path,LinkOption.NOFOLLOW_LINKS)||Files.isSymbolicLink(path))
+            throw new IOException("Registered media missing or not regular");
+        if(Files.size(path)!=expected)throw new IOException("Registered media size differs");
+        java.security.MessageDigest hash=MediaRepository.sha();long actual=0;
+        try(InputStream in=Files.newInputStream(path,StandardOpenOption.READ,LinkOption.NOFOLLOW_LINKS)){
+            byte[] buffer=new byte[16384];int n;
+            while((n=in.read(buffer))!=-1){
+                if(n==0)throw new IOException("Registered media read made no progress");
+                if(n>expected-actual)throw new IOException("Registered media size differs");
+                actual+=n;hash.update(buffer,0,n);
+            }
+        }
+        if(actual!=expected)throw new IOException("Registered media size differs");
+        if(!id.equals(MediaRepository.hex(hash.digest())))throw new IOException("Registered media digest differs");
+    }
+    /** Validates an already staged ZIP without writing any live DB or media.
+     * Caller separately owns/closes BOTH the Snapshot and returned candidate.
+     * Re-checks staged bytes, not just the transport manifest, because a caller may
+     * have held/modified staging after read(). NOT an owner/session/consent token;
+     * a future guarded restore must revalidate again at confirmation.
+     */
+    static SQLiteDatabase archiveCandidate(BackupArchive.Snapshot snapshot)throws IOException{
+        require(snapshot!=null,"Missing archive snapshot");
+        SQLiteDatabase candidate=stateCandidate(snapshot.state());boolean success=false;
+        try{
+            Map<String,Long> expected=registeredMedia(candidate);Map<String,Path> actual=snapshot.assets();
+            require(expected.keySet().equals(actual.keySet()),"Archive registered asset set differs");
+            for(Map.Entry<String,Long> asset:expected.entrySet())verifyRegisteredFile(asset.getKey(),asset.getValue(),actual.get(asset.getKey()));
+            success=true;return candidate;
+        }finally{if(!success)candidate.close();}
+    }
+    /** Full unencrypted backup including private text and all registered images.
+     * Captures one checked state, then uses ONLY that candidate's registry. Does
+     * not hold the live SQL transaction while hashing/copying files. Requires
+     * immutable cooperating app-private media writers, as MediaRepository does.
+     * BackupArchive refuses overwrite and verifies its temporary ZIP before publish.
+     * No default UI entry or power-loss/authenticity guarantee is implied.
+     */
+    public synchronized void exportBackup(Path destination,MediaRepository media)throws IOException{
+        require(destination!=null&&media!=null,"Missing backup destination or media");
+        byte[] state=exportState();
+        try(SQLiteDatabase candidate=stateCandidate(state)){
+            Map<String,Long> expected=registeredMedia(candidate);
+            for(Map.Entry<String,Long> asset:expected.entrySet()){
+                media.verify(asset.getKey()); // Respect this repository's caller-supplied budget.
+                verifyRegisteredFile(asset.getKey(),asset.getValue(),media.path(asset.getKey()));
+            }
+            BackupArchive.write(destination,state,expected.keySet(),media);
+        }
     }
     private static long revision(SQLiteDatabase db){
         try(Cursor c=db.rawQuery("SELECT id,value FROM revision",null)){

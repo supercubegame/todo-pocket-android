@@ -236,6 +236,82 @@ public final class Schema3DeviceTest extends Instrumentation {
         if(controls!=23)throw new AssertionError("boundary control count differs: "+controls);
         log.append("SCHEMA3_WIRE_BOUNDARY controls=").append(controls).append(" positive=2\n");
     }
+    private void archiveRejected(Path archive,Path stage,String cause)throws Exception{
+        boolean rejected=false;
+        try(BackupArchive.Snapshot snapshot=BackupArchive.read(archive,stage,1000000);
+            SQLiteDatabase ignored=Schema3Store.archiveCandidate(snapshot)){}
+        catch(IOException|IllegalArgumentException failure){
+            for(Throwable e=failure;e!=null;e=e.getCause())if(String.valueOf(e.getMessage()).contains(cause))rejected=true;
+        }
+        if(!rejected)throw new AssertionError("archive rejection missing: "+cause);
+        try(java.util.stream.Stream<Path> children=Files.list(stage)){if(children.findAny().isPresent())throw new AssertionError("archive rejection leaked stage");}
+    }
+    /** Full ZIP adapter checks, no live replacement or restore consent token. */
+    private void archiveChecks(Schema3Store store,byte[] wire)throws Exception{
+        Path root=getTargetContext().getFilesDir().toPath(),dir=root.resolve("schema3-archives"),stage=getTargetContext().getCacheDir().toPath().resolve("schema3-archive-stage");
+        Files.createDirectories(dir);Files.createDirectories(stage);
+        MediaRepository media=new MediaRepository(root.resolve("schema3-media"),1000000);
+        String[] ids=new String(Files.readAllBytes(root.resolve("schema3-ids.txt")),java.nio.charset.StandardCharsets.US_ASCII).split("\n");
+        Set<String> registered=new HashSet<>(Arrays.asList(ids));int controls=0;
+        if(registered.size()!=3)throw new AssertionError("archive fixture must have original/current/unreferenced derivative");
+        String orphan=media.copy(new ByteArrayInputStream(new byte[]{9,9,9}));
+        if(registered.contains(orphan))throw new AssertionError("unregistered file fixture collision");
+        byte[] before=store.snapshot();Path good=dir.resolve("good.zip");Files.deleteIfExists(good);
+        store.exportBackup(good,media);
+        try(BackupArchive.Snapshot snapshot=BackupArchive.read(good,stage,1000000);
+            SQLiteDatabase candidate=Schema3Store.archiveCandidate(snapshot)){
+            if(!Arrays.equals(wire,snapshot.state())||!Arrays.equals(wire,newWire(candidate,false))||candidate.getVersion()!=3||candidate.inTransaction()||!snapshot.assets().keySet().equals(registered))throw new AssertionError("new archive changed state or registered set");
+            for(String id:registered)if(!Arrays.equals(Files.readAllBytes(media.path(id)),Files.readAllBytes(snapshot.assets().get(id))))throw new AssertionError("archive media bytes differ");
+            if(snapshot.assets().containsKey(orphan))throw new AssertionError("unregistered file leaked into backup");
+        }controls++;
+        byte[] zipBefore=Files.readAllBytes(good);boolean refused=false;
+        try{store.exportBackup(good,media);}catch(IOException expected){refused=true;}
+        if(!refused||!Arrays.equals(zipBefore,Files.readAllBytes(good)))throw new AssertionError("export overwrote existing archive");controls++;
+        // The old archive is validated before normalization; origin remains raw NULL.
+        try(BackupArchive.Snapshot snapshot=BackupArchive.read(root.resolve("frozen-v2.zip"),stage,1000000);
+            SQLiteDatabase candidate=Schema3Store.archiveCandidate(snapshot);
+            Cursor origins=candidate.rawQuery("SELECT count(*) FROM blocks WHERE original_asset_id IS NOT NULL",null)){
+            if(candidate.getVersion()!=3||!origins.moveToFirst()||origins.getInt(0)!=0||!snapshot.assets().keySet().equals(Set.of(ids[0])))throw new AssertionError("old archive normalization changed origins or assets");
+        }controls++;
+        Path bad=dir.resolve("bad.zip");
+        for(String omitted:new String[]{ids[0],ids[1],ids[2]}){
+            Set<String> missing=new HashSet<>(registered);missing.remove(omitted);Files.deleteIfExists(bad);
+            BackupArchive.write(bad,wire,missing,media);archiveRejected(bad,stage,"Archive registered asset set differs");controls++;
+        }
+        Set<String> extra=new HashSet<>(registered);extra.add(orphan);Files.deleteIfExists(bad);
+        BackupArchive.write(bad,wire,extra,media);archiveRejected(bad,stage,"Archive registered asset set differs");controls++;
+        try(SQLiteDatabase poisoned=Schema3Store.stateCandidate(wire)){
+            poisoned.execSQL("UPDATE media SET bytes=bytes+1 WHERE id=?",new Object[]{ids[1]});
+            byte[] invalid=newWire(poisoned,false);Files.deleteIfExists(bad);BackupArchive.write(bad,invalid,registered,media);
+            archiveRejected(bad,stage,"Registered media size differs");controls++;
+        }
+        // Same-length post-read mutation must fail digest validation, not only size.
+        try(BackupArchive.Snapshot snapshot=BackupArchive.read(good,stage,1000000)){
+            Path damaged=snapshot.assets().get(ids[2]);byte[] bytes=Files.readAllBytes(damaged);bytes[0]^=1;Files.write(damaged,bytes);
+            boolean rejected=false;try(SQLiteDatabase ignored=Schema3Store.archiveCandidate(snapshot)){}
+            catch(IOException expected){rejected=String.valueOf(expected.getMessage()).contains("Registered media digest differs");}
+            if(!rejected)throw new AssertionError("staged corruption not detected");controls++;
+        }
+        // Export must reject registry/file size disagreement before publishing ZIP.
+        SQLiteDatabase db=store.getWritableDatabase();Path invalidExport=dir.resolve("invalid-export.zip");Files.deleteIfExists(invalidExport);
+        db.beginTransaction();
+        try{
+            db.execSQL("UPDATE media SET bytes=bytes+1 WHERE id=?",new Object[]{ids[1]});boolean rejected=false;
+            try{store.exportBackup(invalidExport,media);}catch(IOException expected){rejected=String.valueOf(expected.getMessage()).contains("Registered media size differs");}
+            if(!rejected||Files.exists(invalidExport))throw new AssertionError("invalid registry exported");controls++;
+        }finally{db.endTransaction();}
+        // A valid registry with an absent file must also refuse without publication.
+        Path held=dir.resolve("held-media");Files.move(media.path(ids[1]),held);
+        try{
+            boolean rejected=false;try{store.exportBackup(invalidExport,media);}catch(IOException expected){rejected=true;}
+            if(!rejected||Files.exists(invalidExport))throw new AssertionError("missing registered media exported");controls++;
+        }finally{Files.move(held,root.resolve("schema3-media").resolve(ids[1]));}
+        try(java.util.stream.Stream<Path> children=Files.list(stage)){if(children.findAny().isPresent())throw new AssertionError("archive stage leak");}
+        if(!Arrays.equals(before,store.snapshot())||!Arrays.equals(wire,store.exportState())||!Arrays.equals(zipBefore,Files.readAllBytes(good)))throw new AssertionError("archive checks modified source state or good ZIP");
+        for(String id:registered)media.verify(id);
+        if(controls!=11)throw new AssertionError("archive adapter control count differs: "+controls);
+        log.append("SCHEMA3_ARCHIVE controls=").append(controls).append(" no_live_restore=true\n");
+    }
     private void wireSeed()throws Exception{
         Context c=getTargetContext();Path root=c.getFilesDir().toPath();
         byte[] old=Files.readAllBytes(root.resolve("frozen-v2-state.bin")),wire;
@@ -257,6 +333,7 @@ public final class Schema3DeviceTest extends Instrumentation {
                     }if(rows.moveToNext()||count<2)throw new AssertionError("pair fixture incomplete");
                 }
             }
+            archiveChecks(store,wire);
             need(Arrays.equals(before,store.snapshot()),"wire_schema3_exact_roundtrip_preserves_pairs");
             byte[] owned=wire.clone();
             try(SQLiteDatabase candidate=Schema3Store.stateCandidate(owned)){

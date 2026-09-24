@@ -33,6 +33,11 @@ LABELS = {
         "ordinary_late_sql_fault_rolls_back", "ordinary_remove_keeps_shared_registry",
         "ordinary_postwrite_budget_rolls_back", "image_postwrite_budget_rolls_back",
         "postwrite_budget_small_edits_usable",
+        "legacy_candidate_zip_strict_roundtrip", "legacy_candidate_input_owned_and_no_helper_file",
+        "legacy_candidate_rejects_invalid_transport", "legacy_candidate_rejects_semantic_poison",
+        "legacy_candidate_rejects_noncanonical_before_migration",
+        "legacy_candidate_migration_preserves_old_cells",
+        "legacy_candidate_rejections_and_migration_leave_source_unchanged",
     ],
     "reopen": [
         "separate_process_exact_state", "separate_process_pair_metadata",

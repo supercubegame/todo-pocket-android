@@ -139,6 +139,116 @@ public final class Schema3DeviceTest extends Instrumentation {
         lifecycleSeed();
         ordinaryNoteSeed();
         postWriteBudgetSeed();
+        legacyCandidateSeed();
+    }
+    /** Independent historical wire encoder. Reverse INTEGER-PK category rows only
+     * for a semantically valid but noncanonical transport negative control.
+     */
+    private byte[] legacyWire(SQLiteDatabase db,boolean reverseCategories)throws Exception{
+        ByteArrayOutputStream bytes=new ByteArrayOutputStream();DataOutputStream out=new DataOutputStream(bytes);
+        out.writeInt(0x50544442);out.writeInt(1);out.writeInt(2);out.writeInt(TABLES.length);
+        for(String table:TABLES){
+            String order=reverseCategories&&table.equals("categories")?" DESC":"";
+            try(Cursor c=db.rawQuery("SELECT * FROM "+table+" ORDER BY rowid"+order,null)){
+                text(out,table);out.writeInt(c.getColumnCount());for(String name:c.getColumnNames())text(out,name);out.writeInt(c.getCount());
+                while(c.moveToNext())for(int i=0;i<c.getColumnCount();i++){
+                    int type=c.getType(i);out.writeByte(type);
+                    if(type==1)out.writeLong(c.getLong(i));else if(type==3)text(out,c.getString(i));
+                    else if(type==4){byte[] b=c.getBlob(i);out.writeInt(b.length);out.write(b);}
+                    else if(type!=0)throw new AssertionError("unexpected legacy wire type");
+                }
+            }
+        }out.flush();return bytes.toByteArray();
+    }
+    /** Probe the existing private strict decoder without widening the product API.
+     * This is a pre-integration gate, NOT a production schema3 restore adapter.
+     */
+    private SQLiteDatabase legacyCandidate(byte[] bytes)throws Exception{
+        java.lang.reflect.Method method=AppDatabase.class.getDeclaredMethod("candidate",byte[].class);method.setAccessible(true);
+        try(AppDatabase helper=new AppDatabase(getTargetContext(),"schema3-candidate-probe.db")){
+            try{return (SQLiteDatabase)method.invoke(helper,(Object)bytes);}
+            catch(java.lang.reflect.InvocationTargetException e){
+                Throwable cause=e.getCause();if(cause instanceof Exception)throw (Exception)cause;throw e;
+            }
+        }
+    }
+    private void candidateRejected(byte[] bytes,String causeText)throws Exception{
+        boolean rejected=false;
+        try(SQLiteDatabase ignored=legacyCandidate(bytes)){}
+        catch(IllegalArgumentException e){
+            if(!"备份状态校验失败".equals(e.getMessage()))throw e;
+            for(Throwable cause=e.getCause();cause!=null;cause=cause.getCause())
+                if(causeText==null||String.valueOf(cause.getMessage()).contains(causeText))rejected=true;
+        }
+        if(!rejected)throw new AssertionError("legacy candidate rejection/cause missing: "+causeText);
+    }
+    private void legacyCandidateSeed()throws Exception{
+        Context c=getTargetContext();Path root=c.getFilesDir().toPath();
+        byte[] frozen=Files.readAllBytes(root.resolve("frozen-v2-state.bin")),sourceCells;
+        Path archive=root.resolve("frozen-v2.zip");byte[] archiveBefore=Files.readAllBytes(archive);
+        String id=new String(Files.readAllBytes(root.resolve("frozen-v2-media-id.txt")),java.nio.charset.StandardCharsets.US_ASCII);
+        try(SQLiteDatabase source=SQLiteDatabase.openDatabase(c.getDatabasePath("frozen-v2.db").getPath(),null,SQLiteDatabase.OPEN_READONLY)){
+            sourceCells=oldCells(source);
+            if(!Arrays.equals(frozen,legacyWire(source,false)))throw new AssertionError("frozen transport fixture differs");
+        }
+        try(BackupArchive.Snapshot zip=BackupArchive.read(archive,c.getCacheDir().toPath(),1000000);
+            SQLiteDatabase candidate=legacyCandidate(zip.state())){
+            need(Arrays.equals(zip.state(),frozen)&&zip.assets().keySet().equals(Set.of(id))&&Arrays.equals(Files.readAllBytes(zip.assets().get(id)),new byte[]{97,98,99})&&columns(candidate)==8&&revision(candidate)==42&&Arrays.equals(sourceCells,oldCells(candidate))&&Arrays.equals(frozen,legacyWire(candidate,false)),"legacy_candidate_zip_strict_roundtrip");
+        }
+        byte[] owned=frozen.clone();
+        try(SQLiteDatabase candidate=legacyCandidate(owned)){
+            owned[0]^=1;
+            need(Arrays.equals(frozen,legacyWire(candidate,false))&&!c.getDatabasePath("schema3-candidate-probe.db").exists(),"legacy_candidate_input_owned_and_no_helper_file");
+        }
+        candidateRejected(Arrays.copyOf(frozen,frozen.length-1),null);
+        candidateRejected(Arrays.copyOf(frozen,frozen.length+1),"备份状态存在尾随数据");
+        byte[] future=frozen.clone();future[11]=3;candidateRejected(future,"未知备份格式或数据库版本");
+        byte[] utf=frozen.clone();utf[20]=(byte)0xff;candidateRejected(utf,null);
+        need(Arrays.equals(archiveBefore,Files.readAllBytes(archive)),"legacy_candidate_rejects_invalid_transport");
+        try(SQLiteDatabase source=legacyCandidate(frozen)){
+            String[] faults={"UPDATE categories SET name=' 未规范名称 '",
+                "UPDATE blocks SET caption='隐藏说明' WHERE kind='TEXT'",
+                "UPDATE blocks SET position=9 WHERE note_id='second' AND id='text'",
+                "UPDATE fields SET type='NUMBER' WHERE id='old-field'"};
+            String[] causes={"名称不是有效规范文本","笔记块有非规范隐藏内容","有序数据缺失或重复",""};
+            for(int i=0;i<faults.length;i++){
+                byte[] bad;source.beginTransaction();
+                try{source.execSQL(faults[i]);bad=legacyWire(source,false);}finally{source.endTransaction();}
+                if(Arrays.equals(bad,frozen))throw new AssertionError("semantic poison fixture unchanged");
+                candidateRejected(bad,causes[i]);
+                if(!Arrays.equals(frozen,legacyWire(source,false)))throw new AssertionError("poison fixture rollback incomplete");
+            }
+        }
+        need(true,"legacy_candidate_rejects_semantic_poison");
+        try(SQLiteDatabase source=legacyCandidate(frozen)){
+            source.execSQL("INSERT INTO categories VALUES(8,'另一个分类',1)");
+            byte[] canonical=legacyWire(source,false),noncanonical=legacyWire(source,true);
+            if(Arrays.equals(canonical,noncanonical))throw new AssertionError("row order negative control unchanged");
+            try(SQLiteDatabase accepted=legacyCandidate(canonical)){
+                if(!Arrays.equals(canonical,legacyWire(accepted,false)))throw new AssertionError("canonical control rejected or changed");
+            }
+            candidateRejected(noncanonical,"备份规范回读不一致");
+        }
+        need(true,"legacy_candidate_rejects_noncanonical_before_migration");
+        // Existing migration is exercised only after the strict decoder returns.
+        // No live DB replacement, new archive format or production adapter is claimed.
+        try(SQLiteDatabase candidate=legacyCandidate(frozen);
+            Schema3Store adapter=new Schema3Store(c,"schema3-candidate-migration-probe.db")){
+            candidate.beginTransaction();
+            try{
+                adapter.onUpgrade(candidate,2,3);
+                try(Cursor origin=candidate.rawQuery("SELECT count(*) FROM blocks WHERE original_asset_id IS NOT NULL",null)){
+                    need(columns(candidate)==9&&revision(candidate)==42&&origin.moveToFirst()&&origin.getInt(0)==0&&Arrays.equals(sourceCells,oldCells(candidate))&&candidate.inTransaction(),"legacy_candidate_migration_preserves_old_cells");
+                }
+                // Intentionally no success marker: prove the candidate DDL is in
+                // the caller transaction, without altering any on-disk helper DB.
+            }finally{candidate.endTransaction();}
+            if(columns(candidate)!=8||!Arrays.equals(frozen,legacyWire(candidate,false)))throw new AssertionError("candidate migration rollback failed");
+        }
+        try(SQLiteDatabase source=SQLiteDatabase.openDatabase(c.getDatabasePath("frozen-v2.db").getPath(),null,SQLiteDatabase.OPEN_READONLY);
+            SQLiteDatabase again=legacyCandidate(frozen)){
+            need(source.getVersion()==2&&columns(source)==8&&Arrays.equals(sourceCells,oldCells(source))&&Arrays.equals(frozen,legacyWire(again,false))&&Arrays.equals(archiveBefore,Files.readAllBytes(archive))&&!c.getDatabasePath("schema3-candidate-migration-probe.db").exists(),"legacy_candidate_rejections_and_migration_leave_source_unchanged");
+        }
     }
     private String schema(SQLiteDatabase db){
         StringBuilder out=new StringBuilder();

@@ -14,17 +14,27 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.*;
 
-/** SQLite schema2. Transactional writes and semantic snapshots, no destructive migration.
+/** Default SQLite schema2, with an explicit opt-in schema3 business-API facade.
  * Backup APIs are private-storage adapters, not SAF/UI acceptance or photo decoding.
  */
 public final class AppDatabase extends SQLiteOpenHelper {
     private interface Work<T> { T run(SQLiteDatabase db); }
     private Object restoreSession=new Object();
-    public AppDatabase(Context context,String name) {
+    private final Schema3Store schema3;
+    public AppDatabase(Context context,String name) {this(context,name,false);}
+    private AppDatabase(Context context,String name,boolean upgraded) {
         super(context.getApplicationContext(),validName(name),null,2);
+        schema3=upgraded?new Schema3Store(context,name):null;
         setWriteAheadLoggingEnabled(true);
     }
-    @Override public synchronized void close(){restoreSession=new Object();super.close();}
+    /** Explicit compatibility bridge. The default constructor remains frozen at v2.
+     * Every business read/write uses ONE delegate connection; the v2 superclass never
+     * opens this file. Backup/restore and note origins use the verified v3 adapters.
+     */
+    public static AppDatabase openSchema3(Context context,String name){return new AppDatabase(context,name,true);}
+    @Override public synchronized SQLiteDatabase getWritableDatabase(){return schema3==null?super.getWritableDatabase():schema3.getWritableDatabase();}
+    @Override public synchronized SQLiteDatabase getReadableDatabase(){return schema3==null?super.getReadableDatabase():schema3.getReadableDatabase();}
+    @Override public synchronized void close(){restoreSession=new Object();if(schema3!=null)schema3.close();super.close();}
     private static String validName(String name) {
         if(name==null||!name.matches("[A-Za-z0-9_-]+\\.db"))throw new IllegalArgumentException("无效数据库文件名");return name;
     }
@@ -83,7 +93,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
     @Override public void onDowngrade(SQLiteDatabase db,int oldVersion,int newVersion){throw new IllegalStateException("数据库来自更新版本，保留原数据");}
     private <T> T tx(Work<T> action) {
         SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
-        try{T result=action.run(db);db.setTransactionSuccessful();return result;}
+        try{T result=action.run(db);if(schema3!=null)schema3.snapshot();db.setTransactionSuccessful();return result;}
         catch(SQLiteConstraintException e){throw new IllegalArgumentException("数据重复或关联不存在，本次修改已回滚",e);}
         finally{db.endTransaction();}
     }
@@ -125,7 +135,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
     public synchronized void createNote(String id,long activity,String title){Ledger.identifier(id);String clean=text(title);tx(db->{exists(db,"activities",activity);db.execSQL("INSERT INTO notes VALUES(?,?,?)",new Object[]{id,activity,clean});bump(db);return null;});}
     /** Registry only: caller must copy/verify files and validate actual image format. */
     public synchronized void registerMedia(String id,String mime,long bytes){MediaRepository.validId(id);String clean=text(mime);if(bytes<=0)throw new IllegalArgumentException("媒体大小无效");tx(db->{try(Cursor c=db.rawQuery("SELECT mime,bytes FROM media WHERE id=?",new String[]{id})){if(c.moveToFirst()){if(!clean.equals(c.getString(0))||bytes!=c.getLong(1))throw new IllegalStateException("媒体标识对应的元数据冲突");return null;}}db.execSQL("INSERT INTO media VALUES(?,?,?)",new Object[]{id,clean,bytes});bump(db);return null;});}
-    public synchronized void saveNote(String id,List<NoteDocument.Block> blocks){Ledger.identifier(id);if(blocks==null||Ledger.hasNull(blocks))throw new IllegalArgumentException("缺少笔记内容");List<NoteDocument.Block> owned=new ArrayList<>(blocks);NoteDocument validator=new NoteDocument();for(NoteDocument.Block b:owned)validator.add(b);tx(db->{exists(db,"notes",id);db.delete("blocks","note_id=?",new String[]{id});for(int i=0;i<owned.size();i++){NoteDocument.Block b=owned.get(i);if(b.kind==NoteDocument.Kind.IMAGE)exists(db,"media",b.assetId);db.execSQL("INSERT INTO blocks VALUES(?,?,?,?,?,?,?,?)",new Object[]{id,b.id,i,b.kind.name(),b.text,b.kind==NoteDocument.Kind.IMAGE?b.assetId:null,b.caption,b.privateContent?1:0});}bump(db);return null;});}
+    public synchronized void saveNote(String id,List<NoteDocument.Block> blocks){if(schema3!=null){schema3.saveNote(id,blocks,schema3.snapshot());return;}Ledger.identifier(id);if(blocks==null||Ledger.hasNull(blocks))throw new IllegalArgumentException("缺少笔记内容");List<NoteDocument.Block> owned=new ArrayList<>(blocks);NoteDocument validator=new NoteDocument();for(NoteDocument.Block b:owned)validator.add(b);tx(db->{exists(db,"notes",id);db.delete("blocks","note_id=?",new String[]{id});for(int i=0;i<owned.size();i++){NoteDocument.Block b=owned.get(i);if(b.kind==NoteDocument.Kind.IMAGE)exists(db,"media",b.assetId);db.execSQL("INSERT INTO blocks VALUES(?,?,?,?,?,?,?,?)",new Object[]{id,b.id,i,b.kind.name(),b.text,b.kind==NoteDocument.Kind.IMAGE?b.assetId:null,b.caption,b.privateContent?1:0});}bump(db);return null;});}
     public synchronized List<NoteDocument.Block> noteBlocks(String id){SQLiteDatabase db=getReadableDatabase();exists(db,"notes",id);List<NoteDocument.Block> out=new ArrayList<>();try(Cursor c=db.rawQuery("SELECT id,kind,text,asset_id,caption,private FROM blocks WHERE note_id=? ORDER BY position",new String[]{id})){while(c.moveToNext())out.add(c.getString(1).equals("TEXT")?NoteDocument.Block.text(c.getString(0),c.getString(2),c.getInt(5)!=0):NoteDocument.Block.image(c.getString(0),c.getString(3),c.getString(4),c.getInt(5)!=0));}return Collections.unmodifiableList(out);}
 
     private static CustomFields.Definition fieldDefinition(SQLiteDatabase db,String id) {
@@ -293,9 +303,10 @@ public final class AppDatabase extends SQLiteOpenHelper {
         }catch(IOException|RuntimeException e){throw new IllegalArgumentException("备份状态校验失败",e);}finally{if(!success)stage.close();}
     }
     /** One consistent transaction, including revision/journals and insertion-based note order. */
-    public synchronized byte[] exportState(){return tx(db->{byte[] state=encodeState(db);try(SQLiteDatabase ignored=candidate(state)){return state;}});}
+    public synchronized byte[] exportState(){if(schema3!=null)return schema3.exportState();return tx(db->{byte[] state=encodeState(db);try(SQLiteDatabase ignored=candidate(state)){return state;}});}
     private static Map<String,Long> registeredMedia(SQLiteDatabase db){Map<String,Long> out=new LinkedHashMap<>();try(Cursor c=db.rawQuery("SELECT id,bytes FROM media ORDER BY id",null)){while(c.moveToNext())out.put(c.getString(0),c.getLong(1));}return out;}
     public synchronized void exportBackup(Path destination,MediaRepository media)throws IOException{
+        if(schema3!=null){schema3.exportBackup(destination,media);return;}
         if(media==null)throw new IllegalArgumentException("媒体仓库不能为空");byte[] state=exportState();
         try(SQLiteDatabase staged=candidate(state)){
             Map<String,Long> files=registeredMedia(staged);for(Map.Entry<String,Long> item:files.entrySet()){media.verify(item.getKey());if(Files.size(media.path(item.getKey()))!=item.getValue())throw new IOException("媒体登记大小不一致");}
@@ -315,6 +326,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
      * This is logical atomicity, not power-loss durability or an undo-restore feature.
      */
     public synchronized void restoreBackup(Path archive,Path stagingRoot,long byteBudget,MediaRepository media)throws IOException{
+        if(schema3!=null){try(RestorePlan plan=prepareRestore(archive,stagingRoot,byteBudget)){confirmRestore(plan,media);}return;}
         if(media==null)throw new IllegalArgumentException("媒体仓库不能为空");
         try(BackupArchive.Snapshot snapshot=BackupArchive.read(archive,stagingRoot,byteBudget);SQLiteDatabase staged=candidate(snapshot.state())){
             // Bind commit equality to the validated candidate, not the transport bytes.
@@ -343,16 +355,21 @@ public final class AppDatabase extends SQLiteOpenHelper {
         private final AppDatabase owner;
         private final Object session;
         private final BackupArchive.Snapshot snapshot;
+        private final Schema3Store.RestorePlan upgraded;
         private final byte[] before,expected;
         private final Map<String,Long> current,incoming;
         private boolean terminal;
         private RestorePlan(AppDatabase owner,BackupArchive.Snapshot snapshot,byte[] before,byte[] expected,Map<String,Long> current,Map<String,Long> incoming){
-            this.owner=owner;this.session=owner.restoreSession;this.snapshot=snapshot;
+            this.owner=owner;this.session=owner.restoreSession;this.snapshot=snapshot;this.upgraded=null;
             this.before=before.clone();this.expected=expected.clone();this.current=current;this.incoming=incoming;
+        }
+        private RestorePlan(AppDatabase owner,Schema3Store.RestorePlan upgraded){
+            this.owner=owner;this.session=owner.restoreSession;this.upgraded=upgraded;this.snapshot=null;
+            this.before=null;this.expected=null;this.current=upgraded.currentCounts();this.incoming=upgraded.incomingCounts();
         }
         public Map<String,Long> currentCounts(){return current;}
         public Map<String,Long> incomingCounts(){return incoming;}
-        @Override public void close()throws IOException{synchronized(owner){terminal=true;snapshot.close();}}
+        @Override public void close()throws IOException{synchronized(owner){terminal=true;if(upgraded!=null)upgraded.close();else snapshot.close();}}
     }
     private static Map<String,Long> summary(SQLiteDatabase db){
         Map<String,Long> counts=new LinkedHashMap<>();for(String table:SNAPSHOT_TABLES)try(Cursor c=db.rawQuery("SELECT count(*) FROM "+table,null)){c.moveToFirst();counts.put(table,c.getLong(0));}
@@ -369,6 +386,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
      * Later source-file changes cannot substitute a different backup after consent.
      */
     public synchronized RestorePlan prepareRestore(Path archive,Path stagingRoot,long byteBudget)throws IOException{
+        if(schema3!=null)return new RestorePlan(this,schema3.prepareRestore(archive,stagingRoot,byteBudget));
         BackupArchive.Snapshot snapshot=BackupArchive.read(archive,stagingRoot,byteBudget);boolean success=false;
         try{
             byte[] source=snapshot.state(),before=exportState();
@@ -396,6 +414,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
         if(plan==null||plan.owner!=this)throw new IllegalArgumentException("恢复预览不属于当前数据库");
         if(plan.terminal||plan.session!=restoreSession)throw new IllegalStateException("恢复预览已取消、使用或失效，请重新预览");
         plan.terminal=true;
+        if(plan.upgraded!=null){try{schema3.confirmRestore(plan.upgraded,media);}finally{plan.upgraded.close();}return;}
         try(BackupArchive.Snapshot snapshot=plan.snapshot;SQLiteDatabase staged=candidate(plan.expected)){
             if(media==null)throw new IllegalArgumentException("媒体仓库不能为空");
             // Early read avoids unnecessary publication for already stale plans. It is

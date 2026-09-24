@@ -133,7 +133,41 @@ def selftest():
     assert registration(new, "V12DeviceTest")["status"] != "PASS"
     controls["registration"] = {"positive": 3, "negative": len(bad) + 1}
     controls["native_failure_diagnostics"] = diagnostics_selftest()
+    controls["default_schema3_ui"] = native_schema3_selftest()
     return controls
+
+NATIVE_SCHEMA3_LABELS = [
+    "default native UI uses schema3 with exact nine-column block layout",
+    "native schema3 survives SAF restore and all ordinary edits without invented image origins",
+]
+
+def native_schema3(result, api):
+    checks = result.get("checks", [])
+    passed = (result.get("status") == "PASS" and result.get("api") == api and
+              result.get("default_app_schema") == 3 and
+              result.get("default_schema3_ui") == "NATIVE_SCHEMA3_UI_PASS" and
+              isinstance(checks, list) and result.get("count") == len(checks) and
+              all(checks.count(label) == 1 for label in NATIVE_SCHEMA3_LABELS) and
+              result.get("saf_restore") == "NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS" and
+              result.get("image_metadata") == "CAPTION_PRIVATE_CANCEL_EDIT_CLEAR_RESTART_PASS")
+    return {"status": "PASS" if passed else "NOT_VERIFIED", "evidence": result}
+
+def native_schema3_selftest():
+    good = {"status": "PASS", "api": 26, "default_app_schema": 3,
+            "default_schema3_ui": "NATIVE_SCHEMA3_UI_PASS",
+            "checks": list(NATIVE_SCHEMA3_LABELS), "count": 2,
+            "saf_restore": "NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS",
+            "image_metadata": "CAPTION_PRIVATE_CANCEL_EDIT_CLEAR_RESTART_PASS"}
+    assert native_schema3(good, 26)["status"] == "PASS"
+    bad = [{}, dict(good, status="FAIL"), dict(good, api=34),
+           dict(good, default_app_schema=2), dict(good, default_schema3_ui=""),
+           dict(good, checks=good["checks"][:1], count=1),
+           dict(good, checks=good["checks"]+good["checks"], count=4),
+           dict(good, count=3), dict(good, saf_restore="NOT_VERIFIED"),
+           dict(good, image_metadata="NOT_VERIFIED")]
+    for value in bad:
+        assert native_schema3(value, 26)["status"] != "PASS", "native schema3 observer missed"
+    return {"positive": 1, "negative": len(bad), "scope": "REPORT_CONTROLS_NOT_DEVICE_EXECUTION"}
 
 def diagnostics_selftest():
     import tempfile
@@ -373,6 +407,9 @@ def report():
     for api in (26, 34):
         folder = Path("collected") / ("database-api-" + str(api))
         devices[str(api)] = {}
+        path = folder / "native-ui/native-result.json"
+        native = json.loads(path.read_text()) if path.exists() else {}
+        devices[str(api)]["default_ui"] = native_schema3(native, api)
         for stage, runner in (("default", "V12DeviceTest"), ("schema3", "Schema3DeviceTest"), ("restore", "Schema3RestoreTests"), ("restored", "V12DeviceTest")):
             path = folder / ("device-schema3-registration-" + stage + ".txt")
             text = path.read_text(errors="replace") if path.exists() else ""
@@ -396,12 +433,12 @@ def report():
             devices[str(api)][phase] = observe(text, phase, api)
     passed = all(p["status"] == "PASS" for phases in devices.values() for p in phases.values())
     doc = {"commit": source, "run_id": run, "status": "PASS" if passed else "NOT_VERIFIED",
-           "scope": "OPT_IN_SCHEMA3_STORAGE_ARCHIVE_AND_GUARDED_RESTORE_NOT_DEFAULT_UI",
+           "scope": "SCHEMA3_STORAGE_ARCHIVE_GUARDED_RESTORE_AND_DEFAULT_NATIVE_UI",
            "devices": devices, "observer_selftests": controls, "release_ready": False,
            "archive_compatibility": {"export_and_candidate": "PASS" if passed else "NOT_VERIFIED",
                                      "guarded_live_restore": "PASS" if passed else "NOT_VERIFIED",
-                                     "default_ui_activation": False},
-           "default_app_schema": 2,
+                                     "default_ui_activation": "PASS" if all(d["default_ui"]["status"] == "PASS" for d in devices.values()) else "NOT_VERIFIED"},
+           "configured_default_app_schema": 3,
            "guarded_derivative_plan": "NOT_IMPLEMENTED"}
     data = (json.dumps(doc, ensure_ascii=False, indent=2) + "\n").encode()
     endpoint = "https://api.github.com/repos/" + os.environ["GITHUB_REPOSITORY"] + "/"

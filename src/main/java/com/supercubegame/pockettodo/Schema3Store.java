@@ -167,7 +167,7 @@ public final class Schema3Store extends SQLiteOpenHelper {
      */
     public synchronized void saveNote(String note,List<NoteDocument.Block> blocks,byte[] before){
         Ledger.identifier(note);
-        require(blocks!=null&&!Ledger.hasNull(blocks)),"Missing note blocks");
+        require(blocks!=null&&!Ledger.hasNull(blocks),"Missing note blocks");
         require(before!=null&&before.length>0&&before.length<=COMPARISON_LIMIT,"Missing reviewed state");
         List<NoteDocument.Block> owned=new ArrayList<>(blocks);NoteDocument validator=new NoteDocument();
         for(NoteDocument.Block block:owned)validator.add(block);

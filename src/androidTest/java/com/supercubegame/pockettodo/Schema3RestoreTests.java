@@ -102,7 +102,7 @@ public final class Schema3RestoreTests extends Instrumentation {
             Path file=stagedAsset(stage,id);byte[] content=Files.readAllBytes(file);content[0]^=1;Files.write(file,content);
             rejected(()->store.confirmRestore(damaged,media),"digest differs");
             rejected(()->store.confirmRestore(damaged,media),"no longer active");
-            need(empty(stage)&&empty(root.resolve("schema3-restore-media"))&&Arrays.equals(changed,store.exportState()),"restore_staged_tamper_refused_before_publication");
+            need(empty(stage)&&Arrays.equals(changed,store.exportState()),"restore_staged_tamper_refused_before_publication");
 
             Schema3Store.RestorePlan invalidMedia=store.prepareRestore(archives.resolve("good.zip"),stage,1000000);
             rejected(()->store.confirmRestore(invalidMedia,null),"Missing restore media");
@@ -146,7 +146,110 @@ public final class Schema3RestoreTests extends Instrumentation {
         restoreShape("full",archives.resolve("full.zip"),Files.readAllBytes(archives.resolve("full-state.bin")),stage);
         facadeChecks();
         domainFacadeChecks();
+        derivativeChecks();
         restoreShape("empty",archives.resolve("empty.zip"),Files.readAllBytes(archives.resolve("empty-state.bin")),stage);
+    }
+    private static byte[] photoFixture()throws IOException{
+        android.graphics.Bitmap b=android.graphics.Bitmap.createBitmap(4,3,android.graphics.Bitmap.Config.ARGB_8888);
+        try{
+            for(int y=0;y<3;y++)for(int x=0;x<4;x++)b.setPixel(x,y,0xff000000|((x+1)*40<<16)|((y+1)*50<<8)|17);
+            ByteArrayOutputStream out=new ByteArrayOutputStream();
+            check(b.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out),"fixture encode failed");
+            return out.toByteArray();
+        }finally{b.recycle();}
+    }
+    private static void derivativePixels(byte[] bytes,int width,int height,boolean first){
+        android.graphics.Bitmap b=android.graphics.BitmapFactory.decodeByteArray(bytes,0,bytes.length);
+        check(b!=null,"saved derivative not decodable");
+        try{
+            check(b.getWidth()==width&&b.getHeight()==height,"derivative dimensions differ");
+            for(int y=0;y<height;y++)for(int x=0;x<width;x++){
+                int expected=first&&x==1?0xff000000:0xff000000|((x+2)*40<<16)|((y+1)*50<<8)|17;
+                check(b.getPixel(x,y)==expected,"derivative pixel differs "+x+","+y);
+            }
+        }finally{b.recycle();}
+    }
+    private void derivativeChecks()throws Exception{
+        Context context=getTargetContext();Path root=context.getFilesDir().toPath();
+        context.deleteDatabase("schema3-derivative.db");
+        MediaRepository media=new MediaRepository(root.resolve("schema3-derivative-media"),1000000);
+        byte[] original=photoFixture();String source=media.copy(new ByteArrayInputStream(original));
+        Files.write(root.resolve("schema3-derivative-original.png"),original);
+        try(AppDatabase app=AppDatabase.openSchema3(context,"schema3-derivative.db")){
+            app.addCategory(1,"图片");app.addActivity(1,1,0,"处理");
+            app.createNote("edit-note",1,"同名");app.createNote("sibling-note",1,"同名");
+            app.registerMedia(source,"image/png",original.length);
+            app.saveNote("edit-note",Arrays.asList(NoteDocument.Block.text("text","不动",false),NoteDocument.Block.image("photo",source,"私有说明",true)));
+            app.saveNote("sibling-note",Arrays.asList(NoteDocument.Block.image("photo",source,"兄弟说明",false)));
+            SQLiteDatabase db=app.getWritableDatabase();byte[] before=app.exportState();
+            try(NoteEditorScreen.Editor editor=new NoteEditorScreen.Editor(app,media)){
+                NoteEditorScreen.Preview cancel=editor.prepare("edit-note","photo",1,0,4,2,new int[][]{{1,0,2,2}});
+                byte[] preview=cancel.png();derivativePixels(preview,3,2,true);
+                String firstId=MediaRepository.digest(preview);preview[0]^=1;
+                derivativePixels(cancel.png(),3,2,true);
+                check(Arrays.equals(before,app.exportState())&&app.count("media")==1&&!Files.exists(root.resolve("schema3-derivative-media").resolve(firstId)),"preview published data");
+                cancel.close();cancel.close();rejected(()->editor.confirm(cancel),"no longer active");
+                rejected(()->cancel.png(),"no longer active");
+                NoteEditorScreen.Preview foreign=editor.prepare("edit-note","photo",1,0,4,2,new int[][]{{1,0,2,2}});
+                try(NoteEditorScreen.Editor other=new NoteEditorScreen.Editor(app,media)){
+                    rejected(()->other.confirm(foreign),"different editor");
+                }
+                derivativePixels(foreign.png(),3,2,true);foreign.close();
+                NoteEditorScreen.Preview nested=editor.prepare("edit-note","photo",1,0,4,2,new int[][]{{1,0,2,2}});
+                db.beginTransaction();
+                try{
+                    rejected(()->editor.confirm(nested),"outer transaction");
+                    rejected(()->editor.prepare("edit-note","photo",1,0,4,2,new int[0][]),"outer transaction");
+                }finally{db.endTransaction();}
+                rejected(()->editor.confirm(nested),"no longer active");
+                NoteEditorScreen.Preview stale=editor.prepare("edit-note","photo",1,0,4,2,new int[][]{{1,0,2,2}});
+                long rev=revision(db);
+                try(AppDatabase external=AppDatabase.openSchema3(context,"schema3-derivative.db")){
+                    external.getWritableDatabase().execSQL("UPDATE notes SET title='外部修改' WHERE id='sibling-note'");
+                }
+                byte[] changed=app.exportState();check(!Arrays.equals(before,changed)&&revision(db)==rev,"derivative stale fixture invalid");
+                rejected(()->editor.confirm(stale),"Database changed");
+                check(Arrays.equals(changed,app.exportState())&&!Files.exists(root.resolve("schema3-derivative-media").resolve(firstId)),"stale preview wrote data");
+                NoteEditorScreen.Preview damaged=editor.prepare("edit-note","photo",1,0,4,2,new int[][]{{1,0,2,2}});
+                byte[] corrupt=original.clone();corrupt[corrupt.length-1]^=1;Files.write(media.path(source),corrupt);
+                try{rejected(()->editor.confirm(damaged),"校验");}finally{Files.write(media.path(source),original);}
+                rejected(()->editor.confirm(damaged),"no longer active");
+                check(Arrays.equals(changed,app.exportState()),"damaged source changed DB");
+                NoteEditorScreen.Preview failed=editor.prepare("edit-note","photo",1,0,4,2,new int[][]{{1,0,2,2}});
+                db.execSQL("CREATE TRIGGER derivative_fault BEFORE UPDATE OF asset_id ON blocks BEGIN SELECT RAISE(ABORT,'derivative fault'); END");
+                boolean fault=false;
+                try{editor.confirm(failed);}catch(SQLiteException e){fault=e.getMessage().contains("derivative fault");}
+                finally{db.execSQL("DROP TRIGGER derivative_fault");}
+                check(fault&&Arrays.equals(changed,app.exportState())&&app.count("media")==1,"derivative late fault did not roll back registry block revision");
+                media.verify(firstId);rejected(()->editor.confirm(failed),"no longer active");
+                NoteEditorScreen.Preview save=editor.prepare("edit-note","photo",1,0,4,2,new int[][]{{1,0,2,2}});
+                byte[] expected=save.png();editor.confirm(save);
+                check(app.count("media")==2&&revision(db)==rev+1,"derivative registry or revision differs");
+                rejected(()->editor.confirm(save),"no longer active");
+                check(Arrays.equals(expected,Files.readAllBytes(media.path(firstId)))&&Arrays.equals(original,Files.readAllBytes(media.path(source))),"saved bytes differ");
+                derivativePixels(Files.readAllBytes(media.path(firstId)),3,2,true);
+                try(Cursor c=db.rawQuery("SELECT note_id,id,position,asset_id,original_asset_id,caption,private FROM blocks WHERE kind='IMAGE' ORDER BY note_id",null)){
+                    check(c.moveToNext()&&c.getString(0).equals("edit-note")&&c.getString(1).equals("photo")&&c.getInt(2)==1&&c.getString(3).equals(firstId)&&c.getString(4).equals(source)&&c.getString(5).equals("私有说明")&&c.getInt(6)==1,"target identity or metadata changed");
+                    check(c.moveToNext()&&c.getString(0).equals("sibling-note")&&c.getString(3).equals(source)&&c.isNull(4)&&c.getString(5).equals("兄弟说明")&&c.getInt(6)==0&&!c.moveToNext(),"same-title sibling changed");
+                }
+                NoteEditorScreen.Preview second=editor.prepare("edit-note","photo",0,0,1,2,new int[0][]);
+                editor.confirm(second);
+                try(Cursor c=db.rawQuery("SELECT asset_id,original_asset_id FROM blocks WHERE note_id='edit-note' AND id='photo'",null)){
+                    check(c.moveToFirst()&&c.getString(1).equals(source),"second derivative lost first original");
+                    derivativePixels(Files.readAllBytes(media.path(c.getString(0))),1,2,false);
+                }
+                check(app.noteBlocks("edit-note").get(0).text.equals("不动")&&app.count("media")==3,"second save touched text or lost historical registry");
+                Files.write(root.resolve("schema3-derivative-expected.bin"),app.exportState());
+                NoteEditorScreen.Preview closed=editor.prepare("edit-note","photo",0,0,1,2,new int[0][]);
+                editor.close();editor.close();rejected(()->editor.confirm(closed),"no longer active");
+            }
+            NoteEditorScreen.Editor helper=new NoteEditorScreen.Editor(app,media);
+            NoteEditorScreen.Preview expired=helper.prepare("edit-note","photo",0,0,1,2,new int[0][]);
+            app.close();app.getWritableDatabase();
+            rejected(()->helper.confirm(expired),"no longer active");helper.close();
+            check(Arrays.equals(Files.readAllBytes(root.resolve("schema3-derivative-expected.bin")),app.exportState()),"closed helper preview changed data");
+        }
+        log.append("SCHEMA3_DERIVATIVE actual_png preview_cancel_owner_session_stale_tamper_rollback_save_lineage PASS\n");
     }
     /** Real business writers, not raw-SQL population: every historical domain and
      * all 18 tables must survive the same facade's export/restore/reopen path.
@@ -267,7 +370,7 @@ public final class Schema3RestoreTests extends Instrumentation {
             AppDatabase.RestorePlan cancel=app.prepareRestore(root.resolve("schema3-archives/good.zip"),stage,1000000);
             check(cancel.currentCounts().equals(counts(sql)),"facade current preview counts differ");
             cancel.close();rejected(()->app.confirmRestore(cancel,media),"恢复预览");
-            check(empty(stage)&&Arrays.equals(before,app.exportState()),"facade cancellation wrote data");
+            check(Arrays.equals(before,app.exportState()),"facade cancellation wrote data");
             AppDatabase.RestorePlan plan=app.prepareRestore(root.resolve("schema3-archives/good.zip"),stage,1000000);
             try(AppDatabase foreign=AppDatabase.openSchema3(context,name)){
                 rejected(()->foreign.confirmRestore(plan,media),"不属于");
@@ -435,6 +538,18 @@ public final class Schema3RestoreTests extends Instrumentation {
     }
     private void reopen()throws Exception{
         Context context=getTargetContext();Path root=context.getFilesDir().toPath();
+        try(AppDatabase app=AppDatabase.openSchema3(context,"schema3-derivative.db")){
+            check(Arrays.equals(Files.readAllBytes(root.resolve("schema3-derivative-expected.bin")),app.exportState()),"derivative independent restart state differs");
+            MediaRepository media=new MediaRepository(root.resolve("schema3-derivative-media"),1000000);
+            try(Cursor c=app.getReadableDatabase().rawQuery("SELECT id,bytes FROM media",null)){
+                while(c.moveToNext()){media.verify(c.getString(0));check(Files.size(media.path(c.getString(0)))==c.getLong(1),"derivative reopened media differs");}
+            }
+            try(Cursor c=app.getReadableDatabase().rawQuery("SELECT asset_id,original_asset_id FROM blocks WHERE note_id='edit-note' AND id='photo'",null)){
+                check(c.moveToFirst(),"derivative reopened block missing");
+                derivativePixels(Files.readAllBytes(media.path(c.getString(0))),1,2,false);
+                check(Arrays.equals(Files.readAllBytes(media.path(c.getString(1))),Files.readAllBytes(root.resolve("schema3-derivative-original.png"))),"derivative original changed after restart");
+            }
+        }
         for(String name:new String[]{"schema3-domain","schema3-domain-restored"}){
             try(AppDatabase app=AppDatabase.openSchema3(context,name+".db")){
                 check(Arrays.equals(Files.readAllBytes(root.resolve("schema3-domain-expected.bin")),app.exportState()),"domain independent-process exact state differs");

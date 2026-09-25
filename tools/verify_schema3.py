@@ -69,18 +69,53 @@ LABELS = {
     ],
 }
 
+# This is a completion marker emitted AFTER the actual PNG/session assertions.
+# It is not a native-UI, late-publication race or distinct reopen certificate.
+DERIVATIVE_MARKER = " actual_png preview_cancel_owner_session_stale_tamper_rollback_save_lineage PASS"
+
+def derivative_markers(text, phase):
+    found = list(re.finditer(r"(?:^|stream=)SCHEMA3_DERIVATIVE([^\r\n]*)", text, re.M))
+    values = [match.group(1) for match in found]
+    expected = [DERIVATIVE_MARKER] if phase == "restore_seed" else []
+    results = list(re.finditer(r"(?:^|stream=)SCHEMA3_RESULT ([^\r\n]+)", text, re.M))
+    passed = values == expected and (not found or
+             (len(results) == 1 and found[0].start() < results[0].start()))
+    return {"status": "PASS" if passed else "NOT_VERIFIED",
+            "observed": values, "expected": expected}
+
+def derivative_summary(devices):
+    # Require BOTH expected APIs, the full successful parent phases, and the
+    # exact independently extracted marker. Never infer success from job exit alone.
+    passed = set(devices) == {"26", "34"}
+    for api in ("26", "34"):
+        phases = devices.get(api, {})
+        seed = phases.get("restore_seed", {})
+        marker = seed.get("derivative_markers", {})
+        passed = (passed and seed.get("status") == "PASS" and
+                  marker.get("status") == "PASS" and
+                  marker.get("observed") == [DERIVATIVE_MARKER] and
+                  marker.get("expected") == [DERIVATIVE_MARKER] and
+                  phases.get("restore_reopen", {}).get("status") == "PASS")
+    return {"status": "PASS" if passed else "NOT_VERIFIED",
+            "scope": "LOCAL_PNG_PREVIEW_AND_GUARDED_SAVE_BACKEND",
+            "native_ui": "NOT_IMPLEMENTED", "late_publication_race": "NOT_TESTED",
+            "reopen_evidence": "PARENT_SUITE_PASS_NO_DISTINCT_DERIVATIVE_MARKER",
+            "real_photos": "NOT_TESTED"}
+
 def observe(text, phase, api):
     labels = re.findall(r"(?:^|stream=)SCHEMA3_PASS ([^\r\n]+)", text, re.M)
     result = re.findall(r"(?:^|stream=)SCHEMA3_RESULT ([^\r\n]+)", text, re.M)
     finished = re.findall(r"^INSTRUMENTATION_CODE: (-?\d+)\s*$", text, re.M)
+    derivative = derivative_markers(text, phase)
     passed = (labels == LABELS[phase] and
               result == [f"{phase} {api} {len(LABELS[phase])} PASS"] and
               finished == ["-1"] and "SCHEMA3_FAILED" not in text and
-              "INSTRUMENTATION_FAILED" not in text)
+              "INSTRUMENTATION_FAILED" not in text and derivative["status"] == "PASS")
     return {"status": "PASS" if passed else "NOT_VERIFIED", "labels": labels,
             "expected_labels": LABELS[phase], "checks": len(labels),
             "log_sha256": hashlib.sha256(text.encode()).hexdigest(),
-            "failure_tail": None if passed else text[-9000:]}
+            "failure_tail": None if passed else text[-9000:],
+            "derivative_markers": derivative}
 
 def registration(text, runner):
     package = "com.supercubegame.pockettodo.v12.preview"
@@ -95,6 +130,8 @@ def selftest():
     controls = {}
     for phase, labels in LABELS.items():
         records = "".join("SCHEMA3_PASS " + x + "\n" for x in labels)
+        if phase == "restore_seed":
+            records += "SCHEMA3_DERIVATIVE" + DERIVATIVE_MARKER + "\n"
         marker = f"SCHEMA3_RESULT {phase} 26 {len(labels)} PASS\n"
         good = records + marker + "INSTRUMENTATION_CODE: -1\n"
         assert observe(good, phase, 26)["status"] == "PASS"
@@ -134,7 +171,60 @@ def selftest():
     controls["registration"] = {"positive": 3, "negative": len(bad) + 1}
     controls["native_failure_diagnostics"] = diagnostics_selftest()
     controls["default_schema3_ui"] = native_schema3_selftest()
+    controls["derivative_backend"] = derivative_selftest()
     return controls
+
+def derivative_selftest():
+    import copy
+    phase = "restore_seed"
+    records = "".join("SCHEMA3_PASS " + x + "\n" for x in LABELS[phase])
+    marker = "SCHEMA3_DERIVATIVE" + DERIVATIVE_MARKER + "\n"
+    result = f"SCHEMA3_RESULT {phase} 26 {len(LABELS[phase])} PASS\n"
+    finish = "INSTRUMENTATION_CODE: -1\n"
+    good = records + marker + result + finish
+    for text in (good, good.replace("\n", "\r\n"), "stream=" + good):
+        assert observe(text, phase, 26)["status"] == "PASS"
+    bad = {
+        "missing": good.replace(marker, "", 1),
+        "duplicate": good.replace(marker, marker + marker, 1),
+        "failure": good.replace(marker, marker.replace(" PASS", " FAIL"), 1),
+        "partial": good.replace("rollback_save_lineage", "rollback_save"),
+        "prefix_only": good.replace(marker, "SCHEMA3_DERIVATIVE\n", 1),
+        "unknown_suffix": good.replace(marker, marker.rstrip("\n") + " extra\n", 1),
+        "quoted": good.replace(marker, "quoted: " + marker, 1),
+        "after_result": records + result + marker + finish,
+        "marker_only": marker + finish,
+    }
+    for name, text in bad.items():
+        assert text != good, "derivative control did not mutate: " + name
+        assert observe(text, phase, 26)["status"] != "PASS", "derivative observer missed: " + name
+    # A stray success in another phase is not evidence for this phase.
+    for other in ("seed", "reopen", "restore_reopen"):
+        text = "".join("SCHEMA3_PASS " + x + "\n" for x in LABELS[other])
+        text += marker + f"SCHEMA3_RESULT {other} 26 {len(LABELS[other])} PASS\n" + finish
+        assert observe(text, other, 26)["status"] != "PASS", "misplaced derivative marker accepted"
+    devices = {}
+    for api in (26, 34):
+        reopened = "".join("SCHEMA3_PASS " + x + "\n" for x in LABELS["restore_reopen"])
+        reopened += f'SCHEMA3_RESULT restore_reopen {api} {len(LABELS["restore_reopen"])} PASS\n' + finish
+        devices[str(api)] = {
+            "restore_seed": observe(good.replace("restore_seed 26 ", f"restore_seed {api} "), phase, api),
+            "restore_reopen": observe(reopened, "restore_reopen", api)}
+    summary = derivative_summary(devices)
+    assert summary["status"] == "PASS"
+    assert summary["native_ui"] == "NOT_IMPLEMENTED" and summary["late_publication_race"] == "NOT_TESTED"
+    assert summary["reopen_evidence"] == "PARENT_SUITE_PASS_NO_DISTINCT_DERIVATIVE_MARKER"
+    invalid = [{}, {"26": devices["26"]}, dict(devices, unexpected={})]
+    for api in ("26", "34"):
+        for key in ("restore_seed", "restore_reopen"):
+            mutant = copy.deepcopy(devices);mutant[api][key]["status"] = "NOT_VERIFIED";invalid.append(mutant)
+        for key, value in (("status", "NOT_VERIFIED"), ("observed", []), ("expected", [])):
+            mutant = copy.deepcopy(devices);mutant[api]["restore_seed"]["derivative_markers"][key] = value;invalid.append(mutant)
+    for value in invalid:
+        assert derivative_summary(value)["status"] != "PASS", "aggregate derivative observer missed"
+    return {"log_positive": 3, "log_negative": len(bad) + 3,
+            "aggregate_positive": 1, "aggregate_negative": len(invalid),
+            "scope": "PYTHON_LOG_AND_REPORT_CONTROLS_NOT_COMPILED_PRODUCT_MUTANTS"}
 
 NATIVE_SCHEMA3_LABELS = [
     "default native UI uses schema3 with exact nine-column block layout",
@@ -432,6 +522,8 @@ def report():
             text = path.read_text(errors="replace") if path.exists() else ""
             devices[str(api)][phase] = observe(text, phase, api)
     passed = all(p["status"] == "PASS" for phases in devices.values() for p in phases.values())
+    derivative = derivative_summary(devices)
+    passed = passed and derivative["status"] == "PASS"
     doc = {"commit": source, "run_id": run, "status": "PASS" if passed else "NOT_VERIFIED",
            "scope": "SCHEMA3_STORAGE_ARCHIVE_GUARDED_RESTORE_AND_DEFAULT_NATIVE_UI",
            "devices": devices, "observer_selftests": controls, "release_ready": False,
@@ -439,7 +531,7 @@ def report():
                                      "guarded_live_restore": "PASS" if passed else "NOT_VERIFIED",
                                      "default_ui_activation": "PASS" if all(d["default_ui"]["status"] == "PASS" for d in devices.values()) else "NOT_VERIFIED"},
            "configured_default_app_schema": 3,
-           "guarded_derivative_plan": "NOT_IMPLEMENTED"}
+           "guarded_derivative_plan": derivative}
     data = (json.dumps(doc, ensure_ascii=False, indent=2) + "\n").encode()
     endpoint = "https://api.github.com/repos/" + os.environ["GITHUB_REPOSITORY"] + "/"
     def api(path, method="GET", body=None):

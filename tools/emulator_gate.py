@@ -33,7 +33,7 @@ REQUIRED = {
         'restored media has exact source bytes',
         'restore replaces sentinel rather than merging and preserves todo order',
         'restore retains ordered choices and archived field values',
-        'restored field-note relationship',
+        'restore retains field-note relationship',
         'restored legacy import journal still prevents duplicate import',
         'restored money journal still prevents duplicate batch',
         'restored undo tombstone rejects resurrection',

@@ -327,9 +327,18 @@ public final class NoteEditorScreen {
             mark.setColor(0x99a33743);
         }
         void attach(TextView cropReport,TextView maskReport){this.cropReport=cropReport;this.maskReport=maskReport;}
-        void setRedact(boolean value){redact=value;}
-        void setLocked(boolean value){locked=value;}
-        void reset(){if(locked)return;crop=null;masks.clear();dragging=false;report();invalidate();}
+        void setRedact(boolean value){if(redact!=value)cancelDrag();redact=value;}
+        void setLocked(boolean value){if(value)cancelDrag();locked=value;}
+        void reset(){if(locked)return;cancelDrag();crop=null;masks.clear();report();invalidate();}
+        private void parentGesture(boolean owned){
+            if(getParent()!=null)getParent().requestDisallowInterceptTouchEvent(owned);
+        }
+        private void cancelDrag(){dragging=false;parentGesture(false);invalidate();}
+        @Override protected void onDetachedFromWindow(){cancelDrag();super.onDetachedFromWindow();}
+        @Override protected void onSizeChanged(int w,int h,int oldw,int oldh){
+            if(w!=oldw||h!=oldh)cancelDrag();
+            super.onSizeChanged(w,h,oldw,oldh);
+        }
         Rect crop(){return crop==null?null:new Rect(crop);}
         List<Rect> masks(){List<Rect> copy=new ArrayList<>();for(Rect m:masks)copy.add(new Rect(m));return copy;}
         private float scale(){return Math.min(getWidth()/(float)preview.getWidth(),getHeight()/(float)preview.getHeight());}
@@ -343,12 +352,26 @@ public final class NoteEditorScreen {
                 offsetX()+area.right*preview.getWidth()/(float)srcW*s,offsetY()+area.bottom*preview.getHeight()/(float)srcH*s);
         }
         @Override public boolean onTouchEvent(MotionEvent event){
-            if(locked)return true;
+            if(locked){cancelDrag();return true;}
+            // A selection is one pointer stream, never a scroll or a pinch.
+            // Cancellation keeps the last committed crop/masks, not the draft.
+            if(event.getPointerCount()!=1){cancelDrag();return true;}
             switch(event.getActionMasked()){
-                case MotionEvent.ACTION_DOWN:downX=event.getX();downY=event.getY();moveX=downX;moveY=downY;dragging=true;return true;
-                case MotionEvent.ACTION_MOVE:moveX=event.getX();moveY=event.getY();invalidate();return true;
+                case MotionEvent.ACTION_DOWN:
+                    if(getWidth()<=0||getHeight()<=0)return false;
+                    // Drawing-only: avoid frame-batched/resampled input for pixel
+                    // selection. This request ends with the platform touch stream.
+                    requestUnbufferedDispatch(event);parentGesture(true);
+                    downX=event.getX();downY=event.getY();moveX=downX;moveY=downY;dragging=true;invalidate();return true;
+                case MotionEvent.ACTION_CANCEL:
+                case MotionEvent.ACTION_POINTER_DOWN:
+                case MotionEvent.ACTION_POINTER_UP:
+                    cancelDrag();return true;
+                case MotionEvent.ACTION_MOVE:
+                    if(dragging){moveX=event.getX();moveY=event.getY();invalidate();}
+                    return true;
                 case MotionEvent.ACTION_UP:
-                    if(!dragging)return true;dragging=false;
+                    if(!dragging)return true;dragging=false;parentGesture(false);
                     int l=Math.round(Math.min(sourceX(downX),sourceX(event.getX())));
                     int t=Math.round(Math.min(sourceY(downY),sourceY(event.getY())));
                     int r=Math.round(Math.max(sourceX(downX),sourceX(event.getX())));

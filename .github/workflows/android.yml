@@ -156,7 +156,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 - <<'PY'
+          set -o pipefail
+          python3 - <<'PY' 2>&1 | tee collected/publication.log
           import base64,hashlib,json,os,re,urllib.request,urllib.error
           from pathlib import Path
           root=Path('collected')
@@ -338,7 +339,143 @@ jobs:
           (scope/'legacy-schema2-result.json').write_text(json.dumps({'commit':source,'run_id':run,'status':legacy_status,'evidence':legacy_asset}))
           print('LEGACY_SCHEMA2_EVIDENCE '+legacy_asset['url'])
           PY
+      - name: Publish independent matrix receipt even when screenshot publication fails
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import base64,copy,hashlib,json,os,tempfile,urllib.request,urllib.error
+          from pathlib import Path
+          source,run=os.environ['GITHUB_SHA'],os.environ['GITHUB_RUN_ID']
+          required=[
+            'exact_selected_zip_members','private_and_unselected_text_absent',
+            'document_order_and_duplicate_references','literal_markdown_html_text',
+            'share_redaction_pixels_preserved','share_source_bytes_unchanged',
+            'frozen_input_ownership_and_repeatability','empty_selection_refused_not_all',
+            'private_only_selection_refused','unknown_selection_refused',
+            'duplicate_identity_refused','null_selection_refused',
+            'selected_invalid_image_refuses_entire_export',
+            'unselected_image_never_decoded_or_packaged',
+            'selected_original_is_reencoded_not_copied','share_source_budget_retained',
+            'no_original_named_zip_member','share_text_budget_refuses_not_truncates']
+          def observe(value,api):
+            if not isinstance(value,dict):return False
+            share=value.get('markdown_share')
+            labels=value.get('labels')
+            return (value.get('status')=='PASS' and value.get('commit')==source and
+              value.get('run_id')==run and type(value.get('api')) is int and value['api']==api and
+              value.get('scope')=='ANDROID_APK_CODEC_SHELL_NOT_APP_UI_OR_PERSISTENCE' and
+              type(value.get('checks')) is int and value['checks']==29 and
+              isinstance(labels,list) and len(labels)==29 and all(isinstance(x,str) for x in labels) and len(set(labels))==29 and
+              value.get('host_negative_controls')==4 and value.get('device_apk_readback')=='EXACT_BYTES' and
+              isinstance(share,dict) and share.get('status')=='PASS' and
+              type(share.get('checks')) is int and share['checks']==len(required) and
+              share.get('labels')==required and share.get('independent_host_png_checks')==2 and
+              share.get('scope')=='READ_ONLY_ZIP_BACKEND_NOT_UI_STALE_PREVIEW_OR_RECEIVER')
+          def matrix(values):
+            return (isinstance(values,dict) and set(values)=={'26','34'} and
+                    all(observe(values[str(api)],api) for api in (26,34)))
+          # Observer controls only: these synthetic receipts do not certify Android.
+          sample={'status':'PASS','commit':source,'run_id':run,'api':26,
+            'scope':'ANDROID_APK_CODEC_SHELL_NOT_APP_UI_OR_PERSISTENCE','checks':29,
+            'labels':['codec-'+str(i) for i in range(29)],'host_negative_controls':4,
+            'device_apk_readback':'EXACT_BYTES','markdown_share':{'status':'PASS',
+              'checks':18,'labels':required[:],'independent_host_png_checks':2,
+              'scope':'READ_ONLY_ZIP_BACKEND_NOT_UI_STALE_PREVIEW_OR_RECEIVER'}}
+          controls=0
+          def check(value):
+            global controls
+            assert value,'independent share receipt observer selftest failed'
+            controls+=1
+          check(observe(sample,26))
+          for index in range(len(required)):
+            bad=copy.deepcopy(sample);bad['markdown_share']['labels'][index]='unrelated-'+str(index)
+            check(not observe(bad,26))
+          for key,value in [('commit','wrong-source'),('run_id','wrong-run'),('api',34),
+                            ('api',True),('status','FAIL'),('checks',28),
+                            ('host_negative_controls',3),('device_apk_readback','NOT_OBSERVED'),
+                            ('labels',[None]*29),('markdown_share',[])]:
+            bad=copy.deepcopy(sample);bad[key]=value;check(not observe(bad,26))
+          for key,value in [('checks',17),('labels',required[:-1]),('labels',required[::-1]),
+                            ('labels',required[:-1]+[required[0]]),('status','NOT_VERIFIED'),
+                            ('independent_host_png_checks',1),('scope','UI_VERIFIED')]:
+            bad=copy.deepcopy(sample);bad['markdown_share'][key]=value;check(not observe(bad,26))
+          pair={'26':copy.deepcopy(sample),'34':copy.deepcopy(sample)};pair['34']['api']=34
+          check(matrix(pair));check(not matrix({'26':sample}));check(not matrix({'26':sample,'34':sample}))
+          check(not matrix(dict(pair,extra=sample)));check(not observe(None,26))
+          before=copy.deepcopy(sample);observe(sample,26);check(sample==before)
+          # Each expected path is fixed. Missing/malformed/oversized input is explicit,
+          # not skipped; a broken screenshot publisher cannot hide already-run suites.
+          root=Path('collected')
+          def read_result(path):
+            if not path.is_file():return {'status':'NOT_OBSERVED','path':str(path)}
+            size=path.stat().st_size
+            if size>2*1024*1024:return {'status':'NOT_VERIFIED','error':'JSON exceeds 2 MiB receipt budget','bytes':size}
+            data=path.read_bytes()
+            try:
+              value=json.loads(data)
+              if not isinstance(value,dict):raise ValueError('result is not an object')
+              return value
+            except (ValueError,UnicodeError) as exc:
+              return {'status':'NOT_VERIFIED','error':str(exc),'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()}
+          def tail(path):
+            if not path.is_file():return {'status':'NOT_OBSERVED'}
+            size=path.stat().st_size
+            with path.open('rb') as stream:
+              stream.seek(max(0,size-24000));data=stream.read()
+            return {'status':'OBSERVED_NOT_ACCEPTANCE','bytes':size,'truncated':size>24000,
+                    'tail':data.decode('utf-8',errors='replace')}
+          with tempfile.TemporaryDirectory(prefix='receipt-controls-') as temporary:
+            fixture=Path(temporary)/'result.json'
+            check(read_result(fixture)['status']=='NOT_OBSERVED')
+            for invalid in ('not json','[]','null','"string"'):
+              fixture.write_text(invalid);check(read_result(fixture)['status']=='NOT_VERIFIED')
+            fixture.write_bytes(b'\xff');check(read_result(fixture)['status']=='NOT_VERIFIED')
+            fixture.write_bytes(b' '*(2*1024*1024+1));check('budget' in read_result(fixture)['error'])
+            fixture.write_text(json.dumps(sample));check(observe(read_result(fixture),26))
+            fixture.write_bytes(b'x'*25000+b'FINAL_TRACEBACK_SENTINEL')
+            bounded=tail(fixture)
+            check(bounded['truncated'] and len(bounded['tail'])==24000 and bounded['tail'].endswith('FINAL_TRACEBACK_SENTINEL'))
+            fixture.write_bytes(b'');check(tail(fixture)['tail']=='' and not tail(fixture)['truncated'])
+          print('SHARE_RECEIPT_OBSERVER_SELFTEST '+str(controls)+' PASS; synthetic parser and file controls only',flush=True)
+          devices={};codecs={}
+          for api in (26,34):
+            folder=root/('database-api-'+str(api))
+            codec=read_result(folder/'native-ui/codec-result.json');codecs[str(api)]=codec
+            logs={}
+            for name in ('build.log','ui.log','emulator.log'):
+              # The preceding publisher may have renamed only part of the matrix.
+              paths=[folder/name,folder/(str(api)+'-'+name)]
+              logs[name]={p.name:tail(p) for p in paths if p.is_file()} or {'status':'NOT_OBSERVED'}
+            devices[str(api)]={'codec':codec,'markdown_share_observer':'PASS' if observe(codec,api) else 'NOT_VERIFIED',
+              'native':read_result(folder/'native-ui/native-result.json'),'logs':logs}
+          passed=matrix(codecs)
+          doc={'commit':source,'run_id':run,'scope':'INDEPENDENT_MATRIX_RECEIPT_NOT_DELIVERY_ACCEPTANCE',
+            'markdown_share_status':'PASS' if passed else 'NOT_VERIFIED','devices':devices,
+            'publication_log':tail(root/'publication.log'),'observer_selftests':controls,
+            'release_ready':False,'durable_upgrade_ready':False}
+          data=(json.dumps(doc,ensure_ascii=False,indent=2)+'\n').encode()
+          repo=os.environ['GITHUB_REPOSITORY']
+          def api(path,method='GET',body=None):
+            request=urllib.request.Request('https://api.github.com/repos/'+repo+'/'+path,
+              data=None if body is None else json.dumps(body).encode(),method=method,
+              headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+            with urllib.request.urlopen(request,timeout=30) as response:return json.load(response)
+          path='reports/matrix-receipt-'+source+'-'+run+'.json'
+          body={'message':'Record independent matrix receipt, not delivery acceptance',
+                'branch':'evidence','content':base64.b64encode(data).decode()}
+          try:body['sha']=api('contents/'+path+'?ref=evidence')['sha']
+          except urllib.error.HTTPError as exc:
+            if exc.code!=404:raise
+          written=api('contents/'+path,'PUT',body)
+          actual=api('contents/'+path+'?ref='+written['commit']['sha'])
+          assert base64.b64decode(actual['content'])==data,'matrix receipt exact readback differs'
+          print('MATRIX_RECEIPT '+actual['html_url'],flush=True)
+          assert passed,'Markdown backend checks missing/failed; receipt published, not a native sharing acceptance'
+          PY
       - name: Publish and read back evidence
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           NEEDS_JSON: ${{ toJSON(needs) }}

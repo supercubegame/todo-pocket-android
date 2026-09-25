@@ -33,7 +33,7 @@ REQUIRED = {
         'restored media has exact source bytes',
         'restore replaces sentinel rather than merging and preserves todo order',
         'restore retains ordered choices and archived field values',
-        'restore retains field-note relationship',
+        'restored field-note relationship',
         'restored legacy import journal still prevents duplicate import',
         'restored money journal still prevents duplicate batch',
         'restored undo tombstone rejects resurrection',
@@ -687,6 +687,7 @@ public class ImageImportFixture {
         # proof uses those reported values, never fixture-hardcoded geometry.
         derive_base=state_read('derive-base.db')
         derive_block=selected_blocks[2][1]
+        derive_geometry=[]
         def daily_note():
             note_screen();tap('切换笔记');tap('1. Daily reward');ready()
         def open_derive():
@@ -705,13 +706,20 @@ public class ImageImportFixture {
                 return (round(bx1+ox+sx*pw/sw*sc),round(by1+oy+sy*ph/sh*sc))
             def drag(a,b,c,d):
                 x1,y1=screen(a,b);x2,y2=screen(c,d)
+                derive_geometry.append({'source':[sw,sh],'preview':[pw,ph],
+                    'requested':[a,b,c,d],'screen':[x1,y1,x2,y2],
+                    'canvas':desc('derive-canvas').get('bounds')})
                 shell('input','swipe',str(x1),str(y1),str(x2),str(y2),'400');time.sleep(.3)
             return (sw,sh),drag
         def wait_crop():
             deadline=time.monotonic()+20
             while time.monotonic()<deadline:
                 found=re.fullmatch(r'裁剪 (\d+),(\d+) → (\d+),(\d+)',desc('derive-crop').get('text') or '')
-                if found:return tuple(map(int,found.groups()))
+                if found:
+                    observed=tuple(map(int,found.groups()))
+                    derive_geometry[-1]['observed_crop']=observed
+                    print('DERIVATIVE_GEOMETRY '+json.dumps(derive_geometry[-1]),flush=True)
+                    return observed
                 time.sleep(.25)
             raise AssertionError('crop report never appeared')
         def wait_report(desc_id,value):
@@ -781,14 +789,31 @@ public class VerifyDerivative {
   if(out.getWidth()!=r-l||out.getHeight()!=b-t) throw new AssertionError("output dimensions differ from reported crop");
   java.util.List<int[]> masks=new java.util.ArrayList<>();
   for(int i=6;i+3<a.length;i+=4) masks.add(new int[]{Integer.parseInt(a[i])-l,Integer.parseInt(a[i+1])-t,Integer.parseInt(a[i+2])-l,Integer.parseInt(a[i+3])-t});
-  outer: for(int y=0;y<out.getHeight();y++) for(int x=0;x<out.getWidth();x++){
-   for(int[] m:masks) if(x>=m[0]&&x<m[2]&&y>=m[1]&&y<m[3]){
-    if(out.getRGB(x,y)!=0xff000000) throw new AssertionError("mask not opaque black at "+x+","+y);
-    continue outer;
-   }
-   if(out.getRGB(x,y)!=src.getRGB(l+x,t+y)) throw new AssertionError("pixel differs at "+x+","+y);
-  }
+  verify(src,out,l,t,masks);
+  selftest();
   System.out.println("DERIVATIVE_PIXELS_PASS "+out.getWidth()+"x"+out.getHeight());
+ }
+ static void verify(BufferedImage src,BufferedImage out,int l,int t,java.util.List<int[]> masks){
+  for(int y=0;y<out.getHeight();y++) for(int x=0;x<out.getWidth();x++){
+   boolean masked=false;
+   for(int[] m:masks) if(x>=m[0]&&x<m[2]&&y>=m[1]&&y<m[3]){masked=true;break;}
+   int expected=masked?0xff000000:src.getRGB(l+x,t+y);
+   if(out.getRGB(x,y)!=expected) throw new AssertionError("pixel differs at "+x+","+y);
+  }
+ }
+ static void selftest(){
+  BufferedImage src=new BufferedImage(4,1,BufferedImage.TYPE_INT_ARGB);
+  BufferedImage out=new BufferedImage(4,1,BufferedImage.TYPE_INT_ARGB);
+  for(int x=0;x<4;x++){src.setRGB(x,0,0xff21785f);out.setRGB(x,0,x==1||x==2?0xff000000:0xff21785f);}
+  java.util.List<int[]> masks=java.util.Collections.singletonList(new int[]{1,0,3,1});
+  verify(src,out,0,0,masks);
+  for(int x:new int[]{2,3}){
+   int old=out.getRGB(x,0);out.setRGB(x,0,0xffffffff);
+   boolean rejected=false;
+   try{verify(src,out,0,0,masks);}catch(AssertionError expected){rejected=true;}
+   out.setRGB(x,0,old);
+   if(!rejected)throw new AssertionError("pixel checker skipped corruption after first mask at "+x);
+  }
  }
 }
 ''')
@@ -817,6 +842,7 @@ public class VerifyDerivative {
         result.update(derivative_ui='NATIVE_CROP_MASK_UI_SAVE_CANCEL_RESTART_PASS')
     except Exception as exc:
         result={'status':'FAIL','api':API,'count':len(checks),'checks':checks,'error':repr(exc),'screenshots':shots,'infra_retries':infra_retries,'release_ready':False}
+        if 'derive_geometry' in locals():result['derivative_geometry']=derive_geometry
         try: shot('failure.png')
         except Exception: pass
         (out/'native-result.json').write_text(json.dumps(result,ensure_ascii=False,indent=2))

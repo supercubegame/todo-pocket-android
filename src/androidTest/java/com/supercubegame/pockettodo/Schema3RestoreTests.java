@@ -249,7 +249,115 @@ public final class Schema3RestoreTests extends Instrumentation {
             rejected(()->helper.confirm(expired),"no longer active");helper.close();
             check(Arrays.equals(Files.readAllBytes(root.resolve("schema3-derivative-expected.bin")),app.exportState()),"closed helper preview changed data");
         }
+        derivativeRaceChecks();
         log.append("SCHEMA3_DERIVATIVE actual_png preview_cancel_owner_session_stale_tamper_rollback_save_lineage PASS\n");
+    }
+    /** Pause the real publication monitor, not a product test hook. An independent
+     * helper writes only after the worker is observed blocked inside publication.
+     * The unchanged control crosses exactly the same barrier and must save.
+     */
+    private void derivativeRaceChecks()throws Exception{
+        Context context=getTargetContext();Path root=context.getFilesDir().toPath();
+        for(boolean mutate:new boolean[]{false,true}){
+            String stem=mutate?"schema3-image-race-stale":"schema3-image-race-control";
+            context.deleteDatabase(stem+".db");
+            Path directory=root.resolve(stem+"-media");
+            MediaRepository media=new MediaRepository(directory,1000000);
+            byte[] original=photoFixture();String source=media.copy(new ByteArrayInputStream(original));
+            try(AppDatabase app=AppDatabase.openSchema3(context,stem+".db");
+                NoteEditorScreen.Editor editor=new NoteEditorScreen.Editor(app,media)){
+                app.addCategory(1,"图片");app.addActivity(1,1,0,"并发");
+                app.createNote("target",1,"同名");app.createNote("sibling",1,"同名");
+                app.registerMedia(source,"image/png",original.length);
+                app.saveNote("target",Arrays.asList(NoteDocument.Block.text("text","保留",false),NoteDocument.Block.image("photo",source,"原说明",true)));
+                app.saveNote("sibling",Arrays.asList(NoteDocument.Block.image("photo",source,"兄弟说明",false)));
+                SQLiteDatabase db=app.getWritableDatabase();long rev=revision(db);
+                byte[] before=app.exportState();
+                NoteEditorScreen.Preview plan=editor.prepare("target","photo",1,0,4,2,new int[][]{{1,0,2,2}});
+                byte[] output=plan.png();String derived=MediaRepository.digest(output);
+                derivativePixels(output,3,2,true);
+                check(!derived.equals(source)&&!Files.exists(directory.resolve(derived)),"race output already published");
+                // Independent expected SQL delta, rolled back before the actual save.
+                byte[] expected;
+                db.beginTransaction();
+                try{
+                    db.execSQL("INSERT INTO media VALUES(?,?,?)",new Object[]{derived,"image/png",output.length});
+                    db.execSQL("UPDATE blocks SET asset_id=?,original_asset_id=? WHERE note_id='target' AND id='photo'",new Object[]{derived,source});
+                    db.execSQL("UPDATE revision SET value=? WHERE id=1",new Object[]{rev+1});
+                    expected=app.exportState();
+                }finally{db.endTransaction();}
+                check(Arrays.equals(before,app.exportState()),"race expected-state fixture leaked writes");
+                java.util.concurrent.atomic.AtomicReference<Throwable> failure=new java.util.concurrent.atomic.AtomicReference<>();
+                Thread worker=new Thread(()->{try{editor.confirm(plan);}catch(Throwable error){failure.set(error);}},"image-publication-race");
+                worker.setDaemon(true);
+                byte[] externalState=null;
+                try{
+                    synchronized(MediaRepository.class){
+                        worker.start();
+                        long deadline=android.os.SystemClock.elapsedRealtime()+15000;boolean parked=false;
+                        while(android.os.SystemClock.elapsedRealtime()<deadline&&worker.isAlive()){
+                            if(worker.getState()==Thread.State.BLOCKED){
+                                for(StackTraceElement frame:worker.getStackTrace()){
+                                    if(frame.getClassName().equals(MediaRepository.class.getName())&&frame.getMethodName().equals("publishNewFile"))parked=true;
+                                }
+                            }
+                            if(parked)break;
+                            Thread.sleep(5);
+                        }
+                        check(parked,"image save did not reach publication barrier: "+failure.get());
+                        check(!Files.exists(directory.resolve(derived)),"image published before barrier");
+                        // Do not call app/editor while worker owns their monitors.
+                        try(AppDatabase external=AppDatabase.openSchema3(context,stem+".db")){
+                            check(Arrays.equals(before,external.exportState())&&revision(external.getReadableDatabase())==rev,"image barrier state differs");
+                            if(mutate)external.getWritableDatabase().execSQL("UPDATE notes SET title='图片早检查之后的写入' WHERE id='sibling'");
+                            externalState=external.exportState();
+                            check(revision(external.getReadableDatabase())==rev,"image external writer changed revision");
+                            check(mutate?!Arrays.equals(before,externalState):Arrays.equals(before,externalState),"image race mutation control invalid");
+                        }
+                    }
+                }finally{
+                    worker.join(15000);
+                    check(!worker.isAlive(),"image worker did not finish after barrier release");
+                }
+                Throwable actual=failure.get();
+                if(mutate){
+                    check(actual instanceof IllegalStateException&&actual.getMessage().contains("Database changed"),"image final stale guard not observed: "+actual);
+                    check(Arrays.equals(externalState,app.exportState())&&revision(db)==rev&&app.count("media")==1,"image save overwrote external state");
+                }else{
+                    check(actual==null,"image no-write barrier control failed: "+actual);
+                    check(Arrays.equals(expected,app.exportState())&&revision(db)==rev+1&&app.count("media")==2,"image barrier save differs from exact expected delta");
+                }
+                media.verify(source);media.verify(derived);
+                check(Arrays.equals(original,Files.readAllBytes(media.path(source)))&&Arrays.equals(output,Files.readAllBytes(media.path(derived))),"image race bytes differ");
+                try(java.util.stream.Stream<Path> files=Files.list(directory)){
+                    check(files.count()==2,"image race retained temporary or lost published file");
+                }
+                check(!db.inTransaction(),"image race left transaction active");
+                byte[] after=app.exportState();
+                rejected(()->editor.confirm(plan),"no longer active");rejected(()->plan.png(),"no longer active");
+                plan.close();check(Arrays.equals(after,app.exportState()),"image race consumed token changed state");
+                Files.write(root.resolve(stem+"-expected.bin"),after);
+                Files.write(root.resolve(stem+"-source.png"),original);Files.write(root.resolve(stem+"-output.png"),output);
+            }
+        }
+        log.append("SCHEMA3_IMAGE_LATE_RACE positive=PASS after_early_check=PROVEN same_revision_external_write=REFUSED exact_state_and_bytes=PASS\n");
+    }
+    private void derivativeRaceReopen()throws Exception{
+        Path root=getTargetContext().getFilesDir().toPath();
+        for(boolean stale:new boolean[]{false,true}){
+            String stem=stale?"schema3-image-race-stale":"schema3-image-race-control";
+            try(AppDatabase app=AppDatabase.openSchema3(getTargetContext(),stem+".db")){
+                check(Arrays.equals(Files.readAllBytes(root.resolve(stem+"-expected.bin")),app.exportState()),"image race separate-process state differs");
+                byte[] original=Files.readAllBytes(root.resolve(stem+"-source.png")),output=Files.readAllBytes(root.resolve(stem+"-output.png"));
+                MediaRepository media=new MediaRepository(root.resolve(stem+"-media"),1000000);
+                String source=MediaRepository.digest(original),derived=MediaRepository.digest(output);
+                media.verify(source);media.verify(derived);
+                check(Arrays.equals(original,Files.readAllBytes(media.path(source)))&&Arrays.equals(output,Files.readAllBytes(media.path(derived))),"image race separate-process bytes differ");
+                derivativePixels(Files.readAllBytes(media.path(derived)),3,2,true);
+                check(app.count("media")== (stale?1:2),"image race separate-process registry differs");
+            }
+        }
+        log.append("SCHEMA3_IMAGE_LATE_RACE_REOPEN exact_state_and_bytes=PASS\n");
     }
     /** Real business writers, not raw-SQL population: every historical domain and
      * all 18 tables must survive the same facade's export/restore/reopen path.
@@ -538,6 +646,7 @@ public final class Schema3RestoreTests extends Instrumentation {
     }
     private void reopen()throws Exception{
         Context context=getTargetContext();Path root=context.getFilesDir().toPath();
+        derivativeRaceReopen();
         try(AppDatabase app=AppDatabase.openSchema3(context,"schema3-derivative.db")){
             check(Arrays.equals(Files.readAllBytes(root.resolve("schema3-derivative-expected.bin")),app.exportState()),"derivative independent restart state differs");
             MediaRepository media=new MediaRepository(root.resolve("schema3-derivative-media"),1000000);

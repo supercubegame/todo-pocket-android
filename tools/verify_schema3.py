@@ -324,30 +324,61 @@ NATIVE_SCHEMA3_LABELS = [
     "native schema3 survives SAF restore and all ordinary edits without invented image origins",
 ]
 
+# Touch crop/redaction UI over the guarded derivative backend. Deleting any of
+# these device checks must turn the whole report NOT_VERIFIED, never silent green.
+NATIVE_DERIVATIVE_LABELS = [
+    "derivative dialog shows actual decoded source dimensions with empty selection",
+    "derivative preview without selection rejected visibly",
+    "derivative cancel leaves every table and original bytes unchanged",
+    "corner drag maps to full source extent within touch rounding",
+    "derivative oversize selection rejected with visible pixel budget",
+    "derivative reset clears selection reports",
+    "touch crop maps onto intended source rectangle within rounding",
+    "redact mode adds exactly one reported mask",
+    "touch mask maps onto intended source rectangle within rounding",
+    "derivative preview renders exact reported output dimensions",
+    "derived block preserves note owner position kind empty caption public flag and records exact original",
+    "derived PNG registered with exact mime and byte length",
+    "derivative save preserves all unrelated tables",
+    "original imported PNG bytes unchanged after derivative save",
+    "sibling blocks across notes remain exact after derivative save",
+    "independent decoder proves exact cropped pixels and opaque mask for reported rects",
+    "derived image renders with working entry after process restart",
+    "derivative state and both images survive stopped-process restart exactly",
+    "re-derived preview renders for abandonment check",
+    "abandoned second preview writes nothing and keeps published derivative",
+]
+
 def native_schema3(result, api):
     checks = result.get("checks", [])
+    required = NATIVE_SCHEMA3_LABELS + NATIVE_DERIVATIVE_LABELS
     passed = (result.get("status") == "PASS" and result.get("api") == api and
               result.get("default_app_schema") == 3 and
               result.get("default_schema3_ui") == "NATIVE_SCHEMA3_UI_PASS" and
               isinstance(checks, list) and result.get("count") == len(checks) and
-              all(checks.count(label) == 1 for label in NATIVE_SCHEMA3_LABELS) and
+              all(checks.count(label) == 1 for label in required) and
               result.get("saf_restore") == "NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS" and
-              result.get("image_metadata") == "CAPTION_PRIVATE_CANCEL_EDIT_CLEAR_RESTART_PASS")
+              result.get("image_metadata") == "CAPTION_PRIVATE_CANCEL_EDIT_CLEAR_RESTART_PASS" and
+              result.get("derivative_ui") == "NATIVE_CROP_MASK_UI_SAVE_CANCEL_RESTART_PASS")
     return {"status": "PASS" if passed else "NOT_VERIFIED", "evidence": result}
 
 def native_schema3_selftest():
+    required = NATIVE_SCHEMA3_LABELS + NATIVE_DERIVATIVE_LABELS
     good = {"status": "PASS", "api": 26, "default_app_schema": 3,
             "default_schema3_ui": "NATIVE_SCHEMA3_UI_PASS",
-            "checks": list(NATIVE_SCHEMA3_LABELS), "count": 2,
+            "checks": list(required), "count": len(required),
             "saf_restore": "NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS",
-            "image_metadata": "CAPTION_PRIVATE_CANCEL_EDIT_CLEAR_RESTART_PASS"}
+            "image_metadata": "CAPTION_PRIVATE_CANCEL_EDIT_CLEAR_RESTART_PASS",
+            "derivative_ui": "NATIVE_CROP_MASK_UI_SAVE_CANCEL_RESTART_PASS"}
     assert native_schema3(good, 26)["status"] == "PASS"
     bad = [{}, dict(good, status="FAIL"), dict(good, api=34),
            dict(good, default_app_schema=2), dict(good, default_schema3_ui=""),
            dict(good, checks=good["checks"][:1], count=1),
-           dict(good, checks=good["checks"]+good["checks"], count=4),
-           dict(good, count=3), dict(good, saf_restore="NOT_VERIFIED"),
-           dict(good, image_metadata="NOT_VERIFIED")]
+           dict(good, checks=good["checks"]+good["checks"], count=2*len(required)),
+           dict(good, count=len(required)+1), dict(good, saf_restore="NOT_VERIFIED"),
+           dict(good, image_metadata="NOT_VERIFIED"),
+           dict(good, checks=[x for x in required if x != NATIVE_DERIVATIVE_LABELS[0]], count=len(required)-1),
+           dict(good, derivative_ui="NOT_IMPLEMENTED")]
     for value in bad:
         assert native_schema3(value, 26)["status"] != "PASS", "native schema3 observer missed"
     return {"positive": 1, "negative": len(bad), "scope": "REPORT_CONTROLS_NOT_DEVICE_EXECUTION"}

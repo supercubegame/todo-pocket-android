@@ -42,7 +42,7 @@ REQUIRED = {
     } | {'backup fixture covers nonempty ' + table for table in TABLES},
     'reopen': {
         'separate process retains complete restored state',
-        'separate process retains complete restored media bytes',
+        'separate process retains restored media bytes',
         'restored exact-cent totals remain usable after restart',
         'restored latest batch undo works after separate-process restart',
         'restored import journal still works after restart',
@@ -927,7 +927,7 @@ def main():
     try:
         deadline = time.monotonic() + 240
         last = 'no probe yet'
-        while time.monotonic()<deadline:
+        while time.monotonic() < deadline:
             if proc.poll() is not None:
                 log.flush()
                 raise RuntimeError('emulator exited before boot: ' + Path('emulator.log').read_text()[-4000:])

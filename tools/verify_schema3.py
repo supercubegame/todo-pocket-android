@@ -73,6 +73,24 @@ LABELS = {
 # It is not a native-UI, late-publication race or distinct reopen certificate.
 DERIVATIVE_MARKER = " actual_png preview_cancel_owner_session_stale_tamper_rollback_save_lineage PASS"
 
+RACE_MARKERS = {
+    "restore_seed": " positive=PASS after_early_check=PROVEN same_revision_external_write=REFUSED exact_state_and_bytes=PASS",
+    "restore_reopen": "_REOPEN exact_state_and_bytes=PASS",
+}
+
+def race_fixture(phase):
+    return "SCHEMA3_IMAGE_LATE_RACE" + RACE_MARKERS[phase] + "\n" if phase in RACE_MARKERS else ""
+
+def race_markers(text, phase):
+    found = list(re.finditer(r"(?:^|stream=)SCHEMA3_IMAGE_LATE_RACE([^\r\n]*)", text, re.M))
+    values = [match.group(1) for match in found]
+    expected = [RACE_MARKERS[phase]] if phase in RACE_MARKERS else []
+    results = list(re.finditer(r"(?:^|stream=)SCHEMA3_RESULT ([^\r\n]+)", text, re.M))
+    passed = values == expected and (not found or
+             (len(results) == 1 and found[0].start() < results[0].start()))
+    return {"status": "PASS" if passed else "NOT_VERIFIED",
+            "observed": values, "expected": expected}
+
 def derivative_markers(text, phase):
     found = list(re.finditer(r"(?:^|stream=)SCHEMA3_DERIVATIVE([^\r\n]*)", text, re.M))
     values = [match.group(1) for match in found]
@@ -87,6 +105,7 @@ def derivative_summary(devices):
     # Require BOTH expected APIs, the full successful parent phases, and the
     # exact independently extracted marker. Never infer success from job exit alone.
     passed = set(devices) == {"26", "34"}
+    race_passed = set(devices) == {"26", "34"}
     for api in ("26", "34"):
         phases = devices.get(api, {})
         seed = phases.get("restore_seed", {})
@@ -96,9 +115,19 @@ def derivative_summary(devices):
                   marker.get("observed") == [DERIVATIVE_MARKER] and
                   marker.get("expected") == [DERIVATIVE_MARKER] and
                   phases.get("restore_reopen", {}).get("status") == "PASS")
+        for phase, expected in RACE_MARKERS.items():
+            evidence = phases.get(phase, {})
+            race = evidence.get("image_race_markers", {})
+            race_passed = (race_passed and evidence.get("status") == "PASS" and
+                           race.get("status") == "PASS" and
+                           race.get("observed") == [expected] and race.get("expected") == [expected])
+    passed = passed and race_passed
     return {"status": "PASS" if passed else "NOT_VERIFIED",
             "scope": "LOCAL_PNG_PREVIEW_AND_GUARDED_SAVE_BACKEND",
-            "native_ui": "NOT_IMPLEMENTED", "late_publication_race": "NOT_TESTED",
+            "native_ui": "NOT_IMPLEMENTED",
+            "late_publication_race": "PASS" if race_passed else "NOT_VERIFIED",
+            "late_race_scope": "REAL_PUBLICATION_BARRIER_CONTROL_AND_SAME_REVISION_EXTERNAL_WRITE",
+            "late_race_reopen": "PASS" if race_passed else "NOT_VERIFIED",
             "reopen_evidence": "PARENT_SUITE_PASS_NO_DISTINCT_DERIVATIVE_MARKER",
             "real_photos": "NOT_TESTED"}
 
@@ -107,15 +136,17 @@ def observe(text, phase, api):
     result = re.findall(r"(?:^|stream=)SCHEMA3_RESULT ([^\r\n]+)", text, re.M)
     finished = re.findall(r"^INSTRUMENTATION_CODE: (-?\d+)\s*$", text, re.M)
     derivative = derivative_markers(text, phase)
+    race = race_markers(text, phase)
     passed = (labels == LABELS[phase] and
               result == [f"{phase} {api} {len(LABELS[phase])} PASS"] and
               finished == ["-1"] and "SCHEMA3_FAILED" not in text and
-              "INSTRUMENTATION_FAILED" not in text and derivative["status"] == "PASS")
+              "INSTRUMENTATION_FAILED" not in text and derivative["status"] == "PASS" and
+              race["status"] == "PASS")
     return {"status": "PASS" if passed else "NOT_VERIFIED", "labels": labels,
             "expected_labels": LABELS[phase], "checks": len(labels),
             "log_sha256": hashlib.sha256(text.encode()).hexdigest(),
             "failure_tail": None if passed else text[-9000:],
-            "derivative_markers": derivative}
+            "derivative_markers": derivative, "image_race_markers": race}
 
 def registration(text, runner):
     package = "com.supercubegame.pockettodo.v12.preview"
@@ -130,6 +161,7 @@ def selftest():
     controls = {}
     for phase, labels in LABELS.items():
         records = "".join("SCHEMA3_PASS " + x + "\n" for x in labels)
+        records += race_fixture(phase)
         if phase == "restore_seed":
             records += "SCHEMA3_DERIVATIVE" + DERIVATIVE_MARKER + "\n"
         marker = f"SCHEMA3_RESULT {phase} 26 {len(labels)} PASS\n"
@@ -172,12 +204,14 @@ def selftest():
     controls["native_failure_diagnostics"] = diagnostics_selftest()
     controls["default_schema3_ui"] = native_schema3_selftest()
     controls["derivative_backend"] = derivative_selftest()
+    controls["image_late_race"] = race_selftest()
     return controls
 
 def derivative_selftest():
     import copy
     phase = "restore_seed"
     records = "".join("SCHEMA3_PASS " + x + "\n" for x in LABELS[phase])
+    records += race_fixture(phase)
     marker = "SCHEMA3_DERIVATIVE" + DERIVATIVE_MARKER + "\n"
     result = f"SCHEMA3_RESULT {phase} 26 {len(LABELS[phase])} PASS\n"
     finish = "INSTRUMENTATION_CODE: -1\n"
@@ -201,18 +235,20 @@ def derivative_selftest():
     # A stray success in another phase is not evidence for this phase.
     for other in ("seed", "reopen", "restore_reopen"):
         text = "".join("SCHEMA3_PASS " + x + "\n" for x in LABELS[other])
+        text += race_fixture(other)
         text += marker + f"SCHEMA3_RESULT {other} 26 {len(LABELS[other])} PASS\n" + finish
         assert observe(text, other, 26)["status"] != "PASS", "misplaced derivative marker accepted"
     devices = {}
     for api in (26, 34):
         reopened = "".join("SCHEMA3_PASS " + x + "\n" for x in LABELS["restore_reopen"])
+        reopened += race_fixture("restore_reopen")
         reopened += f'SCHEMA3_RESULT restore_reopen {api} {len(LABELS["restore_reopen"])} PASS\n' + finish
         devices[str(api)] = {
             "restore_seed": observe(good.replace("restore_seed 26 ", f"restore_seed {api} "), phase, api),
             "restore_reopen": observe(reopened, "restore_reopen", api)}
     summary = derivative_summary(devices)
     assert summary["status"] == "PASS"
-    assert summary["native_ui"] == "NOT_IMPLEMENTED" and summary["late_publication_race"] == "NOT_TESTED"
+    assert summary["native_ui"] == "NOT_IMPLEMENTED" and summary["late_publication_race"] == "PASS"
     assert summary["reopen_evidence"] == "PARENT_SUITE_PASS_NO_DISTINCT_DERIVATIVE_MARKER"
     invalid = [{}, {"26": devices["26"]}, dict(devices, unexpected={})]
     for api in ("26", "34"):
@@ -223,6 +259,63 @@ def derivative_selftest():
     for value in invalid:
         assert derivative_summary(value)["status"] != "PASS", "aggregate derivative observer missed"
     return {"log_positive": 3, "log_negative": len(bad) + 3,
+            "aggregate_positive": 1, "aggregate_negative": len(invalid),
+            "scope": "PYTHON_LOG_AND_REPORT_CONTROLS_NOT_COMPILED_PRODUCT_MUTANTS"}
+
+def race_selftest():
+    import copy
+    good_logs = {}
+    positive = negative = 0
+    for phase in RACE_MARKERS:
+        records = "".join("SCHEMA3_PASS " + x + "\n" for x in LABELS[phase])
+        derivative = "SCHEMA3_DERIVATIVE" + DERIVATIVE_MARKER + "\n" if phase == "restore_seed" else ""
+        marker = race_fixture(phase)
+        result = f"SCHEMA3_RESULT {phase} 26 {len(LABELS[phase])} PASS\n"
+        finish = "INSTRUMENTATION_CODE: -1\n"
+        good = records + marker + derivative + result + finish
+        good_logs[phase] = good
+        for text in (good, good.replace("\n", "\r\n"), good.replace(marker, "stream=" + marker)):
+            assert observe(text, phase, 26)["status"] == "PASS"
+            positive += 1
+        bad = {
+            "missing": good.replace(marker, ""),
+            "duplicate": good.replace(marker, marker + marker),
+            "failure": good.replace(marker, marker.replace("PASS", "FAIL")),
+            "truncated": good.replace(marker, "SCHEMA3_IMAGE_LATE_RACE\n"),
+            "extra": good.replace(marker, marker.rstrip("\n") + " extra\n"),
+            "quoted": good.replace(marker, "quoted: " + marker),
+            "wrong_phase": good.replace(marker, race_fixture("restore_reopen" if phase == "restore_seed" else "restore_seed")),
+            "after_result": records + derivative + result + marker + finish,
+            "marker_only": marker + finish,
+            "both_phases": good.replace(marker, race_fixture("restore_seed") + race_fixture("restore_reopen")),
+        }
+        if phase == "restore_seed":
+            for token in ("positive=PASS", "after_early_check=PROVEN", "same_revision_external_write=REFUSED"):
+                bad[token] = good.replace(token, token.split("=")[0] + "=UNKNOWN")
+        for name, text in bad.items():
+            assert text != good, "race control not mutated: " + name
+            assert observe(text, phase, 26)["status"] != "PASS", "race observer missed: " + name
+            negative += 1
+        for other in ("seed", "reopen"):
+            text = "".join("SCHEMA3_PASS " + x + "\n" for x in LABELS[other])
+            text += marker + f"SCHEMA3_RESULT {other} 26 {len(LABELS[other])} PASS\n" + finish
+            assert observe(text, other, 26)["status"] != "PASS"
+            negative += 1
+    devices = {str(api): {phase: observe(text.replace(f"{phase} 26 ", f"{phase} {api} "), phase, api)
+                         for phase, text in good_logs.items()} for api in (26, 34)}
+    summary = derivative_summary(devices)
+    assert summary["status"] == summary["late_publication_race"] == summary["late_race_reopen"] == "PASS"
+    assert summary["native_ui"] == "NOT_IMPLEMENTED" and summary["real_photos"] == "NOT_TESTED"
+    invalid = [{}, {"26": devices["26"]}, {"34": devices["34"]}, dict(devices, extra={})]
+    for api in ("26", "34"):
+        for phase in RACE_MARKERS:
+            absent = copy.deepcopy(devices);del absent[api][phase]["image_race_markers"];invalid.append(absent)
+            for key, value in (("status", "NOT_VERIFIED"), ("observed", []), ("expected", [])):
+                mutant = copy.deepcopy(devices);mutant[api][phase]["image_race_markers"][key] = value;invalid.append(mutant)
+    for value in invalid:
+        result = derivative_summary(value)
+        assert result["status"] == result["late_publication_race"] == result["late_race_reopen"] == "NOT_VERIFIED", "race aggregate missed"
+    return {"log_positive": positive, "log_negative": negative,
             "aggregate_positive": 1, "aggregate_negative": len(invalid),
             "scope": "PYTHON_LOG_AND_REPORT_CONTROLS_NOT_COMPILED_PRODUCT_MUTANTS"}
 

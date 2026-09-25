@@ -130,7 +130,7 @@ public final class ShareExporter {
     }
     private static long u32(byte[] b,int p,boolean little) {
         return little?((long)u16(b,p+2,true)<<16)|u16(b,p,true):
-            ((long)u16(b,p,false)<<16)|(long)u16(b,p+2,false);
+            ((long)u16(b,p,false)<<16)|u16(b,p+2,false);
     }
     /** Check primary TIFF orientation independently of version-dependent framework parsing.
      * Bounded JPEG segment walk, not a general EXIF reader. Ambiguity fails closed.

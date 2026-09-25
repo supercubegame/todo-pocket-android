@@ -697,10 +697,12 @@ public class ImageImportFixture {
             dims=re.fullmatch(r'原图 (\d+) × (\d+) · 预览 (\d+) × (\d+)',desc('derive-source').get('text'))
             assert dims,'source and preview dimensions report missing'
             sw,sh,pw,ph=map(int,dims.groups())
-            vw,vh=cx2-cx1,cy2-cy1
-            scale=min(vw/pw,vh/ph);offx=(vw-pw*scale)/2;offy=(vh-ph*scale)/2
             def screen(sx,sy):
-                return (round(cx1+offx+sx*pw/sw*scale),round(cy1+offy+sy*ph/sh*scale))
+                live=list(map(int,re.findall(r'\d+',desc('derive-canvas').get('bounds'))))
+                bx1,by1,bx2,by2=live
+                bw,bh=bx2-bx1,by2-by1
+                sc=min(bw/pw,bh/ph);ox=(bw-pw*sc)/2;oy=(bh-ph*sc)/2
+                return (round(bx1+ox+sx*pw/sw*sc),round(by1+oy+sy*ph/sh*sc))
             def drag(a,b,c,d):
                 x1,y1=screen(a,b);x2,y2=screen(c,d)
                 shell('input','swipe',str(x1),str(y1),str(x2),str(y2),'400');time.sleep(.3)

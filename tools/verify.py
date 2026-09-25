@@ -161,7 +161,58 @@ def v12():
         run(["java", "-cp", out, "V12CoreTest"])
         run(["java", "-cp", out, "FileBoundaryTest"])
     run([sys.executable, "tools/verify_exports.py"])
+    share_ticket()
     print("V12_ACCEPTANCE PARTIAL: JVM domain/file/pixel contracts only; Android codecs/persisted derivatives/UI/share NOT_TESTED by this fast gate")
+
+def share_ticket():
+    """Compile the actual pure nested class; no Android/SQLite/SAF is simulated."""
+    import tempfile
+    source = Path("src/main/java/com/supercubegame/pockettodo/MainActivity.java").read_text()
+    start, end = "    static final class ShareTicket", "    // END_SHARE_TICKET"
+    assert source.count(start) == source.count(end) == 1, "Missing/ambiguous share ticket"
+    body = source[source.index(start):source.index(end)]
+    tests = r'''
+ static int n;
+ interface Action {void run();}
+ static void ok(boolean b){if(!b)throw new AssertionError("check "+(n+1));n++;}
+ static void reject(Action a){boolean bad=false;try{a.run();}catch(IllegalArgumentException|IllegalStateException e){bad=true;}ok(bad);}
+ public static void main(String[] x){
+  byte[] state={1,2},zip={3,4};ShareTicket t=new ShareTicket(state,zip);
+  state[0]=9;zip[0]=9;ok(java.util.Arrays.equals(t.take(new byte[]{1,2}),new byte[]{3,4}));
+  reject(()->t.take(new byte[]{1,2}));
+  ShareTicket stale=new ShareTicket(new byte[]{1,2},new byte[]{3});
+  reject(()->stale.take(new byte[]{1,9}));reject(()->stale.take(new byte[]{1,2}));
+  ShareTicket cancel=new ShareTicket(new byte[]{1},new byte[]{3});cancel.close();cancel.close();reject(()->cancel.take(new byte[]{1}));
+  reject(()->new ShareTicket(null,new byte[]{3}));reject(()->new ShareTicket(new byte[]{1},null));
+  reject(()->new ShareTicket(new byte[0],new byte[]{3}));reject(()->new ShareTicket(new byte[]{1},new byte[0]));
+  reject(()->new ShareTicket(new byte[8388609],new byte[]{3}));
+  reject(()->new ShareTicket(new byte[]{1},new byte[16777217]));
+  ShareTicket exact=new ShareTicket(new byte[8388608],new byte[16777216]);ok(exact.take(new byte[8388608]).length==16777216);
+  ShareTicket noState=new ShareTicket(new byte[]{1},new byte[]{3});reject(()->noState.take(null));reject(()->noState.take(new byte[]{1}));
+  if(n!=14)throw new AssertionError("coverage drift");
+  System.out.println("SHARE_TICKET_HOST 14/14 PASS NOT_ANDROID_DB_OR_SAF");
+ }
+'''
+    variants = [("real", body, None)]
+    for name, before, after, failure in (
+        ("zip_alias", "this.zip=zip.clone();", "this.zip=zip;", "AssertionError: check 1"),
+        ("stale_bypass", "if(!java.util.Arrays.equals(state,current))", "if(false)", "AssertionError: check 3"),
+        ("replay", "}finally{close();}", "}finally{}", "AssertionError: check 2"),
+    ):
+        assert body.count(before) == 1, "Mutation anchor drift: " + name
+        variants.append((name, body.replace(before, after, 1), failure))
+    for name, implementation, failure in variants:
+        with tempfile.TemporaryDirectory(prefix="share-ticket-", dir="build") as out:
+            test = Path(out) / "TicketTest.java"
+            test.write_text("public class TicketTest {\n" + implementation + tests + "\n}", encoding="utf-8")
+            run(["javac", "--release", "8", "-encoding", "UTF-8", "-d", out, str(test)], timeout=40)
+            result = subprocess.run(["java", "-cp", out, "TicketTest"], text=True, capture_output=True, timeout=40)
+            print(name, result.returncode, result.stdout, result.stderr, flush=True)
+            if failure is None:
+                assert result.returncode == 0 and "SHARE_TICKET_HOST 14/14 PASS" in result.stdout, "Share ticket real implementation failed"
+            else:
+                assert result.returncode != 0 and failure in result.stderr, "Share ticket mutant survived or failed for wrong reason: " + name
+    print("SHARE_TICKET_MUTANTS 3/3 REJECTED; HOST_EXTRACTED_JAVA_NOT_ANDROID_UI")
 
 def build():
     # The inherited V1.1 Gradle/UI configuration is not a V1.2 product. No dormant

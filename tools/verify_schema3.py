@@ -188,7 +188,7 @@ def selftest():
             assert observe(text, phase, 26)["status"] != "PASS", "missed: " + name
         controls[phase] = {"positive": 2, "negative": len(bad), "mutants": list(bad)}
     package = "com.supercubegame.pockettodo.v12.preview"
-    prefix = "instrumentation:" + package + ".test/com.supercubegame/pockettodo."
+    prefix = "instrumentation:" + package + ".test/com.supercubegame.pockettodo."
     old = prefix + "V12DeviceTest (target=" + package + ")\n"
     new = prefix + "Schema3DeviceTest (target=" + package + ")\n"
     assert registration(old, "V12DeviceTest")["status"] == "PASS"

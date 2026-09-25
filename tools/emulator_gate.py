@@ -682,14 +682,137 @@ public class ImageImportFixture {
         ok(desc('image-caption').get('text','')=='' and desc('image-private').get('checked')=='false','empty caption and false private flag persist after restart')
         tap('取消');ready();shot('17-second-image-public.png');stop()
         ok(state_read('image-final-restart.db')==public_saved and private_bytes(jpeg_id)==jpeg,'final metadata cancel and restart preserve every table and exact JPEG original')
+        # Stage19: real touch crop/redaction UI over the accepted derivative backend.
+        # Selection rects come from the dialog's own source-pixel reports; host pixel
+        # proof uses those reported values, never fixture-hardcoded geometry.
+        derive_base=state_read('derive-base.db')
+        derive_block=selected_blocks[2][1]
+        def daily_note():
+            note_screen();tap('切换笔记');tap('1. Daily reward');ready()
+        def open_derive():
+            swipe_up();touch('note-image-derive-'+derive_block)
+            canvas=re.findall(r'\d+',desc('derive-canvas').get('bounds'))
+            cx1,cy1,cx2,cy2=map(int,canvas)
+            assert cx2>cx1 and cy2>cy1,'selection canvas must have real bounds'
+            dims=re.fullmatch(r'原图 (\d+) × (\d+) · 预览 (\d+) × (\d+)',desc('derive-source').get('text'))
+            assert dims,'source and preview dimensions report missing'
+            sw,sh,pw,ph=map(int,dims.groups())
+            vw,vh=cx2-cx1,cy2-cy1
+            scale=min(vw/pw,vh/ph);offx=(vw-pw*scale)/2;offy=(vh-ph*scale)/2
+            def screen(sx,sy):
+                return (round(cx1+offx+sx*pw/sw*scale),round(cy1+offy+sy*ph/sh*scale))
+            def drag(a,b,c,d):
+                x1,y1=screen(a,b);x2,y2=screen(c,d)
+                shell('input','swipe',str(x1),str(y1),str(x2),str(y2),'400');time.sleep(.3)
+            return (sw,sh),drag
+        def wait_crop():
+            deadline=time.monotonic()+20
+            while time.monotonic()<deadline:
+                found=re.fullmatch(r'裁剪 (\d+),(\d+) → (\d+),(\d+)',desc('derive-crop').get('text') or '')
+                if found:return tuple(map(int,found.groups()))
+                time.sleep(.25)
+            raise AssertionError('crop report never appeared')
+        def wait_report(desc_id,value):
+            deadline=time.monotonic()+20
+            while time.monotonic()<deadline:
+                if desc(desc_id).get('text')==value:return
+                time.sleep(.25)
+            raise AssertionError(desc_id+' never became '+value)
+        daily_note();(sw,sh),drag=open_derive()
+        ok((sw,sh)==(1536,768) and desc('derive-crop').get('text')=='未选择裁剪区域' and desc('derive-masks').get('text')=='遮挡 0 处','derivative dialog shows actual decoded source dimensions with empty selection')
+        tap('预览')
+        ok(find(text='尚未选择：请拖出裁剪区域，或在遮挡模式涂抹') is not None,'derivative preview without selection rejected visibly')
+        tap('取消');stop()
+        ok(state_read('derive-cancel-empty.db')==derive_base and private_bytes(chosen_id)==chosen,'derivative cancel leaves every table and original bytes unchanged')
+        daily_note();(sw,sh),drag=open_derive()
+        drag(0,0,sw,sh)
+        fl,ft,fr,fb=wait_crop()
+        ok(abs(fl)<=4 and abs(ft)<=4 and abs(fr-sw)<=4 and abs(fb-sh)<=4,'corner drag maps to full source extent within touch rounding')
+        tap('预览')
+        ok(find(text='选区过大：派生图最多 100 万像素') is not None,'derivative oversize selection rejected with visible pixel budget')
+        tap('重置选区');wait_report('derive-crop','未选择裁剪区域');wait_report('derive-masks','遮挡 0 处')
+        ok(True,'derivative reset clears selection reports')
+        drag(384,192,1152,576)
+        cl,ct,cr,cb=wait_crop()
+        ok(abs(cl-384)<=4 and abs(ct-192)<=4 and abs(cr-1152)<=4 and abs(cb-576)<=4,'touch crop maps onto intended source rectangle within rounding')
+        tap('遮挡模式');drag(768,288,896,480)
+        deadline=time.monotonic()+20
+        while time.monotonic()<deadline:
+            mask_text=desc('derive-masks').get('text') or ''
+            if mask_text.startswith('遮挡 1 处'):break
+            time.sleep(.25)
+        masks_found=re.findall(r'(\d+),(\d+) → (\d+),(\d+)',mask_text)
+        ok(mask_text.startswith('遮挡 1 处') and len(masks_found)==1,'redact mode adds exactly one reported mask')
+        ml,mt,mr,mb=map(int,masks_found[0])
+        ok(abs(ml-768)<=4 and abs(mt-288)<=4 and abs(mr-896)<=4 and abs(mb-480)<=4,'touch mask maps onto intended source rectangle within rounding')
+        tap('预览');find(text='保存')
+        output=re.fullmatch(r'派生预览 (\d+) × (\d+)',desc('derive-output').get('text') or '')
+        assert output,'derivative output dimensions missing'
+        ow,oh=map(int,output.groups())
+        ok((ow,oh)==(cr-cl,cb-ct) and desc('derive-result').get('class')=='android.widget.ImageView','derivative preview renders exact reported output dimensions')
+        shot('18-derivative-preview.png')
+        tap('保存');gone('保存');ready();stop()
+        saved=state_read('derive-saved.db')
+        target=[row for row in saved['blocks'] if row[1]==derive_block]
+        assert len(target)==1,'derived block identity lost'
+        derived_row=target[0];derived_id=derived_row[5]
+        assert re.fullmatch(r'[0-9a-f]{64}',derived_id) and derived_id!=chosen_id,'derived asset must be a new content id'
+        ok(derived_row[0]==selected_blocks[2][0] and derived_row[2:5]==(2,'IMAGE','') and derived_row[6:]==('',0,chosen_id),'derived block preserves note owner position kind empty caption public flag and records exact original')
+        derivative_bytes=private_bytes(derived_id)
+        added_media=[row for row in saved['media'] if row not in derive_base['media']]
+        ok(added_media==[(derived_id,'image/png',len(derivative_bytes))],'derived PNG registered with exact mime and byte length')
+        ok(all(saved[t]==derive_base[t] for t in TABLES if t not in ('revision','blocks','media')),'derivative save preserves all unrelated tables')
+        ok(private_bytes(chosen_id)==chosen,'original imported PNG bytes unchanged after derivative save')
+        siblings=[row for row in derive_base['blocks'] if row[1]!=derive_block]
+        ok(all(row in saved['blocks'] for row in siblings) and len(saved['blocks'])==len(derive_base['blocks']),'sibling blocks across notes remain exact after derivative save')
+        source_png=(out/'derivative-source.png').resolve();source_png.write_bytes(chosen)
+        derived_png=(out/'derivative-output.png').resolve();derived_png.write_bytes(derivative_bytes)
+        source=helper/'VerifyDerivative.java'
+        source.write_text('''import java.awt.image.BufferedImage;
+import java.io.File;
+import javax.imageio.ImageIO;
+public class VerifyDerivative {
+ public static void main(String[] a) throws Exception {
+  BufferedImage src=ImageIO.read(new File(a[0])), out=ImageIO.read(new File(a[1]));
+  if(src==null||out==null) throw new AssertionError("decode failed");
+  int l=Integer.parseInt(a[2]),t=Integer.parseInt(a[3]),r=Integer.parseInt(a[4]),b=Integer.parseInt(a[5]);
+  if(out.getWidth()!=r-l||out.getHeight()!=b-t) throw new AssertionError("output dimensions differ from reported crop");
+  java.util.List<int[]> masks=new java.util.ArrayList<>();
+  for(int i=6;i+3<a.length;i+=4) masks.add(new int[]{Integer.parseInt(a[i])-l,Integer.parseInt(a[i+1])-t,Integer.parseInt(a[i+2])-l,Integer.parseInt(a[i+3])-t});
+  outer: for(int y=0;y<out.getHeight();y++) for(int x=0;x<out.getWidth();x++){
+   for(int[] m:masks) if(x>=m[0]&&x<m[2]&&y>=m[1]&&y<m[3]){
+    if(out.getRGB(x,y)!=0xff000000) throw new AssertionError("mask not opaque black at "+x+","+y);
+    continue outer;
+   }
+   if(out.getRGB(x,y)!=src.getRGB(l+x,t+y)) throw new AssertionError("pixel differs at "+x+","+y);
+  }
+  System.out.println("DERIVATIVE_PIXELS_PASS "+out.getWidth()+"x"+out.getHeight());
+ }
+}
+''')
+        run(['javac','-d',helper,source],timeout=40)
+        pixels=run(['java','-Djava.awt.headless=true','-cp',helper,'VerifyDerivative',source_png,derived_png,str(cl),str(ct),str(cr),str(cb),str(ml),str(mt),str(mr),str(mb)],timeout=60,capture=True).stdout
+        ok(pixels.strip()=='DERIVATIVE_PIXELS_PASS '+str(cr-cl)+'x'+str(cb-ct),'independent decoder proves exact cropped pixels and opaque mask for reported rects')
+        daily_note();swipe_up()
+        ok(desc('note-image-'+derive_block).get('class')=='android.widget.ImageView' and desc('note-image-derive-'+derive_block).get('enabled')=='true','derived image renders with working entry after process restart')
+        shot('19-derivative-saved.png');stop()
+        ok(state_read('derive-restart.db')==saved and private_bytes(derived_id)==derivative_bytes and private_bytes(chosen_id)==chosen,'derivative state and both images survive stopped-process restart exactly')
+        daily_note();(dw,dh),drag=open_derive()
+        drag(0,0,dw//2,dh//2)
+        tap('预览');find(text='保存')
+        ok(desc('derive-result').get('class')=='android.widget.ImageView','re-derived preview renders for abandonment check')
+        tap('取消');stop()
+        ok(state_read('derive-abandon.db')==saved and private_bytes(derived_id)==derivative_bytes,'abandoned second preview writes nothing and keeps published derivative')
         with sqlite3.connect(copy_db('schema3-final.db')) as db:
-            ok(db.execute('PRAGMA user_version').fetchone()==(3,) and db.execute('SELECT count(*) FROM blocks').fetchone()[0]>0 and db.execute('SELECT count(*) FROM blocks WHERE original_asset_id IS NOT NULL').fetchone()==(0,),'native schema3 survives SAF restore and all ordinary edits without invented image origins')
+            origins=db.execute('SELECT id,original_asset_id FROM blocks WHERE original_asset_id IS NOT NULL').fetchall()
+            ok(db.execute('PRAGMA user_version').fetchone()==(3,) and db.execute('SELECT count(*) FROM blocks').fetchone()[0]>0 and origins==[(derive_block,chosen_id)],'native schema3 survives SAF restore and all ordinary edits without invented image origins')
         result={'status':'PASS','scope':'NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE','ledger_calendar':'NATIVE_MULTI_DATE_LEDGER_PASS','saf_restore':'NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS','checkin_history':'NATIVE_CHECKIN_HISTORY_BACKDATE_PASS','note_editor':'NATIVE_TEXT_IMAGE_NOTE_PASS','api':API,'count':len(checks),'checks':checks,'screenshots':shots,'infra_retries':infra_retries,'restore_undo':'NOT_IMPLEMENTED','restore_preview_lifecycle':'NOT_TESTED','checkin_schedules':'NOT_IMPLEMENTED','real_photo_selection':'NOT_IMPLEMENTED','photos':'NOT_TESTED','sharing':'NOT_TESTED','release_ready':False}
         result.update(real_photo_selection='NATIVE_SAF_PNG_PASS',photos='SYNTHETIC_PNG_ONLY',image_picker_lifecycle='CANCEL_AND_RESTART_ONLY',jpeg='NOT_TESTED',camera='NOT_IMPLEMENTED')
         result.update(real_photo_selection='NATIVE_SAF_PNG_JPEG_PASS',photos='SYNTHETIC_PNG_JPEG_ONLY',jpeg='NATIVE_SAF_EXACT_PRIVATE_COPY_PASS',image_first_note='CANCEL_REJECT_CREATE_RESTART_PASS',image_pixel_budget='20000000_ACCEPTED_20005000_REJECTED',exif_orientation='NOT_TESTED',whole_note_memory='NOT_TESTED')
         result.update(multiple_notes='CREATE_SWITCH_EDIT_DUPLICATE_TITLE_RESTART_PASS',note_selection_persistence='RESTART_DEFAULTS_FIRST_EXPLICIT_RESELECT',note_rename_delete_reorder='NOT_IMPLEMENTED')
         result.update(nonfirst_image='APPEND_ISOLATION_RESTART_PASS',image_metadata='CAPTION_PRIVATE_CANCEL_EDIT_CLEAR_RESTART_PASS',private_sharing='NOT_TESTED')
         result.update(default_app_schema=3,default_schema3_ui='NATIVE_SCHEMA3_UI_PASS')
+        result.update(derivative_ui='NATIVE_CROP_MASK_UI_SAVE_CANCEL_RESTART_PASS')
     except Exception as exc:
         result={'status':'FAIL','api':API,'count':len(checks),'checks':checks,'error':repr(exc),'screenshots':shots,'infra_retries':infra_retries,'release_ready':False}
         try: shot('failure.png')

@@ -17,6 +17,103 @@ import java.util.List;
  */
 public final class ShareExporter {
     private ShareExporter() {}
+    /** Read-only frozen export input. Caller must build this from a consistent
+     * database snapshot and revalidate that snapshot before presenting/sending it.
+     * No origin/backup asset field exists here: only the selected displayed image.
+     * This backend is not a stale-preview token or a redaction certificate.
+     */
+    public static final class MarkdownItem {
+        private final String key,text,caption;
+        private final byte[] image;
+        private final boolean privateContent;
+        public MarkdownItem(String noteId,String blockId,String text,byte[] image,String caption,boolean privateContent){
+            if(noteId==null||blockId==null||!noteId.matches("[A-Za-z0-9_-]{1,128}")||!blockId.matches("[A-Za-z0-9_-]{1,128}"))
+                throw new IllegalArgumentException("Stable note and block identity required");
+            if((text==null)==(image==null)||caption==null||image!=null&&(image.length==0||image.length>8*1024*1024))
+                throw new IllegalArgumentException("Exactly one bounded text/image block required");
+            this.key=noteId+"/"+blockId;this.text=text;this.image=image==null?null:image.clone();
+            this.caption=caption;this.privateContent=privateContent;
+        }
+    }
+    /** Escape user prose, never interpret it as Markdown/HTML or an asset path. */
+    private static String literal(String text){
+        if(text.length()>262144)throw new IllegalArgumentException("Share text exceeds 262144 characters");
+        StringBuilder out=new StringBuilder();
+        for(int i=0;i<text.length();i++){
+            char c=text.charAt(i);
+            if(c=='\r'){if(i+1<text.length()&&text.charAt(i+1)=='\n')i++;out.append('\n');}
+            else if(c=='\n'||c=='\t')out.append(c);
+            else if(Character.isHighSurrogate(c)){
+                if(i+1>=text.length()||!Character.isLowSurrogate(text.charAt(i+1)))throw new IllegalArgumentException("Malformed share text");
+                out.append(c).append(text.charAt(++i));
+            }else if(Character.isLowSurrogate(c)||Character.isISOControl(c))throw new IllegalArgumentException("Invalid share text control");
+            else if(c=='<')out.append("&lt;");
+            else if(c=='>')out.append("&gt;");
+            else if(c=='&')out.append("&amp;");
+            else if(c>=33&&c<=126&&!Character.isLetterOrDigit(c))out.append("&#").append((int)c).append(';');
+            else out.append(c);
+            if(out.length()>1048576)throw new IllegalArgumentException("Escaped share text budget exceeded");
+        }
+        return out.toString();
+    }
+    private static final class ZipBytes extends java.io.OutputStream {
+        private final ByteArrayOutputStream out=new ByteArrayOutputStream();
+        @Override public void write(int b)throws IOException{if(out.size()>=16*1024*1024)throw new IOException("Share ZIP exceeds 16 MiB");out.write(b);}
+        @Override public void write(byte[] b,int off,int n)throws IOException{
+            if(n<0||n>16*1024*1024-out.size())throw new IOException("Share ZIP exceeds 16 MiB");
+            out.write(b,off,n);
+        }
+    }
+    private static void zipEntry(java.util.zip.ZipOutputStream zip,String name,byte[] bytes)throws IOException{
+        java.util.zip.ZipEntry entry=new java.util.zip.ZipEntry(name);entry.setTime(0);
+        zip.putNextEntry(entry);zip.write(bytes);zip.closeEntry();
+    }
+    /**
+     * Explicit selection, private excluded even when selected, document order retained.
+     * New PNG encoding strips container metadata; it does NOT discover/redact secrets.
+     * Dedup compares actual encoded bytes, retaining every selected caption/reference.
+     * Fixed ZIP names cannot contain note titles, source filenames, IDs or user paths.
+     * Provisional bounded policy: 1000 items, 1 MiB Markdown, 16 MiB expanded/ZIP.
+     * No files, database writes, automatic selection or partial output on failure.
+     */
+    public static byte[] markdownZip(List<MarkdownItem> items,java.util.Set<String> selected)throws IOException{
+        if(items==null||selected==null||selected.isEmpty()||items.size()>1000||selected.size()>1000)
+            throw new IllegalArgumentException("Explicit bounded share selection required");
+        List<MarkdownItem> snapshot=new ArrayList<>(items);
+        java.util.Set<String> wanted=new java.util.HashSet<>(selected),known=new java.util.HashSet<>();
+        for(MarkdownItem item:snapshot)if(item==null||!known.add(item.key))throw new IllegalArgumentException("Duplicate/missing share identity");
+        if(wanted.contains(null)||!known.containsAll(wanted))throw new IllegalArgumentException("Unknown share selection");
+        StringBuilder md=new StringBuilder("# Pocket Todo\n\n");
+        List<byte[]> assets=new ArrayList<>();long imageBytes=0;int count=0;
+        for(MarkdownItem item:snapshot){
+            if(!wanted.contains(item.key)||item.privateContent)continue;
+            count++;
+            if(item.image==null)md.append(literal(item.text)).append("\n\n");
+            else{
+                BitmapFactory.Options header=new BitmapFactory.Options();header.inJustDecodeBounds=true;
+                BitmapFactory.decodeByteArray(item.image,0,item.image.length,header);
+                byte[] clean=png(item.image,0,0,header.outWidth,header.outHeight,new int[0][],MAX_PIXELS);
+                int index=-1;
+                for(int i=0;i<assets.size();i++)if(java.util.Arrays.equals(assets.get(i),clean)){index=i;break;}
+                if(index<0){
+                    if(clean.length>16*1024*1024-imageBytes)throw new IOException("Expanded share asset budget exceeded");
+                    imageBytes+=clean.length;assets.add(clean);index=assets.size()-1;
+                }
+                md.append("![Image](assets/image-").append(index+1).append(".png)\n\n");
+                if(!item.caption.isEmpty())md.append(literal(item.caption)).append("\n\n");
+            }
+            if(md.length()>1048576)throw new IllegalArgumentException("Markdown budget exceeded");
+        }
+        if(count==0)throw new IllegalArgumentException("No non-private content selected");
+        byte[] markdown=md.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        if(markdown.length>1048576||imageBytes+markdown.length>16*1024*1024)throw new IOException("Expanded share budget exceeded");
+        ZipBytes bytes=new ZipBytes();
+        try(java.util.zip.ZipOutputStream zip=new java.util.zip.ZipOutputStream(bytes)){
+            zipEntry(zip,"notes.md",markdown);
+            for(int i=0;i<assets.size();i++)zipEntry(zip,"assets/image-"+(i+1)+".png",assets.get(i));
+        }
+        return bytes.out.toByteArray();
+    }
     // Deliberately smaller than import limits: full-resolution processing is bounded.
     // Reject larger images, never silently downsample or remap the supplied coordinates.
     private static final int MAX_BYTES = 8 * 1024 * 1024;
@@ -33,7 +130,7 @@ public final class ShareExporter {
     }
     private static long u32(byte[] b,int p,boolean little) {
         return little?((long)u16(b,p+2,true)<<16)|u16(b,p,true):
-            ((long)u16(b,p,false)<<16)|u16(b,p+2,false);
+            ((long)u16(b,p,false)<<16)|(long)u16(b,p+2,false);
     }
     /** Check primary TIFF orientation independently of version-dependent framework parsing.
      * Bounded JPEG segment walk, not a general EXIF reader. Ambiguity fails closed.

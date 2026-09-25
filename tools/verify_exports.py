@@ -218,6 +218,67 @@ public final class AndroidCodecTest {
  }
  static void reject(Action action,String label)throws Exception {boolean bad=false;try{action.run();}catch(IOException|IllegalArgumentException e){bad=true;}ok(bad,label);}
  static void save(File p,byte[] b)throws IOException {try(OutputStream o=new FileOutputStream(p)){o.write(b);}}
+ static int shareChecks;
+ static void shareOk(boolean b,String name){if(!b)throw new AssertionError(name);shareChecks++;System.out.println("SHARE_PASS "+name);}
+ static Object item(String note,String id,String text,byte[] image,String caption,boolean secret)throws Exception{
+  return Class.forName("com.supercubegame.pockettodo.ShareExporter$MarkdownItem").getConstructor(String.class,String.class,String.class,byte[].class,String.class,boolean.class).newInstance(note,id,text,image,caption,secret);
+ }
+ static byte[] share(List<Object> items,Set<String> selected)throws Exception{
+  try{return(byte[])Class.forName("com.supercubegame.pockettodo.ShareExporter").getMethod("markdownZip",List.class,Set.class).invoke(null,items,selected);}
+  catch(InvocationTargetException e){if(e.getCause() instanceof Exception)throw(Exception)e.getCause();throw e;}
+ }
+ static void shareReject(Action action,String name)throws Exception{
+  boolean bad=false;try{action.run();}catch(IOException|IllegalArgumentException e){bad=true;}shareOk(bad,name);
+ }
+ static Set<String> keys(String... ids){return new LinkedHashSet<>(Arrays.asList(ids));}
+ static Map<String,byte[]> unzip(byte[] bytes)throws Exception{
+  Map<String,byte[]> files=new LinkedHashMap<>();
+  try(java.util.zip.ZipInputStream z=new java.util.zip.ZipInputStream(new ByteArrayInputStream(bytes))){
+   java.util.zip.ZipEntry e;while((e=z.getNextEntry())!=null){ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] b=new byte[1024];int n;while((n=z.read(b))!=-1)out.write(b,0,n);if(files.put(e.getName(),out.toByteArray())!=null)throw new AssertionError("duplicate ZIP member");}
+  }return files;
+ }
+ static void sharing(File root,byte[] source,byte[] redacted)throws Exception{
+  byte[] before=redacted.clone();
+  Object text=item("n1","t","Visible ![bad](../original.png)\n<img src=\"secret\"> & 中文",null,"",false);
+  Object image=item("n2","i",null,redacted,"Selected caption",false);
+  Object repeat=item("n2","j",null,redacted,"Repeated caption",false);
+  Object hidden=item("n1","p","PRIVATE_NOTE_SECRET",null,"",true);
+  Object unselected=item("n1","u",null,source,"UNSELECTED_ORIGINAL_SECRET",false);
+  List<Object> items=new ArrayList<>(Arrays.asList(text,image,repeat,hidden,unselected));
+  byte[] zip=share(items,keys("n2/j","n1/p","n2/i","n1/t"));
+  save(new File(root,"share.zip"),zip);
+  Map<String,byte[]> files=unzip(zip);
+  shareOk(files.keySet().equals(keys("notes.md","assets/image-1.png")),"exact_selected_zip_members");
+  String md=new String(files.get("notes.md"),java.nio.charset.StandardCharsets.UTF_8);
+  shareOk(!md.contains("PRIVATE_NOTE_SECRET")&&!md.contains("UNSELECTED_ORIGINAL_SECRET")&&!md.contains("PRIVATE_GPS_SECRET"),"private_and_unselected_text_absent");
+  shareOk(md.indexOf("Visible")<md.indexOf("Selected caption")&&md.indexOf("Selected caption")<md.indexOf("Repeated caption")&&md.split("!\\[Image\\]",-1).length==3,"document_order_and_duplicate_references");
+  shareOk(!md.contains("<img")&&!md.contains("![bad]")&&md.contains("&lt;img")&&md.contains("中文"),"literal_markdown_html_text");
+  Bitmap b=BitmapFactory.decodeByteArray(files.get("assets/image-1.png"),0,files.get("assets/image-1.png").length);
+  int[] pixels=new int[12];if(b!=null&&b.getWidth()==4&&b.getHeight()==3)b.getPixels(pixels,0,4,0,0,4,3);
+  shareOk(b!=null&&b.getWidth()==4&&b.getHeight()==3&&Arrays.equals(pixels,new int[]{0xff0a141e,0xff000000,0xff000000,0xff0d1a27,0xff112233,0xff000000,0xff000000,0xff000000,0xff183048,0xff19324b,0xff000000,0xff000000}),"share_redaction_pixels_preserved");
+  if(b!=null)b.recycle();
+  shareOk(Arrays.equals(redacted,before),"share_source_bytes_unchanged");
+  Arrays.fill(redacted,(byte)0);items.clear();
+  shareOk(Arrays.equals(share(Arrays.asList(text,image,repeat,hidden,unselected),keys("n1/t","n2/i","n2/j","n1/p")),zip),"frozen_input_ownership_and_repeatability");
+  shareReject(()->share(Arrays.asList(text),keys()),"empty_selection_refused_not_all");
+  shareReject(()->share(Arrays.asList(hidden),keys("n1/p")),"private_only_selection_refused");
+  shareReject(()->share(Arrays.asList(text),keys("missing/id")),"unknown_selection_refused");
+  shareReject(()->share(Arrays.asList(text,text),keys("n1/t")),"duplicate_identity_refused");
+  shareReject(()->share(Arrays.asList(text),null),"null_selection_refused");
+  Object broken=item("n3","bad",null,new byte[]{1,2,3},"BROKEN",false);
+  shareReject(()->share(Arrays.asList(text,broken),keys("n1/t","n3/bad")),"selected_invalid_image_refuses_entire_export");
+  shareOk(unzip(share(Arrays.asList(text,broken),keys("n1/t"))).keySet().equals(keys("notes.md")),"unselected_image_never_decoded_or_packaged");
+  Object raw=item("n4","raw",null,source,"Clean reencoding",false);
+  byte[] clean=share(Arrays.asList(raw),keys("n4/raw"));save(new File(root,"share-clean.zip"),clean);
+  shareOk(!Arrays.equals(unzip(clean).get("assets/image-1.png"),source),"selected_original_is_reencoded_not_copied");
+  Object over=item("n4","over",null,read(new File(root,"over.png")),"Large",false);
+  shareReject(()->share(Arrays.asList(over),keys("n4/over")),"share_source_budget_retained");
+  shareOk(!new String(zip,java.nio.charset.StandardCharsets.ISO_8859_1).contains("original.png"),"no_original_named_zip_member");
+  StringBuilder large=new StringBuilder();for(int i=0;i<=262144;i++)large.append('x');
+  Object excessive=item("n5","big",large.toString(),null,"",false);
+  shareReject(()->share(Arrays.asList(excessive),keys("n5/big")),"share_text_budget_refuses_not_truncates");
+  System.out.println("ANDROID_SHARE_RESULT "+shareChecks+"/"+shareChecks+" PASS");
+ }
  public static void main(String[] args) {
   try {
    if(args.length==1&&args[0].equals("--diagnostic-selftest"))throw new AssertionError("codec_diagnostic_sentinel");
@@ -275,6 +336,7 @@ public final class AndroidCodecTest {
   reject(()->png(wide,0,0,1,1,new int[0][],1),"valid_wide_image_rejected");
   ok(Arrays.equals(source,before),"all_rejections_preserve_source_bytes");
   ok(Arrays.equals(result,read(new File(root,"derived.png"))),"later_operations_preserve_earlier_derivative");
+  sharing(root,source,result);
   System.out.println("ANDROID_CODEC_RESULT "+checks+"/"+checks+" PASS");
  }
 }
@@ -532,6 +594,34 @@ def android_codec(adb, gate):
     labels=re.findall(r"^CODEC_PASS (.+)$",text,re.M)
     summary=re.findall(r"^ANDROID_CODEC_RESULT (\d+)/(\d+) PASS$",text,re.M)
     assert len(summary)==1 and summary[0]==(str(len(labels)),str(len(labels))) and len(labels)==29 and len(set(labels))==29
+    share_labels=re.findall(r"^SHARE_PASS (.+)$",text,re.M)
+    assert len(share_labels)==18 and len(set(share_labels))==18
+    assert re.findall(r"^ANDROID_SHARE_RESULT (\d+)/(\d+) PASS$",text,re.M)==[("18","18")]
+    # Independent host ZIP membership, UTF-8 text and PNG pixels, not exporter readback.
+    import zipfile
+    for archive in ("share.zip","share-clean.zip"):
+        run([*prefix,"pull",remote+"/"+archive,folder/archive])
+        with zipfile.ZipFile(folder/archive) as z:
+            assert z.namelist()==["notes.md","assets/image-1.png"]
+            md=z.read("notes.md").decode("utf-8")
+            assert not any(s in md for s in ("PRIVATE_NOTE_SECRET","UNSELECTED_ORIGINAL_SECRET","<img","![bad]"))
+            asset=z.read("assets/image-1.png")
+            assert b"PRIVATE_GPS_SECRET" not in asset
+            if archive=="share.zip":
+                (folder/"share-derived.png").write_bytes(asset)
+            else:
+                assert asset!=(folder/"source.png").read_bytes()
+                (folder/"share-clean.png").write_bytes(asset)
+    share_host=folder/"ShareHost.java"
+    share_host.write_text('''import java.nio.file.*; public class ShareHost {
+      public static void main(String[] a)throws Exception {
+        Path p=Paths.get(a[0]); CodecHostCheck.check(p.resolve("share-derived.png"),4,3,new int[]{0xff0a141e,0xff000000,0xff000000,0xff0d1a27,0xff112233,0xff000000,0xff000000,0xff000000,0xff183048,0xff19324b,0xff000000,0xff000000});
+        int[] source=new int[35];for(int i=0;i<35;i++)source[i]=0xff000000|((i+1)*0x010203);
+        CodecHostCheck.check(p.resolve("share-clean.png"),7,5,source);
+      }}''',encoding="utf-8")
+    run(["javac","-encoding","UTF-8","-cp",folder,"-d",folder,share_host])
+    share_host_result=run(["java","-Djava.awt.headless=true","-cp",folder,"ShareHost",folder])
+    assert re.findall(r"^HOST_CODEC_PASS (.+)$",share_host_result,re.M)==["share-derived.png","share-clean.png"]
     for name in sources:
         actual=subprocess.check_output([*prefix,"exec-out","cat",remote+"/"+name],timeout=30)
         assert actual==(folder/name).read_bytes(),"device fixture/source changed: "+name
@@ -566,6 +656,8 @@ def android_codec(adb, gate):
             "host_negative_controls":len(mutations),"device_apk_readback":"EXACT_BYTES",
             "output_metadata":"PNG_CHUNK_ALLOWLIST_NO_TEXT_EXIF_TRAILING_BYTES",
             "exif_boundaries":exif_report,"release_ready":False}
+    report["markdown_share"]={"status":"PASS","checks":18,"labels":share_labels,
+                             "independent_host_png_checks":2,"scope":"READ_ONLY_ZIP_BACKEND_NOT_UI_STALE_PREVIEW_OR_RECEIVER"}
     out=ROOT/"native-ui";out.mkdir(exist_ok=True)
     (out/"codec-result.json").write_text(json.dumps(report,indent=2)+"\n")
     print("ANDROID_CODEC_EVIDENCE "+json.dumps(report),flush=True)

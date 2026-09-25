@@ -66,7 +66,8 @@ public final class TodayScreen {
         content=column();LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,0,1);cp.topMargin=dp(12);root.addView(content,cp);
         LinearLayout nav=new LinearLayout(activity);
         nav.addView(button("今天",()->navigate(0)),new LinearLayout.LayoutParams(0,dp(52),1));
-        nav.addView(button("活动",()->navigate(1)),new LinearLayout.LayoutParams(0,dp(52),1));root.addView(nav);
+        nav.addView(button("活动",()->navigate(1)),new LinearLayout.LayoutParams(0,dp(52),1));
+        nav.addView(button("导出笔记",()->((MainActivity)activity).openNoteShare()),new LinearLayout.LayoutParams(0,dp(52),1));root.addView(nav);
         refresh();
     }
     private void navigate(int next){if(busy)return;rememberDraft();page=next;refresh();}

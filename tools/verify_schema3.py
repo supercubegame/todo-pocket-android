@@ -188,7 +188,7 @@ def selftest():
             assert observe(text, phase, 26)["status"] != "PASS", "missed: " + name
         controls[phase] = {"positive": 2, "negative": len(bad), "mutants": list(bad)}
     package = "com.supercubegame.pockettodo.v12.preview"
-    prefix = "instrumentation:" + package + ".test/com.supercubegame.pockettodo."
+    prefix = "instrumentation:" + package + ".test/com.supercubegame/pockettodo."
     old = prefix + "V12DeviceTest (target=" + package + ")\n"
     new = prefix + "Schema3DeviceTest (target=" + package + ")\n"
     assert registration(old, "V12DeviceTest")["status"] == "PASS"
@@ -205,6 +205,7 @@ def selftest():
     controls["default_schema3_ui"] = native_schema3_selftest()
     controls["derivative_backend"] = derivative_selftest()
     controls["image_late_race"] = race_selftest()
+    controls["markdown_native_ui"] = share_ui_selftest()
     return controls
 
 def derivative_selftest():
@@ -595,6 +596,302 @@ def isolated_runner(adb, gate, build_env):
             "app_certificate": app_certificate, "default_test_certificate": test_certificate,
             "scope": "HOST_APK_BYTES_AND_INSTALLED_RUNNER_NOT_DEVICE_APK_PULLBACK"}))
 
+SHARE_UI_LABELS = [
+    "share private fixture changes only chosen image metadata",
+    "share duplicate-title empty note cannot export namesake content",
+    "share picker excludes private image and starts with no selection",
+    "share empty selection stays in selection dialog",
+    "share actual preview contains selected text and image",
+    "share unchecked consent cannot open system save",
+    "share preview cancellation preserves complete database and media",
+    "share system picker cancellation publishes no file and preserves state",
+    "share text-only selection creates exact Markdown without image entries",
+    "share text-only success preserves complete database and media",
+    "share selected export contains exact Markdown and only one current image",
+    "share independent decoder verifies exported crop and opaque mask pixels",
+    "share successful image export preserves complete database and media",
+    "share external writer changes privacy without revision increment",
+    "share stale preview refuses publication through real system picker",
+    "share stale refusal causes no extra database or media mutation",
+]
+SHARE_UI_SCOPE = "NATIVE_SINGLE_NOTE_MARKDOWN_SAF_SYNTHETIC_NOT_PDF_OR_RECEIVER"
+
+def share_ui_observe(value, api, source, run):
+    if not isinstance(value, dict):
+        value = {}
+    passed = (value.get("status") == "PASS" and value.get("api") == api and
+              value.get("commit") == source and value.get("run_id") == run and
+              value.get("scope") == SHARE_UI_SCOPE and value.get("checks") == SHARE_UI_LABELS and
+              type(value.get("count")) is int and value.get("count") == len(SHARE_UI_LABELS) and
+              value.get("release_ready") is False)
+    return {"status": "PASS" if passed else "NOT_VERIFIED", "evidence": value}
+
+def share_ui_selftest():
+    import copy
+    good = {"status": "PASS", "api": 26, "commit": "source", "run_id": "run",
+            "scope": SHARE_UI_SCOPE, "checks": list(SHARE_UI_LABELS),
+            "count": len(SHARE_UI_LABELS), "release_ready": False}
+    assert share_ui_observe(good, 26, "source", "run")["status"] == "PASS"
+    bad = [None, [], {}, dict(good, api=34), dict(good, commit="old"),
+           dict(good, run_id="old"), dict(good, status="FAIL"), dict(good, scope="backend"),
+           dict(good, count=True), dict(good, release_ready=True)]
+    for i in range(len(SHARE_UI_LABELS)):
+        missing = copy.deepcopy(good);del missing["checks"][i];missing["count"] -= 1
+        swapped = copy.deepcopy(good);swapped["checks"][i] = "unrelated"
+        bad.extend((missing, swapped))
+    bad.extend((dict(good, checks=good["checks"] + good["checks"], count=2*len(SHARE_UI_LABELS)),
+                dict(good, checks=list(reversed(good["checks"])))))
+    for value in bad:
+        assert share_ui_observe(value, 26, "source", "run")["status"] != "PASS", "share UI observer missed"
+    return {"positive": 1, "negative": len(bad), "scope": "REPORT_CONTROLS_NOT_ANDROID_EXECUTION"}
+
+def native_share_ui(adb, gate):
+    """Continue the real v1.2 UI fixture, not the historical v1.1 ui_test.py.
+    No product test hooks. SQLite/media are independently read on the host.
+    One explicit CI-only external SQLite writer tests same-revision privacy staleness.
+    """
+    import io
+    import sqlite3
+    import time
+    import zipfile
+    import xml.etree.ElementTree as ET
+    out = Path("native-ui")
+    report_path = out / "native-result.json"
+    parent = json.loads(report_path.read_text())
+    assert native_schema3(parent, gate.API)["status"] == "PASS", "native prerequisites not accepted"
+    checks, shots, serial = [], [], 0
+    prefix = [str(adb), "-s", gate.SERIAL]
+    result = {"status": "FAIL", "api": gate.API, "commit": os.environ["GITHUB_SHA"],
+              "run_id": os.environ["GITHUB_RUN_ID"], "scope": SHARE_UI_SCOPE,
+              "checks": checks, "release_ready": False,
+              "recreation": "NOT_TESTED", "provider_failures": "NOT_TESTED",
+              "private_text": "NOT_TESTED", "actual_receiver": "NOT_TESTED"}
+    def command(*args, binary=False):
+        return subprocess.check_output(prefix + list(args), text=not binary, timeout=40)
+    def shell(*args): return command("shell", *args)
+    def nodes():
+        shell("uiautomator", "dump", "/sdcard/share-window.xml")
+        return list(ET.fromstring(shell("cat", "/sdcard/share-window.xml")).iter("node"))
+    def find(**attrs):
+        deadline = time.monotonic() + 20
+        current = []
+        while time.monotonic() < deadline:
+            current = nodes()
+            for n in current:
+                if all(n.get(k) == v for k, v in attrs.items()): return n
+            time.sleep(.25)
+        raise AssertionError("share UI missing " + repr(attrs) + "; actual=" +
+                             repr([n.attrib for n in current if n.get("text") or n.get("content-desc")]))
+    def click(n):
+        assert n.get("enabled") == "true", "disabled share target"
+        x1,y1,x2,y2 = map(int,re.findall(r"\d+",n.get("bounds")))
+        assert x2>x1 and y2>y1, "empty share target bounds"
+        shell("input","tap",str((x1+x2)//2),str((y1+y2)//2))
+    def tap(text): click(find(text=text))
+    def touch(desc): click(find(**{"content-desc":desc}))
+    def ready(): find(**{"content-desc":"v12-status","text":"已保存到本机"})
+    def stop(): shell("am","force-stop",gate.PKG)
+    def start():
+        shell("am","start","-W","-n",gate.PKG+"/com.supercubegame.pockettodo.MainActivity")
+        ready()
+    def snapshot():
+        nonlocal serial
+        serial += 1
+        path = out / ("share-state-" + str(serial) + ".db")
+        path.write_bytes(command("exec-out","run-as",gate.PKG,"cat","databases/pocket-v12.db",binary=True))
+        if "pocket-v12.db-wal" in shell("run-as",gate.PKG,"ls","databases").splitlines():
+            Path(str(path)+"-wal").write_bytes(command("exec-out","run-as",gate.PKG,"cat","databases/pocket-v12.db-wal",binary=True))
+        with sqlite3.connect(path) as db:
+            tables = [r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
+            assert "blocks" in tables and "revision" in tables
+            state = {t:db.execute('SELECT * FROM "'+t+'" ORDER BY rowid').fetchall() for t in tables}
+        media = {}
+        for name in shell("run-as",gate.PKG,"ls","files/media").splitlines():
+            assert re.fullmatch(r"[0-9a-f]{64}",name), "unexpected media filename"
+            data = command("exec-out","run-as",gate.PKG,"cat","files/media/"+name,binary=True)
+            media[name] = hashlib.sha256(data).hexdigest()
+            assert media[name] == name, "stored media digest mismatch"
+        return state, media
+    def ok(condition, label):
+        assert condition, label
+        assert label == SHARE_UI_LABELS[len(checks)], "share check order drift"
+        checks.append(label);print("NATIVE_SHARE_PASS "+label,flush=True)
+    def shot(name):
+        data = command("exec-out","screencap","-p",binary=True)
+        assert data.startswith(b"\x89PNG\r\n\x1a\n")
+        (out/name).write_bytes(data)
+        shots.append({"file":name,"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()})
+    def file_paths():
+        return shell("find","/sdcard/Download","-type","f","-name","PocketTodo-notes.zip").splitlines()
+    def export_bytes():
+        paths = file_paths()
+        assert paths == ["/sdcard/Download/PocketTodo-notes.zip"], "missing or ambiguous SAF output: "+repr(paths)
+        data = command("exec-out","cat",paths[0],binary=True)
+        assert data, "empty SAF output"
+        return data
+    def choose_note(note_id):
+        tap("导出笔记");find(text="导出哪篇笔记？")
+        tap(note_labels[note_id])
+    def choose_blocks(image):
+        choose_note(note)
+        find(text="勾选内容（私有项已排除）")
+        tap("1. 文字：Second edited")
+        if image: tap("2. 图片：")
+        tap("生成预览");find(text="Markdown图片包预览")
+    def consent():
+        for attempt in range(8):
+            current = nodes()
+            for n in current:
+                if n.get("text") == "我已核对内容与图片，可保存此包":
+                    bounds=list(map(int,re.findall(r"\d+",n.get("bounds"))))
+                    if bounds[2]>bounds[0] and bounds[3]>bounds[1]:
+                        assert n.get("checked") == "false", "consent not initially empty"
+                        click(n);return
+            shell("input","swipe","160","440","160","190","350")
+        raise AssertionError("share consent not reachable")
+    def open_save():
+        consent();tap("选择保存位置")
+        assert "documentsui" in find(text="PocketTodo-notes.zip").get("package","")
+        assert "documentsui" in find(text="SAVE").get("package","")
+    def saved_message():
+        find(**{"content-desc":"v12-status","text":"Markdown图片包已保存，逐字节回读一致"})
+    try:
+        assert os.environ.get("GITHUB_ACTIONS") == "true" and shell("getprop","ro.kernel.qemu").strip() == "1"
+        stop();initial, original_media = snapshot()
+        derived = [r for r in initial["blocks"] if r[8] is not None]
+        assert len(derived) == 1, "expected actual native derivative fixture"
+        row = derived[0];note, block = row[0], row[1]
+        siblings = [r for r in initial["blocks"] if r[0] == note and r[3] == "IMAGE" and r[1] != block]
+        assert len(siblings) == 1 and siblings[0][7] == 0 and row[7] == 0
+        private = siblings[0]
+        note_row = next(r for r in initial["notes"] if r[0] == note)
+        duplicates = [r for r in initial["notes"] if r[2] == note_row[2] and r[0] != note]
+        assert len(duplicates) == 1 and not any(r[0] == duplicates[0][0] for r in initial["blocks"])
+        # Resolve actual activity title column independently from SQLite schema.
+        with sqlite3.connect(out/("share-state-"+str(serial)+".db")) as db:
+            titles = dict(db.execute("SELECT id,title FROM activities"))
+        note_labels = {r[0]:str(i+1)+". "+titles[r[1]]+" / "+r[2] for i,r in enumerate(initial["notes"])}
+        start();tap("活动");ready();touch("activity-"+str(note_row[1]));ready();tap("笔记");ready()
+        tap("切换笔记");tap("2. Second note");ready()
+        touch("note-image-edit-"+private[1]);touch("image-caption")
+        shell("input","text","PRIVATE_SHARE_SENTINEL");touch("image-private");tap("保存");ready();stop()
+        baseline, media = snapshot()
+        expected = list(private);expected[6]="PRIVATE_SHARE_SENTINEL";expected[7]=1
+        ok(baseline["blocks"] == [tuple(expected) if r==private else r for r in initial["blocks"]] and
+           all(baseline[t]==initial[t] for t in initial if t not in ("blocks","revision")) and media==original_media,
+           "share private fixture changes only chosen image metadata")
+        assert not file_paths(), "preexisting share output would mask failed publication"
+        start();choose_note(duplicates[0][0])
+        find(**{"content-desc":"v12-status","text":"这篇笔记没有非私有内容可导出"})
+        ok(not any(n.get("text")=="勾选内容（私有项已排除）" for n in nodes()),
+           "share duplicate-title empty note cannot export namesake content")
+        choose_note(note);find(text="勾选内容（私有项已排除）")
+        choices = [n for n in nodes() if n.get("class")=="android.widget.CheckedTextView"]
+        ok([n.get("text") for n in choices]==["1. 文字：Second edited","2. 图片："] and
+           all(n.get("checked")=="false" for n in choices),
+           "share picker excludes private image and starts with no selection")
+        tap("生成预览")
+        ok(find(text="勾选内容（私有项已排除）") is not None and not file_paths(),
+           "share empty selection stays in selection dialog")
+        tap("1. 文字：Second edited");tap("2. 图片：");tap("生成预览");find(text="Markdown图片包预览")
+        visible = nodes()
+        ok(any("Second edited" in n.get("text","") for n in visible) and
+           any(n.get("class")=="android.widget.ImageView" for n in visible),
+           "share actual preview contains selected text and image")
+        shot("20-share-preview.png");tap("选择保存位置")
+        ok(find(text="Markdown图片包预览") is not None and not file_paths() and
+           not any("documentsui" in n.get("package","") for n in nodes()),
+           "share unchecked consent cannot open system save")
+        tap("取消");stop()
+        ok(snapshot()==(baseline,media),"share preview cancellation preserves complete database and media")
+        start();choose_blocks(True);open_save();shell("input","keyevent","KEYCODE_BACK")
+        find(**{"content-desc":"v12-status","text":"已取消导出，本机笔记未改变"});stop()
+        ok(not file_paths() and snapshot()==(baseline,media),
+           "share system picker cancellation publishes no file and preserves state")
+        start();choose_blocks(False);open_save();tap("SAVE");saved_message()
+        text_zip = export_bytes()
+        with zipfile.ZipFile(io.BytesIO(text_zip)) as archive:
+            ok(archive.namelist()==["notes.md"] and archive.read("notes.md")==b"# Pocket Todo\n\nSecond edited\n\n",
+               "share text-only selection creates exact Markdown without image entries")
+        stop();ok(snapshot()==(baseline,media),"share text-only success preserves complete database and media")
+        shell("mv","/sdcard/Download/PocketTodo-notes.zip","/sdcard/Download/share-text-verified.zip")
+        start();choose_blocks(True);open_save();tap("SAVE");saved_message()
+        image_zip = export_bytes()
+        with zipfile.ZipFile(io.BytesIO(image_zip)) as archive:
+            ok(archive.namelist()==["notes.md","assets/image-1.png"] and
+               archive.read("notes.md")==b"# Pocket Todo\n\nSecond edited\n\n![Image](assets/image-1.png)\n\n",
+               "share selected export contains exact Markdown and only one current image")
+            (out/"share-exported.png").write_bytes(archive.read("assets/image-1.png"))
+        geometry = parent["derivative_geometry"]
+        crops = [g["observed_crop"] for g in geometry if g.get("source")==[1280,640] and "observed_crop" in g]
+        masks = [g["observed_mask"] for g in geometry if g.get("source")==[1280,640] and "observed_mask" in g]
+        assert len(crops)==len(masks)==1
+        pixels = subprocess.check_output(["java","-Djava.awt.headless=true","-cp","build/ci-note-image","VerifyDerivative",
+            str(out/"derivative-source.png"),str(out/"share-exported.png"),*map(str,crops[0]),*map(str,masks[0])],
+            text=True,timeout=60).strip()
+        ok(pixels=="DERIVATIVE_PIXELS_PASS "+str(crops[0][2]-crops[0][0])+"x"+str(crops[0][3]-crops[0][1]),
+           "share independent decoder verifies exported crop and opaque mask pixels")
+        shot("21-share-saved.png");stop()
+        ok(snapshot()==(baseline,media),"share successful image export preserves complete database and media")
+        result["zip_sha256"] = hashlib.sha256(image_zip).hexdigest()
+        result["zip_bytes"] = len(image_zip)
+        shell("mv","/sdcard/Download/PocketTodo-notes.zip","/sdcard/Download/share-image-verified.zip")
+        helper = Path("build/ci-share-writer");helper.mkdir(parents=True,exist_ok=True)
+        java = helper/"ShareExternalWriter.java"
+        java.write_text('''import android.database.sqlite.SQLiteDatabase;
+import android.content.ContentValues;
+public class ShareExternalWriter {
+ public static void main(String[] a) {
+  if(!android.os.Build.HARDWARE.equals("ranchu")&&!android.os.Build.HARDWARE.equals("goldfish"))throw new SecurityException("CI emulator only");
+  try(SQLiteDatabase db=SQLiteDatabase.openDatabase(a[0],null,SQLiteDatabase.OPEN_READWRITE)){
+   ContentValues v=new ContentValues();v.put("private",Integer.parseInt(a[3]));
+   if(db.update("blocks",v,"note_id=? AND id=? AND private=?",new String[]{a[1],a[2],a[4]})!=1)throw new AssertionError("exact external target");
+  }
+  System.out.println("EXTERNAL_PRIVACY_WRITE_ONE_ROW");
+ }
+}''',encoding="utf-8")
+        android_jar = gate.SDK/"platforms/android-35/android.jar"
+        subprocess.run(["javac","-encoding","UTF-8","-cp",str(android_jar),"-d",str(helper),str(java)],check=True,timeout=40)
+        jar = helper/"writer.jar"
+        subprocess.run([str(gate.SDK/"build-tools/35.0.0/d8"),"--lib",str(android_jar),"--min-api","26",
+                        "--output",str(jar),str(helper/"ShareExternalWriter.class")],check=True,timeout=40)
+        command("push",str(jar),"/data/local/tmp/share-writer.jar")
+        def external(value, previous):
+            output=shell("run-as",gate.PKG,"env","CLASSPATH=/data/local/tmp/share-writer.jar","app_process","/system/bin",
+                         "ShareExternalWriter","/data/user/0/"+gate.PKG+"/databases/pocket-v12.db",
+                         note,block,str(value),str(previous))
+            assert output.strip()=="EXTERNAL_PRIVACY_WRITE_ONE_ROW",output
+        start();choose_blocks(True);open_save()
+        external(1,0)
+        changed, changed_media = snapshot()
+        stale_row = list(row);stale_row[7]=1
+        ok(changed["blocks"]==[tuple(stale_row) if r==row else r for r in baseline["blocks"]] and
+           all(changed[t]==baseline[t] for t in baseline if t!="blocks") and changed_media==media,
+           "share external writer changes privacy without revision increment")
+        tap("SAVE")
+        find(**{"content-desc":"v12-status","text":"导出未完成：预览过期或保存失败；本机笔记未改。目标可能留有空文件或部分文件，请检查"})
+        paths=file_paths()
+        ok(not paths or (len(paths)==1 and command("exec-out","cat",paths[0],binary=True)==b""),
+           "share stale preview refuses publication through real system picker")
+        stop()
+        ok(snapshot()==(changed,media),"share stale refusal causes no extra database or media mutation")
+        external(0,1)
+        assert snapshot()==(baseline,media), "external test cleanup changed other state"
+        result["status"]="PASS"
+    except Exception as exc:
+        result["error"]=exception_evidence(exc)
+        parent["status"]="FAIL"
+        try: shot("share-failure.png")
+        except Exception as capture: result["screenshot_error"]=repr(capture)
+        raise
+    finally:
+        result["count"]=len(checks)
+        parent["markdown_ui"]=result
+        if result["status"]=="PASS": parent["sharing"]=SHARE_UI_SCOPE
+        parent["screenshots"].extend(shots)
+        report_path.write_text(json.dumps(parent,ensure_ascii=False,indent=2))
+        print("NATIVE_SHARE_RESULT "+json.dumps(result,ensure_ascii=False),flush=True)
+
 def android():
     build_env = os.environ.copy()
     print("SCHEMA3_OBSERVER_SELFTEST " + json.dumps(selftest()), flush=True)
@@ -606,7 +903,10 @@ def android():
         isolated_runner(adb, gate, build_env)
     gate.verify_database = database_and_schema3
     native = gate.verify_native_ui
-    gate.verify_native_ui = lambda adb: native_with_diagnostics(adb, gate, native)
+    def native_and_share(adb):
+        native_with_diagnostics(adb, gate, native)
+        native_with_diagnostics(adb, gate, lambda device: native_share_ui(device, gate))
+    gate.verify_native_ui = native_and_share
     # Existing codec wrapper still invokes our wrapper, then all old native tests.
     try:
         verify_exports.android_main()
@@ -624,6 +924,7 @@ def report():
         path = folder / "native-ui/native-result.json"
         native = json.loads(path.read_text()) if path.exists() else {}
         devices[str(api)]["default_ui"] = native_schema3(native, api)
+        devices[str(api)]["markdown_ui"] = share_ui_observe(native.get("markdown_ui"), api, source, run)
         for stage, runner in (("default", "V12DeviceTest"), ("schema3", "Schema3DeviceTest"), ("restore", "Schema3RestoreTests"), ("restored", "V12DeviceTest")):
             path = folder / ("device-schema3-registration-" + stage + ".txt")
             text = path.read_text(errors="replace") if path.exists() else ""

@@ -46,8 +46,9 @@ jobs:
       matrix:
         api: [26, 34]
     runs-on: ubuntu-24.04
-    # Stage13 API34 used about 21 minutes; added SAF cases need headroom, not fewer checks.
-    timeout-minutes: 40
+    # Run36108321597 reached both 186-check native PASS results but API34 hit 40m.
+    # Bounded headroom for the full suite and packaging; no assertion or stage is skipped.
+    timeout-minutes: 55
     env:
       TEST_API: ${{ matrix.api }}
     steps:

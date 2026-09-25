@@ -2,7 +2,13 @@ package com.supercubegame.pockettodo;
 
 import android.app.AlertDialog;
 import android.database.Cursor;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Rect;
+import android.graphics.RectF;
+import android.view.MotionEvent;
+import android.view.View;
 import android.widget.*;
 import java.io.IOException;
 import java.io.ByteArrayOutputStream;
@@ -13,7 +19,8 @@ import java.util.UUID;
 
 /** Native activity note editor: stable note selection and ordered text/image blocks.
  * SAF-selected PNG/JPEG originals are private immutable copies, with bounded previews.
- * Camera, EXIF orientation, crop and opaque redaction remain subsequent work.
+ * Camera and EXIF orientation remain subsequent work; crop and opaque redaction
+ * run through the guarded derivative backend behind real touch selection.
  * Writes go through validated AppDatabase APIs; UI read queries never mutate raw SQL.
  */
 public final class NoteEditorScreen {
@@ -213,7 +220,8 @@ public final class NoteEditorScreen {
                 LinearLayout meta=new LinearLayout(host.activity);
                 TextView privacy=host.text(b.privateContent?"私有图片":"非私有图片",14,TodayScreen.MUTED);privacy.setContentDescription("note-image-privacy-"+b.id);
                 meta.addView(privacy,new LinearLayout.LayoutParams(0,-2,1));
-                Button edit=host.button("说明 / 私有",()->editImage(s,b));edit.setContentDescription("note-image-edit-"+b.id);meta.addView(edit,new LinearLayout.LayoutParams(-2,host.dp(48)));row.addView(meta);
+                Button edit=host.button("说明 / 私有",()->editImage(s,b));edit.setContentDescription("note-image-edit-"+b.id);meta.addView(edit,new LinearLayout.LayoutParams(-2,host.dp(48)));
+                Button derive=host.button("裁剪 / 遮挡",()->deriveImage(s,b));derive.setContentDescription("note-image-derive-"+b.id);meta.addView(derive,new LinearLayout.LayoutParams(-2,host.dp(48)));row.addView(meta);
                 if(!b.caption.isEmpty())row.addView(host.text(b.caption,14,TodayScreen.MUTED));
                 android.graphics.Bitmap image=s.previews.get(b.id);
                 if(image!=null){
@@ -291,6 +299,165 @@ public final class NoteEditorScreen {
         }));
         dialog.show();
     }
+    /** One derivative dialog session; dismissal always closes the owned preview. */
+    private static final class Session {
+        Editor editor;
+        Preview preview;
+        void close(){
+            if(preview!=null){preview.close();preview=null;}
+            if(editor!=null){editor.close();editor=null;}
+        }
+    }
+    /** Real touch selection on the actually decoded preview. View coordinates map
+     * through fit-center into source pixels; reports expose the exact mapping. */
+    static final class SelectionView extends View {
+        private final android.graphics.Bitmap preview;
+        private final int srcW,srcH;
+        private final Paint frame=new Paint(),dim=new Paint(),mark=new Paint();
+        private final ArrayList<Rect> masks=new ArrayList<>();
+        private Rect crop;
+        private float downX,downY,moveX,moveY;
+        private boolean dragging,redact,locked;
+        private TextView cropReport,maskReport;
+        SelectionView(android.content.Context context,android.graphics.Bitmap preview,int srcW,int srcH){
+            super(context);
+            this.preview=preview;this.srcW=srcW;this.srcH=srcH;
+            frame.setStyle(Paint.Style.STROKE);frame.setStrokeWidth(3);frame.setColor(0xffffffff);
+            dim.setColor(0x88203d35);
+            mark.setColor(0x99a33743);
+        }
+        void attach(TextView cropReport,TextView maskReport){this.cropReport=cropReport;this.maskReport=maskReport;}
+        void setRedact(boolean value){redact=value;}
+        void setLocked(boolean value){locked=value;}
+        void reset(){if(locked)return;crop=null;masks.clear();dragging=false;report();invalidate();}
+        Rect crop(){return crop==null?null:new Rect(crop);}
+        List<Rect> masks(){List<Rect> copy=new ArrayList<>();for(Rect m:masks)copy.add(new Rect(m));return copy;}
+        private float scale(){return Math.min(getWidth()/(float)preview.getWidth(),getHeight()/(float)preview.getHeight());}
+        private float offsetX(){return (getWidth()-preview.getWidth()*scale())/2f;}
+        private float offsetY(){return (getHeight()-preview.getHeight()*scale())/2f;}
+        private float sourceX(float x){float p=Math.max(0,Math.min(preview.getWidth(),(x-offsetX())/scale()));return p*srcW/preview.getWidth();}
+        private float sourceY(float y){float p=Math.max(0,Math.min(preview.getHeight(),(y-offsetY())/scale()));return p*srcH/preview.getHeight();}
+        private RectF viewRect(Rect area){
+            float s=scale();
+            return new RectF(offsetX()+area.left*preview.getWidth()/(float)srcW*s,offsetY()+area.top*preview.getHeight()/(float)srcH*s,
+                offsetX()+area.right*preview.getWidth()/(float)srcW*s,offsetY()+area.bottom*preview.getHeight()/(float)srcH*s);
+        }
+        @Override public boolean onTouchEvent(MotionEvent event){
+            if(locked)return true;
+            switch(event.getActionMasked()){
+                case MotionEvent.ACTION_DOWN:downX=event.getX();downY=event.getY();moveX=downX;moveY=downY;dragging=true;return true;
+                case MotionEvent.ACTION_MOVE:moveX=event.getX();moveY=event.getY();invalidate();return true;
+                case MotionEvent.ACTION_UP:
+                    if(!dragging)return true;dragging=false;
+                    int l=Math.round(Math.min(sourceX(downX),sourceX(event.getX())));
+                    int t=Math.round(Math.min(sourceY(downY),sourceY(event.getY())));
+                    int r=Math.round(Math.max(sourceX(downX),sourceX(event.getX())));
+                    int b=Math.round(Math.max(sourceY(downY),sourceY(event.getY())));
+                    Rect area=new Rect(l,t,r,b);
+                    if(area.width()>=2&&area.height()>=2){
+                        if(redact)masks.add(area);else crop=area;
+                        report();
+                    }
+                    invalidate();return true;
+            }
+            return true;
+        }
+        private void report(){
+            if(cropReport!=null)cropReport.setText(crop==null?"未选择裁剪区域":"裁剪 "+crop.left+","+crop.top+" → "+crop.right+","+crop.bottom);
+            if(maskReport!=null){
+                StringBuilder text=new StringBuilder("遮挡 ").append(masks.size()).append(" 处");
+                for(Rect m:masks)text.append("：").append(m.left).append(",").append(m.top).append(" → ").append(m.right).append(",").append(m.bottom);
+                maskReport.setText(text);
+            }
+        }
+        @Override protected void onDraw(Canvas canvas){
+            canvas.drawColor(0xff203d35);
+            float s=scale(),ox=offsetX(),oy=offsetY(),dw=preview.getWidth()*s,dh=preview.getHeight()*s;
+            canvas.drawBitmap(preview,null,new RectF(ox,oy,ox+dw,oy+dh),null);
+            if(crop!=null){
+                RectF area=viewRect(crop);
+                canvas.drawRect(ox,oy,ox+dw,area.top,dim);
+                canvas.drawRect(ox,area.bottom,ox+dw,oy+dh,dim);
+                canvas.drawRect(ox,area.top,area.left,area.bottom,dim);
+                canvas.drawRect(area.right,area.top,ox+dw,area.bottom,dim);
+                canvas.drawRect(area,frame);
+            }
+            for(Rect m:masks){RectF area=viewRect(m);canvas.drawRect(area,mark);canvas.drawRect(area,frame);}
+            if(dragging)canvas.drawRect(Math.min(downX,moveX),Math.min(downY,moveY),Math.max(downX,moveX),Math.max(downY,moveY),frame);
+        }
+    }
+    /** Touch selection feeding the accepted guarded backend. Original bytes, caption,
+     * privacy and siblings stay untouched; abandoned previews never write. */
+    private void deriveImage(State s,NoteDocument.Block block){
+        final android.graphics.Bitmap shown=s.previews.get(block.id);
+        if(shown==null){host.message("图片副本不可用，无法裁剪",true);return;}
+        host.work(()->{
+            android.graphics.BitmapFactory.Options size=bounds(s.media.path(block.assetId));
+            return new int[]{size.outWidth,size.outHeight};
+        },size->showDerive(s,block,shown,size[0],size[1]),null);
+    }
+    private void showDerive(State s,NoteDocument.Block block,android.graphics.Bitmap shown,int srcW,int srcH){
+        LinearLayout body=host.column();body.setPadding(host.dp(12),host.dp(4),host.dp(12),host.dp(4));
+        final SelectionView view=new SelectionView(host.activity,shown,srcW,srcH);
+        view.setContentDescription("derive-canvas");body.addView(view,new LinearLayout.LayoutParams(-1,host.dp(240)));
+        TextView source=host.text("原图 "+srcW+" × "+srcH+" · 预览 "+shown.getWidth()+" × "+shown.getHeight(),14,TodayScreen.MUTED);source.setContentDescription("derive-source");body.addView(source);
+        TextView crop=host.text("未选择裁剪区域",14,TodayScreen.INK);crop.setContentDescription("derive-crop");body.addView(crop);
+        TextView masks=host.text("遮挡 0 处",14,TodayScreen.MUTED);masks.setContentDescription("derive-masks");body.addView(masks);
+        view.attach(crop,masks);
+        LinearLayout modes=new LinearLayout(host.activity);
+        modes.addView(host.button("裁剪模式",()->view.setRedact(false)),new LinearLayout.LayoutParams(0,host.dp(48),1));
+        modes.addView(host.button("遮挡模式",()->view.setRedact(true)),new LinearLayout.LayoutParams(0,host.dp(48),1));
+        body.addView(modes);
+        body.addView(host.button("重置选区",view::reset),new LinearLayout.LayoutParams(-1,host.dp(48)));
+        TextView output=host.text("",14,TodayScreen.INK);output.setContentDescription("derive-output");body.addView(output);
+        TextView validation=host.text("拖拽选择裁剪区域；遮挡模式可叠加多处。保存生成新图，原图保留。",14,TodayScreen.MUTED);body.addView(validation);
+        ScrollView scroll=new ScrollView(host.activity);scroll.addView(body);
+        final AlertDialog dialog=new AlertDialog.Builder(host.activity).setTitle("裁剪 / 遮挡").setView(scroll).setNegativeButton("取消",null).setPositiveButton("预览",null).create();
+        final Session session=new Session();
+        dialog.setOnDismissListener(unused->session.close());
+        dialog.setOnShowListener(unused->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+            if(session.preview!=null){
+                dialog.setCancelable(false);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);
+                host.work(()->{session.editor.confirm(session.preview);return true;},ignored->{dialog.dismiss();load();},()->dialog.dismiss());
+                return;
+            }
+            Rect area=view.crop();
+            List<Rect> drawn=view.masks();
+            if(area==null&&drawn.isEmpty()){validation.setText("尚未选择：请拖出裁剪区域，或在遮挡模式涂抹");validation.setTextColor(TodayScreen.ERROR);return;}
+            if(area==null)area=new Rect(0,0,srcW,srcH);
+            if((long)area.width()*area.height()>1000000L){validation.setText("选区过大：派生图最多 100 万像素");validation.setTextColor(TodayScreen.ERROR);return;}
+            if(area.width()<2||area.height()<2){validation.setText("选区过小");validation.setTextColor(TodayScreen.ERROR);return;}
+            if(area.equals(new Rect(0,0,srcW,srcH))&&drawn.isEmpty()){validation.setText("未做任何修改");validation.setTextColor(TodayScreen.ERROR);return;}
+            ArrayList<int[]> translated=new ArrayList<>();
+            for(Rect m:drawn){
+                int l=Math.max(m.left,area.left),t=Math.max(m.top,area.top),r=Math.min(m.right,area.right),b=Math.min(m.bottom,area.bottom);
+                if(l<r&&t<b)translated.add(new int[]{l-area.left,t-area.top,r-area.left,b-area.top});
+            }
+            final Rect target=area;
+            final int[][] maskArray=translated.toArray(new int[0][]);
+            dialog.setCancelable(false);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);view.setLocked(true);
+            host.work(()->{
+                session.editor=new Editor(host.db,s.media);
+                session.preview=session.editor.prepare(s.noteId,block.id,target.left,target.top,target.right,target.bottom,maskArray);
+                byte[] png=session.preview.png();
+                android.graphics.Bitmap decoded=android.graphics.BitmapFactory.decodeByteArray(png,0,png.length);
+                if(decoded==null)throw new IOException("派生预览解码失败");
+                return decoded;
+            },decoded->{
+                dialog.setCancelable(true);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);
+                output.setText("派生预览 "+decoded.getWidth()+" × "+decoded.getHeight());
+                ImageView image=new ImageView(host.activity);
+                image.setImageBitmap(decoded);image.setAdjustViewBounds(true);image.setMaxHeight(host.dp(160));image.setContentDescription("derive-result");
+                body.addView(image,0,new LinearLayout.LayoutParams(-1,-2));
+                Button positive=dialog.getButton(AlertDialog.BUTTON_POSITIVE);positive.setText("保存");positive.setEnabled(true);
+            },()->{
+                dialog.setCancelable(true);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);view.setLocked(false);
+                session.close();
+                validation.setText("预览失败：原图可能已变化，请重新选择");validation.setTextColor(TodayScreen.ERROR);
+            });
+        }));
+        dialog.show();
+    }
     /** Resource policy, not a measured capacity promise. Per-image limits do not bound a whole note. */
     private static final long IMAGE_BYTES=8L*1024*1024, IMAGE_PIXELS=20000000;
     private static final int IMAGE_EDGE=16384, PREVIEW_EDGE=1024;
@@ -339,7 +506,7 @@ public final class NoteEditorScreen {
     }
     /** Original retained privately; backups include it and any metadata. No share path yet. */
     private void addImage(State s){
-        AlertDialog pick=new AlertDialog.Builder(host.activity).setTitle("加入图片").setMessage("选择 PNG/JPEG，最大 8 MiB、2000 万像素、单边 16384。保留本机原图副本及元数据，完整备份也会包含；尚不支持相机、旋转校正、裁剪遮挡或分享。")
+        AlertDialog pick=new AlertDialog.Builder(host.activity).setTitle("加入图片").setMessage("选择 PNG/JPEG，最大 8 MiB、2000 万像素、单边 16384。保留本机原图副本及元数据，完整备份也会包含；尚不支持相机、旋转校正或分享。")
             .setNegativeButton("取消",null).setNeutralButton("从文件选择",(dialog,which)->((MainActivity)host.activity).chooseNoteImage(uri->importImage(s,uri)))
             .setPositiveButton("加入合成图",null).create();
         pick.setOnShowListener(unused->pick.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{

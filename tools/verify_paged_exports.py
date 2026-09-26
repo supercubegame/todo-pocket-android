@@ -7,6 +7,8 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import shlex
+import tempfile
 import zipfile
 
 JAVA = r'''
@@ -36,8 +38,15 @@ public final class PagedContractTest {
  static void write(File root,String name,Object result)throws Exception{
   AndroidCodecTest.save(new File(root,name),bytes(result));
  }
- public static void main(String[] args){
-  try{
+ static byte[] read(File file)throws IOException{
+  try(InputStream in=new FileInputStream(file);ByteArrayOutputStream out=new ByteArrayOutputStream()){
+   byte[] b=new byte[8192];int n;while((n=in.read(b))!=-1)out.write(b,0,n);return out.toByteArray();
+  }
+ }
+ static void save(File file,byte[] bytes)throws IOException{
+  try(OutputStream out=new FileOutputStream(file)){out.write(bytes);}
+ }
+ public static void verify(String[] args)throws Exception{
    File root=new File(args[0]);
    renderer=Class.forName("com.supercubegame.pockettodo.PagedNoteRenderer");
    block=Class.forName("com.supercubegame.pockettodo.PagedNoteRenderer$Block");
@@ -88,10 +97,142 @@ public final class PagedContractTest {
    reject(()->render(Arrays.asList(empty),keys("n/empty"),"PDF"),"blank_document_rejected");
    if(checks!=29)throw new AssertionError("coverage_count_"+checks);
    System.out.println("PAGED_RESULT 29/29 PASS BACKEND_NOT_NATIVE_UI_SAF_OR_RECEIVER");
-  }catch(Throwable e){e.printStackTrace(System.err);System.err.flush();System.out.flush();System.exit(1);}
  }
 }
 '''
+
+RUNNER = r'''
+package ci.paged;
+import android.app.Instrumentation;
+import android.os.Bundle;
+import java.io.*;
+public final class PagedInstrumentation extends Instrumentation {
+ private Bundle args;
+ @Override public void onCreate(Bundle value){super.onCreate(value);args=value;start();}
+ @Override public void onStart(){
+  ByteArrayOutputStream bytes=new ByteArrayOutputStream();
+  PrintStream oldOut=System.out,oldErr=System.err;
+  int code=0;
+  try{
+   PrintStream log=new PrintStream(bytes,true,"UTF-8");System.setOut(log);System.setErr(log);
+   if(!getTargetContext().getPackageName().equals(args.getString("expectedPackage"))||
+      android.os.Process.myUid()!=getTargetContext().getApplicationInfo().uid)
+    throw new AssertionError("paged_target_identity");
+   System.out.println("PAGED_TARGET "+getTargetContext().getPackageName()+" "+android.os.Process.myUid());
+   if("diagnostic".equals(args.getString("mode")))throw new AssertionError("paged_diagnostic_sentinel");
+   File root=new File(getTargetContext().getCacheDir(),args.getString("folder"));
+   PagedContractTest.verify(new String[]{root.getAbsolutePath(),args.getString("expectedApi")});
+   code=-1;
+  }catch(Throwable e){System.err.println("PAGED_FAILED");e.printStackTrace(System.err);}
+  finally{
+   System.out.flush();System.err.flush();System.setOut(oldOut);System.setErr(oldErr);
+   Bundle result=new Bundle();
+   try{result.putString("stream",bytes.toString("UTF-8"));}catch(Exception e){throw new RuntimeException(e);}
+   finish(code,result);
+  }
+ }
+}
+'''
+
+LABELS = ["actual_api"] + [
+    name+"_"+kind for kind in ("PDF","PNG_ZIP") for name in (
+        "multiple_pages","result_ownership","excluded_blocks_do_not_add_pages","single_page",
+        "empty_selection","unknown_selection","private_only","duplicate_identity",
+        "selected_bad_image","unselected_bad_image_ignored","source_pixel_budget",
+        "invalid_text","page_limit_refuses_not_truncates")
+] + ["source_file_unchanged","blank_document_rejected"]
+
+def observe(text,package):
+    labels=re.findall(r"^PAGED_PASS ([^\r\n]+)",text,re.M)
+    targets=re.findall(r"(?:^|stream=)PAGED_TARGET (\S+) (\d+)",text,re.M)
+    assert len(targets)==1 and targets[0][0]==package and int(targets[0][1])>=10000
+    assert labels==LABELS
+    assert re.findall(r"^PAGED_RESULT ([^\r\n]+)",text,re.M)==[
+        "29/29 PASS BACKEND_NOT_NATIVE_UI_SAF_OR_RECEIVER"]
+    assert re.findall(r"^INSTRUMENTATION_CODE: (-?\d+)\s*$",text,re.M)==["-1"]
+    assert not any(x in text for x in ("PAGED_FAILED","INSTRUMENTATION_FAILED","INSTRUMENTATION_ABORTED"))
+    return labels
+
+def instrumentation(folder,prefix,gate):
+    """Normal target-app startup initializes fonts; never patch hidden framework APIs."""
+    from verify_schema3 import certificate, require_registration
+    root=Path(__file__).resolve().parents[1]
+    apps=list((root/"build/outputs/apk/debug").glob("*.apk"))
+    tests=list((root/"build/outputs/apk/androidTest/debug").glob("*.apk"))
+    assert len(apps)==len(tests)==1
+    app,test=apps[0],tests[0]
+    before,saved=app.read_bytes(),test.read_bytes()
+    cert=certificate(app,gate)
+    assert cert==certificate(test,gate)
+    require_registration(prefix[0],gate,"paged-before","V12DeviceTest")
+    # The original SDK build uses this debug key. Certificate equality below is
+    # mandatory: an absent/different key is a hard failure, not a signing fallback.
+    key=Path.home()/".android/debug.keystore"
+    assert key.is_file(),"original debug keystore unavailable"
+    nonce="paged-contract-"+os.environ["GITHUB_RUN_ID"]
+    cache="cache/"+nonce
+    run([*prefix,"shell","run-as",gate.PKG,"mkdir",cache])
+    for name in ("derived.png","over.png"):
+        data=(folder/name).read_bytes()
+        command="run-as "+shlex.quote(gate.PKG)+" sh -c "+shlex.quote("umask 077; cat > "+cache+"/"+name)
+        subprocess.run([*prefix,"shell",command],input=data,check=True,timeout=30)
+        assert subprocess.check_output([*prefix,"exec-out","run-as",gate.PKG,"cat",cache+"/"+name],timeout=30)==data
+    def installed_app():
+        output=run([*prefix,"shell","pm","path",gate.PKG])
+        paths=re.findall(r"^package:(\S+)\s*$",output,re.M)
+        assert len(paths)==1,"ambiguous installed product APK"
+        return subprocess.check_output([*prefix,"exec-out","cat",paths[0]],timeout=30)
+    assert installed_app()==before
+    with tempfile.TemporaryDirectory(prefix="paged-runner-",dir=root/"build") as temp:
+        work=Path(temp);src=work/"src";src.mkdir()
+        # Test-only sources; product classes remain solely in the installed APK.
+        contract="package ci.paged;\n"+JAVA.replace("AndroidCodecTest.read(","read(").replace("AndroidCodecTest.save(","save(")
+        (src/"PagedContractTest.java").write_text(contract,encoding="utf-8")
+        (src/"PagedInstrumentation.java").write_text(RUNNER,encoding="utf-8")
+        init=work/"runner.gradle"
+        init.write_text("gradle.projectsEvaluated { rootProject.android {\n"
+            " defaultConfig { testInstrumentationRunner 'ci.paged.PagedInstrumentation' }\n"
+            " sourceSets.androidTest.java.srcDir "+json.dumps(str(src))+"\n"
+            " signingConfigs.debug.storeFile = new File("+json.dumps(str(key))+")\n"
+            "} }\n")
+        backup=work/"default-test.apk";backup.write_bytes(saved)
+        try:
+            run(["gradle","--no-daemon","--console=plain","-I",init,"assembleDebugAndroidTest"],timeout=300)
+            assert app.read_bytes()==before,"test build changed product APK"
+            assert certificate(test,gate)==cert,"paged test signing certificate differs"
+            run([*prefix,"install","-r","-t",test],timeout=120)
+            registration=run([*prefix,"shell","pm","list","instrumentation"])
+            rows=re.findall(r"^instrumentation:(\S+) \(target=([^)]+)\)\s*$",registration,re.M)
+            assert [r for r in rows if r[0].startswith(gate.PKG+".test/")]==[
+                (gate.PKG+".test/ci.paged.PagedInstrumentation",gate.PKG)]
+            args=[*prefix,"shell","am","instrument","-w","-r","-e","expectedPackage",gate.PKG,
+                  "-e","expectedApi",str(gate.API),"-e","folder",nonce]
+            component=gate.PKG+".test/ci.paged.PagedInstrumentation"
+            diagnostic=run([*args,"-e","mode","diagnostic",component],timeout=60)
+            assert "java.lang.AssertionError: paged_diagnostic_sentinel" in diagnostic
+            assert "PAGED_FAILED" in diagnostic and "INSTRUMENTATION_CODE: 0" in diagnostic
+            try:observe(diagnostic,gate.PKG)
+            except AssertionError:pass
+            else:raise AssertionError("failed instrumentation accepted")
+            output=run([*args,component],timeout=180)
+            labels=observe(output,gate.PKG)
+            for stem in ("paged","filtered","picture"):
+                for ext in ("pdf","zip"):
+                    name=stem+"."+ext
+                    data=subprocess.check_output([*prefix,"exec-out","run-as",gate.PKG,"cat",cache+"/"+name],timeout=30)
+                    assert 0<len(data)<=16777216
+                    (folder/name).write_bytes(data)
+            assert installed_app()==before
+        finally:
+            assert backup.read_bytes()==saved
+            run([*prefix,"install","-r","-t",backup],timeout=120)
+            test.write_bytes(saved)
+            require_registration(prefix[0],gate,"paged-restored","V12DeviceTest")
+            assert app.read_bytes()==before and test.read_bytes()==saved
+    return labels,{"runtime":"TARGET_APP_INSTRUMENTATION","diagnostic_failure_rejected":True,
+                   "product_apk_sha256":hashlib.sha256(before).hexdigest(),
+                   "installed_product_readback":"EXACT_BEFORE_AND_AFTER",
+                   "default_test_restored":"EXACT_BYTES_AND_REGISTERED_RUNNER","certificate":cert}
 
 HOST = r'''
 import java.awt.image.BufferedImage;
@@ -141,6 +282,21 @@ def selftest():
         except AssertionError:continue
         raise AssertionError("PDF observer accepted corrupt text")
     print("PAGED_TEXT_OBSERVER 1 positive 5 negatives PASS NOT_PDF_EXECUTION",flush=True)
+    good="INSTRUMENTATION_RESULT: stream=PAGED_TARGET test.package 10123\n"
+    good+="".join("PAGED_PASS "+label+"\n" for label in LABELS)
+    marker="PAGED_RESULT 29/29 PASS BACKEND_NOT_NATIVE_UI_SAF_OR_RECEIVER\n"
+    good+=marker+"INSTRUMENTATION_CODE: -1\n"
+    assert observe(good,"test.package")==LABELS
+    invalid=[good.replace("test.package","other"),good.replace("10123","2000"),
+             good.replace(marker,""),good+marker,good.replace("CODE: -1","CODE: 0"),
+             good.replace("INSTRUMENTATION_CODE: -1\n",""),good+"PAGED_FAILED\n",
+             good+"INSTRUMENTATION_FAILED\n",good.replace("PAGED_PASS actual_api","PAGED_PASS unrelated")]
+    invalid += [good.replace("PAGED_PASS "+label+"\n","",1) for label in LABELS]
+    for bad in invalid:
+        try:observe(bad,"test.package")
+        except AssertionError:continue
+        raise AssertionError("incomplete paged instrumentation accepted")
+    print("PAGED_RUNNER_OBSERVER 1 positive "+str(len(invalid))+" negatives PASS NOT_DEVICE_EXECUTION",flush=True)
 
 def verify(folder,classes,android,prefix,remote,gate):
     """Called inside the existing codec job; failures propagate to its exit status."""
@@ -149,23 +305,13 @@ def verify(folder,classes,android,prefix,remote,gate):
     if not all(shutil.which(x) for x in ("pdftotext","pdftoppm","pdfinfo")):
         run(["sudo","apt-get","update"],timeout=240)
         run(["sudo","apt-get","install","-y","poppler-utils"],timeout=240)
-    java=folder/"PagedContractTest.java";java.write_text(JAVA,encoding="utf-8")
-    run(["javac","--release","8","-encoding","UTF-8","-cp",str(android)+os.pathsep+str(classes),"-d",classes,java])
-    jar=folder/"paged-tests.jar"
-    run([gate.SDK/"build-tools/35.0.0/d8","--min-api","26","--lib",android,"--output",jar,*sorted(classes.rglob("*.class"))])
-    run([*prefix,"push",jar,remote+"/paged-tests.jar"])
-    assert subprocess.check_output([*prefix,"exec-out","cat",remote+"/paged-tests.jar"],timeout=30)==jar.read_bytes()
-    output=run([*prefix,"shell","CLASSPATH="+remote+"/paged-tests.jar:"+remote+"/app.apk",
-                "app_process","/system/bin","PagedContractTest",remote,str(gate.API)],timeout=180)
-    labels=re.findall(r"^PAGED_PASS (.+)$",output,re.M)
-    assert len(labels)==len(set(labels))==29 and "PAGED_RESULT 29/29 PASS" in output
+    labels,identity=instrumentation(folder,prefix,gate)
     host=folder/"PagedHostCheck.java";host.write_text(HOST,encoding="utf-8")
     run(["javac","-encoding","UTF-8","-d",folder,host])
     def check_image(file,mode):
         return run(["java","-Djava.awt.headless=true","-cp",folder,"PagedHostCheck",file,mode])
     evidence={}
     for stem in ("paged","filtered","picture"):
-        for ext in ("pdf","zip"):run([*prefix,"pull",remote+"/"+stem+"."+ext,folder/(stem+"."+ext)])
         info=run(["pdfinfo",folder/(stem+".pdf")])
         match=re.search(r"^Pages:\s+(\d+)",info,re.M);assert match,info
         pages=int(match[1]);assert pages==1 if stem=="picture" else 3<=pages<=5
@@ -193,7 +339,7 @@ def verify(folder,classes,android,prefix,remote,gate):
     report={"commit":os.environ["GITHUB_SHA"],"run_id":os.environ["GITHUB_RUN_ID"],"api":gate.API,
             "status":"PASS","scope":"APK_PAGED_BACKEND_POPPLER_AND_JDK_NOT_UI_SAF_RECEIVER",
             "checks":29,"labels":labels,"independent_outputs":evidence,"text_observer_negative_controls":5,
-            "release_ready":False}
+            "instrumentation":identity,"release_ready":False}
     target=gate.ROOT/"native-ui" if hasattr(gate,"ROOT") else Path("native-ui")
     target.mkdir(exist_ok=True)
     (target/"paged-result.json").write_text(json.dumps(report,indent=2)+"\n")

@@ -207,6 +207,7 @@ def selftest():
     controls["markdown_native_ui"] = share_ui_selftest()
     controls["share_picker_navigation"] = share_navigation_selftest()
     controls["signal_target_identity"] = signal_identity_selftest()
+    controls["paged_exports"] = paged_observer_selftest()
     return controls
 
 def derivative_selftest():
@@ -1109,6 +1110,128 @@ def android():
         gate.verify_native_ui = native
         gate.verify_database = original
 
+# Independent of the device emitter: deleting its labels cannot shrink this
+# required contract. These receipts cover synthetic exports, not full delivery.
+PAGED_BACKEND_LABELS = ["actual_api"] + [
+    name+"_"+kind for kind in ("PDF","PNG_ZIP") for name in (
+        "multiple_pages","result_ownership","excluded_blocks_do_not_add_pages","single_page",
+        "empty_selection","unknown_selection","private_only","duplicate_identity",
+        "selected_bad_image","unselected_bad_image_ignored","source_pixel_budget",
+        "invalid_text","page_limit_refuses_not_truncates")
+] + ["source_file_unchanged","blank_document_rejected"]
+PAGED_PREVIEW_LABELS = [name+"_"+kind for kind in ("PDF","PNG_ZIP") for name in (
+    "decoded_actual_pages","decoded_page_bounds_and_ink","corrupt_payload_rejected","wrong_format_rejected",
+    "actual_dialog_pages","unchecked_consent","unchecked_save_blocked","saf_format_after_consent",
+    "cancel_clears_ticket","preview_preserves_database","dialog_bitmaps_recycled")]
+PAGED_NATIVE_LABELS = [name+"_"+kind for kind in ("PDF","PNG_ZIP") for name in (
+    "private_excluded_and_empty_selection","format_picker_selected","actual_page_preview",
+    "unchecked_save_refused","picker_cancel_preserves_state","real_saf_output",
+    "independent_text_page","save_preserves_state","same_revision_privacy_change",
+    "stale_publication_refused","stale_refusal_preserves_state","fixture_restored")]
+PAGED_NATIVE_SCOPE = "NATIVE_SINGLE_NOTE_TEXT_PDF_PNG_SAF_CANCEL_STALE_NOT_PROCESS_DEATH_OR_RECEIVER"
+
+def paged_observe(codec, native, api, source, run):
+    def obj(value): return value if isinstance(value,dict) else {}
+    def digest(value): return isinstance(value,str) and re.fullmatch(r"[0-9a-f]{64}",value) is not None
+    def identity(value):
+        return (value.get("status")=="PASS" and type(value.get("api")) is int and
+                value.get("api")==api and value.get("commit")==source and
+                value.get("run_id")==run and value.get("release_ready") is False)
+    def coverage(value, labels):
+        return value.get("labels")==labels and type(value.get("checks")) is int and value["checks"]==len(labels)
+    codec,native=obj(codec),obj(native)
+    backend=obj(codec.get("paged_exports")); preview=obj(backend.get("preview_ui"))
+    receipt=obj(codec.get("paged_native_ui")); instrument=obj(backend.get("instrumentation"))
+    outputs=obj(receipt.get("outputs")); errors=[]
+    if not identity(codec) or not digest(codec.get("apk_sha256")):
+        errors.append("current_source_codec_identity")
+    if not identity(backend) or not coverage(backend,PAGED_BACKEND_LABELS) or backend.get("scope")!="APK_PAGED_BACKEND_POPPLER_AND_JDK_NOT_UI_SAF_RECEIVER":
+        errors.append("required_paged_backend")
+    if not coverage(preview,PAGED_PREVIEW_LABELS) or preview.get("scope")!="ACTUAL_DIALOG_AND_INTERCEPTED_SAF_NOT_PROVIDER_E2E":
+        errors.append("required_actual_preview")
+    if (instrument.get("runtime")!="TARGET_APP_INSTRUMENTATION" or
+        instrument.get("diagnostic_failure_rejected") is not True or
+        instrument.get("product_apk_sha256")!=codec.get("apk_sha256") or
+        instrument.get("installed_product_readback")!="EXACT_BEFORE_AND_AFTER" or
+        instrument.get("default_test_restored")!="EXACT_BYTES_AND_REGISTERED_RUNNER"):
+        errors.append("preview_product_identity")
+    if not identity(receipt) or not coverage(receipt,PAGED_NATIVE_LABELS) or receipt.get("scope")!=PAGED_NATIVE_SCOPE:
+        errors.append("required_real_saf")
+    if native.get("status")!="PASS" or native.get("paged_ui")!=receipt:
+        errors.append("native_codec_receipt_disagreement")
+    if set(outputs)!={"PDF","PNG_ZIP"}: errors.append("missing_format_outputs")
+    for kind in ("PDF","PNG_ZIP"):
+        output=obj(outputs.get(kind))
+        if (not digest(output.get("sha256")) or type(output.get("bytes")) is not int or
+            not 0<output.get("bytes",0)<=16777216 or
+            output.get("pdf_text")!=("EXACT" if kind=="PDF" else "NOT_OCR_TESTED") or
+            output.get("page")!="SINGLE_NONBLANK_TEXT_REGION_NO_IMAGE"):
+            errors.append("invalid_output_"+kind)
+    return {"status":"PASS" if not errors else "NOT_VERIFIED","errors":errors,
+            "scope":"PAGED_BACKEND_PREVIEW_AND_SINGLE_NOTE_TEXT_SAF_NOT_FULL_SHARING",
+            "backend_checks":backend.get("checks"),"preview_checks":preview.get("checks"),
+            "native_checks":receipt.get("checks"),"outputs":outputs,"release_ready":False}
+
+def paged_observer_selftest():
+    import copy
+    common={"status":"PASS","api":26,"commit":"source","run_id":"run","release_ready":False}
+    backend=dict(common,checks=29,labels=PAGED_BACKEND_LABELS[:],
+        scope="APK_PAGED_BACKEND_POPPLER_AND_JDK_NOT_UI_SAF_RECEIVER",
+        preview_ui={"checks":22,"labels":PAGED_PREVIEW_LABELS[:],
+                    "scope":"ACTUAL_DIALOG_AND_INTERCEPTED_SAF_NOT_PROVIDER_E2E"},
+        instrumentation={"runtime":"TARGET_APP_INSTRUMENTATION","diagnostic_failure_rejected":True,
+                         "product_apk_sha256":"a"*64,"installed_product_readback":"EXACT_BEFORE_AND_AFTER",
+                         "default_test_restored":"EXACT_BYTES_AND_REGISTERED_RUNNER"})
+    receipt=dict(common,checks=24,labels=PAGED_NATIVE_LABELS[:],scope=PAGED_NATIVE_SCOPE,
+        outputs={kind:{"sha256":"b"*64,"bytes":100,"pdf_text":"EXACT" if kind=="PDF" else "NOT_OCR_TESTED",
+                       "page":"SINGLE_NONBLANK_TEXT_REGION_NO_IMAGE"} for kind in ("PDF","PNG_ZIP")})
+    codec=dict(common,apk_sha256="a"*64,paged_exports=backend,paged_native_ui=receipt)
+    native={"status":"PASS","paged_ui":copy.deepcopy(receipt)}
+    baseline=copy.deepcopy((codec,native))
+    def accepted(c,n): return paged_observe(c,n,26,"source","run")["status"]=="PASS"
+    assert accepted(codec,native) and (codec,native)==baseline
+    mutants=[]
+    for path in ((),("paged_exports",),("paged_exports","preview_ui"),("paged_native_ui",)):
+        for key,value in (("checks",0),("labels",[]),("scope","wrong")) if path else (("commit","old"),("run_id","old"),("api",True),("status","FAIL"),("release_ready",True)):
+            c=copy.deepcopy(codec);target=c
+            for part in path:target=target[part]
+            target[key]=value;mutants.append((c,copy.deepcopy(native)))
+    for path,labels in ((("paged_exports",),PAGED_BACKEND_LABELS),
+                        (("paged_exports","preview_ui"),PAGED_PREVIEW_LABELS),
+                        (("paged_native_ui",),PAGED_NATIVE_LABELS)):
+        for index in range(len(labels)):
+            c=copy.deepcopy(codec);target=c
+            for part in path:target=target[part]
+            del target["labels"][index];target["checks"]-=1
+            n=copy.deepcopy(native)
+            # Missing native checks remain self-consistent in BOTH reports.
+            # Parent status stays PASS, reproducing the old aggregate blind spot.
+            if path==("paged_native_ui",):n["paged_ui"]=copy.deepcopy(target)
+            assert c["status"]==n["status"]=="PASS"
+            mutants.append((c,n))
+        for key,value in (("api",34),("commit","old"),("run_id","old"),("release_ready",True)) if len(path)==1 else (("checks",True),):
+            c=copy.deepcopy(codec);target=c
+            for part in path:target=target[part]
+            target[key]=value;mutants.append((c,copy.deepcopy(native)))
+    for key in ("paged_exports","paged_native_ui"):
+        for value in (None,[],{}):
+            c=copy.deepcopy(codec);c[key]=value;mutants.append((c,copy.deepcopy(native)))
+    for kind in ("PDF","PNG_ZIP"):
+        for key,value in (("sha256","bad"),("bytes",0),("bytes",True),("bytes",16777217),("pdf_text","wrong"),("page","wrong")):
+            c=copy.deepcopy(codec);c["paged_native_ui"]["outputs"][kind][key]=value
+            n=copy.deepcopy(native);n["paged_ui"]=copy.deepcopy(c["paged_native_ui"]);mutants.append((c,n))
+    for key,value in (("runtime","wrong"),("diagnostic_failure_rejected",False),
+                      ("product_apk_sha256","c"*64),("installed_product_readback","wrong"),
+                      ("default_test_restored","wrong")):
+        c=copy.deepcopy(codec);c["paged_exports"]["instrumentation"][key]=value
+        mutants.append((c,copy.deepcopy(native)))
+    mutants.extend([(None,native),(codec,None),(codec,{"status":"PASS"}),
+                    (codec,dict(native,status="FAIL"))])
+    for c,n in mutants:
+        assert (c,n)!=baseline,"paged mutation did not apply"
+        assert not accepted(c,n),"paged aggregate accepted missing/failed evidence"
+    return {"positive":1,"negative":len(mutants),"scope":"REPORT_MUTATIONS_NOT_DEVICE_EXECUTION"}
+
 def report():
     controls = selftest()
     source, run = os.environ["GITHUB_SHA"], os.environ["GITHUB_RUN_ID"]
@@ -1120,6 +1243,9 @@ def report():
         native = json.loads(path.read_text()) if path.exists() else {}
         devices[str(api)]["default_ui"] = native_schema3(native, api)
         devices[str(api)]["markdown_ui"] = share_ui_observe(native.get("markdown_ui"), api, source, run)
+        path = folder / "native-ui/codec-result.json"
+        codec = json.loads(path.read_text()) if path.exists() else {}
+        devices[str(api)]["paged_exports"] = paged_observe(codec, native, api, source, run)
         for stage, runner in (("default", "V12DeviceTest"), ("schema3", "Schema3DeviceTest"), ("restore", "Schema3RestoreTests"), ("restored", "V12DeviceTest")):
             path = folder / ("device-schema3-registration-" + stage + ".txt")
             text = path.read_text(errors="replace") if path.exists() else ""

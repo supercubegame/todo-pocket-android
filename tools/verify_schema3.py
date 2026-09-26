@@ -973,11 +973,20 @@ public class ShareExternalWriter {
         start();choose_blocks(True);open_save()
         old_pid = shell("pidof",gate.PKG).strip()
         assert re.fullmatch(r"[1-9][0-9]*",old_pid), "one live product process required"
-        # Unlike force-stop, am kill preserves the activity/task and the external
-        # picker result route. Poll disappearance, not a guessed sleep or restart.
+        # Deterministic CI fault injection, not a low-memory-killer simulation.
+        # am kill left API26 alive; do not force-stop and destroy the result route.
+        # Signal only the exact disposable app PID after checking name and UID.
+        identity = shell("run-as",gate.PKG,"cat","/proc/"+old_pid+"/cmdline")
+        uid = shell("run-as",gate.PKG,"id","-u").strip()
+        process_status = shell("run-as",gate.PKG,"cat","/proc/"+old_pid+"/status")
+        owners = re.findall(r"^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$",process_status,re.M)
+        assert int(old_pid)>1 and identity==gate.PKG+"\x00" and re.fullmatch(r"[1-9][0-9]*",uid)
+        assert owners==[(uid,uid,uid,uid)], "refuse to signal a different UID"
         probes = []
-        result["process_loss"] = {"old_pid":old_pid,"absence_probes":probes}
-        shell("am","kill",gate.PKG)
+        result["process_loss"] = {"old_pid":old_pid,"absence_probes":probes,
+                                  "injection":"CI_APP_UID_SIGKILL_NOT_LMK","uid":uid,
+                                  "cmdline":identity,"uid_fields":owners}
+        shell("run-as",gate.PKG,"kill","-9",old_pid)
         deadline = time.monotonic()+30
         while True:
             probe = subprocess.run(prefix+["shell","pidof",gate.PKG],

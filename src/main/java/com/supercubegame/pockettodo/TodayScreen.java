@@ -44,6 +44,8 @@ public final class TodayScreen {
     private int page, filter;
     private String draft="";
     private boolean busy, closed;
+    // UI-thread identity: an old load completion must not erase a newer result notice.
+    private Object notice=new Object();
     private final Map<View,Boolean> paused=new IdentityHashMap<>();
     final ActivitiesScreen activities;
     private AppDatabase.RestorePlan pendingRestore;
@@ -175,15 +177,16 @@ public final class TodayScreen {
     <T> void work(Callable<T> action,Consumer<T> success,Runnable failure){
         if(closed||busy)return;
         busy=true;pause(root);message("正在读取或保存…",false);
+        final Object noticeAtStart=notice;
         io.execute(()->{
             try{T result=action.call();activity.runOnUiThread(()->{
-                if(closed||activity.isDestroyed())return;busy=false;resume();message("已保存到本机",false);success.accept(result);
+                if(closed||activity.isDestroyed())return;busy=false;resume();if(notice==noticeAtStart)message("已保存到本机",false);success.accept(result);
             });}catch(Exception e){activity.runOnUiThread(()->{
-                if(closed||activity.isDestroyed())return;busy=false;resume();message("未能保存或读取，原始数据未清空",true);if(failure!=null)failure.run();
+                if(closed||activity.isDestroyed())return;busy=false;resume();if(notice==noticeAtStart)message("未能保存或读取，原始数据未清空",true);if(failure!=null)failure.run();
             });}
         });
     }
-    void message(String value,boolean error){status.setText(value);status.setTextColor(error?ERROR:MUTED);}
+    void message(String value,boolean error){notice=new Object();status.setText(value);status.setTextColor(error?ERROR:MUTED);}
     private void pause(View v){paused.put(v,v.isEnabled());v.setEnabled(false);if(v instanceof ViewGroup){ViewGroup g=(ViewGroup)v;for(int i=0;i<g.getChildCount();i++)pause(g.getChildAt(i));}}
     private void resume(){for(Map.Entry<View,Boolean> state:paused.entrySet())state.getKey().setEnabled(state.getValue());paused.clear();}
     void addRow(LinearLayout parent,View view){LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.bottomMargin=dp(10);parent.addView(view,p);}

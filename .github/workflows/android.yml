@@ -38,6 +38,105 @@ jobs:
           name: core-evidence
           path: core.log
           if-no-files-found: error
+  export_probe:
+    needs: core
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [26, 34]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      TEST_API: ${{ matrix.api }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Fixed Android build setup for independent export probe
+        run: |
+          set -euo pipefail
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip.sha256 -o /tmp/gradle.sha256
+          echo "$(cat /tmp/gradle.sha256)  /tmp/gradle.zip" | sha256sum -c -
+          unzip -q /tmp/gradle.zip -d /tmp
+          echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+      - name: Build the current-source disposable APKs
+        run: gradle --no-daemon --console=plain assembleDebug assembleDebugAndroidTest
+      - name: Independent export backend and actual preview, not native SAF acceptance
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' 2>&1 | tee export-probe.log
+          import hashlib,json,os,sys,time
+          from pathlib import Path
+          sys.path.insert(0,'tools')
+          import emulator_gate as gate
+          import verify_exports
+          from verify_schema3 import PAGED_BACKEND_LABELS,PAGED_PREVIEW_LABELS,require_registration,certificate
+          started=time.monotonic()
+          result={'status':'FAIL','commit':os.environ['GITHUB_SHA'],'run_id':os.environ['GITHUB_RUN_ID'],
+            'api':gate.API,'scope':'PARALLEL_EXPORT_BACKEND_PREVIEW_NOT_NATIVE_SAF_OR_FULL_REGRESSION',
+            'release_ready':False,'durable_upgrade_ready':False}
+          calls=[]
+          def install_and_probe(adb):
+            apps=list(Path('build/outputs/apk/debug').glob('*.apk'))
+            tests=list(Path('build/outputs/apk/androidTest/debug').glob('*.apk'))
+            assert len(apps)==len(tests)==1
+            assert certificate(apps[0],gate)==certificate(tests[0],gate)
+            badging=gate.run([gate.SDK/'build-tools/35.0.0/aapt','dump','badging',apps[0]],capture=True).stdout
+            assert "name='"+gate.PKG+"'" in badging and "sdkVersion:'26'" in badging
+            for apk in (apps[0],tests[0]):
+              gate.run([adb,'-s',gate.SERIAL,'install','-t',apk],timeout=120)
+            require_registration(adb,gate,'probe','V12DeviceTest')
+            installed=gate.run([adb,'-s',gate.SERIAL,'shell','pm','path',gate.PKG],capture=True).stdout.strip()
+            assert installed.startswith('package:') and '\n' not in installed
+            import subprocess
+            actual=subprocess.check_output([str(adb),'-s',gate.SERIAL,'exec-out','cat',installed[8:]],timeout=30)
+            assert actual==apps[0].read_bytes()
+            calls.append('installed_exact_product')
+            verify_exports.android_codec(adb,gate)
+            calls.append('codec_and_actual_preview')
+            # The codec composes a later native callback for the FULL runner.
+            # This separate job deliberately has a narrower named contract.
+            # Restore only this job's receipt callback, never alter full jobs.
+            gate.verify_native_ui=finish_probe
+          def finish_probe(adb):
+            assert calls==['installed_exact_product','codec_and_actual_preview']
+            codec=json.loads(Path('native-ui/codec-result.json').read_text())
+            assert codec['status']=='PASS' and codec['commit']==result['commit'] and codec['run_id']==result['run_id'] and codec['api']==gate.API
+            paged=codec['paged_exports'];preview=paged['preview_ui']
+            assert paged['status']=='PASS' and paged['labels']==PAGED_BACKEND_LABELS and paged['checks']==29
+            assert preview['labels']==PAGED_PREVIEW_LABELS and preview['checks']==22
+            assert paged['instrumentation']['product_apk_sha256']==hashlib.sha256(actual_product()).hexdigest()
+            assert not Path('native-ui/native-result.json').exists(),'probe must not fabricate full native acceptance'
+            calls.append('receipt_verified')
+            result.update(status='PASS',codec=codec,native_saf='NOT_EXECUTED_IN_THIS_JOB')
+          def actual_product():
+            apps=list(Path('build/outputs/apk/debug').glob('*.apk'));assert len(apps)==1
+            return apps[0].read_bytes()
+          gate.verify_database=install_and_probe
+          gate.verify_native_ui=finish_probe
+          try:
+            gate.main()
+            assert calls==['installed_exact_product','codec_and_actual_preview','receipt_verified']
+          except Exception as exc:
+            result.update(status='FAIL',error=repr(exc));raise
+          finally:
+            result.update(elapsed_seconds=round(time.monotonic()-started,3),stages=calls)
+            Path('export-probe.json').write_text(json.dumps(result,indent=2)+'\n')
+            print('EXPORT_PROBE_RESULT '+json.dumps(result),flush=True)
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: export-probe-api-${{ matrix.api }}
+          path: |
+            export-probe.json
+            export-probe.log
+            emulator.log
+            native-ui/codec-result.json
+          if-no-files-found: error
   database:
     needs: core
     if: github.event_name != 'pull_request'
@@ -140,7 +239,7 @@ jobs:
             build/reports/lint-results-debug.html
           if-no-files-found: error
   report:
-    needs: [core, database]
+    needs: [core, database, export_probe]
     if: always() && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -474,6 +573,97 @@ jobs:
           print('MATRIX_RECEIPT '+actual['html_url'],flush=True)
           assert passed,'Markdown backend checks missing/failed; receipt published, not a native sharing acceptance'
           PY
+      - name: Publish and require both independent export probes
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import base64,copy,json,os,sys,urllib.request,urllib.error
+          from pathlib import Path
+          sys.path.insert(0,'tools')
+          from verify_schema3 import PAGED_BACKEND_LABELS,PAGED_PREVIEW_LABELS
+          source,run=os.environ['GITHUB_SHA'],os.environ['GITHUB_RUN_ID']
+          scope='PARALLEL_EXPORT_BACKEND_PREVIEW_NOT_NATIVE_SAF_OR_FULL_REGRESSION'
+          stages=['installed_exact_product','codec_and_actual_preview','receipt_verified']
+          def observe(value,api):
+            if not isinstance(value,dict):return False
+            codec=value.get('codec',{})
+            if not isinstance(codec,dict):return False
+            paged=codec.get('paged_exports',{})
+            if not isinstance(paged,dict):return False
+            preview=paged.get('preview_ui',{})
+            if not isinstance(preview,dict):return False
+            return (value.get('status')=='PASS' and value.get('scope')==scope and
+              value.get('commit')==source and value.get('run_id')==run and
+              type(value.get('api')) is int and value['api']==api and
+              value.get('stages')==stages and value.get('release_ready') is False and
+              value.get('durable_upgrade_ready') is False and
+              value.get('native_saf')=='NOT_EXECUTED_IN_THIS_JOB' and
+              type(value.get('elapsed_seconds')) in (int,float) and 0<value['elapsed_seconds']<2100 and
+              codec.get('status')=='PASS' and codec.get('commit')==source and
+              codec.get('run_id')==run and type(codec.get('api')) is int and codec['api']==api and
+              paged.get('status')=='PASS' and paged.get('commit')==source and paged.get('run_id')==run and
+              type(paged.get('api')) is int and paged['api']==api and
+              paged.get('labels')==PAGED_BACKEND_LABELS and type(paged.get('checks')) is int and paged['checks']==29 and
+              preview.get('labels')==PAGED_PREVIEW_LABELS and type(preview.get('checks')) is int and preview['checks']==22)
+          def matrix(values):
+            return isinstance(values,dict) and set(values)=={'26','34'} and all(observe(values[str(a)],a) for a in (26,34))
+          pair={}
+          for api in (26,34):
+            identity={'status':'PASS','commit':source,'run_id':run,'api':api}
+            pair[str(api)]=dict(identity,scope=scope,stages=stages[:],release_ready=False,
+              durable_upgrade_ready=False,native_saf='NOT_EXECUTED_IN_THIS_JOB',elapsed_seconds=1,
+              codec=dict(identity,paged_exports=dict(identity,checks=29,labels=PAGED_BACKEND_LABELS[:],
+                preview_ui={'checks':22,'labels':PAGED_PREVIEW_LABELS[:]})))
+          assert matrix(pair)
+          negative=0
+          def reject(value):
+            global negative
+            assert not matrix(value),'independent probe observer accepted incomplete evidence'
+            negative+=1
+          reject({});reject({'26':pair['26']});reject(dict(pair,extra={}))
+          for api in ('26','34'):
+            for key,value in [('status','FAIL'),('commit','old'),('run_id','old'),('api',True),('stages',stages[:-1]),
+                              ('release_ready',True),('native_saf','PASS'),('elapsed_seconds',0),('codec',None)]:
+              bad=copy.deepcopy(pair);bad[api][key]=value;reject(bad)
+            for preview in (False,True):
+              labels=PAGED_PREVIEW_LABELS if preview else PAGED_BACKEND_LABELS
+              for i in range(len(labels)):
+                bad=copy.deepcopy(pair);target=bad[api]['codec']['paged_exports']
+                if preview:target=target['preview_ui']
+                del target['labels'][i];target['checks']-=1;reject(bad)
+          devices={}
+          for api in (26,34):
+            path=Path('collected')/('export-probe-api-'+str(api))/'export-probe.json'
+            try:
+              assert path.stat().st_size<=2*1024*1024
+              devices[str(api)]=json.loads(path.read_bytes())
+            except (OSError,ValueError,AssertionError) as exc:
+              devices[str(api)]={'status':'NOT_VERIFIED','error':repr(exc)}
+          passed=matrix(devices)
+          doc={'commit':source,'run_id':run,'status':'PASS' if passed else 'NOT_VERIFIED',
+            'scope':scope,'devices':devices,'observer_controls':{'positive':1,'negative':negative},
+            'release_ready':False,'durable_upgrade_ready':False}
+          data=(json.dumps(doc,ensure_ascii=False,indent=2)+'\n').encode()
+          endpoint='https://api.github.com/repos/'+os.environ['GITHUB_REPOSITORY']+'/'
+          def api(path,method='GET',body=None):
+            request=urllib.request.Request(endpoint+path,method=method,
+              data=None if body is None else json.dumps(body).encode(),
+              headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+            with urllib.request.urlopen(request,timeout=30) as response:return json.load(response)
+          path='reports/export-probe-'+source+'-'+run+'.json'
+          body={'message':'Record independent export probe, not full regression','branch':'evidence',
+            'content':base64.b64encode(data).decode()}
+          try:body['sha']=api('contents/'+path+'?ref=evidence')['sha']
+          except urllib.error.HTTPError as exc:
+            if exc.code!=404:raise
+          written=api('contents/'+path,'PUT',body)
+          actual=api('contents/'+path+'?ref='+written['commit']['sha'])
+          assert base64.b64decode(actual['content'])==data
+          print('EXPORT_PROBE_EVIDENCE '+actual['html_url'],flush=True)
+          assert passed,'independent export probe missing or failed; full regression is also still required'
+          PY
       - name: Publish and read back evidence
         if: always()
         env:
@@ -507,7 +697,7 @@ jobs:
           import hashlib,json,os
           from pathlib import Path
           needs=json.loads(os.environ['NEEDS_JSON'])
-          assert all(needs[name]['result']=='success' for name in ('core','database'))
+          assert all(needs[name]['result']=='success' for name in ('core','database','export_probe'))
           legacy=json.loads(Path('collected/scope/legacy-schema2-result.json').read_text())
           assert legacy['status']=='PASS' and legacy['commit']==os.environ['GITHUB_SHA'] and legacy['run_id']==os.environ['GITHUB_RUN_ID']
           report=json.loads(Path('collected/scope/ui-result.json').read_text())

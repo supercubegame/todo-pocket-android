@@ -1,0 +1,827 @@
+{
+  "commit": "3138dbc11789f46539afd41879992db471d05cb8",
+  "run_id": "36239221603",
+  "jobs": {
+    "core": {
+      "result": "success",
+      "outputs": {}
+    },
+    "database": {
+      "result": "failure",
+      "outputs": {}
+    }
+  },
+  "logs": {
+    "core.log": "tical whole batch retry no-op\nPASS late conflicting row rejects whole batch\nPASS conflicting batch leaves no partial first row\nPASS null row rejected without immutable-list null trap\nPASS null batch leaves no partial data\nPASS undo removes only own batch and snapshot independent\nPASS undone batch cannot silently replay\nPASS undo cannot remove earlier batch after later write\nPASS stale correction cannot overwrite newer entry\nPASS explicit correction recomputes summary\nPASS unrecorded day not invented as zero confirmation\nPASS planned row does not mark actual day as recorded\nPASS null selected day rejected explicitly\nPASS streak follows scheduled days not intervening rest days\nPASS skip breaks scheduled streak\nPASS backdate distinct from entry timestamp\nPASS private blocks excluded from explicit share selection\nPASS empty share selection does not export all content\nPASS missing share block rejected rather than ignored\nPASS asset reference rejects directory traversal\nPASS removing one image reference preserves other reference\nPASS note edit does not mutate export snapshot\nPASS one application reused in multiple categories\nPASS category rename preserves activity relationship\nPASS category reorder uses stable identities\nPASS invalid category reorder rejected\nPASS invalid reorder leaves category order unchanged\nPASS removing app shortcut does not erase activity\nPASS unknown category rejected\nPASS duplicate category identity rejected\nPASS blank category rename rejected\nPASS failed rename retains category name\nPASS archive hides activity without destroying relationships\nPASS field rename preserves value and stable note attachment ID\nPASS numeric field rejects non-number\nPASS invalid field change leaves prior value\nPASS multi-select deduplicates option identities\nPASS unknown option rejected\nPASS date field rejects impossible calendar date\nPASS link field rejects executable URI\nPASS ordinary web link accepted\nPASS field archive retains values for recovery\nPASS archived field prevents silent new writes\nPASS image revision normalizes legacy missing origin to current asset\nPASS unmodified image backup references deduplicate\nPASS first derivative retains earliest original\nPASS second derivative never promotes prior derivative to original\nPASS later image edits leave prior immutable revisions exact\nPASS backup keeps current and earliest original but not obsolete intermediate\nPASS current-only reference projection excludes distinct original\nPASS explicit restored image pair retains same references\nPASS editing reconstructed revision keeps original\nPASS identical derived bytes can have different per-block originals\nPASS identical output digest is valid without duplicate asset entries\nPASS backup asset set is immutable\nPASS current asset set cannot acquire original through caller mutation\nPASS invalid current media digest rejected 0\nPASS invalid original media digest rejected 0\nPASS invalid derivative media digest rejected 0\nPASS invalid current media digest rejected 1\nPASS invalid original media digest rejected 1\nPASS invalid derivative media digest rejected 1\nPASS invalid current media digest rejected 2\nPASS invalid original media digest rejected 2\nPASS invalid derivative media digest rejected 2\nPASS invalid current media digest rejected 3\nPASS invalid original media digest rejected 3\nPASS invalid derivative media digest rejected 3\nPASS invalid current media digest rejected 4\nPASS invalid original media digest rejected 4\nPASS invalid derivative media digest rejected 4\nPASS invalid current media digest rejected 5\nPASS invalid original media digest rejected 5\nPASS invalid derivative media digest rejected 5\nPASS invalid current media digest rejected 6\nPASS invalid original media digest rejected 6\nPASS invalid derivative media digest rejected 6\nPASS null current media digest rejected\nPASS null derivative media digest rejected\nPASS all invalid revisions leave existing relationship unchanged\nPASS image edit binds stable note and block IDs not titles\nPASS image edit captures exact caption and privacy\nPASS image edit starts from current asset with legacy origin fallback\nPASS image block first edit retains original\nPASS image block second edit retains earliest original\nPASS repeated image edits preserve both stable target identities\nPASS derivative replacement retains caption and private flag\nPASS image metadata edit preserves exact multiline caption and explicit false\nPASS caption privacy edit never resets current or original image\nPASS empty caption and explicit private are valid independent values\nPASS metadata changes cannot retarget another note or block\nPASS metadata edits leave earlier immutable draft unchanged\nPASS later derivative edits leave earlier immutable drafts unchanged\nPASS image draft does not modify source block\nPASS editing restored image block keeps earliest original\nPASS shared current bytes and block ID do not conflate per-note origins\nPASS no-op derivative keeps a single original reference\nPASS image draft backup obligation remains separate from current-only projection\nPASS unsaved edits leave note order target and shared-image sibling untouched\nPASS image edit cannot masquerade as a legacy block and silently lose original on save\nPASS image edit rejects missing source block\nPASS image edit rejects text source\nPASS image edit rejects missing note identity\nPASS image edit rejects empty note identity\nPASS image edit rejects non-digest legacy placeholder before persistence\nPASS image edit rejects invalid original digest\nPASS image edit rejects null caption\nPASS image edit rejects missing derivative digest\nPASS image edit rejects noncanonical derivative digest\nPASS all rejected image edits leave relationship and metadata exact\nPASS image edit cannot be subclassed into mutable state\nPASS every image edit instance field is final\nV12_CORE_RESULT 151/151 PASS; DOMAIN_ONLY; ANDROID_EXPORT_RESTORE_NOT_TESTED\n+ java -cp /home/runner/work/todo-pocket-android/todo-pocket-android/build/v12-core-0ffkizwq FileBoundaryTest\nPASS legacy preview preserves order identity text and completion\nPASS legacy preview does not mutate source model\nPASS legacy import retry has stable source fingerprint\nPASS legacy preview list immutable\nPASS empty legacy backup imports no invented rows\nPASS foreign legacy bytes rejected\nPASS damaged legacy checksum rejected\nPASS null legacy backup rejected\nPASS private copy content digest and exact bytes\nPASS import never deletes or changes gallery source\nPASS duplicate media content deduplicated\nPASS media survives repository reconstruction\nPASS media path traversal rejected\nPASS over-budget media import explicitly fails\nPASS oversize import leaves no partial asset\nPASS interrupted source read propagates exact injected failure not budget rejection\nPASS failed stream leaves no partial asset\nPASS empty media input rejected\nPASS media symlink cannot escape private store\nPASS corrupted stored media rejected by digest\nPASS dedup does not trust an existing corrupt file\nPASS archive state round-trips exact bytes\nPASS archive media set and bytes round-trip exactly\nPASS archive state snapshot defensive copy\nPASS archive staging never replaces live media\nPASS closing staged snapshot cleans temporary files\nPASS closed archive snapshot cannot be reused\nPASS archive export refuses existing destination\nPASS damaged archive media rejected\nPASS bad media archive leaves no staging residue\nPASS damaged archive state rejected\nPASS missing referenced asset rejected\nPASS foreign archive header rejected\nPASS unlisted archive asset cannot slip through\nPASS duplicate zip fixture changes both local and central names\nPASS duplicate fixture parses and exposes two state entries\nPASS duplicate archive names rejected\nPASS expanded archive byte budget enforced\nPASS all rejected archive reads clean staging\nPASS hostile archive paths rejected\nPASS archive never extracts arbitrary entry paths\nPASS truncated zip central directory rejected\nPASS export rejects referenced missing media\nPASS failed archive export leaves no published destination\nPASS transport can represent an empty payload without inventing data\nPASS media digest matches independent published SHA256 abc vector\nPASS exact media byte budget accepted\nPASS nonprogressing input fails instead of hanging\nPASS all boundary tests retain original and clear staging\nFILE_BOUNDARY_RESULT 49/49 PASS; JVM_FILESYSTEM_ONLY; DATABASE_ANDROID_IMAGE_DECODING_FULL_RESTORE_NOT_TESTED\n+ /usr/bin/python3 tools/verify_exports.py\nPAGED_TEXT_OBSERVER 2 positive 13 negatives PASS NOT_PDF_EXECUTION\nPAGED_TEXT_DIAGNOSTIC 8/8 PASS NOT_PDF_EXECUTION\nPAGED_RUNNER_OBSERVER 1 positive 63 negatives PASS NOT_DEVICE_EXECUTION\nPAGED_KEY_OBSERVER 2 positive 5 negatives PASS NOT_CI_KEYSTORE_EXECUTION\nPASS identity_smoke\nPASS crop_dimensions\nPASS crop_nonzero_origin_pixels\nPASS crop_source_unchanged\nPASS crop_last_pixel_exclusive_edges\nPASS unmasked_argb_preserved_exactly\nPASS mask_exact_black_and_outside_pixels\nPASS mask_source_unchanged\nPASS mask_transparent_source_fully_opaque\nPASS mask_overlap_order_and_duplicate_invariant\nPASS result_does_not_alias_source\nPASS result_defensive_copy\nPASS later_render_cannot_change_prior_result\nPASS null_source_rejected\nPASS zero_width_rejected\nPASS negative_height_rejected\nPASS source_length_mismatch_rejected\nPASS dimension_overflow_rejected\nPASS source_edge_policy_rejected\nPASS source_pixel_policy_rejected\nPASS explicit_crop_required\nPASS explicit_mask_list_required\nPASS negative_crop_rejected\nPASS crop_outside_source_rejected\nPASS crop_bottom_outside_rejected\nPASS zero_area_crop_rejected\nPASS reversed_crop_rejected\nPASS null_mask_rejected\nPASS mask_uses_output_bounds\nPASS mask_bottom_outside_rejected\nPASS negative_mask_rejected\nPASS empty_mask_rejected\nPASS reversed_mask_rejected\nPASS late_invalid_mask_rejects_whole_request\nPASS output_budget_rejected\nPASS zero_budget_rejected\nPASS budget_above_policy_rejected\nPASS exact_output_budget_accepted\nPASS all_rejections_preserve_source\nPASS exact_source_edge_accepted\nPASS exact_source_pixel_limit_accepted\nPASS valid_length_over_pixel_limit_rejected\nPASS jdk_png_encoder_available\nPASS actual_png_signature\nPASS independent_png_decode_dimensions\nPASS independent_png_decode_all_pixels\nPIXEL_RESULT 46/46 PASS\nPASS identity_smoke\nPIXEL_RESULT 1/1 PASS\nPASS mutation rejected by mask_exact_black_and_outside_pixels\nPASS identity_smoke\nPIXEL_RESULT 1/1 PASS\nPASS mutation rejected by mask_exact_black_and_outside_pixels\nPASS identity_smoke\nPIXEL_RESULT 1/1 PASS\nPASS mutation rejected by crop_nonzero_origin_pixels\nPASS identity_smoke\nPIXEL_RESULT 1/1 PASS\nPASS mutation rejected by result_defensive_copy\nPIXEL_CONTRACT_EVIDENCE {\"status\": \"PASS\", \"scope\": \"JDK_PURE_ARGB_CROP_OPAQUE_MASK_NOT_ANDROID_OR_SHARE\", \"checks\": 46, \"labels\": [\"identity_smoke\", \"crop_dimensions\", \"crop_nonzero_origin_pixels\", \"crop_source_unchanged\", \"crop_last_pixel_exclusive_edges\", \"unmasked_argb_preserved_exactly\", \"mask_exact_black_and_outside_pixels\", \"mask_source_unchanged\", \"mask_transparent_source_fully_opaque\", \"mask_overlap_order_and_duplicate_invariant\", \"result_does_not_alias_source\", \"result_defensive_copy\", \"later_render_cannot_change_prior_result\", \"null_source_rejected\", \"zero_width_rejected\", \"negative_height_rejected\", \"source_length_mismatch_rejected\", \"dimension_overflow_rejected\", \"source_edge_policy_rejected\", \"source_pixel_policy_rejected\", \"explicit_crop_required\", \"explicit_mask_list_required\", \"negative_crop_rejected\", \"crop_outside_source_rejected\", \"crop_bottom_outside_rejected\", \"zero_area_crop_rejected\", \"reversed_crop_rejected\", \"null_mask_rejected\", \"mask_uses_output_bounds\", \"mask_bottom_outside_rejected\", \"negative_mask_rejected\", \"empty_mask_rejected\", \"reversed_mask_rejected\", \"late_invalid_mask_rejects_whole_request\", \"output_budget_rejected\", \"zero_budget_rejected\", \"budget_above_policy_rejected\", \"exact_output_budget_accepted\", \"all_rejections_preserve_source\", \"exact_source_edge_accepted\", \"exact_source_pixel_limit_accepted\", \"valid_length_over_pixel_limit_rejected\", \"jdk_png_encoder_available\", \"actual_png_signature\", \"independent_png_decode_dimensions\", \"independent_png_decode_all_pixels\"], \"mutants_rejected\": 4, \"source_sha256\": \"d70de482b16ca2b6325241302a482624ffc46ffe5e063807acaff99d5bb67d67\", \"android_codec\": \"NOT_TESTED\", \"persistence_ui_share\": \"NOT_IMPLEMENTED\", \"release_ready\": false}\n+ javac --release 8 -encoding UTF-8 -d /home/runner/work/todo-pocket-android/todo-pocket-android/build/share-ticket-dh26rcnb /home/runner/work/todo-pocket-android/todo-pocket-android/build/share-ticket-dh26rcnb/TicketTest.java\nreal 0 SHARE_TICKET_HOST 14/14 PASS NOT_ANDROID_DB_OR_SAF\n \n+ javac --release 8 -encoding UTF-8 -d /home/runner/work/todo-pocket-android/todo-pocket-android/build/share-ticket-20r_4cto /home/runner/work/todo-pocket-android/todo-pocket-android/build/share-ticket-20r_4cto/TicketTest.java\nzip_alias 1  Exception in thread \"main\" java.lang.AssertionError: check 1\n\tat TicketTest.ok(TicketTest.java:21)\n\tat TicketTest.main(TicketTest.java:25)\n\n+ javac --release 8 -encoding UTF-8 -d /home/runner/work/todo-pocket-android/todo-pocket-android/build/share-ticket-9pb2msiu /home/runner/work/todo-pocket-android/todo-pocket-android/build/share-ticket-9pb2msiu/TicketTest.java\nstale_bypass 1  Exception in thread \"main\" java.lang.AssertionError: check 3\n\tat TicketTest.ok(TicketTest.java:21)\n\tat TicketTest.reject(TicketTest.java:22)\n\tat TicketTest.main(TicketTest.java:28)\n\n+ javac --release 8 -encoding UTF-8 -d /home/runner/work/todo-pocket-android/todo-pocket-android/build/share-ticket-tc_16k0m /home/runner/work/todo-pocket-android/todo-pocket-android/build/share-ticket-tc_16k0m/TicketTest.java\nreplay 1  Exception in thread \"main\" java.lang.AssertionError: check 2\n\tat TicketTest.ok(TicketTest.java:21)\n\tat TicketTest.reject(TicketTest.java:22)\n\tat TicketTest.main(TicketTest.java:26)\n\nSHARE_TICKET_MUTANTS 3/3 REJECTED; HOST_EXTRACTED_JAVA_NOT_ANDROID_UI\n+ javac --release 8 -encoding UTF-8 -d /home/runner/work/todo-pocket-android/todo-pocket-android/build/share-write-fkxwhv21 /home/runner/work/todo-pocket-android/todo-pocket-android/build/share-write-fkxwhv21/WriteTest.java\nreal 0 PASS exact_roundtrip_1\nPASS exact_roundtrip_16384\nPASS exact_roundtrip_16385\nPASS exact_roundtrip_32775\nPASS exact_roundtrip_16777216\nPASS invalid_budget_before_open\nPASS invalid_budget_before_open\nPASS invalid_budget_before_open\nPASS output_open_failure\nPASS null_output\nPASS partial_write_failure_no_readback\nPASS output_close_failure_no_readback\nPASS write_failure_keeps_suppressed_close\nPASS readback_open_failure\nPASS null_readback\nPASS read_failure_0\nPASS read_failure_7\nPASS read_failure_16385\nPASS truncation_0\nPASS truncation_7\nPASS truncation_32774\nPASS extra_byte_rejected\nPASS mismatch_0\nPASS mismatch_16384\nPASS mismatch_32774\nPASS zero_progress_rejected\nPASS readback_close_failure\nPASS mismatch_keeps_suppressed_close\nSHARE_WRITE_HOST 28/28 PASS NOT_ANDROID_PROVIDER_OR_DB\n \n+ javac --release 8 -encoding UTF-8 -d /home/runner/work/todo-pocket-android/todo-pocket-android/build/share-write-3_f9c3ox /home/runner/work/todo-pocket-android/todo-pocket-android/build/share-write-3_f9c3ox/WriteTest.java\nmismatch 1 PASS exact_roundtrip_1\nPASS exact_roundtrip_16384\nPASS exact_roundtrip_16385\nPASS exact_roundtrip_32775\nPASS exact_roundtrip_16777216\nPASS invalid_budget_before_open\nPASS invalid_budget_before_open\nPASS invalid_budget_before_open\nPASS output_open_failure\nPASS null_output\nPASS partial_write_failure_no_readback\nPASS output_close_failure_no_readback\nPASS write_failure_keeps_suppressed_close\nPASS readback_open_failure\nPASS null_readback\nPASS read_failure_0\nPASS read_failure_7\nPASS read_failure_16385\nPASS truncation_0\nPASS truncation_7\nPASS truncation_32774\nPASS extra_byte_rejected\n Exception in thread \"main\" java.lang.AssertionError: expected_io_failure\n\tat WriteTest.failure(WriteTest.java:31)\n\tat WriteTest.main(WriteTest.java:100)\n\n+ javac --release 8 -encoding UTF-8 -d /home/runner/work/todo-pocket-android/todo-pocket-android/build/share-write-o9hk9kst /home/runner/work/todo-pocket-android/todo-pocket-android/build/share-write-o9hk9kst/WriteTest.java\ntruncated 1 PASS exact_roundtrip_1\nPASS exact_roundtrip_16384\nPASS exact_roundtrip_16385\nPASS exact_roundtrip_32775\nPASS exact_roundtrip_16777216\nPASS invalid_budget_before_open\nPASS invalid_budget_before_open\nPASS invalid_budget_before_open\nPASS output_open_failure\nPASS null_output\nPASS partial_write_failure_no_readback\nPASS output_close_failure_no_readback\nPASS write_failure_keeps_suppressed_close\nPASS readback_open_failure\nPASS null_readback\nPASS read_failure_0\nPASS read_failure_7\nPASS read_failure_16385\n Exception in thread \"main\" java.lang.AssertionError: expected_io_failure\n\tat WriteTest.failure(WriteTest.java:31)\n\tat WriteTest.main(WriteTest.java:94)\n\n+ javac --release 8 -encoding UTF-8 -d /home/runner/work/todo-pocket-android/todo-pocket-android/build/share-write-3l4cc2q2 /home/runner/work/todo-pocket-android/todo-pocket-android/build/share-write-3l4cc2q2/WriteTest.java\nzero_progress 1 PASS exact_roundtrip_1\nPASS exact_roundtrip_16384\nPASS exact_roundtrip_16385\nPASS exact_roundtrip_32775\nPASS exact_roundtrip_16777216\nPASS invalid_budget_before_open\nPASS invalid_budget_before_open\nPASS invalid_budget_before_open\nPASS output_open_failure\nPASS null_output\nPASS partial_write_failure_no_readback\nPASS output_close_failure_no_readback\nPASS write_failure_keeps_suppressed_close\nPASS readback_open_failure\nPASS null_readback\nPASS read_failure_0\nPASS read_failure_7\nPASS read_failure_16385\nPASS truncation_0\nPASS truncation_7\nPASS truncation_32774\nPASS extra_byte_rejected\nPASS mismatch_0\nPASS mismatch_16384\nPASS mismatch_32774\n Exception in thread \"main\" java.lang.AssertionError: expected_io_failure\n\tat WriteTest.failure(WriteTest.java:31)\n\tat WriteTest.main(WriteTest.java:103)\n\nSHARE_WRITE_MUTANTS 3/3 REJECTED; HOST_EXTRACTED_JAVA_NOT_ANDROID_PROVIDER\nV12_ACCEPTANCE PARTIAL: JVM domain/file/pixel contracts only; Android codecs/persisted derivatives/UI/share NOT_TESTED by this fast gate\nNATIVE_FAILURE_DIAGNOSTICS {\"status\": \"DIAGNOSTIC_ONLY_NOT_RETRY_OR_ACCEPTANCE\", \"original\": {\"type\": \"CalledProcessError\", \"message\": \"Command '['adb', 'shell', 'run-as']' returned non-zero exit status 255.\", \"command\": [\"adb\", \"shell\", \"run-as\"], \"returncode\": 255, \"stdout\": {\"captured\": true, \"tail\": \"stdout-sentinel�\", \"truncated\": false}, \"stderr\": {\"captured\": true, \"tail\": \"stderr-sentinel\", \"truncated\": false}}, \"probes\": [{\"name\": \"transport\", \"command\": [\"adb\", \"-s\", \"test-serial\", \"get-state\"], \"returncode\": 7, \"stdout\": {\"captured\": true, \"tail\": \"probe-output\", \"truncated\": false}, \"stderr\": {\"captured\": true, \"tail\": \"probe-error\", \"truncated\": false}}, {\"name\": \"shell_identity\", \"command\": [\"adb\", \"-s\", \"test-serial\", \"shell\", \"id\"], \"returncode\": 7, \"stdout\": {\"captured\": true, \"tail\": \"probe-output\", \"truncated\": false}, \"stderr\": {\"captured\": true, \"tail\": \"probe-error\", \"truncated\": false}}, {\"name\": \"app_identity\", \"command\": [\"adb\", \"-s\", \"test-serial\", \"shell\", \"run-as\", \"test.package\", \"id\"], \"returncode\": 7, \"stdout\": {\"captured\": true, \"tail\": \"probe-output\", \"truncated\": false}, \"stderr\": {\"captured\": true, \"tail\": \"probe-error\", \"truncated\": false}}, {\"name\": \"database_directory\", \"command\": [\"adb\", \"-s\", \"test-serial\", \"shell\", \"run-as\", \"test.package\", \"ls\", \"databases\"], \"returncode\": 7, \"stdout\": {\"captured\": true, \"tail\": \"probe-output\", \"truncated\": false}, \"stderr\": {\"captured\": true, \"tail\": \"probe-error\", \"truncated\": false}}]}\nNATIVE_DIAGNOSTICS_INCOMPLETE OSError('diagnostic write/probe failure')\nNATIVE_FAILURE_DIAGNOSTICS {\"status\": \"DIAGNOSTIC_ONLY_NOT_RETRY_OR_ACCEPTANCE\", \"original\": {\"type\": \"CalledProcessError\", \"message\": \"Command '['adb', 'shell', 'run-as']' returned non-zero exit status 255.\", \"command\": [\"adb\", \"shell\", \"run-as\"], \"returncode\": 255, \"stdout\": {\"captured\": true, \"tail\": \"stdout-sentinel�\", \"truncated\": false}, \"stderr\": {\"captured\": true, \"tail\": \"stderr-sentinel\", \"truncated\": false}}, \"probes\": [{\"name\": \"transport\", \"command\": [\"adb\", \"-s\", \"test-serial\", \"get-state\"], \"returncode\": 7, \"stdout\": {\"captured\": true, \"tail\": \"probe-output\", \"truncated\": false}, \"stderr\": {\"captured\": true, \"tail\": \"probe-error\", \"truncated\": false}}, {\"name\": \"shell_identity\", \"command\": [\"adb\", \"-s\", \"test-serial\", \"shell\", \"id\"], \"returncode\": 7, \"stdout\": {\"captured\": true, \"tail\": \"probe-output\", \"truncated\": false}, \"stderr\": {\"captured\": true, \"tail\": \"probe-error\", \"truncated\": false}}, {\"name\": \"app_identity\", \"command\": [\"adb\", \"-s\", \"test-serial\", \"shell\", \"run-as\", \"test.package\", \"id\"], \"returncode\": 7, \"stdout\": {\"captured\": true, \"tail\": \"probe-output\", \"truncated\": false}, \"stderr\": {\"captured\": true, \"tail\": \"probe-error\", \"truncated\": false}}, {\"name\": \"database_directory\", \"command\": [\"adb\", \"-s\", \"test-serial\", \"shell\", \"run-as\", \"test.package\", \"ls\", \"databases\"], \"returncode\": 7, \"stdout\": {\"captured\": true, \"tail\": \"probe-output\", \"truncated\": false}, \"stderr\": {\"captured\": true, \"tail\": \"probe-error\", \"truncated\": false}}]}\nNATIVE_DIAGNOSTICS_INCOMPLETE FileNotFoundError(2, 'No such file or directory')\n{\n  \"seed\": {\n    \"positive\": 2,\n    \"negative\": 13,\n    \"mutants\": [\n      \"entire_suite_missing\",\n      \"label_missing\",\n      \"consistent_missing\",\n      \"label_duplicate\",\n      \"label_substituted\",\n      \"result_missing\",\n      \"result_duplicate\",\n      \"wrong_api\",\n      \"wrong_phase\",\n      \"failure\",\n      \"instrumentation_failure\",\n      \"bad_finish\",\n      \"missing_finish\"\n    ]\n  },\n  \"reopen\": {\n    \"positive\": 2,\n    \"negative\": 13,\n    \"mutants\": [\n      \"entire_suite_missing\",\n      \"label_missing\",\n      \"consistent_missing\",\n      \"label_duplicate\",\n      \"label_substituted\",\n      \"result_missing\",\n      \"result_duplicate\",\n      \"wrong_api\",\n      \"wrong_phase\",\n      \"failure\",\n      \"instrumentation_failure\",\n      \"bad_finish\",\n      \"missing_finish\"\n    ]\n  },\n  \"restore_seed\": {\n    \"positive\": 2,\n    \"negative\": 13,\n    \"mutants\": [\n      \"entire_suite_missing\",\n      \"label_missing\",\n      \"consistent_missing\",\n      \"label_duplicate\",\n      \"label_substituted\",\n      \"result_missing\",\n      \"result_duplicate\",\n      \"wrong_api\",\n      \"wrong_phase\",\n      \"failure\",\n      \"instrumentation_failure\",\n      \"bad_finish\",\n      \"missing_finish\"\n    ]\n  },\n  \"restore_reopen\": {\n    \"positive\": 2,\n    \"negative\": 13,\n    \"mutants\": [\n      \"entire_suite_missing\",\n      \"label_missing\",\n      \"consistent_missing\",\n      \"label_duplicate\",\n      \"label_substituted\",\n      \"result_missing\",\n      \"result_duplicate\",\n      \"wrong_api\",\n      \"wrong_phase\",\n      \"failure\",\n      \"instrumentation_failure\",\n      \"bad_finish\",\n      \"missing_finish\"\n    ]\n  },\n  \"registration\": {\n    \"positive\": 3,\n    \"negative\": 7\n  },\n  \"native_failure_diagnostics\": {\n    \"checks\": 8,\n    \"scope\": \"HOST_PYTHON_INJECTED_FAILURES_NOT_DEVICE_ROOT_CAUSE\"\n  },\n  \"default_schema3_ui\": {\n    \"positive\": 1,\n    \"negative\": 12,\n    \"scope\": \"REPORT_CONTROLS_NOT_DEVICE_EXECUTION\"\n  },\n  \"derivative_backend\": {\n    \"log_positive\": 3,\n    \"log_negative\": 12,\n    \"aggregate_positive\": 1,\n    \"aggregate_negative\": 13,\n    \"scope\": \"PYTHON_LOG_AND_REPORT_CONTROLS_NOT_COMPILED_PRODUCT_MUTANTS\"\n  },\n  \"image_late_race\": {\n    \"log_positive\": 6,\n    \"log_negative\": 27,\n    \"aggregate_positive\": 1,\n    \"aggregate_negative\": 20,\n    \"scope\": \"PYTHON_LOG_AND_REPORT_CONTROLS_NOT_COMPILED_PRODUCT_MUTANTS\"\n  },\n  \"markdown_native_ui\": {\n    \"positive\": 1,\n    \"negative\": 58,\n    \"scope\": \"REPORT_CONTROLS_NOT_ANDROID_EXECUTION\"\n  },\n  \"share_picker_navigation\": {\n    \"checks\": 8,\n    \"scope\": \"HOST_NAVIGATION_MODEL_NOT_ANDROID_IME\"\n  },\n  \"signal_target_identity\": {\n    \"positive\": 3,\n    \"negative\": 28,\n    \"scope\": \"HOST_PROC_IDENTITY_CONTROLS_NOT_ANDROID_PROCESS_DEATH\"\n  }\n}\nPASS unfinished V1.2 delivery explicitly blocked\n",
+    "setup.log": "NOT_OBSERVED",
+    "build.log": "NOT_OBSERVED",
+    "ui.log": "NOT_OBSERVED",
+    "emulator.log": "NOT_OBSERVED"
+  },
+  "physical_device": "NOT_TESTED",
+  "durable_upgrade_ready": false,
+  "acceptance_scope": "V1.2_JVM_DOMAIN_AND_FILE_BOUNDARIES",
+  "full_v12_acceptance": "NOT_TESTED",
+  "release_ready": false,
+  "ui": {
+    "status": "NOT_VERIFIED",
+    "scope": "NATIVE_SLICE_AND_DATABASE_NOT_FULL_PRODUCT",
+    "devices": {
+      "26": {
+        "result": {
+          "status": "PASS",
+          "api": 26,
+          "checks": {
+            "seed": 155,
+            "reopen": 25
+          },
+          "scope": "ANDROID_SCHEMA2_DATABASE_AND_MEDIA_BYTES",
+          "ui": "SEE_NATIVE_UI_RESULT",
+          "image_decoding": "NOT_TESTED",
+          "full_backup_restore": "SCHEMA2_DB_MEDIA_BYTES_PASS",
+          "saf_restore_ui": "SEE_NATIVE_UI_RESULT",
+          "power_loss": "NOT_TESTED",
+          "release_ready": false
+        },
+        "logs": {
+          "setup.log": "  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n\n  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\n100   169  100   169    0     0   2530      0 --:--:-- --:--:-- --:--:--  2560\n\n  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\n\n100  129M  100  129M    0     0   170M      0 --:--:-- --:--:-- --:--:--  170M\n  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n\n  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\n100   167  100   167    0     0   3423      0 --:--:-- --:--:-- --:--:--  3479\n\n100    64  100    64    0     0    545      0 --:--:-- --:--:-- --:--:--   545\n100    64  100    64    0     0    545      0 --:--:-- --:--:-- --:--:--     0\n/tmp/gradle.zip: OK\nLoading package information...                                                  \nLoading local repository...                                                     \n[                                       ] 3% Loading local repository...        \n[                                       ] 3% Fetch remote repository...         \n[=                                      ] 3% Fetch remote repository...         \n[=                                      ] 4% Fetch remote repository...         \n[=                                      ] 5% Fetch remote repository...         \n[==                                     ] 5% Fetch remote repository...         \n[==                                     ] 6% Fetch remote repository...         \n[==                                     ] 7% Fetch remote repository...         \n[==                                     ] 7% Computing updates...               \n[===                                    ] 8% Computing updates...               \n[===                                    ] 10% Computing updates...              \n[=======================================] 100% Computing updates...             \n\n",
+          "build.log": "\nWelcome to Gradle 8.9!\n\nHere are the highlights of this release:\n - Enhanced Error and Warning Messages\n - IDE Integration Improvements\n - Daemon JVM Information\n\nFor more details see https://docs.gradle.org/8.9/release-notes.html\n\nTo honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.9/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.\nDaemon will be stopped at the end of the build \n> Task :preBuild UP-TO-DATE\n> Task :preDebugBuild UP-TO-DATE\n> Task :mergeDebugNativeDebugMetadata NO-SOURCE\n> Task :javaPreCompileDebug\n> Task :generateDebugResValues\n> Task :mapDebugSourceSetPaths\n> Task :checkDebugAarMetadata\n> Task :generateDebugResources\n> Task :packageDebugResources\n> Task :mergeDebugResources\n> Task :createDebugCompatibleScreenManifests\n> Task :extractDeepLinksDebug\n> Task :parseDebugLocalResources\n> Task :processDebugMainManifest\n> Task :processDebugManifest\n> Task :mergeDebugShaders\n> Task :compileDebugShaders NO-SOURCE\n> Task :generateDebugAssets UP-TO-DATE\n> Task :mergeDebugAssets\n> Task :processDebugManifestForPackage\n> Task :compressDebugAssets\n> Task :processDebugResources\n> Task :l8DexDesugarLibDebug\n\n> Task :compileDebugJavaWithJavac\nNote: Some input files use or override a deprecated API.\nNote: Recompile with -Xlint:deprecation for details.\n\n> Task :desugarDebugFileDependencies\n> Task :dexBuilderDebug\n> Task :processDebugJavaRes NO-SOURCE\n> Task :mergeDebugGlobalSynthetics\n> Task :mergeDebugJniLibFolders\n> Task :mergeDebugNativeLibs NO-SOURCE\n> Task :stripDebugDebugSymbols NO-SOURCE\n> Task :checkDebugDuplicateClasses\n> Task :validateSigningDebug\n> Task :mergeLibDexDebug\n> Task :writeDebugAppMetadata\n> Task :writeDebugSigningConfigVersions\n> Task :mergeProjectDexDebug\n> Task :preDebugAndroidTestBuild SKIPPED\n> Task :bundleDebugClassesToCompileJar\n> Task :javaPreCompileDebugAndroidTest\n> Task :checkDebugAndroidTestAarMetadata\n> Task :generateDebugAndroidTestResValues\n> Task :mapDebugAndroidTestSourceSetPaths\n> Task :generateDebugAndroidTestResources\n> Task :mergeDebugAndroidTestResources\n> Task :mergeDebugJavaResource\n> Task :processDebugAndroidTestManifest\n> Task :mergeDebugAndroidTestShaders\n> Task :compileDebugAndroidTestShaders NO-SOURCE\n> Task :generateDebugAndroidTestAssets UP-TO-DATE\n> Task :mergeDebugAndroidTestAssets\n> Task :compressDebugAndroidTestAssets\n> Task :desugarDebugAndroidTestFileDependencies\n> Task :processDebugAndroidTestJavaRes NO-SOURCE\n> Task :mergeDebugAndroidTestJavaResource\n> Task :checkDebugAndroidTestDuplicateClasses\n> Task :mergeDebugAndroidTestJniLibFolders\n> Task :mergeExtDexDebugAndroidTest\n> Task :mergeDebugAndroidTestNativeLibs NO-SOURCE\n> Task :mergeLibDexDebugAndroidTest\n> Task :stripDebugAndroidTestDebugSymbols NO-SOURCE\n> Task :validateSigningDebugAndroidTest\n> Task :writeDebugAndroidTestSigningConfigVersions\n> Task :processDebugAndroidTestResources\n> Task :generateDebugAndroidTestLintModel\n> Task :mergeExtDexDebug\n> Task :compileDebugAndroidTestJavaWithJavac\n> Task :dexBuilderDebugAndroidTest\n> Task :mergeDebugAndroidTestGlobalSynthetics\n> Task :extractProguardFiles\n> Task :packageDebug\n> Task :createDebugApkListingFileRedirect\n> Task :assembleDebug\n> Task :generateDebugLintReportModel\n> Task :preDebugUnitTestBuild UP-TO-DATE\n> Task :mergeProjectDexDebugAndroidTest\n> Task :generateDebugUnitTestLintModel\n> Task :packageDebugAndroidTest\n> Task :createDebugAndroidTestApkListingFileRedirect\n> Task :assembleDebugAndroidTest\n> Task :lintAnalyzeDebug\n> Task :lintAnalyzeDebugAndroidTest\n> Task :lintAnalyzeDebugUnitTest\n\n> Task :lintReportDebug\nWrote HTML report to file:///home/runner/work/todo-pocket-android/todo-pocket-android/build/reports/lint-results-debug.html\n\n> Task :lintDebug\n\nBUILD SUCCESSFUL in 1m 17s\n68 actionable tasks: 68 executed\n",
+          "ui.log": "ug/todo-pocket-android-debug.apk: 1 file pushed, 0 skipped. 427.8 MB/s (9281469 bytes in 0.021s)\n/home/runner/work/todo-pocket-android/todo-pocket-android/build/codec-contract/codec-test.jar: 1 file pushed, 0 skipped. 113.5 MB/s (9112 bytes in 0.000s)\n/home/runner/work/todo-pocket-android/todo-pocket-android/build/codec-contract/source.png: 1 file pushed, 0 skipped. 4.4 MB/s (238 bytes in 0.000s)\n/home/runner/work/todo-pocket-android/todo-pocket-android/build/codec-contract/alpha.png: 1 file pushed, 0 skipped. 1.7 MB/s (114 bytes in 0.000s)\n/home/runner/work/todo-pocket-android/todo-pocket-android/build/codec-contract/limit.png: 1 file pushed, 0 skipped. 95.3 MB/s (6250 bytes in 0.000s)\n/home/runner/work/todo-pocket-android/todo-pocket-android/build/codec-contract/over.png: 1 file pushed, 0 skipped. 99.5 MB/s (6256 bytes in 0.000s)\n/home/runner/work/todo-pocket-android/todo-pocket-android/build/codec-contract/source.jpg: 1 file pushed, 0 skipped. 14.5 MB/s (632 bytes in 0.000s)\n/home/runner/work/todo-pocket-android/todo-pocket-android/build/codec-contract/rotated.jpg: 1 file pushed, 0 skipped. 12.2 MB/s (668 bytes in 0.000s)\n/home/runner/work/todo-pocket-android/todo-pocket-android/build/codec-contract/exif.png: 1 file pushed, 0 skipped. 5.0 MB/s (276 bytes in 0.000s)\n/home/runner/work/todo-pocket-android/todo-pocket-android/build/codec-contract/edge.png: 1 file pushed, 0 skipped. 2.3 MB/s (132 bytes in 0.000s)\n/home/runner/work/todo-pocket-android/todo-pocket-android/build/codec-contract/wide.png: 1 file pushed, 0 skipped. 2.2 MB/s (132 bytes in 0.000s)\nCODEC_DIAGNOSTIC_SELFTEST PASS exit=1 sentinel_stack_visible\nCODEC_PASS actual_android_api\nCODEC_PASS apk_class_available_in_device_runtime\nCODEC_PASS android_output_decodes_at_crop_dimensions\nCODEC_PASS android_exact_crop_and_opaque_mask_pixels\nCODEC_PASS successful_codec_preserves_original_bytes\nCODEC_PASS derivative_is_not_original_container\nCODEC_PASS same_pixels_repeat_without_accumulating_edits\nCODEC_PASS invalid_output_mask_rejected\nCODEC_PASS out_of_source_crop_rejected\nCODEC_PASS late_malformed_mask_rejected\nCODEC_PASS null_masks_rejected\nCODEC_PASS null_mask_row_rejected\nCODEC_PASS exact_output_budget_enforced\nCODEC_PASS zero_output_budget_rejected\nCODEC_PASS output_policy_not_relaxed\nCODEC_PASS null_source_rejected\nCODEC_PASS empty_source_rejected\nCODEC_PASS non_image_rejected\nCODEC_PASS over_byte_policy_rejected\nCODEC_PASS exact_android_source_pixel_budget_accepted\nCODEC_PASS valid_image_over_source_budget_rejected\nCODEC_PASS transparent_source_mask_encoded\nCODEC_PASS jpeg_decode_preserves_original_bytes\nCODEC_PASS non_normal_exif_requires_orientation_support\nCODEC_PASS png_exif_refused_on_both_platforms\nCODEC_PASS exact_android_edge_accepted\nCODEC_PASS valid_wide_image_rejected\nCODEC_PASS all_rejections_preserve_source_bytes\nCODEC_PASS later_operations_preserve_earlier_derivative\nSHARE_PASS exact_selected_zip_members\nSHARE_PASS private_and_unselected_text_absent\nSHARE_PASS document_order_and_duplicate_references\nSHARE_PASS literal_markdown_html_text\nSHARE_PASS share_redaction_pixels_preserved\nSHARE_PASS share_source_bytes_unchanged\nSHARE_PASS frozen_input_ownership_and_repeatability\nSHARE_PASS empty_selection_refused_not_all\nSHARE_PASS private_only_selection_refused\nSHARE_PASS unknown_selection_refused\nSHARE_PASS duplicate_identity_refused\nSHARE_PASS null_selection_refused\nSHARE_PASS selected_invalid_image_refuses_entire_export\nSHARE_PASS unselected_image_never_decoded_or_packaged\nSHARE_PASS selected_original_is_reencoded_not_copied\nSHARE_PASS share_source_budget_retained\nSHARE_PASS no_original_named_zip_member\nSHARE_PASS share_text_budget_refuses_not_truncates\nANDROID_SHARE_RESULT 18/18 PASS\nANDROID_CODEC_RESULT 29/29 PASS\n/data/local/tmp/pocket-codec-contract/share.zip: 1 file pulled, 0 skipped. 0.9 MB/s (571 bytes in 0.001s)\n/data/local/tmp/pocket-codec-contract/share-clean.zip: 1 file pulled, 0 skipped. 0.0 MB/s (451 bytes in 0.041s)\nHOST_CODEC_PASS share-derived.png\nHOST_CODEC_PASS share-clean.png\n/data/local/tmp/pocket-codec-contract/derived.png: 1 file pulled, 0 skipped. 0.0 MB/s (119 bytes in 0.042s)\n/data/local/tmp/pocket-codec-contract/limit-derived.png: 1 file pulled, 0 skipped. 0.0 MB/s (86 bytes in 0.041s)\n/data/local/tmp/pocket-codec-contract/alpha-derived.png: 1 file pulled, 0 skipped. 0.2 MB/s (93 bytes in 0.000s)\n/data/local/tmp/pocket-codec-contract/jpeg-derived.png: 1 file pulled, 0 skipped. 0.1 MB/s (94 bytes in 0.001s)\nHOST_CODEC_PASS derived.png\nHOST_CODEC_PASS limit-derived.png\nHOST_CODEC_PASS alpha-derived.png\nHOST_CODEC_PASS jpeg-derived.png\nPASS mutation rejected by host_decode_exact_pixels\nPASS mutation rejected by unexpected_metadata_tEXt\nPASS mutation rejected by no_trailing_original_bytes\nPASS mutation rejected by host_decode_dimensions\n/home/runner/work/todo-pocket-android/todo-pocket-android/build/codec-contract/classes/exif-tests.jar: 1 file pushed, 0 skipped. 166.4 MB/s (11820 bytes in 0.000s)\nEXIF_PASS parser_no_exif_accepted\nEXIF_PASS parser_little_normal_accepted\nEXIF_PASS parser_big_normal_accepted\nEXIF_PASS codec_no_exif_exact_black\nEXIF_PASS codec_little_normal_exact_black\nEXIF_PASS codec_big_normal_exact_black\nEXIF_PASS parser_orientation_II_2\nEXIF_PASS codec_orientation_II_2\nEXIF_PASS parser_orientation_II_3\nEXIF_PASS codec_orientation_II_3\nEXIF_PASS parser_orientation_II_4\nEXIF_PASS codec_orientation_II_4\nEXIF_PASS parser_orientation_II_5\nEXIF_PASS codec_orientation_II_5\nEXIF_PASS parser_orientation_II_6\nEXIF_PASS codec_orientation_II_6\nEXIF_PASS parser_orientation_II_7\nEXIF_PASS codec_orientation_II_7\nEXIF_PASS parser_orientation_II_8\nEXIF_PASS codec_orientation_II_8\nEXIF_PASS parser_orientation_MM_2\nEXIF_PASS codec_orientation_MM_2\nEXIF_PASS parser_orientation_MM_3\nEXIF_PASS codec_orientation_MM_3\nEXIF_PASS parser_orientation_MM_4\nEXIF_PASS codec_orientation_MM_4\nEXIF_PASS parser_orientation_MM_5\nEXIF_PASS codec_orientation_MM_5\nEXIF_PASS parser_orientation_MM_6\nEXIF_PASS codec_orientation_MM_6\nEXIF_PASS parser_orientation_MM_7\nEXIF_PASS codec_orientation_MM_7\nEXIF_PASS parser_orientation_MM_8\nEXIF_PASS codec_orientation_MM_8\nEXIF_PASS parser_duplicate_exif_rejected\nEXIF_PASS parser_undefined_II_rejected\nEXIF_PASS parser_invalid_value_II_rejected\nEXIF_PASS parser_missing_orientation_II_rejected\nEXIF_PASS parser_duplicate_field_II_rejected\nEXIF_PASS parser_wrong_type_II_rejected\nEXIF_PASS parser_wrong_count_II_rejected\nEXIF_PASS parser_zero_offset_II_rejected\nEXIF_PASS parser_unsigned_offset_II_rejected\nEXIF_PASS parser_truncated_entries_II_rejected\nEXIF_PASS parser_short_header_II_rejected\nEXIF_PASS parser_missing_ifd_tail_II_rejected\nEXIF_PASS parser_wrong_magic_II_rejected\nEXIF_PASS parser_undefined_MM_rejected\nEXIF_PASS parser_invalid_value_MM_rejected\nEXIF_PASS parser_missing_orientation_MM_rejected\nEXIF_PASS parser_duplicate_field_MM_rejected\nEXIF_PASS parser_wrong_type_MM_rejected\nEXIF_PASS parser_wrong_count_MM_rejected\nEXIF_PASS parser_zero_offset_MM_rejected\nEXIF_PASS parser_unsigned_offset_MM_rejected\nEXIF_PASS parser_truncated_entries_MM_rejected\nEXIF_PASS parser_short_header_MM_rejected\nEXIF_PASS parser_missing_ifd_tail_MM_rejected\nEXIF_PASS parser_wrong_magic_MM_rejected\nEXIF_PASS parser_invalid_byte_order_rejected\nEXIF_PASS parser_truncated_marker_rejected\nEXIF_PASS parser_short_segment_rejected\nEXIF_PASS parser_segment_outside_bytes_rejected\nEXIF_RESULT 63/63 PASS\n/home/runner/work/todo-pocket-android/todo-pocket-android/build/codec-contract/allow_rotated/allow_rotated.jar: 1 file pushed, 0 skipped. 101.2 MB/s (8023 bytes in 0.000s)\nEXIF_PASS parser_no_exif_accepted\nEXIF_PASS parser_little_normal_accepted\nEXIF_PASS parser_big_normal_accepted\nEXIF_PASS codec_no_exif_exact_black\nEXIF_PASS codec_little_normal_exact_black\nEXIF_PASS codec_big_normal_exact_black\nEXIF_RESULT 6/6 PASS\nPASS mutation rejected by parser_orientation_II_2\n/home/runner/work/todo-pocket-android/todo-pocket-android/build/codec-contract/allow_duplicate/allow_duplicate.jar: 1 file pushed, 0 skipped. 84.3 MB/s (8025 bytes in 0.000s)\nEXIF_PASS parser_no_exif_accepted\nEXIF_PASS parser_little_normal_accepted\nEXIF_PASS parser_big_normal_accepted\nEXIF_PASS codec_no_exif_exact_black\nEXIF_PASS codec_little_normal_exact_black\nEXIF_PASS codec_big_normal_exact_black\nEXIF_RESULT 6/6 PASS\nPASS mutation rejected by parser_duplicate_exif_rejected\nPAGED_TEXT_OBSERVER 2 positive 13 negatives PASS NOT_PDF_EXECUTION\nPAGED_TEXT_DIAGNOSTIC 8/8 PASS NOT_PDF_EXECUTION\nPAGED_RUNNER_OBSERVER 1 positive 63 negatives PASS NOT_DEVICE_EXECUTION\nPAGED_KEY_OBSERVER 2 positive 5 negatives PASS NOT_CI_KEYSTORE_EXECUTION\nGet:1 file:/etc/apt/apt-mirrors.txt Mirrorlist [144 B]\nHit:2 http://azure.archive.ubuntu.com/ubuntu noble InRelease\nGet:3 http://azure.archive.ubuntu.com/ubuntu noble-updates InRelease [126 kB]\nGet:4 http://azure.archive.ubuntu.com/ubuntu noble-backports InRelease [126 kB]\nGet:5 http://azure.archive.ubuntu.com/ubuntu noble-security InRelease [126 kB]\nGet:6 https://packages.microsoft.com/ubuntu/24.04/prod noble InRelease [3600 B]\nGet:7 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 Packages [1318 kB]\nGet:8 http://azure.archive.ubuntu.com/ubuntu noble-updates/main Translation-en [299 kB]\nGet:9 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 Components [181 kB]\nGet:10 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 Packages [1697 kB]\nGet:11 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe Translation-en [340 kB]\nGet:12 http://azure.archive.ubuntu.com/ubuntu noble-updates/universe amd64 Components [388 kB]\nGet:13 http://azure.archive.ubuntu.com/ubuntu noble-updates/restricted amd64 Packages [1654 kB]\nGet:14 http://azure.archive.ubuntu.com/ubuntu noble-updates/restricted Translation-en [377 kB]\nGet:15 http://azure.archive.ubuntu.com/ubuntu noble-updates/multiverse amd64 Components [940 B]\nGet:16 http://azure.archive.ubuntu.com/ubuntu noble-backports/main amd64 Packages [40.6 kB]\nGet:17 http://azure.archive.ubuntu.com/ubuntu noble-backports/main amd64 Components [5796 B]\nGet:18 http://azure.archive.ubuntu.com/ubuntu noble-backports/universe amd64 Packages [31.0 kB]\nGet:19 http://azure.archive.ubuntu.com/ubuntu noble-backports/universe Translation-en [18.6 kB]\nGet:20 http://azure.archive.ubuntu.com/ubuntu noble-backports/universe amd64 Components [12.6 kB]\nGet:21 http://azure.archive.ubuntu.com/ubuntu noble-security/main amd64 Packages [1053 kB]\nGet:22 http://azure.archive.ubuntu.com/ubuntu noble-security/main Translation-en [219 kB]\nGet:23 http://azure.archive.ubuntu.com/ubuntu noble-security/main amd64 Components [46.3 kB]\nGet:24 http://azure.archive.ubuntu.com/ubuntu noble-security/universe amd64 Packages [1220 kB]\nGet:25 http://azure.archive.ubuntu.com/ubuntu noble-security/universe Translation-en [245 kB]\nGet:26 http://azure.archive.ubuntu.com/ubuntu noble-security/universe amd64 Components [76.3 kB]\nGet:27 http://azure.archive.ubuntu.com/ubuntu noble-security/restricted amd64 Packages [1535 kB]\nGet:28 http://azure.archive.ubuntu.com/ubuntu noble-security/restricted Translation-en [353 kB]\nGet:29 https://packages.microsoft.com/ubuntu/24.04/prod noble/main amd64 Packages [498 kB]\nGet:30 https://packages.microsoft.com/ubuntu/24.04/prod noble/main arm64 Packages [446 kB]\nFetched 12.4 MB in 1s (8875 kB/s)\nReading package lists...\n\nReading package lists...\nBuilding dependency tree...\nReading state information...\nThe following additional packages will be installed:\n  libpoppler134 poppler-data\nSuggested packages:\n  ghostscript fonts-japanese-mincho | fonts-ipafont-mincho\n  fonts-japanese-gothic | fonts-ipafont-gothic fonts-arphic-ukai\n  fonts-arphic-uming fonts-nanum\nThe following NEW packages will be installed:\n  libpoppler134 poppler-data poppler-utils\n0 upgraded, 3 newly installed, 0 to remove and 32 not upgraded.\nNeed to get 3389 kB of archives.\nAfter this operation, 17.8 MB of additional disk space will be used.\nGet:1 file:/etc/apt/apt-mirrors.txt Mirrorlist [144 B]\nGet:2 http://azure.archive.ubuntu.com/ubuntu noble/main amd64 poppler-data all 0.4.12-1 [2060 kB]\nGet:3 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 libpoppler134 amd64 24.02.0-1ubuntu9.9 [1118 kB]\nGet:4 http://azure.archive.ubuntu.com/ubuntu noble-updates/main amd64 poppler-utils amd64 24.02.0-1ubuntu9.9 [212 kB]\nFetched 3389 kB in 0s (16.9 MB/s)\nSelecting previously unselected package poppler-data.\n(Reading database ... \n(Reading database ... 5%\n(Reading database ... 10%\n(Reading database ... 15%\n(Reading database ... 20%\n(Reading database ... 25%\n(Reading database ... 30%\n(Reading database ... 35%\n(Reading database ... 40%\n(Reading database ... 45%\n(Reading database ... 50%\n(Reading database ... 55%\n(Reading database ... 60%\n(Reading database ... 65%\n(Reading database ... 70%\n(Reading database ... 75%\n(Reading database ... 80%\n(Reading database ... 85%\n(Reading database ... 90%\n(Reading database ... 95%\n(Reading database ... 100%\n(Reading database ... 202190 files and directories currently installed.)\nPreparing to unpack .../poppler-data_0.4.12-1_all.deb ...\nUnpacking poppler-data (0.4.12-1) ...\nSelecting previously unselected package libpoppler134:amd64.\nPreparing to unpack .../libpoppler134_24.02.0-1ubuntu9.9_amd64.deb ...\nUnpacking libpoppler134:amd64 (24.02.0-1ubuntu9.9) ...\nSelecting previously unselected package poppler-utils.\nPreparing to unpack .../poppler-utils_24.02.0-1ubuntu9.9_amd64.deb ...\nUnpacking poppler-utils (24.02.0-1ubuntu9.9) ...\nSetting up libpoppler134:amd64 (24.02.0-1ubuntu9.9) ...\nSetting up poppler-data (0.4.12-1) ...\nSetting up poppler-utils (24.02.0-1ubuntu9.9) ...\nProcessing triggers for libc-bin (2.39-0ubuntu8.9) ...\nProcessing triggers for man-db (2.12.0-4build2) ...\nNot building database; man-db/auto-update is not 'true'.\nProcessing triggers for fontconfig (2.15.0-1.1ubuntu2) ...\n\nRunning kernel seems to be up-to-date.\n\nNo services need to be restarted.\n\nNo containers need to be restarted.\n\nNo user sessions are running outdated binaries.\n\nNo VM guests are running outdated hypervisor (qemu) binaries on this host.\n\ninstrumentation:com.supercubegame.pockettodo.v12.preview.test/com.supercubegame.pockettodo.V12DeviceTest (target=com.supercubegame.pockettodo.v12.preview)\ninstrumentation:org.chromium.webview_shell/.WebViewLayoutTestRunner (target=org.chromium.webview_shell)\n\n\nPAGED_DEBUG_KEY existing certificate match verified; no key generated\n\npackage:/data/app/com.supercubegame.pockettodo.v12.preview-ThjYXU5G65LY71G9HIdfBQ==/base.apk\n\nTo honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.9/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.\nDaemon will be stopped at the end of the build \n> Task :preBuild UP-TO-DATE\n> Task :preDebugBuild UP-TO-DATE\n> Task :javaPreCompileDebug UP-TO-DATE\n> Task :checkDebugAarMetadata UP-TO-DATE\n> Task :generateDebugResValues UP-TO-DATE\n> Task :mapDebugSourceSetPaths UP-TO-DATE\n> Task :generateDebugResources UP-TO-DATE\n> Task :mergeDebugResources UP-TO-DATE\n> Task :packageDebugResources UP-TO-DATE\n> Task :parseDebugLocalResources UP-TO-DATE\n> Task :createDebugCompatibleScreenManifests UP-TO-DATE\n> Task :extractDeepLinksDebug UP-TO-DATE\n> Task :processDebugMainManifest UP-TO-DATE\n> Task :processDebugManifest UP-TO-DATE\n> Task :processDebugManifestForPackage UP-TO-DATE\n> Task :processDebugResources UP-TO-DATE\n> Task :compileDebugJavaWithJavac UP-TO-DATE\n> Task :bundleDebugClassesToCompileJar UP-TO-DATE\n> Task :preDebugAndroidTestBuild SKIPPED\n> Task :javaPreCompileDebugAndroidTest UP-TO-DATE\n> Task :checkDebugAndroidTestAarMetadata UP-TO-DATE\n> Task :generateDebugAndroidTestResValues UP-TO-DATE\n> Task :mapDebugAndroidTestSourceSetPaths UP-TO-DATE\n> Task :generateDebugAndroidTestResources UP-TO-DATE\n> Task :mergeDebugAndroidTestResources UP-TO-DATE\n> Task :processDebugAndroidTestManifest\n> Task :mergeDebugAndroidTestShaders UP-TO-DATE\n> Task :compileDebugAndroidTestShaders NO-SOURCE\n> Task :generateDebugAndroidTestAssets UP-TO-DATE\n> Task :mergeDebugAndroidTestAssets UP-TO-DATE\n> Task :compressDebugAndroidTestAssets UP-TO-DATE\n> Task :desugarDebugAndroidTestFileDependencies UP-TO-DATE\n> Task :processDebugAndroidTestJavaRes NO-SOURCE\n> Task :mergeDebugAndroidTestJavaResource UP-TO-DATE\n> Task :checkDebugAndroidTestDuplicateClasses UP-TO-DATE\n> Task :mergeExtDexDebugAndroidTest UP-TO-DATE\n> Task :mergeLibDexDebugAndroidTest UP-TO-DATE\n> Task :mergeDebugAndroidTestJniLibFolders UP-TO-DATE\n> Task :mergeDebugJniLibFolders UP-TO-DATE\n> Task :mergeDebugNativeLibs NO-SOURCE\n> Task :mergeDebugAndroidTestNativeLibs NO-SOURCE\n> Task :stripDebugAndroidTestDebugSymbols NO-SOURCE\n> Task :validateSigningDebugAndroidTest UP-TO-DATE\n> Task :writeDebugAndroidTestSigningConfigVersions UP-TO-DATE\n> Task :processDebugAndroidTestResources\n> Task :compileDebugAndroidTestJavaWithJavac\n> Task :dexBuilderDebugAndroidTest\n> Task :mergeDebugAndroidTestGlobalSynthetics UP-TO-DATE\n> Task :mergeProjectDexDebugAndroidTest\n> Task :packageDebugAndroidTest\n> Task :createDebugAndroidTestApkListingFileRedirect UP-TO-DATE\n> Task :assembleDebugAndroidTest\n\nBUILD SUCCESSFUL in 12s\n42 actionable tasks: 6 executed, 36 up-to-date\n\nPerforming Streamed Install\nSuccess\n\ninstrumentation:com.supercubegame.pockettodo.v12.preview.test/ci.paged.PagedInstrumentation (target=com.supercubegame.pockettodo.v12.preview)\ninstrumentation:org.chromium.webview_shell/.WebViewLayoutTestRunner (target=org.chromium.webview_shell)\n\nINSTRUMENTATION_RESULT: stream=PAGED_TARGET com.supercubegame.pockettodo.v12.preview 10077\nPAGED_FAILED\njava.lang.AssertionError: paged_diagnostic_sentinel\n\tat ci.paged.PagedInstrumentation.onStart(PagedInstrumentation.java:19)\n\tat android.app.Instrumentation$InstrumentationThread.run(Instrumentation.java:2074)\n\nINSTRUMENTATION_CODE: 0\n\nINSTRUMENTATION_RESULT: stream=PAGED_TARGET com.supercubegame.pockettodo.v12.preview 10077\nPAGED_PASS actual_api\nPAGED_PASS multiple_pages_PDF\nPAGED_PASS result_ownership_PDF\nPAGED_PASS excluded_blocks_do_not_add_pages_PDF\nPAGED_PASS single_page_PDF\nPAGED_PASS empty_selection_PDF\nPAGED_PASS unknown_selection_PDF\nPAGED_PASS private_only_PDF\nPAGED_PASS duplicate_identity_PDF\nPAGED_PASS selected_bad_image_PDF\nPAGED_PASS unselected_bad_image_ignored_PDF\nPAGED_PASS source_pixel_budget_PDF\nPAGED_PASS invalid_text_PDF\nPAGED_PASS page_limit_refuses_not_truncates_PDF\nPAGED_PASS multiple_pages_PNG_ZIP\nPAGED_PASS result_ownership_PNG_ZIP\nPAGED_PASS excluded_blocks_do_not_add_pages_PNG_ZIP\nPAGED_PASS single_page_PNG_ZIP\nPAGED_PASS empty_selection_PNG_ZIP\nPAGED_PASS unknown_selection_PNG_ZIP\nPAGED_PASS private_only_PNG_ZIP\nPAGED_PASS duplicate_identity_PNG_ZIP\nPAGED_PASS selected_bad_image_PNG_ZIP\nPAGED_PASS unselected_bad_image_ignored_PNG_ZIP\nPAGED_PASS source_pixel_budget_PNG_ZIP\nPAGED_PASS invalid_text_PNG_ZIP\nPAGED_PASS page_limit_refuses_not_truncates_PNG_ZIP\nPAGED_PASS source_file_unchanged\nPAGED_PASS blank_document_rejected\nPAGED_PREVIEW_PASS decoded_actual_pages_PDF\nPAGED_PREVIEW_PASS decoded_page_bounds_and_ink_PDF\nPAGED_PREVIEW_PASS corrupt_payload_rejected_PDF\nPAGED_PREVIEW_PASS wrong_format_rejected_PDF\nPAGED_PREVIEW_DIAGNOSTIC format=1 dialogs=0 destroyed=false finishing=false busy=false status=预览无法完整显示，未导出；请减少选项\nPAGED_PREVIEW_DIAGNOSTIC same_thread_decode_and_views=FAILED\njava.lang.reflect.InvocationTargetException\n\tat java.lang.reflect.Method.invoke(Native Method)\n\tat ci.paged.PagedContractTest.lambda$previewUi$1(PagedContractTest.java:155)\n\tat ci.paged.PagedContractTest$$ExternalSyntheticLambda6.run(D8$$SyntheticClass:0)\n\tat ci.paged.PagedContractTest.lambda$onUi$0(PagedContractTest.java:87)\n\tat ci.paged.PagedContractTest$$ExternalSyntheticLambda0.run(D8$$SyntheticClass:0)\n\tat android.app.Instrumentation$SyncRunnable.run(Instrumentation.java:2092)\n\tat android.os.Handler.handleCallback(Handler.java:789)\n\tat android.os.Handler.dispatchMessage(Handler.java:98)\n\tat android.os.Looper.loop(Looper.java:164)\n\tat android.app.ActivityThread.main(ActivityThread.java:6541)\n\tat java.lang.reflect.Method.invoke(Native Method)\n\tat com.android.internal.os.Zygote$MethodAndArgsCaller.run(Zygote.java:240)\n\tat com.android.internal.os.ZygoteInit.main(ZygoteInit.java:767)\nCaused by: java.io.IOException: file not in PDF format or corrupted\n\tat android.graphics.pdf.PdfRenderer.nativeCreate(Native Method)\n\tat android.graphics.pdf.PdfRenderer.<init>(PdfRenderer.java:166)\n\tat com.supercubegame.pockettodo.MainActivity.decodePagedPreview(MainActivity.java:230)\n\t... 13 more\nPAGED_FAILED\njava.lang.AssertionError: preview UI failure\n\tat ci.paged.PagedContractTest.onUi(PagedContractTest.java:88)\n\tat ci.paged.PagedContractTest.previewUi(PagedContractTest.java:141)\n\tat ci.paged.PagedContractTest.verify(PagedContractTest.java:246)\n\tat ci.paged.PagedInstrumentation.onStart(PagedInstrumentation.java:21)\n\tat android.app.Instrumentation$InstrumentationThread.run(Instrumentation.java:2074)\nCaused by: java.lang.AssertionError: one actual preview dialog; observed=0\n\tat ci.paged.PagedContractTest.lambda$previewUi$1(PagedContractTest.java:166)\n\tat ci.paged.PagedContractTest$$ExternalSyntheticLambda6.run(D8$$SyntheticClass:0)\n\tat ci.paged.PagedContractTest.lambda$onUi$0(PagedContractTest.java:87)\n\tat ci.paged.PagedContractTest$$ExternalSyntheticLambda0.run(D8$$SyntheticClass:0)\n\tat android.app.Instrumentation$SyncRunnable.run(Instrumentation.java:2092)\n\tat android.os.Handler.handleCallback(Handler.java:789)\n\tat android.os.Handler.dispatchMessage(Handler.java:98)\n\tat android.os.Looper.loop(Looper.java:164)\n\tat android.app.ActivityThread.main(ActivityThread.java:6541)\n\tat java.lang.reflect.Method.invoke(Native Method)\n\tat com.android.internal.os.Zygote$MethodAndArgsCaller.run(Zygote.java:240)\n\tat com.android.internal.os.ZygoteInit.main(ZygoteInit.java:767)\n\nINSTRUMENTATION_CODE: 0\n\nPerforming Streamed Install\nSuccess\n\ninstrumentation:com.supercubegame.pockettodo.v12.preview.test/com.supercubegame.pockettodo.V12DeviceTest (target=com.supercubegame.pockettodo.v12.preview)\ninstrumentation:org.chromium.webview_shell/.WebViewLayoutTestRunner (target=org.chromium.webview_shell)\n\n\nEMULATOR_PROCESS_EXITED 0\nTraceback (most recent call last):\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_schema3.py\", line 1181, in <module>\n    android()\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_schema3.py\", line 1107, in android\n    verify_exports.android_main()\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_exports.py\", line 681, in android_main\n    gate.main()\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/emulator_gate.py\", line 946, in main\n    verify_database(adb)\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_exports.py\", line 679, in database_and_codec\n    android_codec(adb,gate)\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_exports.py\", line 655, in android_codec\n    paged_report=verify_paged(folder,classes,android,prefix,remote,gate)\n                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_paged_exports.py\", line 631, in verify\n    labels,identity=instrumentation(folder,prefix,gate)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_paged_exports.py\", line 419, in instrumentation\n    labels=observe(output,gate.PKG)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_paged_exports.py\", line 317, in observe\n    assert re.findall(r\"^PAGED_PREVIEW_PASS ([^\\r\\n]+)\",text,re.M)==PREVIEW_LABELS\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError\n",
+          "emulator.log": "INFO         | Android emulator version 37.1.11.0 (build_id 15917651) (CL:N/A)\nINFO         | Graphics backend: gfxstream\nINFO         | Found systemPath /usr/local/lib/android/sdk/system-images/android-26/google_apis/x86_64/\nWARNING: cannnot unmap ptr 0x7fb515201000 as it is in the protected range from 0x7fb495200000 to 0x7fb515400000\nINFO         | Saving last run QEMU version for the AVD to 2\nINFO         | Guest GLES Driver: Auto (ext controls)\nINFO         | emuglConfig_init: vulkan_mode_selected:swiftshader gles_mode_selected:swiftshader\nINFO         | Checking system compatibility:\nINFO         |   Checking: hasSufficientDiskSpace\nINFO         |      Ok: Disk space requirements to run avd: `pocket-ci` are met\nINFO         |   Checking: hasSufficientHwGpu\nINFO         |      Ok: Hardware GPU compatibility checks are not required\nINFO         |   Checking: hasSufficientSystem\nINFO         |      Ok: System requirements to run avd: `pocket-ci` are met\nWARNING      | Feature QuickbootFileBacked is disabled due to stability issues, if you really want that, the environment variable ANDROID_EMU_FORCE_QUICKBOOT_FILE_BACKED need to set to 1\nWARNING      | FeatureControl is requesting a non existing feature.\nINFO         | Storing crashdata in: /tmp/android-runner/emu-crash-37.1.11.db, detection is enabled for process: 2571\nINFO         | Initializing gfxstream backend\nINFO         | startOpenglesRendererImpl: gpu info\nINFO         | \nINFO         | SharedLibrary::open for [libX11]\nWARNING      | Could not open libX11.so, try libX11.so.6\nINFO         | SharedLibrary::open for [libX11.so.6]\nINFO         | SharedLibrary::open for [libX11-xcb]\nWARNING      | Could not open libX11-xcb.so, try libX11-xcb.so.1\nINFO         | SharedLibrary::open for [libX11-xcb.so.1]\nINFO         | Graphics Adapter Vendor Google (Google Inc.)\nINFO         | Graphics Adapter Android Emulator OpenGL ES Translator (Google SwiftShader)\nINFO         | Graphics API Version OpenGL ES 3.0 (OpenGL ES 3.0 SwiftShader 4.0.0.1)\nINFO         | Graphics API Extensions GL_OES_EGL_sync GL_OES_EGL_image GL_OES_EGL_image_external GL_OES_depth24 GL_OES_depth32 GL_OES_element_index_uint GL_OES_texture_float GL_OES_texture_float_linear GL_OES_compressed_paletted_texture GL_OES_compressed_ETC1_RGB8_texture GL_OES_depth_texture GL_OES_texture_half_float GL_OES_texture_half_float_linear GL_OES_packed_depth_stencil GL_OES_vertex_half_float GL_OES_standard_derivatives GL_OES_texture_npot GL_OES_rgb8_rgba8 GL_EXT_color_buffer_float GL_EXT_color_buffer_half_float GL_EXT_texture_format_BGRA8888 GL_APPLE_texture_format_BGRA8888 \nINFO         | Graphics Device Extensions N/A\nINFO         | Verified boot params were not found.\nINFO         | Userspace boot properties:\nINFO         |   android.bootanim=0\nINFO         |   android.qemud=1\nINFO         |   androidboot.android_dt_dir=/sys/bus/platform/devices/ANDR0001:00/properties/android/\nINFO         |   androidboot.hardware=ranchu\nINFO         |   androidboot.serialno=EMULATOR37X1X11X0\nINFO         |   qemu=1\nINFO         |   qemu.avd_name=pocket-ci\nINFO         |   qemu.camera_hq_edge_processing=0\nINFO         |   qemu.dalvik.vm.heapsize=512m\nINFO         |   qemu.encrypt=1\nINFO         |   qemu.gles=1\nINFO         |   qemu.gltransport=pipe\nINFO         |   qemu.gltransport.drawFlushInterval=800\nINFO         |   qemu.opengles.version=196608\nINFO         |   qemu.settings.system.screen_off_timeout=2147483647\nINFO         |   qemu.skin=320x640\nINFO         |   qemu.uirenderer=skiagl\nINFO         |   qemu.vsync=60\nINFO         |   qemu.wifi=1\nINFO         | Monitoring duration of emulator setup.\nINFO         | Setting display: 0 configuration to: 320x640, dpi: 160x160 \nINFO         | setDisplayActiveConfig: id:0, 320x640\nINFO         | emulatorSetupEnvironment: Environment scene is not required\nUSER_INFO    | Emulator is performing a full startup. This may take upto two minutes, or more.\nWARNING      | Failed to process .ini file /home/runner/work/_temp/pocket-avd-36239221603-26/emu-update-last-check.ini for reading.\nWARNING      | Failed to process .ini file /home/runner/work/_temp/pocket-avd-36239221603-26/emu-update-last-check.ini for reading.\nINFO         | Boot completed in 33187 ms\nINFO         | Increasing screen off timeout, logcat buffer size to 2M.\nINFO         | Wait for emulator (pid 2571) 20 seconds to shutdown gracefully before kill;you can set environment variable ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL(in seconds) to change the default value (20 seconds)\n\nUSER_INFO    | Snapshots have been disabled by the user, save request is ignored.\nINFO         | Saving snapshot 'default_boot' using 0 ms\nERROR        | stop: Not implemented\nWARNING      | Emulator client has not yet been configured.. Call configure me first!\nINFO         | removeAll\n"
+        }
+      },
+      "34": {
+        "result": {
+          "status": "PASS",
+          "api": 34,
+          "checks": {
+            "seed": 155,
+            "reopen": 25
+          },
+          "scope": "ANDROID_SCHEMA2_DATABASE_AND_MEDIA_BYTES",
+          "ui": "SEE_NATIVE_UI_RESULT",
+          "image_decoding": "NOT_TESTED",
+          "full_backup_restore": "SCHEMA2_DB_MEDIA_BYTES_PASS",
+          "saf_restore_ui": "SEE_NATIVE_UI_RESULT",
+          "power_loss": "NOT_TESTED",
+          "release_ready": false
+        },
+        "logs": {
+          "setup.log": "  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n\n  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\n100   169  100   169    0     0   4724      0 --:--:-- --:--:-- --:--:--  4828\n\n  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\n\n  9  129M    9 12.2M    0     0  71.8M      0  0:00:01 --:--:--  0:00:01 71.8M\n100  129M  100  129M    0     0   300M      0 --:--:-- --:--:-- --:--:--  452M\n  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n\n  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\n100   167  100   167    0     0   4821      0 --:--:-- --:--:-- --:--:--  4911\n\n100    64  100    64    0     0    780      0 --:--:-- --:--:-- --:--:--   780\n/tmp/gradle.zip: OK\nLoading package information...                                                  \nLoading local repository...                                                     \n[                                       ] 3% Loading local repository...        \n[                                       ] 3% Fetch remote repository...         \n[=                                      ] 3% Fetch remote repository...         \n[=                                      ] 4% Fetch remote repository...         \n[=                                      ] 5% Fetch remote repository...         \n[==                                     ] 5% Fetch remote repository...         \n[==                                     ] 6% Fetch remote repository...         \n[==                                     ] 7% Fetch remote repository...         \n[==                                     ] 7% Computing updates...               \n[===                                    ] 8% Computing updates...               \n[===                                    ] 10% Computing updates...              \n[=======================================] 100% Computing updates...             \n\n",
+          "build.log": "\nWelcome to Gradle 8.9!\n\nHere are the highlights of this release:\n - Enhanced Error and Warning Messages\n - IDE Integration Improvements\n - Daemon JVM Information\n\nFor more details see https://docs.gradle.org/8.9/release-notes.html\n\nTo honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.9/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.\nDaemon will be stopped at the end of the build \n> Task :preBuild UP-TO-DATE\n> Task :preDebugBuild UP-TO-DATE\n> Task :mergeDebugNativeDebugMetadata NO-SOURCE\n> Task :javaPreCompileDebug\n> Task :generateDebugResValues\n> Task :checkDebugAarMetadata\n> Task :mapDebugSourceSetPaths\n> Task :generateDebugResources\n> Task :packageDebugResources\n> Task :mergeDebugResources\n> Task :createDebugCompatibleScreenManifests\n> Task :extractDeepLinksDebug\n> Task :parseDebugLocalResources\n> Task :processDebugMainManifest\n> Task :processDebugManifest\n> Task :mergeDebugShaders\n> Task :compileDebugShaders NO-SOURCE\n> Task :generateDebugAssets UP-TO-DATE\n> Task :mergeDebugAssets\n> Task :compressDebugAssets\n> Task :desugarDebugFileDependencies\n> Task :processDebugJavaRes NO-SOURCE\n> Task :processDebugManifestForPackage\n> Task :processDebugResources\n> Task :mergeDebugJavaResource\n> Task :l8DexDesugarLibDebug\n\n> Task :compileDebugJavaWithJavac\nNote: Some input files use or override a deprecated API.\nNote: Recompile with -Xlint:deprecation for details.\n\n> Task :dexBuilderDebug\n> Task :mergeDebugGlobalSynthetics\n> Task :mergeDebugJniLibFolders\n> Task :checkDebugDuplicateClasses\n> Task :mergeDebugNativeLibs NO-SOURCE\n> Task :stripDebugDebugSymbols NO-SOURCE\n> Task :mergeLibDexDebug\n> Task :mergeProjectDexDebug\n> Task :validateSigningDebug\n> Task :writeDebugAppMetadata\n> Task :writeDebugSigningConfigVersions\n> Task :preDebugAndroidTestBuild SKIPPED\n> Task :javaPreCompileDebugAndroidTest\n> Task :bundleDebugClassesToCompileJar\n> Task :checkDebugAndroidTestAarMetadata\n> Task :generateDebugAndroidTestResValues\n> Task :mapDebugAndroidTestSourceSetPaths\n> Task :generateDebugAndroidTestResources\n> Task :mergeDebugAndroidTestResources\n> Task :processDebugAndroidTestManifest\n> Task :mergeDebugAndroidTestShaders\n> Task :compileDebugAndroidTestShaders NO-SOURCE\n> Task :generateDebugAndroidTestAssets UP-TO-DATE\n> Task :mergeDebugAndroidTestAssets\n> Task :compressDebugAndroidTestAssets\n> Task :desugarDebugAndroidTestFileDependencies\n> Task :processDebugAndroidTestJavaRes NO-SOURCE\n> Task :mergeDebugAndroidTestJavaResource\n> Task :checkDebugAndroidTestDuplicateClasses\n> Task :mergeExtDexDebugAndroidTest\n> Task :mergeDebugAndroidTestJniLibFolders\n> Task :mergeDebugAndroidTestNativeLibs NO-SOURCE\n> Task :stripDebugAndroidTestDebugSymbols NO-SOURCE\n> Task :validateSigningDebugAndroidTest\n> Task :mergeLibDexDebugAndroidTest\n> Task :writeDebugAndroidTestSigningConfigVersions\n> Task :processDebugAndroidTestResources\n> Task :mergeExtDexDebug\n> Task :generateDebugAndroidTestLintModel\n> Task :compileDebugAndroidTestJavaWithJavac\n> Task :dexBuilderDebugAndroidTest\n> Task :mergeDebugAndroidTestGlobalSynthetics\n> Task :extractProguardFiles\n> Task :generateDebugLintReportModel\n> Task :preDebugUnitTestBuild UP-TO-DATE\n> Task :generateDebugUnitTestLintModel\n> Task :mergeProjectDexDebugAndroidTest\n> Task :packageDebug\n> Task :createDebugApkListingFileRedirect\n> Task :assembleDebug\n> Task :packageDebugAndroidTest\n> Task :createDebugAndroidTestApkListingFileRedirect\n> Task :assembleDebugAndroidTest\n> Task :lintAnalyzeDebug\n> Task :lintAnalyzeDebugAndroidTest\n> Task :lintAnalyzeDebugUnitTest\n\n> Task :lintReportDebug\nWrote HTML report to file:///home/runner/work/todo-pocket-android/todo-pocket-android/build/reports/lint-results-debug.html\n\n> Task :lintDebug\n\nBUILD SUCCESSFUL in 1m 29s\n68 actionable tasks: 68 executed\n",
+          "ui.log": " tables\nUI_PASS original imported PNG bytes unchanged after derivative save\nUI_PASS sibling blocks across notes remain exact after derivative save\n+ java -Djava.awt.headless=true -cp build/ci-note-image VerifyDerivative /home/runner/work/todo-pocket-android/todo-pocket-android/native-ui/derivative-source.png /home/runner/work/todo-pocket-android/todo-pocket-android/native-ui/derivative-output.png 320 160 960 480 640 238 800 402\nUI_PASS independent decoder proves exact cropped pixels and opaque mask for reported rects\nUI_PASS derived image renders with working entry after process restart\nUI_PASS derivative state and both images survive stopped-process restart exactly\nUI_PASS re-derived preview renders for abandonment check\nUI_PASS abandoned second preview writes nothing and keeps published derivative\nUI_PASS native schema3 survives SAF restore and all ordinary edits without invented image origins\nNATIVE_UI_RESULT {\"status\": \"PASS\", \"scope\": \"NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE\", \"ledger_calendar\": \"NATIVE_MULTI_DATE_LEDGER_PASS\", \"saf_restore\": \"NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS\", \"checkin_history\": \"NATIVE_CHECKIN_HISTORY_BACKDATE_PASS\", \"note_editor\": \"NATIVE_TEXT_IMAGE_NOTE_PASS\", \"api\": 34, \"count\": 186, \"checks\": [\"new UI database starts empty without fabricated activities\", \"blank todo rejected visibly\", \"UI adds distinct stable todo identities\", \"real checkbox completes todo\", \"pending filter excludes completed row\", \"completed filter excludes pending row\", \"invalid edit stays open without losing original\", \"cancel invalid edit preserves value and completion\", \"title edit preserves stable identity and completion\", \"native todo state survives actual process restart\", \"category created through visible native dialog\", \"category rename updates visible label\", \"activity created under selected category\", \"ordered multiline manual path displays without collapse\", \"daily check-in writes visible done state\", \"repeated daily mark remains one visible day\", \"skipped is distinct from done and unrecorded\", \"accessible category reorder changes exact visible order\", \"category order persists after process restart\", \"skipped mark persists after process restart\", \"activity path persists after process restart\", \"actual native screenshots represent distinct states\", \"default native UI uses schema3 with exact nine-column block layout\", \"independent SQLite read matches exact UI todo identities titles and states\", \"independent SQLite read matches renamed reordered categories\", \"activity stays in its category without invented application\", \"independent SQLite read preserves path order\", \"repeated native marks persist exactly one day with entry timestamp\", \"check-in does not invent money entries\", \"new native ledger starts with empty selection and zero summary\", \"calendar multi-select is explicit read-only scope\", \"three different-day amounts total exactly 80 yuan in native UI\", \"cancel native entry does not change totals\", \"native ledger rejects fractional cents without closing editor\", \"refund reduces net expense without rewriting gross expense\", \"planned is separate and signed net cash is exact\", \"nonconsecutive selected days exclude actual refund date\", \"cancel date selection keeps previous summary\", \"missing day is not presented as confirmed zero expenditure\", \"empty date selection is zero not all-time total\", \"native ledger exact totals survive stopped-process restart\", \"independent Android SQLite read matches all six exact typed dated entries\", \"native saves have distinct entry and batch identities without selection-generated writes\", \"cancel and invalid amount leave no batch journal residue\", \"money and date filtering never mutate the check-in history\", \"native check-in editor rejects malformed date without closing\", \"backdated done check-in appears with its exact date\", \"un-recording removes the visible history row\", \"un-recorded backdate leaves the exact prior single mark in independent readback\", \"check-in editing never mutates the ledger\", \"backdated check-in survives cancel then re-entered identically\", \"SAF file selection shows visible restore preview and replacement counts\", \"canceling SAF restore preview makes no database write\", \"cancelled restore leaves exact new todo and old state independent\", \"cancelled restore retains exact ledger rows\", \"SAF file selection shows visible restore preview and replacement counts\", \"unchecked consent cannot restore even with visible confirmation control\", \"SAF file selection shows visible restore preview and replacement counts\", \"explicit SAF consent replaces data with previewed backup\", \"SAF restored data survives a separate stopped-process restart\", \"independent SQLite read matches exact SAF restored state\", \"SAF restore retains exact ledger after independent readback\", \"SAF restore retains exact check-in history including the re-entered backdate\", \"empty note starts visibly empty without fabricated content\", \"blank note save rejected visibly\", \"saved note text appears on activity\", \"note survives process restart\", \"attached image is registered with note\", \"note inherits its activity title and stays bound to that activity\", \"note keeps ordered text then image blocks\", \"image block is not private by default\", \"image bytes registered under immutable content id\", \"image block references exact registered media id\", \"notes never mutate the ledger\", \"actual private PNG bytes match registry size and content ID\", \"independent PNG decoder verifies all 9216 opaque expected pixels\", \"edit existing note opens with the exact stored text\", \"cancel note edit preserves original text and identity\", \"blank existing note edit stays open with visible validation\", \"cancelled valid and blank note edits leave exact persisted note rows unchanged\", \"note edit replaces text in place without leaving an old duplicate\", \"edited note text and stable block identity survive stopped-process restart\", \"image remains an image view after editing text and restarting\", \"independent readback proves only text changed with note IDs block IDs order and privacy retained\", \"editing note leaves exact media registry and complete ledger unchanged\", \"text editing and restart preserve exact private image bytes\", \"image import opens the actual system document picker\", \"cancel system image picker reports no note change\", \"cancel picker leaves exact blocks and media registrations unchanged\", \"malformed selected image rejected visibly\", \"malformed rejection preserves every database table including revision\", \"oversized dimensions selected image rejected visibly\", \"oversized dimensions rejection preserves every database table including revision\", \"excess byte budget selected image rejected visibly\", \"excess byte budget rejection preserves every database table including revision\", \"SAF image appends one exact ordered block without replacing text or prior image\", \"SAF original bytes registered by exact hash MIME and length\", \"image import preserves notes identity and all unrelated tables\", \"SAF private copy equals independently generated two-color PNG byte for byte\", \"selected image still renders after source deletion and stopped-process restart\", \"selected image block identity order and reference survive restart\", \"source deletion never removes or changes the private selected image\", \"independent host decoder proves JPEG and both pixel boundary fixtures really decode with intended dimensions and colors\", \"new image-first activity has no existing note in independent SQLite read\", \"image-first activity shows genuine empty note before any import\", \"first-image cancellation waits for a visible system picker before pressing Back\", \"canceling first image reports no note change\", \"first-image cancel creates no orphan note media block or revision\", \"malformed first image rejected visibly before note creation\", \"malformed first image leaves every table unchanged with no orphan note or media registration\", \"20005000-pixel first image rejected visibly before note creation\", \"20005000-pixel first image leaves every table unchanged with no orphan note or media registration\", \"JPEG-first import creates exactly one note with correct activity binding title and preserved prior notes\", \"JPEG-first import creates exactly one position-zero public image block without touching previous blocks\", \"JPEG-first media registry has exact actual MIME digest and original byte length\", \"JPEG-first note creation preserves activities todos checkins ledger and all unrelated tables\", \"selected JPEG private original is byte-exact rather than a recompressed preview\", \"JPEG-first note displays a real ImageView after external source deletion and process restart\", \"JPEG-first restart preserves every database table and exact private JPEG bytes\", \"exactly 20000000 pixels is accepted inclusively as one appended ordered image block\", \"pixel-limit image keeps exact private original and matching media registry\", \"pixel-limit import preserves note identity and unrelated complete tables\", \"20000000-pixel image remains an ImageView after source deletion and restart\", \"pixel-limit restart preserves exact complete database and original image bytes\", \"existing single note remains the initial selected note\", \"blank new note title stays in dialog without creating a note\", \"canceling a populated new-note dialog preserves every table and revision\", \"new note selects its own empty content instead of copying the first note\", \"second note has one fresh identity correct owner title and unchanged old notes\", \"second note owns exactly its text block while all first-note and other-activity blocks remain exact\", \"creating and editing second note preserves media ledger checkins and all unrelated tables\", \"restart opens original first note without replacing its content\", \"note picker exposes both titles in stable creation order\", \"canceling note switch keeps selected note\", \"explicit selection restores second note alone after process restart\", \"editing second note stays on selected stable note instead of jumping to first\", \"switching back preserves original first-note text\", \"first note retains its imported image after multi-note editing\", \"independent readback proves only second text changed with all note and block identities intact\", \"multi-note edits preserve unrelated tables and all selected private originals byte for byte\", \"duplicate note title creates a separate empty note rather than overwriting its namesake\", \"same-title creation adds only one distinct note and never touches existing blocks or unrelated tables\", \"restart preserves creation order and separate indexed entries for duplicate titles\", \"same-title note selection resolves exact second identity not latest matching title\", \"switching and restarting notes are read-only across the complete database\", \"image append retains the non-first selected note and its existing text\", \"non-first image import appends exactly one correctly owned ordered block without modifying any old block\", \"reused JPEG import preserves notes complete media registry unrelated tables and exact original\", \"non-first note image survives source deletion and explicit reselect after restart\", \"new image metadata editor starts with empty caption and public flag\", \"canceling edited caption and privacy preserves every table revision and original bytes\", \"caption and private badge render on the selected second note after saving\", \"private caption save changes only caption and privacy while retaining every block identity owner order and asset reference\", \"metadata edit preserves complete unrelated tables media registrations and all imported originals\", \"restart and reselect prefill the persisted caption and true private flag\", \"editing second image metadata does not leak its caption into first note\", \"same-title third note stays empty after second note image edits\", \"restart and switching across private-image notes are read-only for every table\", \"caption-only edit preserves existing true private flag and all other block fields\", \"caption-only private edit leaves all unrelated tables and immutable original unchanged\", \"updated private caption survives another force-stop and explicit note selection\", \"empty caption is allowed and private flag can be explicitly unset\", \"clearing caption and unsetting private restores exact original block fields without touching siblings or other tables\", \"empty caption and false private flag persist after restart\", \"final metadata cancel and restart preserve every table and exact JPEG original\", \"derivative dialog shows actual decoded source dimensions with empty selection\", \"derivative preview without selection rejected visibly\", \"derivative cancel leaves every table and original bytes unchanged\", \"corner drag maps to full source extent within touch rounding\", \"derivative oversize selection rejected with visible pixel budget\", \"derivative reset clears selection reports\", \"touch crop maps onto intended source rectangle within rounding\", \"redact mode adds exactly one reported mask\", \"touch mask maps onto intended source rectangle within rounding\", \"derivative preview renders exact reported output dimensions\", \"derived block preserves note owner position kind empty caption public flag and records exact original\", \"derived PNG registered with exact mime and byte length\", \"derivative save preserves all unrelated tables\", \"original imported PNG bytes unchanged after derivative save\", \"sibling blocks across notes remain exact after derivative save\", \"independent decoder proves exact cropped pixels and opaque mask for reported rects\", \"derived image renders with working entry after process restart\", \"derivative state and both images survive stopped-process restart exactly\", \"re-derived preview renders for abandonment check\", \"abandoned second preview writes nothing and keeps published derivative\", \"native schema3 survives SAF restore and all ordinary edits without invented image origins\"], \"screenshots\": [{\"file\": \"01-todos.png\", \"bytes\": 37421, \"sha256\": \"9f469d6b532bd0dee740203f7238b87cbe652ce46de41e4c0fcbbd412a2fd05d\"}, {\"file\": \"02-activity.png\", \"bytes\": 46364, \"sha256\": \"edcb2d1f4da39cb129d5d2714ee17ad69cec7d3f65c93ea7745edd10622b30b2\"}, {\"file\": \"03-categories.png\", \"bytes\": 44299, \"sha256\": \"1b13d549e95f45907c807a83948317422d53a2afaa0461ae7d2eb8b694c998e1\"}, {\"file\": \"04-ledger.png\", \"bytes\": 57698, \"sha256\": \"cb1a65b701020190f6435566785ea854e3313d1d6ff770d31c1d2bf69b1387bc\"}, {\"file\": \"05-selected-dates.png\", \"bytes\": 57762, \"sha256\": \"305d784a578ff37cd0c35aa52d137c497fb4e269afcaa4cef5b5a0c971842852\"}, {\"file\": \"06-checkin-history.png\", \"bytes\": 42816, \"sha256\": \"e2e79bc1bc08973956769a15ae079dbae5bee5facdf4184b255fd8746444c690\"}, {\"file\": \"07-backup.png\", \"bytes\": 41618, \"sha256\": \"a00393ed4337f035c5bf7ed8dc88caba797961d96ff48da183fad21a711c7df1\"}, {\"file\": \"08-restore-preview.png\", \"bytes\": 57825, \"sha256\": \"0bc0a75cbeafbe167455ff64f26495417ca755b162cfa91a483566a1e83834be\"}, {\"file\": \"09-note.png\", \"bytes\": 34146, \"sha256\": \"568f618558230d66f27971ff4febc1b053a0f5327f45665b47c7516980b92f1a\"}, {\"file\": \"10-note-edited.png\", \"bytes\": 40874, \"sha256\": \"8a5cf25cee70b67fed8953e632fb7a357e9b9874edabb71d9fe32b95d494defd\"}, {\"file\": \"11-selected-image.png\", \"bytes\": 35860, \"sha256\": \"bf9dfdb5d40c2df109cd70a74b64a47840e52bd3c3661cd37d1219d541bd9d33\"}, {\"file\": \"12-jpeg-first-note.png\", \"bytes\": 35722, \"sha256\": \"47edadd622ef742be0bb275d6107735aded62bf25ef4e50c61c6de7888479953\"}, {\"file\": \"13-pixel-limit-image.png\", \"bytes\": 35824, \"sha256\": \"e7f602db57fe458db44cd3e06ddaaa5ca0628491fc3d9e5e0fe5cf97a6179f54\"}, {\"file\": \"14-multiple-notes.png\", \"bytes\": 36293, \"sha256\": \"769761c844712edfb9e27f43fe7bc23a8d7e2d4003d42abd5434a0fadfbae7f0\"}, {\"file\": \"15-second-note.png\", \"bytes\": 33624, \"sha256\": \"1fc2096603d054b8bd6c01ec3e2d1ce57b46e2e144a1bf5ff1b8c708c4b6c77f\"}, {\"file\": \"16-private-image-caption.png\", \"bytes\": 41479, \"sha256\": \"48b0e9d47e474a6cce77c8a8e8736331c26025d9dafd19012dcc4da0e3b9950a\"}, {\"file\": \"17-second-image-public.png\", \"bytes\": 39032, \"sha256\": \"08c6b30a6681e6848e6efcaba30af37a0bdc585a6d754dc4a4bea17a4ea3ca89\"}, {\"file\": \"18-derivative-preview.png\", \"bytes\": 38953, \"sha256\": \"ab6d00b04a2c2157403e70a616e6de65e2066c010038bd34073a8beed511523b\"}, {\"file\": \"19-derivative-saved.png\", \"bytes\": 36338, \"sha256\": \"a84574f2a7c271396a4ed763deab7a54826b9475af672b72de4a6b04385e1ff6\"}], \"infra_retries\": [], \"restore_undo\": \"NOT_IMPLEMENTED\", \"restore_preview_lifecycle\": \"NOT_TESTED\", \"checkin_schedules\": \"NOT_IMPLEMENTED\", \"real_photo_selection\": \"NATIVE_SAF_PNG_JPEG_PASS\", \"photos\": \"SYNTHETIC_PNG_JPEG_ONLY\", \"sharing\": \"NOT_TESTED\", \"release_ready\": false, \"image_picker_lifecycle\": \"CANCEL_AND_RESTART_ONLY\", \"jpeg\": \"NATIVE_SAF_EXACT_PRIVATE_COPY_PASS\", \"camera\": \"NOT_IMPLEMENTED\", \"image_first_note\": \"CANCEL_REJECT_CREATE_RESTART_PASS\", \"image_pixel_budget\": \"20000000_ACCEPTED_20005000_REJECTED\", \"exif_orientation\": \"NOT_TESTED\", \"whole_note_memory\": \"NOT_TESTED\", \"multiple_notes\": \"CREATE_SWITCH_EDIT_DUPLICATE_TITLE_RESTART_PASS\", \"note_selection_persistence\": \"RESTART_DEFAULTS_FIRST_EXPLICIT_RESELECT\", \"note_rename_delete_reorder\": \"NOT_IMPLEMENTED\", \"nonfirst_image\": \"APPEND_ISOLATION_RESTART_PASS\", \"image_metadata\": \"CAPTION_PRIVATE_CANCEL_EDIT_CLEAR_RESTART_PASS\", \"private_sharing\": \"NOT_TESTED\", \"default_app_schema\": 3, \"default_schema3_ui\": \"NATIVE_SCHEMA3_UI_PASS\", \"derivative_ui\": \"NATIVE_CROP_MASK_UI_SAVE_CANCEL_RESTART_PASS\", \"derivative_geometry\": [{\"source\": [1536, 768], \"preview\": [768, 384], \"requested\": [0, 0, 1536, 768], \"screen\": [28, 151, 292, 283], \"canvas\": \"[28,97][292,337]\", \"observed_crop\": [0, 0, 1536, 768]}, {\"source\": [1280, 640], \"preview\": [640, 320], \"requested\": [320, 160, 960, 480], \"screen\": [94, 184, 226, 250], \"canvas\": \"[28,97][292,337]\", \"observed_crop\": [320, 160, 960, 480]}, {\"source\": [1280, 640], \"preview\": [640, 320], \"requested\": [640, 240, 800, 400], \"screen\": [160, 200, 193, 234], \"canvas\": \"[28,97][292,337]\", \"observed_mask\": [640, 238, 800, 402]}, {\"source\": [640, 320], \"preview\": [640, 320], \"requested\": [0, 0, 320, 160], \"screen\": [28, 151, 160, 217], \"canvas\": \"[28,97][292,337]\"}], \"pixel_oracle\": \"DERIVATIVE_ORACLE_PASS positive=1 negative=2\"}\nNATIVE_SHARE_PASS share private fixture changes only chosen image metadata\nNATIVE_SHARE_PASS share duplicate-title empty note cannot export namesake content\nNATIVE_SHARE_PASS share picker excludes private image and starts with no selection\nNATIVE_SHARE_PASS share empty selection stays in selection dialog\nNATIVE_SHARE_PASS share actual preview contains selected text and image\nNATIVE_SHARE_PASS share unchecked consent cannot open system save\nNATIVE_SHARE_PASS share preview cancellation preserves complete database and media\nNATIVE_SHARE_PASS share system picker cancellation publishes no file and preserves state\nNATIVE_SHARE_PASS share text-only selection creates exact Markdown without image entries\nNATIVE_SHARE_PASS share text-only success preserves complete database and media\nNATIVE_SHARE_PASS share selected export contains exact Markdown and only one current image\nNATIVE_SHARE_PASS share independent decoder verifies exported crop and opaque mask pixels\nNATIVE_SHARE_PASS share successful image export preserves complete database and media\nNATIVE_SHARE_PASS share external writer changes privacy without revision increment\nNATIVE_SHARE_PASS share stale preview refuses publication through real system picker\nNATIVE_SHARE_PASS share stale refusal causes no extra database or media mutation\nCI_SIGNAL_TARGET {\"status\": \"PASS\", \"pid\": \"2545\", \"uid\": \"10192\", \"uid_fields\": [[\"10192\", \"10192\", \"10192\", \"10192\"]], \"expected_package\": \"com.supercubegame.pockettodo.v12.preview\", \"cmdline_bytes\": 99, \"cmdline_sha256\": \"725588960f59515f7cdbb1bcb02d9fea1e06f7d7d6311703702508cb23a3d55e\", \"cmdline_hex_head\": \"636f6d2e73757065726375626567616d652e706f636b6574746f646f2e7631322e707265766965770000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\", \"cmdline_hex_truncated\": false, \"exact_argv0\": true, \"nul_only_tail\": true, \"nul_suffix_bytes\": 59}\nNATIVE_SHARE_PASS share background process death is proven while system picker remains\nNATIVE_SHARE_PASS share recreated owner refuses old preview without nonempty publication\nNATIVE_SHARE_PASS share returned activity runs in a different proven process\nNATIVE_SHARE_PASS share process-loss refusal preserves complete database and media\nNATIVE_SHARE_PASS share fresh explicit selection after process loss exports exact reviewed ZIP\nNATIVE_SHARE_PASS share fresh post-loss success preserves complete database and media\nNATIVE_SHARE_RESULT {\"status\": \"PASS\", \"api\": 34, \"commit\": \"3138dbc11789f46539afd41879992db471d05cb8\", \"run_id\": \"36239221603\", \"scope\": \"NATIVE_SINGLE_NOTE_MARKDOWN_SAF_SYNTHETIC_NOT_PDF_OR_RECEIVER\", \"checks\": [\"share private fixture changes only chosen image metadata\", \"share duplicate-title empty note cannot export namesake content\", \"share picker excludes private image and starts with no selection\", \"share empty selection stays in selection dialog\", \"share actual preview contains selected text and image\", \"share unchecked consent cannot open system save\", \"share preview cancellation preserves complete database and media\", \"share system picker cancellation publishes no file and preserves state\", \"share text-only selection creates exact Markdown without image entries\", \"share text-only success preserves complete database and media\", \"share selected export contains exact Markdown and only one current image\", \"share independent decoder verifies exported crop and opaque mask pixels\", \"share successful image export preserves complete database and media\", \"share external writer changes privacy without revision increment\", \"share stale preview refuses publication through real system picker\", \"share stale refusal causes no extra database or media mutation\", \"share background process death is proven while system picker remains\", \"share recreated owner refuses old preview without nonempty publication\", \"share returned activity runs in a different proven process\", \"share process-loss refusal preserves complete database and media\", \"share fresh explicit selection after process loss exports exact reviewed ZIP\", \"share fresh post-loss success preserves complete database and media\"], \"release_ready\": false, \"recreation\": \"PROCESS_DEATH_DURING_SAF_REFUSED_AND_FRESH_EXPORT_PASS\", \"provider_failures\": \"NOT_TESTED\", \"private_text\": \"NOT_TESTED\", \"actual_receiver\": \"NOT_TESTED\", \"picker_cancel_navigation\": [{\"backs\": 0, \"packages\": [\"com.google.android.documentsui\"], \"cancelled\": false}, {\"backs\": 1, \"packages\": [\"com.supercubegame.pockettodo.v12.preview\"], \"cancelled\": true}], \"zip_sha256\": \"6a3c4c3305de6a38c2cddf8ac8b9a041fbf8be824a0dc508b0e77161956a144d\", \"zip_bytes\": 589, \"external_helper\": {\"sha256\": \"8e7b26128c3529da5a01cd2be38001ae1e6e1c242dd01b0e1e22f90a52a61d07\", \"readback\": \"EXACT_BYTES\", \"location\": \"APP_PRIVATE_CACHE\"}, \"process_loss\": {\"old_pid\": \"2545\", \"absence_probes\": [{\"returncode\": 1, \"stdout\": \"\", \"stderr\": \"\"}], \"injection\": \"CI_APP_UID_SIGKILL_NOT_LMK\", \"stage\": \"SIGNAL_SENT\", \"identity\": {\"status\": \"PASS\", \"pid\": \"2545\", \"uid\": \"10192\", \"uid_fields\": [[\"10192\", \"10192\", \"10192\", \"10192\"]], \"expected_package\": \"com.supercubegame.pockettodo.v12.preview\", \"cmdline_bytes\": 99, \"cmdline_sha256\": \"725588960f59515f7cdbb1bcb02d9fea1e06f7d7d6311703702508cb23a3d55e\", \"cmdline_hex_head\": \"636f6d2e73757065726375626567616d652e706f636b6574746f646f2e7631322e707265766965770000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\", \"cmdline_hex_truncated\": false, \"exact_argv0\": true, \"nul_only_tail\": true, \"nul_suffix_bytes\": 59}, \"uid\": \"10192\", \"uid_fields\": [[\"10192\", \"10192\", \"10192\", \"10192\"]], \"picker_package\": \"com.google.android.documentsui\", \"new_pid\": \"3029\"}, \"count\": 22}\nEMULATOR_PROCESS_EXITED 0\n",
+          "emulator.log": "INFO         | Android emulator version 37.1.11.0 (build_id 15917651) (CL:N/A)\nINFO         | Graphics backend: gfxstream\nINFO         | Found systemPath /usr/local/lib/android/sdk/system-images/android-34/google_apis/x86_64/\nINFO         | Saving last run QEMU version for the AVD to 2\nINFO         | Increasing RAM size to 2560MB\nINFO         | Guest GLES Driver: Auto (ext controls)\nINFO         | emuglConfig_init: vulkan_mode_selected:swiftshader gles_mode_selected:swiftshader\nINFO         | Checking system compatibility:\nINFO         |   Checking: hasSufficientDiskSpace\nINFO         |      Ok: Disk space requirements to run avd: `pocket-ci` are met\nINFO         |   Checking: hasSufficientHwGpu\nINFO         |      Ok: Hardware GPU compatibility checks are not required\nINFO         |   Checking: hasSufficientSystem\nINFO         |      Ok: System requirements to run avd: `pocket-ci` are met\nWARNING      | Feature QuickbootFileBacked is disabled due to stability issues, if you really want that, the environment variable ANDROID_EMU_FORCE_QUICKBOOT_FILE_BACKED need to set to 1\nINFO         | Storing crashdata in: /tmp/android-runner/emu-crash-37.1.11.db, detection is enabled for process: 2779\nINFO         | Initializing gfxstream backend\nINFO         | startOpenglesRendererImpl: gpu info\nINFO         | \nINFO         | initIcdPaths: ICD set to 'swiftshader', using Swiftshader ICD\nINFO         | Setting ICD filenames for the loader = /usr/local/lib/android/sdk/emulator/lib64/vulkan/vk_swiftshader_icd.json\nINFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/qemu/linux-x86_64/lib64/vulkan/libvulkan.so]\nINFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/qemu/linux-x86_64/lib64/vulkan/libvulkan.so.1]\nINFO         | SharedLibrary::open for [/usr/local/lib/android/sdk/emulator/lib64/vulkan/libvulkan.so]\nINFO         | Added library: /usr/local/lib/android/sdk/emulator/lib64/vulkan/libvulkan.so\nINFO         | Selecting Vulkan device: SwiftShader Device (Subzero), Version: 1.3.0\nINFO         | Using Vulkan externalMemoryMode: OpaqueFd for VkEmulation\nINFO         | SharedLibrary::open for [libX11]\nWARNING      | Could not open libX11.so, try libX11.so.6\nINFO         | SharedLibrary::open for [libX11.so.6]\nINFO         | SharedLibrary::open for [libX11-xcb]\nWARNING      | Could not open libX11-xcb.so, try libX11-xcb.so.1\nINFO         | SharedLibrary::open for [libX11-xcb.so.1]\nINFO         | Initializing VkEmulation features:\nINFO         |     glInteropSupported: false\nINFO         |     useDeferredCommands: true\nINFO         |     createResourceWithRequirements: true\nINFO         |     useVulkanComposition: false\nINFO         |     useVulkanNativeSwapchain: false\nINFO         |     enable guestRenderDoc: false\nINFO         |     ASTC LDR emulation mode: Gpu\nINFO         |     enable ETC2 emulation: true\nINFO         |     enable Ycbcr emulation: false\nINFO         |     guestVulkanOnly: false\nINFO         |     useDedicatedAllocations: false\nINFO         |     guestVulkanMaxApiVersion: 1.3.0\nINFO         |     enableProtectedMemoryEmulation: false\nINFO         | Graphics Adapter Vendor Google (Google Inc.)\nINFO         | Graphics Adapter Android Emulator OpenGL ES Translator (Google SwiftShader)\nINFO         | Graphics API Version OpenGL ES 3.0 (OpenGL ES 3.0 SwiftShader 4.0.0.1)\nINFO         | Graphics API Extensions GL_OES_EGL_sync GL_OES_EGL_image GL_OES_EGL_image_external GL_OES_depth24 GL_OES_depth32 GL_OES_element_index_uint GL_OES_texture_float GL_OES_texture_float_linear GL_OES_compressed_paletted_texture GL_OES_compressed_ETC1_RGB8_texture GL_OES_depth_texture GL_OES_texture_half_float GL_OES_texture_half_float_linear GL_OES_packed_depth_stencil GL_OES_vertex_half_float GL_OES_standard_derivatives GL_OES_texture_npot GL_OES_rgb8_rgba8 GL_EXT_color_buffer_float GL_EXT_color_buffer_half_float GL_EXT_texture_format_BGRA8888 GL_APPLE_texture_format_BGRA8888 \nINFO         | Graphics Device Extensions N/A\nINFO         | Disabling sparse binding feature support\nINFO         | Sending adb public key [QAAAAKHuyQufirKHe0VQVh9Z0qd/RlU4cVocyONG9CQoPOBfuAG3/H141MmpodixCLLhsAu4WaN5WLgmNkYhpqb+UwTgYFAuKEXw3EuFiYE0otTWvcD4kFXbJtIYUmZ7Ui+0+5EO0cipUnya7N+iCsLt+1w1WP1UdJCp731fNIDPGdZ4lTNMG1T84kpCYlJBxMabw6ZbhXdgS0gcclS1B10ZE5eCC556xy25Sm8cTMDc5zjarpqiuyV6GxYxfGKSVu6gdVvzg1xXIVnaav/9ICxKOMnmgZh1/ruDD+HM7bBq+rv9/LHv4HIvTjmNjIT9KyXLxflafip2KxAPmT2TnpBWgatRbbvApGQQjE6I5rDHpvRUTeS9yTkyjUrERoAjQ+GVXqOFlTzqtaKIHNJtETSZM5su0XpMJ/u93d8AiriPJd/cVUPe/nyPb2vn1CDMa0q5MWukZHc14FKf6ToRM+2vdVtojkS00cw8cJ3c2G8MwIlrVaQ0TamdrNaFzY3MduyblDY/rvye6uELtgVN5bXl0fbtoaqM41+V+7ACAH5efAkDfxpxKEwEGXnvDNRO38QzQhTZPm5TaZJaao0y27u27Lh6KVZ+q9PERnogzs+Y/ANuHGKsaP0ftVhhQacGBQq16X6bwgat0Tu2wDXxarFD109B3ocdkxM12S5+/jgnD3sCbmLZTwEAAQA= runner@unknown]\nINFO         | Userspace boot properties:\nINFO         |   androidboot.boot_devices=pci0000:00/0000:00:03.0 pci0000:00/0000:00:06.0\nINFO         |   androidboot.dalvik.vm.heapsize=576m\nINFO         |   androidboot.debug.hwui.renderer=skiagl\nINFO         |   androidboot.debug.sf.nobootanimation=1\nINFO         |   androidboot.hardware=ranchu\nINFO         |   androidboot.hardware.gltransport=pipe\nINFO         |   androidboot.hardware.vulkan=ranchu\nINFO         |   androidboot.logcat=*:V\nINFO         |   androidboot.opengles.version=196608\nINFO         |   androidboot.qemu=1\nINFO         |   androidboot.qemu.adb.pubkey=QAAAAKHuyQufirKHe0VQVh9Z0qd/RlU4cVocyONG9CQoPOBfuAG3/H141MmpodixCLLhsAu4WaN5WLgmNkYhpqb+UwTgYFAuKEXw3EuFiYE0otTWvcD4kFXbJtIYUmZ7Ui+0+5EO0cipUnya7N+iCsLt+1w1WP1UdJCp731fNIDPGdZ4lTNMG1T84kpCYlJBxMabw6ZbhXdgS0gcclS1B10ZE5eCC556xy25Sm8cTMDc5zjarpqiuyV6GxYxfGKSVu6gdVvzg1xXIVnaav/9ICxKOMnmgZh1/ruDD+HM7bBq+rv9/LHv4HIvTjmNjIT9KyXLxflafip2KxAPmT2TnpBWgatRbbvApGQQjE6I5rDHpvRUTeS9yTkyjUrERoAjQ+GVXqOFlTzqtaKIHNJtETSZM5su0XpMJ/u93d8AiriPJd/cVUPe/nyPb2vn1CDMa0q5MWukZHc14FKf6ToRM+2vdVtojkS00cw8cJ3c2G8MwIlrVaQ0TamdrNaFzY3MduyblDY/rvye6uELtgVN5bXl0fbtoaqM41+V+7ACAH5efAkDfxpxKEwEGXnvDNRO38QzQhTZPm5TaZJaao0y27u27Lh6KVZ+q9PERnogzs+Y/ANuHGKsaP0ftVhhQacGBQq16X6bwgat0Tu2wDXxarFD109B3ocdkxM12S5+/jgnD3sCbmLZTwEAAQA= runner@unknown\nINFO         |   androidboot.qemu.avd_name=pocket-ci\nINFO         |   androidboot.qemu.camera_hq_edge_processing=0\nINFO         |   androidboot.qemu.camera_protocol_ver=1\nINFO         |   androidboot.qemu.cpuvulkan.version=4206592\nINFO         |   androidboot.qemu.gltransport.drawFlushInterval=800\nINFO         |   androidboot.qemu.gltransport.name=pipe\nINFO         |   androidboot.qemu.hwcodec.avcdec=2\nINFO         |   androidboot.qemu.hwcodec.hevcdec=2\nINFO         |   androidboot.qemu.hwcodec.vpxdec=2\nINFO         |   androidboot.qemu.settings.system.screen_off_timeout=2147483647\nINFO         |   androidboot.qemu.skin=320x640\nINFO         |   androidboot.qemu.virtiowifi=1\nINFO         |   androidboot.qemu.vsync=60\nINFO         |   androidboot.serialno=EMULATOR37X1X11X0\nINFO         |   androidboot.vbmeta.digest=451e57ed688ff746d2c636d52169ade253e2bc5bb30a5c3ff23679ca15d3bcd3\nINFO         |   androidboot.vbmeta.hash_alg=sha256\nINFO         |   androidboot.vbmeta.size=6656\nINFO         |   androidboot.veritymode=enforcing\nWARNING: cannnot unmap ptr 0x7f96cda01000 as it is in the protected range from 0x7f962da00000 to 0x7f96cdc00000\nINFO         | Monitoring duration of emulator setup.\nINFO         | Successfully initialized netsim WiFi\nINFO         | Activated packet streamer for bluetooth emulation\nINFO         | Setting display: 0 configuration to: 320x640, dpi: 160x160 \nINFO         | setDisplayActiveConfig: id:0, 320x640\nINFO         | emulatorSetupEnvironment: Environment scene is not required\nUSER_INFO    | Emulator is performing a full startup. This may take upto two minutes, or more.\nWARNING      | Failed to process .ini file /home/runner/work/_temp/pocket-avd-36239221603-34/emu-update-last-check.ini for reading.\nWARNING      | Failed to process .ini file /home/runner/work/_temp/pocket-avd-36239221603-34/emu-update-last-check.ini for reading.\nINFO         | Boot completed in 40160 ms\nINFO         | Increasing screen off timeout, logcat buffer size to 2M.\nERROR        | Failed to find ColorBuffer: 184\nERROR        | Failed to find ColorBuffer: 188\nERROR        | Failed to find ColorBuffer: 275\nERROR        | Failed to find ColorBuffer: 377\nERROR        | Failed to find ColorBuffer: 389\nERROR        | Failed to find ColorBuffer: 397\nERROR        | Failed to find ColorBuffer: 421\nERROR        | Failed to find ColorBuffer: 430\nERROR        | Failed to find ColorBuffer: 451\nERROR        | Failed to find ColorBuffer: 467\nERROR        | Failed to find ColorBuffer: 470\nERROR        | Failed to find ColorBuffer: 585\nERROR        | Failed to find ColorBuffer: 655\nERROR        | Failed to find ColorBuffer: 742\nERROR        | Failed to find ColorBuffer: 827\nERROR        | Failed to find ColorBuffer: 836\nERROR        | Failed to find ColorBuffer: 864\nERROR        | Failed to find ColorBuffer: 939\nERROR        | Failed to find ColorBuffer: 1056\nERROR        | Failed to find ColorBuffer: 1068\nERROR        | Failed to find ColorBuffer: 1170\nERROR        | Failed to find ColorBuffer: 1360\nERROR        | Failed to find ColorBuffer: 1474\nERROR        | Failed to find ColorBuffer: 1510\nERROR        | Failed to find ColorBuffer: 1546\nERROR        | Failed to find ColorBuffer: 1630\nERROR        | Failed to find ColorBuffer: 1638\nERROR        | Failed to find ColorBuffer: 1661\nERROR        | Failed to find ColorBuffer: 1665\nERROR        | Failed to find ColorBuffer: 1678\nERROR        | Failed to find ColorBuffer: 1682\nERROR        | Failed to find ColorBuffer: 1759\nERROR        | Failed to find ColorBuffer: 1789\nERROR        | Failed to find ColorBuffer: 1814\nERROR        | Failed to find ColorBuffer: 1856\nERROR        | Failed to find ColorBuffer: 1879\nERROR        | Failed to find ColorBuffer: 1883\nERROR        | Failed to find ColorBuffer: 1888\nERROR        | Failed to find ColorBuffer: 1891\nERROR        | Failed to find ColorBuffer: 1915\nERROR        | Failed to find ColorBuffer: 1951\nERROR        | Failed to find ColorBuffer: 1965\nERROR        | Failed to find ColorBuffer: 1988\nERROR        | Failed to find ColorBuffer: 1992\nERROR        | Failed to find ColorBuffer: 2018\nERROR        | Failed to find ColorBuffer: 2045\nERROR        | Failed to find ColorBuffer: 2078\nERROR        | Failed to find ColorBuffer: 2081\nERROR        | Failed to find ColorBuffer: 2107\nERROR        | Failed to find ColorBuffer: 2165\nERROR        | Failed to find ColorBuffer: 2190\nERROR        | Failed to find ColorBuffer: 2222\nERROR        | Failed to find ColorBuffer: 2231\nERROR        | Failed to find ColorBuffer: 2258\nERROR        | Failed to find ColorBuffer: 2291\nERROR        | Failed to find ColorBuffer: 2295\nERROR        | Failed to find ColorBuffer: 2350\nERROR        | Failed to find ColorBuffer: 2354\nERROR        | Failed to find ColorBuffer: 2358\nERROR        | Failed to find ColorBuffer: 2392\nERROR        | Failed to find ColorBuffer: 2421\nERROR        | Failed to find ColorBuffer: 2425\nERROR        | Failed to find ColorBuffer: 2429\nERROR        | Failed to find ColorBuffer: 2463\nERROR        | Failed to find ColorBuffer: 2489\nERROR        | Failed to find ColorBuffer: 2493\nERROR        | Failed to find ColorBuffer: 2531\nERROR        | Failed to find ColorBuffer: 2556\nERROR        | Failed to find ColorBuffer: 2560\nERROR        | Failed to find ColorBuffer: 2631\nERROR        | Failed to find ColorBuffer: 2635\nINFO         | Wait for emulator (pid 2779) 20 seconds to shutdown gracefully before kill;you can set environment variable ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL(in seconds) to change the default value (20 seconds)\n\nUSER_INFO    | Snapshots have been disabled by the user, save request is ignored.\nINFO         | Saving snapshot 'default_boot' using 1 ms\nERROR        | stop: Not implemented\nWARNING      | Emulator client has not yet been configured.. Call configure me first!\nINFO         | removeAll\nWARNING      | Netsim Wifi dns:///localhost:45561 is gone due to Stream removed (CANCELLED)\n"
+        }
+      }
+    },
+    "native": {
+      "26": {
+        "status": "NOT_OBSERVED",
+        "published_screenshots": []
+      },
+      "34": {
+        "status": "PASS",
+        "scope": "NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE",
+        "ledger_calendar": "NATIVE_MULTI_DATE_LEDGER_PASS",
+        "saf_restore": "NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS",
+        "checkin_history": "NATIVE_CHECKIN_HISTORY_BACKDATE_PASS",
+        "note_editor": "NATIVE_TEXT_IMAGE_NOTE_PASS",
+        "api": 34,
+        "count": 186,
+        "checks": [
+          "new UI database starts empty without fabricated activities",
+          "blank todo rejected visibly",
+          "UI adds distinct stable todo identities",
+          "real checkbox completes todo",
+          "pending filter excludes completed row",
+          "completed filter excludes pending row",
+          "invalid edit stays open without losing original",
+          "cancel invalid edit preserves value and completion",
+          "title edit preserves stable identity and completion",
+          "native todo state survives actual process restart",
+          "category created through visible native dialog",
+          "category rename updates visible label",
+          "activity created under selected category",
+          "ordered multiline manual path displays without collapse",
+          "daily check-in writes visible done state",
+          "repeated daily mark remains one visible day",
+          "skipped is distinct from done and unrecorded",
+          "accessible category reorder changes exact visible order",
+          "category order persists after process restart",
+          "skipped mark persists after process restart",
+          "activity path persists after process restart",
+          "actual native screenshots represent distinct states",
+          "default native UI uses schema3 with exact nine-column block layout",
+          "independent SQLite read matches exact UI todo identities titles and states",
+          "independent SQLite read matches renamed reordered categories",
+          "activity stays in its category without invented application",
+          "independent SQLite read preserves path order",
+          "repeated native marks persist exactly one day with entry timestamp",
+          "check-in does not invent money entries",
+          "new native ledger starts with empty selection and zero summary",
+          "calendar multi-select is explicit read-only scope",
+          "three different-day amounts total exactly 80 yuan in native UI",
+          "cancel native entry does not change totals",
+          "native ledger rejects fractional cents without closing editor",
+          "refund reduces net expense without rewriting gross expense",
+          "planned is separate and signed net cash is exact",
+          "nonconsecutive selected days exclude actual refund date",
+          "cancel date selection keeps previous summary",
+          "missing day is not presented as confirmed zero expenditure",
+          "empty date selection is zero not all-time total",
+          "native ledger exact totals survive stopped-process restart",
+          "independent Android SQLite read matches all six exact typed dated entries",
+          "native saves have distinct entry and batch identities without selection-generated writes",
+          "cancel and invalid amount leave no batch journal residue",
+          "money and date filtering never mutate the check-in history",
+          "native check-in editor rejects malformed date without closing",
+          "backdated done check-in appears with its exact date",
+          "un-recording removes the visible history row",
+          "un-recorded backdate leaves the exact prior single mark in independent readback",
+          "check-in editing never mutates the ledger",
+          "backdated check-in survives cancel then re-entered identically",
+          "SAF file selection shows visible restore preview and replacement counts",
+          "canceling SAF restore preview makes no database write",
+          "cancelled restore leaves exact new todo and old state independent",
+          "cancelled restore retains exact ledger rows",
+          "SAF file selection shows visible restore preview and replacement counts",
+          "unchecked consent cannot restore even with visible confirmation control",
+          "SAF file selection shows visible restore preview and replacement counts",
+          "explicit SAF consent replaces data with previewed backup",
+          "SAF restored data survives a separate stopped-process restart",
+          "independent SQLite read matches exact SAF restored state",
+          "SAF restore retains exact ledger after independent readback",
+          "SAF restore retains exact check-in history including the re-entered backdate",
+          "empty note starts visibly empty without fabricated content",
+          "blank note save rejected visibly",
+          "saved note text appears on activity",
+          "note survives process restart",
+          "attached image is registered with note",
+          "note inherits its activity title and stays bound to that activity",
+          "note keeps ordered text then image blocks",
+          "image block is not private by default",
+          "image bytes registered under immutable content id",
+          "image block references exact registered media id",
+          "notes never mutate the ledger",
+          "actual private PNG bytes match registry size and content ID",
+          "independent PNG decoder verifies all 9216 opaque expected pixels",
+          "edit existing note opens with the exact stored text",
+          "cancel note edit preserves original text and identity",
+          "blank existing note edit stays open with visible validation",
+          "cancelled valid and blank note edits leave exact persisted note rows unchanged",
+          "note edit replaces text in place without leaving an old duplicate",
+          "edited note text and stable block identity survive stopped-process restart",
+          "image remains an image view after editing text and restarting",
+          "independent readback proves only text changed with note IDs block IDs order and privacy retained",
+          "editing note leaves exact media registry and complete ledger unchanged",
+          "text editing and restart preserve exact private image bytes",
+          "image import opens the actual system document picker",
+          "cancel system image picker reports no note change",
+          "cancel picker leaves exact blocks and media registrations unchanged",
+          "malformed selected image rejected visibly",
+          "malformed rejection preserves every database table including revision",
+          "oversized dimensions selected image rejected visibly",
+          "oversized dimensions rejection preserves every database table including revision",
+          "excess byte budget selected image rejected visibly",
+          "excess byte budget rejection preserves every database table including revision",
+          "SAF image appends one exact ordered block without replacing text or prior image",
+          "SAF original bytes registered by exact hash MIME and length",
+          "image import preserves notes identity and all unrelated tables",
+          "SAF private copy equals independently generated two-color PNG byte for byte",
+          "selected image still renders after source deletion and stopped-process restart",
+          "selected image block identity order and reference survive restart",
+          "source deletion never removes or changes the private selected image",
+          "independent host decoder proves JPEG and both pixel boundary fixtures really decode with intended dimensions and colors",
+          "new image-first activity has no existing note in independent SQLite read",
+          "image-first activity shows genuine empty note before any import",
+          "first-image cancellation waits for a visible system picker before pressing Back",
+          "canceling first image reports no note change",
+          "first-image cancel creates no orphan note media block or revision",
+          "malformed first image rejected visibly before note creation",
+          "malformed first image leaves every table unchanged with no orphan note or media registration",
+          "20005000-pixel first image rejected visibly before note creation",
+          "20005000-pixel first image leaves every table unchanged with no orphan note or media registration",
+          "JPEG-first import creates exactly one note with correct activity binding title and preserved prior notes",
+          "JPEG-first import creates exactly one position-zero public image block without touching previous blocks",
+          "JPEG-first media registry has exact actual MIME digest and original byte length",
+          "JPEG-first note creation preserves activities todos checkins ledger and all unrelated tables",
+          "selected JPEG private original is byte-exact rather than a recompressed preview",
+          "JPEG-first note displays a real ImageView after external source deletion and process restart",
+          "JPEG-first restart preserves every database table and exact private JPEG bytes",
+          "exactly 20000000 pixels is accepted inclusively as one appended ordered image block",
+          "pixel-limit image keeps exact private original and matching media registry",
+          "pixel-limit import preserves note identity and unrelated complete tables",
+          "20000000-pixel image remains an ImageView after source deletion and restart",
+          "pixel-limit restart preserves exact complete database and original image bytes",
+          "existing single note remains the initial selected note",
+          "blank new note title stays in dialog without creating a note",
+          "canceling a populated new-note dialog preserves every table and revision",
+          "new note selects its own empty content instead of copying the first note",
+          "second note has one fresh identity correct owner title and unchanged old notes",
+          "second note owns exactly its text block while all first-note and other-activity blocks remain exact",
+          "creating and editing second note preserves media ledger checkins and all unrelated tables",
+          "restart opens original first note without replacing its content",
+          "note picker exposes both titles in stable creation order",
+          "canceling note switch keeps selected note",
+          "explicit selection restores second note alone after process restart",
+          "editing second note stays on selected stable note instead of jumping to first",
+          "switching back preserves original first-note text",
+          "first note retains its imported image after multi-note editing",
+          "independent readback proves only second text changed with all note and block identities intact",
+          "multi-note edits preserve unrelated tables and all selected private originals byte for byte",
+          "duplicate note title creates a separate empty note rather than overwriting its namesake",
+          "same-title creation adds only one distinct note and never touches existing blocks or unrelated tables",
+          "restart preserves creation order and separate indexed entries for duplicate titles",
+          "same-title note selection resolves exact second identity not latest matching title",
+          "switching and restarting notes are read-only across the complete database",
+          "image append retains the non-first selected note and its existing text",
+          "non-first image import appends exactly one correctly owned ordered block without modifying any old block",
+          "reused JPEG import preserves notes complete media registry unrelated tables and exact original",
+          "non-first note image survives source deletion and explicit reselect after restart",
+          "new image metadata editor starts with empty caption and public flag",
+          "canceling edited caption and privacy preserves every table revision and original bytes",
+          "caption and private badge render on the selected second note after saving",
+          "private caption save changes only caption and privacy while retaining every block identity owner order and asset reference",
+          "metadata edit preserves complete unrelated tables media registrations and all imported originals",
+          "restart and reselect prefill the persisted caption and true private flag",
+          "editing second image metadata does not leak its caption into first note",
+          "same-title third note stays empty after second note image edits",
+          "restart and switching across private-image notes are read-only for every table",
+          "caption-only edit preserves existing true private flag and all other block fields",
+          "caption-only private edit leaves all unrelated tables and immutable original unchanged",
+          "updated private caption survives another force-stop and explicit note selection",
+          "empty caption is allowed and private flag can be explicitly unset",
+          "clearing caption and unsetting private restores exact original block fields without touching siblings or other tables",
+          "empty caption and false private flag persist after restart",
+          "final metadata cancel and restart preserve every table and exact JPEG original",
+          "derivative dialog shows actual decoded source dimensions with empty selection",
+          "derivative preview without selection rejected visibly",
+          "derivative cancel leaves every table and original bytes unchanged",
+          "corner drag maps to full source extent within touch rounding",
+          "derivative oversize selection rejected with visible pixel budget",
+          "derivative reset clears selection reports",
+          "touch crop maps onto intended source rectangle within rounding",
+          "redact mode adds exactly one reported mask",
+          "touch mask maps onto intended source rectangle within rounding",
+          "derivative preview renders exact reported output dimensions",
+          "derived block preserves note owner position kind empty caption public flag and records exact original",
+          "derived PNG registered with exact mime and byte length",
+          "derivative save preserves all unrelated tables",
+          "original imported PNG bytes unchanged after derivative save",
+          "sibling blocks across notes remain exact after derivative save",
+          "independent decoder proves exact cropped pixels and opaque mask for reported rects",
+          "derived image renders with working entry after process restart",
+          "derivative state and both images survive stopped-process restart exactly",
+          "re-derived preview renders for abandonment check",
+          "abandoned second preview writes nothing and keeps published derivative",
+          "native schema3 survives SAF restore and all ordinary edits without invented image origins"
+        ],
+        "screenshots": [
+          {
+            "file": "01-todos.png",
+            "bytes": 37421,
+            "sha256": "9f469d6b532bd0dee740203f7238b87cbe652ce46de41e4c0fcbbd412a2fd05d"
+          },
+          {
+            "file": "02-activity.png",
+            "bytes": 46364,
+            "sha256": "edcb2d1f4da39cb129d5d2714ee17ad69cec7d3f65c93ea7745edd10622b30b2"
+          },
+          {
+            "file": "03-categories.png",
+            "bytes": 44299,
+            "sha256": "1b13d549e95f45907c807a83948317422d53a2afaa0461ae7d2eb8b694c998e1"
+          },
+          {
+            "file": "04-ledger.png",
+            "bytes": 57698,
+            "sha256": "cb1a65b701020190f6435566785ea854e3313d1d6ff770d31c1d2bf69b1387bc"
+          },
+          {
+            "file": "05-selected-dates.png",
+            "bytes": 57762,
+            "sha256": "305d784a578ff37cd0c35aa52d137c497fb4e269afcaa4cef5b5a0c971842852"
+          },
+          {
+            "file": "06-checkin-history.png",
+            "bytes": 42816,
+            "sha256": "e2e79bc1bc08973956769a15ae079dbae5bee5facdf4184b255fd8746444c690"
+          },
+          {
+            "file": "07-backup.png",
+            "bytes": 41618,
+            "sha256": "a00393ed4337f035c5bf7ed8dc88caba797961d96ff48da183fad21a711c7df1"
+          },
+          {
+            "file": "08-restore-preview.png",
+            "bytes": 57825,
+            "sha256": "0bc0a75cbeafbe167455ff64f26495417ca755b162cfa91a483566a1e83834be"
+          },
+          {
+            "file": "09-note.png",
+            "bytes": 34146,
+            "sha256": "568f618558230d66f27971ff4febc1b053a0f5327f45665b47c7516980b92f1a"
+          },
+          {
+            "file": "10-note-edited.png",
+            "bytes": 40874,
+            "sha256": "8a5cf25cee70b67fed8953e632fb7a357e9b9874edabb71d9fe32b95d494defd"
+          },
+          {
+            "file": "11-selected-image.png",
+            "bytes": 35860,
+            "sha256": "bf9dfdb5d40c2df109cd70a74b64a47840e52bd3c3661cd37d1219d541bd9d33"
+          },
+          {
+            "file": "12-jpeg-first-note.png",
+            "bytes": 35722,
+            "sha256": "47edadd622ef742be0bb275d6107735aded62bf25ef4e50c61c6de7888479953"
+          },
+          {
+            "file": "13-pixel-limit-image.png",
+            "bytes": 35824,
+            "sha256": "e7f602db57fe458db44cd3e06ddaaa5ca0628491fc3d9e5e0fe5cf97a6179f54"
+          },
+          {
+            "file": "14-multiple-notes.png",
+            "bytes": 36293,
+            "sha256": "769761c844712edfb9e27f43fe7bc23a8d7e2d4003d42abd5434a0fadfbae7f0"
+          },
+          {
+            "file": "15-second-note.png",
+            "bytes": 33624,
+            "sha256": "1fc2096603d054b8bd6c01ec3e2d1ce57b46e2e144a1bf5ff1b8c708c4b6c77f"
+          },
+          {
+            "file": "16-private-image-caption.png",
+            "bytes": 41479,
+            "sha256": "48b0e9d47e474a6cce77c8a8e8736331c26025d9dafd19012dcc4da0e3b9950a"
+          },
+          {
+            "file": "17-second-image-public.png",
+            "bytes": 39032,
+            "sha256": "08c6b30a6681e6848e6efcaba30af37a0bdc585a6d754dc4a4bea17a4ea3ca89"
+          },
+          {
+            "file": "18-derivative-preview.png",
+            "bytes": 38953,
+            "sha256": "ab6d00b04a2c2157403e70a616e6de65e2066c010038bd34073a8beed511523b"
+          },
+          {
+            "file": "19-derivative-saved.png",
+            "bytes": 36338,
+            "sha256": "a84574f2a7c271396a4ed763deab7a54826b9475af672b72de4a6b04385e1ff6"
+          },
+          {
+            "file": "20-share-preview.png",
+            "bytes": 48358,
+            "sha256": "eef3a96d61f4e01febfbcd362b8684c67099584fa7ec3b813efd8d78e30688c0"
+          },
+          {
+            "file": "21-share-saved.png",
+            "bytes": 40888,
+            "sha256": "5d3fb4eff953d31bff15e0cc0f8208d39ae9446f4552e923163b39f4b429e951"
+          },
+          {
+            "file": "22-share-process-loss-refused.png",
+            "bytes": 39952,
+            "sha256": "7aaab32eacf93821d530db3d3df5542f4d6a9221b76aa21663f0186dd16def8e"
+          },
+          {
+            "file": "23-share-fresh-after-loss.png",
+            "bytes": 40709,
+            "sha256": "872905bad230506483c7ada92d577c00e5d12935c9bda19e989d681d224fdae0"
+          }
+        ],
+        "infra_retries": [],
+        "restore_undo": "NOT_IMPLEMENTED",
+        "restore_preview_lifecycle": "NOT_TESTED",
+        "checkin_schedules": "NOT_IMPLEMENTED",
+        "real_photo_selection": "NATIVE_SAF_PNG_JPEG_PASS",
+        "photos": "SYNTHETIC_PNG_JPEG_ONLY",
+        "sharing": "NATIVE_SINGLE_NOTE_MARKDOWN_SAF_SYNTHETIC_NOT_PDF_OR_RECEIVER",
+        "release_ready": false,
+        "image_picker_lifecycle": "CANCEL_AND_RESTART_ONLY",
+        "jpeg": "NATIVE_SAF_EXACT_PRIVATE_COPY_PASS",
+        "camera": "NOT_IMPLEMENTED",
+        "image_first_note": "CANCEL_REJECT_CREATE_RESTART_PASS",
+        "image_pixel_budget": "20000000_ACCEPTED_20005000_REJECTED",
+        "exif_orientation": "NOT_TESTED",
+        "whole_note_memory": "NOT_TESTED",
+        "multiple_notes": "CREATE_SWITCH_EDIT_DUPLICATE_TITLE_RESTART_PASS",
+        "note_selection_persistence": "RESTART_DEFAULTS_FIRST_EXPLICIT_RESELECT",
+        "note_rename_delete_reorder": "NOT_IMPLEMENTED",
+        "nonfirst_image": "APPEND_ISOLATION_RESTART_PASS",
+        "image_metadata": "CAPTION_PRIVATE_CANCEL_EDIT_CLEAR_RESTART_PASS",
+        "private_sharing": "NOT_TESTED",
+        "default_app_schema": 3,
+        "default_schema3_ui": "NATIVE_SCHEMA3_UI_PASS",
+        "derivative_ui": "NATIVE_CROP_MASK_UI_SAVE_CANCEL_RESTART_PASS",
+        "derivative_geometry": [
+          {
+            "source": [
+              1536,
+              768
+            ],
+            "preview": [
+              768,
+              384
+            ],
+            "requested": [
+              0,
+              0,
+              1536,
+              768
+            ],
+            "screen": [
+              28,
+              151,
+              292,
+              283
+            ],
+            "canvas": "[28,97][292,337]",
+            "observed_crop": [
+              0,
+              0,
+              1536,
+              768
+            ]
+          },
+          {
+            "source": [
+              1280,
+              640
+            ],
+            "preview": [
+              640,
+              320
+            ],
+            "requested": [
+              320,
+              160,
+              960,
+              480
+            ],
+            "screen": [
+              94,
+              184,
+              226,
+              250
+            ],
+            "canvas": "[28,97][292,337]",
+            "observed_crop": [
+              320,
+              160,
+              960,
+              480
+            ]
+          },
+          {
+            "source": [
+              1280,
+              640
+            ],
+            "preview": [
+              640,
+              320
+            ],
+            "requested": [
+              640,
+              240,
+              800,
+              400
+            ],
+            "screen": [
+              160,
+              200,
+              193,
+              234
+            ],
+            "canvas": "[28,97][292,337]",
+            "observed_mask": [
+              640,
+              238,
+              800,
+              402
+            ]
+          },
+          {
+            "source": [
+              640,
+              320
+            ],
+            "preview": [
+              640,
+              320
+            ],
+            "requested": [
+              0,
+              0,
+              320,
+              160
+            ],
+            "screen": [
+              28,
+              151,
+              160,
+              217
+            ],
+            "canvas": "[28,97][292,337]"
+          }
+        ],
+        "pixel_oracle": "DERIVATIVE_ORACLE_PASS positive=1 negative=2",
+        "markdown_ui": {
+          "status": "PASS",
+          "api": 34,
+          "commit": "3138dbc11789f46539afd41879992db471d05cb8",
+          "run_id": "36239221603",
+          "scope": "NATIVE_SINGLE_NOTE_MARKDOWN_SAF_SYNTHETIC_NOT_PDF_OR_RECEIVER",
+          "checks": [
+            "share private fixture changes only chosen image metadata",
+            "share duplicate-title empty note cannot export namesake content",
+            "share picker excludes private image and starts with no selection",
+            "share empty selection stays in selection dialog",
+            "share actual preview contains selected text and image",
+            "share unchecked consent cannot open system save",
+            "share preview cancellation preserves complete database and media",
+            "share system picker cancellation publishes no file and preserves state",
+            "share text-only selection creates exact Markdown without image entries",
+            "share text-only success preserves complete database and media",
+            "share selected export contains exact Markdown and only one current image",
+            "share independent decoder verifies exported crop and opaque mask pixels",
+            "share successful image export preserves complete database and media",
+            "share external writer changes privacy without revision increment",
+            "share stale preview refuses publication through real system picker",
+            "share stale refusal causes no extra database or media mutation",
+            "share background process death is proven while system picker remains",
+            "share recreated owner refuses old preview without nonempty publication",
+            "share returned activity runs in a different proven process",
+            "share process-loss refusal preserves complete database and media",
+            "share fresh explicit selection after process loss exports exact reviewed ZIP",
+            "share fresh post-loss success preserves complete database and media"
+          ],
+          "release_ready": false,
+          "recreation": "PROCESS_DEATH_DURING_SAF_REFUSED_AND_FRESH_EXPORT_PASS",
+          "provider_failures": "NOT_TESTED",
+          "private_text": "NOT_TESTED",
+          "actual_receiver": "NOT_TESTED",
+          "picker_cancel_navigation": [
+            {
+              "backs": 0,
+              "packages": [
+                "com.google.android.documentsui"
+              ],
+              "cancelled": false
+            },
+            {
+              "backs": 1,
+              "packages": [
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "cancelled": true
+            }
+          ],
+          "zip_sha256": "6a3c4c3305de6a38c2cddf8ac8b9a041fbf8be824a0dc508b0e77161956a144d",
+          "zip_bytes": 589,
+          "external_helper": {
+            "sha256": "8e7b26128c3529da5a01cd2be38001ae1e6e1c242dd01b0e1e22f90a52a61d07",
+            "readback": "EXACT_BYTES",
+            "location": "APP_PRIVATE_CACHE"
+          },
+          "process_loss": {
+            "old_pid": "2545",
+            "absence_probes": [
+              {
+                "returncode": 1,
+                "stdout": "",
+                "stderr": ""
+              }
+            ],
+            "injection": "CI_APP_UID_SIGKILL_NOT_LMK",
+            "stage": "SIGNAL_SENT",
+            "identity": {
+              "status": "PASS",
+              "pid": "2545",
+              "uid": "10192",
+              "uid_fields": [
+                [
+                  "10192",
+                  "10192",
+                  "10192",
+                  "10192"
+                ]
+              ],
+              "expected_package": "com.supercubegame.pockettodo.v12.preview",
+              "cmdline_bytes": 99,
+              "cmdline_sha256": "725588960f59515f7cdbb1bcb02d9fea1e06f7d7d6311703702508cb23a3d55e",
+              "cmdline_hex_head": "636f6d2e73757065726375626567616d652e706f636b6574746f646f2e7631322e707265766965770000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+              "cmdline_hex_truncated": false,
+              "exact_argv0": true,
+              "nul_only_tail": true,
+              "nul_suffix_bytes": 59
+            },
+            "uid": "10192",
+            "uid_fields": [
+              [
+                "10192",
+                "10192",
+                "10192",
+                "10192"
+              ]
+            ],
+            "picker_package": "com.google.android.documentsui",
+            "new_pid": "3029"
+          },
+          "count": 22
+        },
+        "published_screenshots": [
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/a680e5271c0311b484cea64a03a289ed8edda0c4/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/01-todos.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/a680e5271c0311b484cea64a03a289ed8edda0c4/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/01-todos.png",
+            "sha256": "9f469d6b532bd0dee740203f7238b87cbe652ce46de41e4c0fcbbd412a2fd05d",
+            "file": "01-todos.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/a99acc815a6973f437d90d99fa77de232e7c7618/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/02-activity.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/a99acc815a6973f437d90d99fa77de232e7c7618/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/02-activity.png",
+            "sha256": "edcb2d1f4da39cb129d5d2714ee17ad69cec7d3f65c93ea7745edd10622b30b2",
+            "file": "02-activity.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/4ad0d4fa2dfdb9f614412da6137bc2388f75cf5c/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/03-categories.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/4ad0d4fa2dfdb9f614412da6137bc2388f75cf5c/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/03-categories.png",
+            "sha256": "1b13d549e95f45907c807a83948317422d53a2afaa0461ae7d2eb8b694c998e1",
+            "file": "03-categories.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/7bfa55414ae2ef5d886ee16215c631a0ca122bea/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/04-ledger.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/7bfa55414ae2ef5d886ee16215c631a0ca122bea/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/04-ledger.png",
+            "sha256": "cb1a65b701020190f6435566785ea854e3313d1d6ff770d31c1d2bf69b1387bc",
+            "file": "04-ledger.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/9ae4c72d9fd4a1d31acb46ee8d303eeeacaf39cb/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/05-selected-dates.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/9ae4c72d9fd4a1d31acb46ee8d303eeeacaf39cb/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/05-selected-dates.png",
+            "sha256": "305d784a578ff37cd0c35aa52d137c497fb4e269afcaa4cef5b5a0c971842852",
+            "file": "05-selected-dates.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/4aa8af98bc0e1170315c39d578913934b26896b7/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/06-checkin-history.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/4aa8af98bc0e1170315c39d578913934b26896b7/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/06-checkin-history.png",
+            "sha256": "e2e79bc1bc08973956769a15ae079dbae5bee5facdf4184b255fd8746444c690",
+            "file": "06-checkin-history.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/2647c8816baac620f3f3f6a4f699d89b4c679a5f/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/07-backup.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/2647c8816baac620f3f3f6a4f699d89b4c679a5f/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/07-backup.png",
+            "sha256": "a00393ed4337f035c5bf7ed8dc88caba797961d96ff48da183fad21a711c7df1",
+            "file": "07-backup.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/8cf3b203c15a9387500e978d317f209418b101b3/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/08-restore-preview.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/8cf3b203c15a9387500e978d317f209418b101b3/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/08-restore-preview.png",
+            "sha256": "0bc0a75cbeafbe167455ff64f26495417ca755b162cfa91a483566a1e83834be",
+            "file": "08-restore-preview.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/b4c602136ca1103c160e38c850f3de6edbab28f7/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/09-note.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/b4c602136ca1103c160e38c850f3de6edbab28f7/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/09-note.png",
+            "sha256": "568f618558230d66f27971ff4febc1b053a0f5327f45665b47c7516980b92f1a",
+            "file": "09-note.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/a5e4e4f5cdd38a9e63e616f0b724372b91ac9903/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/10-note-edited.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/a5e4e4f5cdd38a9e63e616f0b724372b91ac9903/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/10-note-edited.png",
+            "sha256": "8a5cf25cee70b67fed8953e632fb7a357e9b9874edabb71d9fe32b95d494defd",
+            "file": "10-note-edited.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/e816434eef03ee7d18a4e280a67f7802bee6cbee/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/11-selected-image.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/e816434eef03ee7d18a4e280a67f7802bee6cbee/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/11-selected-image.png",
+            "sha256": "bf9dfdb5d40c2df109cd70a74b64a47840e52bd3c3661cd37d1219d541bd9d33",
+            "file": "11-selected-image.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/141c7240b4650ce65b27680fae6fb063debe00df/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/12-jpeg-first-note.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/141c7240b4650ce65b27680fae6fb063debe00df/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/12-jpeg-first-note.png",
+            "sha256": "47edadd622ef742be0bb275d6107735aded62bf25ef4e50c61c6de7888479953",
+            "file": "12-jpeg-first-note.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/d164444d31fcda78b57ec78a5d204d1ebba231c3/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/13-pixel-limit-image.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/d164444d31fcda78b57ec78a5d204d1ebba231c3/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/13-pixel-limit-image.png",
+            "sha256": "e7f602db57fe458db44cd3e06ddaaa5ca0628491fc3d9e5e0fe5cf97a6179f54",
+            "file": "13-pixel-limit-image.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/9f26319fba0ba2ed6c2a2a8da00d072cb9a59cd7/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/14-multiple-notes.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/9f26319fba0ba2ed6c2a2a8da00d072cb9a59cd7/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/14-multiple-notes.png",
+            "sha256": "769761c844712edfb9e27f43fe7bc23a8d7e2d4003d42abd5434a0fadfbae7f0",
+            "file": "14-multiple-notes.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/ddb77951f8d9c4e8ad675fdf29291c71e7bc96f9/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/15-second-note.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/ddb77951f8d9c4e8ad675fdf29291c71e7bc96f9/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/15-second-note.png",
+            "sha256": "1fc2096603d054b8bd6c01ec3e2d1ce57b46e2e144a1bf5ff1b8c708c4b6c77f",
+            "file": "15-second-note.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/e525b5ee9848be6635014bdaf5c9816a5287ce76/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/16-private-image-caption.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/e525b5ee9848be6635014bdaf5c9816a5287ce76/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/16-private-image-caption.png",
+            "sha256": "48b0e9d47e474a6cce77c8a8e8736331c26025d9dafd19012dcc4da0e3b9950a",
+            "file": "16-private-image-caption.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/1ddfd1a0b6b4e7685e4175f478c697e1982c2cd9/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/17-second-image-public.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/1ddfd1a0b6b4e7685e4175f478c697e1982c2cd9/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/17-second-image-public.png",
+            "sha256": "08c6b30a6681e6848e6efcaba30af37a0bdc585a6d754dc4a4bea17a4ea3ca89",
+            "file": "17-second-image-public.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/7be8c7bb6fdd31aaa8810c746bd4b994feba2dd0/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/18-derivative-preview.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/7be8c7bb6fdd31aaa8810c746bd4b994feba2dd0/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/18-derivative-preview.png",
+            "sha256": "ab6d00b04a2c2157403e70a616e6de65e2066c010038bd34073a8beed511523b",
+            "file": "18-derivative-preview.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/4fe019d8fe3cf42c896f9685a832c7fe54cb90d6/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/19-derivative-saved.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/4fe019d8fe3cf42c896f9685a832c7fe54cb90d6/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/19-derivative-saved.png",
+            "sha256": "a84574f2a7c271396a4ed763deab7a54826b9475af672b72de4a6b04385e1ff6",
+            "file": "19-derivative-saved.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/fb31660b31aa3bfb3d493bab87f19ac094a90b57/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/20-share-preview.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/fb31660b31aa3bfb3d493bab87f19ac094a90b57/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/20-share-preview.png",
+            "sha256": "eef3a96d61f4e01febfbcd362b8684c67099584fa7ec3b813efd8d78e30688c0",
+            "file": "20-share-preview.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/97a18d58ea5994cd9e585a14d609e1e7fefe778b/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/21-share-saved.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/97a18d58ea5994cd9e585a14d609e1e7fefe778b/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/21-share-saved.png",
+            "sha256": "5d3fb4eff953d31bff15e0cc0f8208d39ae9446f4552e923163b39f4b429e951",
+            "file": "21-share-saved.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/4a78dffb0cd8a899e195166508786bc80ead948f/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/22-share-process-loss-refused.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/4a78dffb0cd8a899e195166508786bc80ead948f/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/22-share-process-loss-refused.png",
+            "sha256": "7aaab32eacf93821d530db3d3df5542f4d6a9221b76aa21663f0186dd16def8e",
+            "file": "22-share-process-loss-refused.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/7004a9fcab04bc278580258b361195bd4c9f56da/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/23-share-fresh-after-loss.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/7004a9fcab04bc278580258b361195bd4c9f56da/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/23-share-fresh-after-loss.png",
+            "sha256": "872905bad230506483c7ada92d577c00e5d12935c9bda19e989d681d224fdae0",
+            "file": "23-share-fresh-after-loss.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/ac2c49581bb6d9a6c748056efde4886ba2b00f84/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/derivative-output.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/ac2c49581bb6d9a6c748056efde4886ba2b00f84/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/derivative-output.png",
+            "sha256": "09850540aa76afa2fd7d4c975db1be59b9c49ce8054a24a5a9b289371caf316a",
+            "file": "derivative-output.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/849f364edac796bd7ac7801bd4b09544c7f6c167/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/derivative-source.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/849f364edac796bd7ac7801bd4b09544c7f6c167/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/derivative-source.png",
+            "sha256": "101752500846f0a5f6dc4ca52f29d9db89625a555acc1f99d6165f57e144cb8f",
+            "file": "derivative-source.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/2f86db6e7cc960196030d8f08c5cfc14f9c182bc/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/note-media.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/2f86db6e7cc960196030d8f08c5cfc14f9c182bc/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/note-media.png",
+            "sha256": "8880b1c84ddbdca3c4473711900fe94e549356071c7d054f9585c1e2178d64b8",
+            "file": "note-media.png"
+          },
+          {
+            "url": "https://github.com/supercubegame/todo-pocket-android/blob/ea7077e3161349650bfafc6a29c6613773d42ebe/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/share-exported.png",
+            "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/ea7077e3161349650bfafc6a29c6613773d42ebe/screenshots/3138dbc11789f46539afd41879992db471d05cb8-36239221603/34/share-exported.png",
+            "sha256": "09850540aa76afa2fd7d4c975db1be59b9c49ce8054a24a5a9b289371caf316a",
+            "file": "share-exported.png"
+          }
+        ]
+      }
+    },
+    "native_index": {
+      "url": "https://github.com/supercubegame/todo-pocket-android/blob/f28be32469e482bd56a6658bc68198ebfecfba78/reports/native-3138dbc11789f46539afd41879992db471d05cb8-36239221603.json",
+      "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/f28be32469e482bd56a6658bc68198ebfecfba78/reports/native-3138dbc11789f46539afd41879992db471d05cb8-36239221603.json",
+      "sha256": "75a7abc9036018398cd610fc99ca58016a60511286b89448f64418f831884229"
+    },
+    "guarded_restore": {
+      "status": "PASS",
+      "evidence": {
+        "url": "https://github.com/supercubegame/todo-pocket-android/blob/d1cf6ae3b6451e0afe59bd8cb6c5a1ce12f6684b/reports/restore-plan-3138dbc11789f46539afd41879992db471d05cb8-36239221603.json",
+        "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/d1cf6ae3b6451e0afe59bd8cb6c5a1ce12f6684b/reports/restore-plan-3138dbc11789f46539afd41879992db471d05cb8-36239221603.json",
+        "sha256": "7c07257109660c7eae4a3f8b125a2d014d7997dbf5529db879da6adec7234a7e"
+      }
+    },
+    "screenshots": "SYNTHETIC_NATIVE_UI_ONLY",
+    "exports": "NOT_TESTED",
+    "full_database_media_restore": "SCHEMA2_DB_MEDIA_BYTES_PASS",
+    "saf_restore_ui": "NOT_VERIFIED",
+    "image_decoding": "NOT_TESTED",
+    "power_loss": "NOT_TESTED",
+    "release_ready": false
+  },
+  "SHA256SUMS.txt": "261ba04f3f0d534cbe09bc22a04fc4ae8239944d7fff08e885c3e5d93ccb46b3  PocketTodo-v1.2-preview-3138dbc11789.apk\n",
+  "signature.txt": "Verifies\nVerified using v1 scheme (JAR signing): false\nVerified using v2 scheme (APK Signature Scheme v2): true\nVerified using v3 scheme (APK Signature Scheme v3): false\nVerified using v3.1 scheme (APK Signature Scheme v3.1): false\nVerified using v4 scheme (APK Signature Scheme v4): false\nVerified for SourceStamp: false\nNumber of signers: 1\nSigner #1 certificate DN: C=US, O=Android, CN=Android Debug\nSigner #1 certificate SHA-256 digest: 6105928a843371d0b783ff32a1edbbd94445d3835c7edc9d6cc7b3b9832fc99c\nSigner #1 certificate SHA-1 digest: 5ea31f0bc95ebc932a678dd205bfb27f34faabe5\nSigner #1 certificate MD5 digest: 107c9cfbf7b0600447f8a963fa1c909a\nSigner #1 key algorithm: RSA\nSigner #1 key size (bits): 2048\nSigner #1 public key SHA-256 digest: c35995523c53ce14f2296c7b14a0f2a8549087c1d31f17fc16b7cf163c21d7b7\nSigner #1 public key SHA-1 digest: 84eab907c4127ac99fe9b963025436436aeb1feb\nSigner #1 public key MD5 digest: d58ca9967232e0f448b1144e3e9fbbb4\n",
+  "package.txt": "package: name='com.supercubegame.pockettodo.v12.preview' versionCode='3' versionName='1.2' platformBuildVersionName='15' platformBuildVersionCode='35' compileSdkVersion='35' compileSdkVersionCodename='15'\nsdkVersion:'26'\ntargetSdkVersion:'34'\napplication-label:'口袋待办·预览'\napplication-icon-160:'res/drawable/ic_launcher.xml'\napplication: label='口袋待办·预览' icon='res/drawable/ic_launcher.xml'\napplication-debuggable\nlaunchable-activity: name='com.supercubegame.pockettodo.MainActivity'  label='' icon=''\nfeature-group: label=''\n  uses-feature: name='android.hardware.faketouch'\n  uses-implied-feature: name='android.hardware.faketouch' reason='default feature for all apps'\nmain\nsupports-screens: 'small' 'normal' 'large' 'xlarge'\nsupports-any-density: 'true'\nlocales: '--_--'\ndensities: '160'\n\npackage: com.supercubegame.pockettodo.v12.preview\n"
+}

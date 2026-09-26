@@ -10,6 +10,16 @@ import android.graphics.pdf.PdfDocument;
 import android.text.Layout;
 import android.text.StaticLayout;
 import android.text.TextPaint;
+import com.tom_roush.pdfbox.cos.COSDictionary;
+import com.tom_roush.pdfbox.cos.COSName;
+import com.tom_roush.pdfbox.cos.COSString;
+import com.tom_roush.pdfbox.multipdf.LayerUtility;
+import com.tom_roush.pdfbox.pdmodel.PDDocument;
+import com.tom_roush.pdfbox.pdmodel.PDPage;
+import com.tom_roush.pdfbox.pdmodel.PDPageContentStream;
+import com.tom_roush.pdfbox.pdmodel.common.PDRectangle;
+import com.tom_roush.pdfbox.pdmodel.documentinterchange.markedcontent.PDPropertyList;
+import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -79,6 +89,7 @@ public final class PagedNoteRenderer {
     }
     private static final class Draw {
         StaticLayout text;int start,end,y,height;
+        String original;
         byte[] image;int width;
     }
     private static final class Plan {
@@ -102,7 +113,7 @@ public final class PagedNoteRenderer {
                 }
                 String fragment=text.substring(layout.getLineStart(first),layout.getLineEnd(line-1));
                 if(fragment.endsWith("\n"))fragment=fragment.substring(0,fragment.length()-1);
-                Draw d=new Draw();d.text=typeset(fragment);d.start=0;d.end=d.text.getHeight();
+                Draw d=new Draw();d.original=fragment;d.text=typeset(fragment);d.start=0;d.end=d.text.getHeight();
                 d.y=y;d.height=layout.getLineBottom(line-1)-top;
                 if(d.end>d.height)throw new IOException("Page text reflow changed; reduce selection");
                 pages.get(pages.size()-1).add(d);y+=d.height;
@@ -160,14 +171,7 @@ public final class PagedNoteRenderer {
         if(plan.pages.get(0).isEmpty())throw new IllegalArgumentException("No visible content selected");
         Bounded output=new Bounded();
         if(format==Format.PDF){
-            PdfDocument document=new PdfDocument();
-            try{
-                for(int i=0;i<plan.pages.size();i++){
-                    PdfDocument.Page page=document.startPage(new PdfDocument.PageInfo.Builder(WIDTH,HEIGHT,i+1).create());
-                    try{draw(page.getCanvas(),plan.pages.get(i));}finally{document.finishPage(page);}
-                }
-                document.writeTo(output);
-            }finally{document.close();}
+            pdf(plan,output);
         }else{
             long expanded=0;
             try(ZipOutputStream zip=new ZipOutputStream(output)){
@@ -186,9 +190,56 @@ public final class PagedNoteRenderer {
         }
         return new Result(format,plan.pages.size(),output.bytes.toByteArray());
     }
+    /** Import only our own bounded visual fragments, never arbitrary external PDFs.
+     * Skia knows glyph IDs, not necessarily the original Unicode. ActualText wraps
+     * each corresponding text fragment, without replacing glyphs, normalizing
+     * radicals, adding invisible duplicate text, or flattening vector text.
+     * Keep all fragments in one source document so shared font resources dedupe.
+     */
+    private static void pdf(Plan plan,Bounded output)throws IOException{
+        Bounded raw=new Bounded();
+        PdfDocument visual=new PdfDocument();
+        try{
+            int number=0;
+            for(List<Draw> page:plan.pages)for(Draw d:page){
+                PdfDocument.Page fragment=visual.startPage(
+                    new PdfDocument.PageInfo.Builder(WIDTH,HEIGHT,++number).create());
+                try{drawOne(fragment.getCanvas(),d);}finally{visual.finishPage(fragment);}
+            }
+            visual.writeTo(raw);
+        }finally{visual.close();}
+        try(PDDocument source=PDDocument.load(raw.bytes.toByteArray());
+            PDDocument document=new PDDocument()){
+            document.setVersion(1.7f);
+            LayerUtility importer=new LayerUtility(document);
+            int index=0;
+            for(List<Draw> draws:plan.pages){
+                PDPage page=new PDPage(new PDRectangle(WIDTH,HEIGHT));
+                document.addPage(page);
+                try(PDPageContentStream stream=new PDPageContentStream(document,page)){
+                    stream.setNonStrokingColor(1f);
+                    stream.addRect(0,0,WIDTH,HEIGHT);stream.fill();
+                    for(Draw d:draws){
+                        PDFormXObject form=importer.importPageAsForm(source,index++);
+                        if(d.text!=null){
+                            COSDictionary properties=new COSDictionary();
+                            properties.setItem(COSName.getPDFName("ActualText"),new COSString(
+                                ("\uFEFF"+d.original).getBytes(java.nio.charset.StandardCharsets.UTF_16BE)));
+                            stream.beginMarkedContent(COSName.getPDFName("Span"),PDPropertyList.create(properties));
+                        }
+                        stream.saveGraphicsState();stream.drawForm(form);stream.restoreGraphicsState();
+                        if(d.text!=null)stream.endMarkedContent();
+                    }
+                }
+            }
+            document.save(output);
+        }
+    }
     private static void draw(Canvas canvas,List<Draw> draws)throws IOException{
         canvas.drawColor(Color.WHITE);
-        for(Draw d:draws){
+        for(Draw d:draws)drawOne(canvas,d);
+    }
+    private static void drawOne(Canvas canvas,Draw d)throws IOException{
             if(d.text!=null){
                 int saved=canvas.save();
                 try{
@@ -202,6 +253,5 @@ public final class PagedNoteRenderer {
                     new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG));}
                 finally{image.recycle();}
             }
-        }
     }
 }

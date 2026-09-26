@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import shlex
 import tempfile
+import tarfile
 import zipfile
 
 JAVA = r'''
@@ -46,6 +47,21 @@ public final class PagedContractTest {
  static void save(File file,byte[] bytes)throws IOException{
   try(OutputStream out=new FileOutputStream(file)){out.write(bytes);}
  }
+ static byte[] withoutActualText(byte[] data)throws IOException{
+  try(com.tom_roush.pdfbox.pdmodel.PDDocument doc=com.tom_roush.pdfbox.pdmodel.PDDocument.load(data)){
+   int removed=0;
+   for(com.tom_roush.pdfbox.pdmodel.PDPage page:doc.getPages()){
+    com.tom_roush.pdfbox.pdmodel.PDResources resources=page.getResources();
+    for(com.tom_roush.pdfbox.cos.COSName name:resources.getPropertiesNames()){
+     com.tom_roush.pdfbox.cos.COSDictionary props=resources.getProperties(name).getCOSObject();
+     com.tom_roush.pdfbox.cos.COSName actual=com.tom_roush.pdfbox.cos.COSName.getPDFName("ActualText");
+     if(props.containsKey(actual)){props.removeItem(actual);removed++;}
+    }
+   }
+   if(removed==0)throw new AssertionError("ActualText removal control did not modify PDF");
+   ByteArrayOutputStream out=new ByteArrayOutputStream();doc.save(out);return out.toByteArray();
+  }
+ }
  public static void verify(String[] args)throws Exception{
    File root=new File(args[0]);
    renderer=Class.forName("com.supercubegame.pockettodo.PagedNoteRenderer");
@@ -57,7 +73,7 @@ public final class PagedContractTest {
    Arrays.fill(image,(byte)0);
    StringBuilder text=new StringBuilder("BEGIN_SELECTED\n");
    for(int i=0;i<90;i++)text.append(String.format(java.util.Locale.ROOT,"ROW%03d selected text\n",i));
-   text.append("END_SELECTED\n中文说明");
+   text.append("END_SELECTED\n中文说明\nUNICODE_PAIR 文|⽂|文|⽂ END_PAIR");
    Object prose=block("n","t",text.toString(),null,"",false);
    Object hidden=block("n","p","PRIVATE_PAGED_SECRET",null,"",true);
    Object badPrivate=block("n","q",null,new byte[]{1,2,3},"PRIVATE_IMAGE_SECRET",true);
@@ -68,6 +84,7 @@ public final class PagedContractTest {
     int pageCount=pages(result);
     ok(pageCount>=3&&pageCount<=5,"multiple_pages_"+kind);
     write(root,kind.equals("PDF")?"paged.pdf":"paged.zip",result);
+    if(kind.equals("PDF"))save(new File(root,"unmarked.pdf"),withoutActualText(bytes(result)));
     byte[] first=bytes(result);byte value=first[0];first[0]^=1;
     ok(bytes(result)[0]==value,"result_ownership_"+kind);
     Object filtered=render(Arrays.asList(prose,picture),keys("n/t","n/i"),kind);
@@ -254,6 +271,9 @@ def instrumentation(folder,prefix,gate):
                     data=subprocess.check_output([*prefix,"exec-out","run-as",gate.PKG,"cat",cache+"/"+name],timeout=30)
                     assert 0<len(data)<=16777216
                     (folder/name).write_bytes(data)
+            data=subprocess.check_output([*prefix,"exec-out","run-as",gate.PKG,"cat",cache+"/unmarked.pdf"],timeout=30)
+            assert 0<len(data)<=16777216
+            (folder/"unmarked.pdf").write_bytes(data)
             assert installed_app()==before
         finally:
             assert backup.read_bytes()==saved
@@ -263,6 +283,7 @@ def instrumentation(folder,prefix,gate):
             assert app.read_bytes()==before and test.read_bytes()==saved
     return labels,{"runtime":"TARGET_APP_INSTRUMENTATION","diagnostic_failure_rejected":True,
                    "product_apk_sha256":hashlib.sha256(before).hexdigest(),
+                   "product_apk_bytes":len(before),
                    "installed_product_readback":"EXACT_BEFORE_AND_AFTER",
                    "default_test_restored":"EXACT_BYTES_AND_REGISTERED_RUNNER","certificate":cert}
 
@@ -303,6 +324,7 @@ def text_check(text):
     assert rows==["ROW%03d"%i for i in range(90)],"PDF row loss/duplication/order"
     assert text.index("BEGIN_SELECTED")<text.index("ROW000")<text.index("ROW089")<text.index("END_SELECTED")<text.index("CAPTION_END")
     assert "中文说明" in text.replace(" ","").replace("\n",""),"Chinese PDF text missing"
+    assert text.count("UNICODE_PAIR 文|⽂|文|⽂ END_PAIR")==1,"PDF original Unicode pair changed"
 
 def pdf_text_diagnostic(text):
     """Only synthetic CI fixture output. Preserve code points, not a guessed cause."""
@@ -313,15 +335,21 @@ def pdf_text_diagnostic(text):
             "form_feeds":text.count("\f")}
 
 def selftest():
-    good="BEGIN_SELECTED\n"+"\n".join("ROW%03d"%i for i in range(90))+"\nEND_SELECTED\n中文说明\nCAPTION_END"
+    good="BEGIN_SELECTED\n"+"\n".join("ROW%03d"%i for i in range(90))+"\nEND_SELECTED\n中文说明\nUNICODE_PAIR 文|⽂|文|⽂ END_PAIR\nCAPTION_END"
     text_check(good)
     bad=(good.replace("ROW050",""),good.replace("ROW050","ROW049"),good+"PRIVATE_PAGED_SECRET",
-         good.replace("中文说明",""),good.replace("ROW000","ROW999"))
+         good.replace("中文说明",""),good.replace("ROW000","ROW999"),
+         good.replace("文|⽂|文|⽂","⽂|⽂|⽂|⽂"),good.replace("文|⽂|文|⽂","文|文|文|文"),
+         good.replace("文|⽂|文|⽂","⽂|文|⽂|文"),good.replace("文|⽂|文|⽂","文|⽂"),
+         good.replace("UNICODE_PAIR 文|⽂|文|⽂ END_PAIR",""),
+         good.replace("文|⽂|文|⽂","文|�|文|�"),good+"\nUNICODE_PAIR 文|⽂|文|⽂ END_PAIR")
+    assert len(bad)==12
     for value in bad:
+        assert value!=good,"text mutation did not change fixture"
         try:text_check(value)
         except AssertionError:continue
         raise AssertionError("PDF observer accepted corrupt text")
-    print("PAGED_TEXT_OBSERVER 1 positive 5 negatives PASS NOT_PDF_EXECUTION",flush=True)
+    print("PAGED_TEXT_OBSERVER 1 positive 12 negatives PASS NOT_PDF_EXECUTION",flush=True)
     for value in ("中文说明","中文说\u660e","\ufffd\ufffd","\u2f42文说明","中文\f说明",""):
         diagnostic=pdf_text_diagnostic(value)
         assert diagnostic["tail"]==value and diagnostic["characters"]==len(value)
@@ -358,6 +386,36 @@ def selftest():
             except AssertionError:continue
             raise AssertionError("unverified or ambiguous debug key accepted")
     print("PAGED_KEY_OBSERVER 2 positive 5 negatives PASS NOT_CI_KEYSTORE_EXECUTION",flush=True)
+
+def apk_size_comparison(gate):
+    """Build the exact pre-dependency source with the same SDK and existing key.
+    This baseline APK is never installed or delivered. No signing key is created.
+    """
+    from verify_schema3 import certificate
+    root=Path(__file__).resolve().parents[1]
+    apps=list((root/"build/outputs/apk/debug").glob("*.apk"));assert len(apps)==1
+    app=apps[0];current=app.read_bytes();cert=certificate(app,gate);key=debug_key(cert)
+    baseline="452969cf2f053bb8c527d3fb2dc3bf1fbf4afe21"
+    run(["git","-C",root,"fetch","--no-tags","--depth=1","origin",baseline],timeout=120)
+    with tempfile.TemporaryDirectory(prefix="paged-size-",dir=root/"build") as temp:
+        work=Path(temp);archive=work/"baseline.tar";project=work/"baseline";project.mkdir()
+        with archive.open("wb") as out:
+            subprocess.run(["git","-C",str(root),"archive",baseline],stdout=out,check=True,timeout=60)
+        with tarfile.open(archive) as files:files.extractall(project,filter="data")
+        init=work/"signing.gradle"
+        init.write_text("gradle.beforeProject { p -> p.plugins.withId('com.android.application') { "
+            "p.androidComponents.finalizeDsl { dsl -> dsl.signingConfigs.getByName('debug').storeFile = new File("
+            +json.dumps(str(key))+") } } }\n")
+        run(["gradle","--no-daemon","--console=plain","-p",project,"-I",init,"assembleDebug"],timeout=360)
+        old=list((project/"build/outputs/apk/debug").glob("*.apk"));assert len(old)==1
+        assert certificate(old[0],gate)==cert,"size baseline certificate mismatch"
+        previous=old[0].read_bytes()
+        assert app.read_bytes()==current,"isolated size build changed product APK"
+    result={"baseline_commit":baseline,"baseline_bytes":len(previous),"current_bytes":len(current),
+            "delta_bytes":len(current)-len(previous),"baseline_sha256":hashlib.sha256(previous).hexdigest(),
+            "current_sha256":hashlib.sha256(current).hexdigest(),"baseline_installed":False}
+    print("PAGED_APK_SIZE "+json.dumps(result),flush=True)
+    return result
 
 def verify(folder,classes,android,prefix,remote,gate):
     """Called inside the existing codec job; failures propagate to its exit status."""
@@ -401,9 +459,23 @@ def verify(folder,classes,android,prefix,remote,gate):
     assert (folder/"paged.zip").read_bytes()==(folder/"filtered.zip").read_bytes(),"excluded content affected PNG pages"
     for a,b in zip(sorted(folder.glob("paged-pdf-*.png")),sorted(folder.glob("filtered-pdf-*.png"))):
         assert a.read_bytes()==b.read_bytes(),"excluded content affected PDF pixels"
+    # A file-level mutation, not a recompiled product mutant: remove only original
+    # text annotations. It must reveal glyph ambiguity without changing any pixel.
+    run(["pdftotext","-enc","UTF-8",folder/"unmarked.pdf",folder/"unmarked.txt"])
+    try:text_check((folder/"unmarked.txt").read_text())
+    except AssertionError as error:
+        assert str(error) in ("Chinese PDF text missing","PDF original Unicode pair changed"),"unrelated mutation failure"
+    else:raise AssertionError("ActualText removal did not expose exact-Unicode failure")
+    run(["pdftoppm","-r","72","-png",folder/"unmarked.pdf",folder/"unmarked-pdf"])
+    original=sorted(folder.glob("paged-pdf-*.png"));unmarked=sorted(folder.glob("unmarked-pdf-*.png"))
+    assert len(original)==len(unmarked)
+    for a,b in zip(original,unmarked):
+        assert a.read_bytes()==b.read_bytes(),"ActualText changed visible PDF pixels"
+    size=apk_size_comparison(gate)
     report={"commit":os.environ["GITHUB_SHA"],"run_id":os.environ["GITHUB_RUN_ID"],"api":gate.API,
             "status":"PASS","scope":"APK_PAGED_BACKEND_POPPLER_AND_JDK_NOT_UI_SAF_RECEIVER",
-            "checks":29,"labels":labels,"independent_outputs":evidence,"text_observer_negative_controls":5,
+            "checks":29,"labels":labels,"independent_outputs":evidence,"text_observer_negative_controls":12,
+            "actualtext_removal_control":"REJECTED_WITH_IDENTICAL_PIXELS","apk_size":size,
             "instrumentation":identity,"release_ready":False}
     target=gate.ROOT/"native-ui" if hasattr(gate,"ROOT") else Path("native-ui")
     target.mkdir(exist_ok=True)

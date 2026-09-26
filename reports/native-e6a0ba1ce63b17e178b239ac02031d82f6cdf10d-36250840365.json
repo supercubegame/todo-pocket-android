@@ -1,0 +1,1578 @@
+{
+  "commit": "e6a0ba1ce63b17e178b239ac02031d82f6cdf10d",
+  "run_id": "36250840365",
+  "scope": "NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE",
+  "status": "PASS",
+  "devices": {
+    "26": {
+      "status": "PASS",
+      "scope": "NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE",
+      "ledger_calendar": "NATIVE_MULTI_DATE_LEDGER_PASS",
+      "saf_restore": "NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS",
+      "checkin_history": "NATIVE_CHECKIN_HISTORY_BACKDATE_PASS",
+      "note_editor": "NATIVE_TEXT_IMAGE_NOTE_PASS",
+      "api": 26,
+      "count": 186,
+      "checks": [
+        "new UI database starts empty without fabricated activities",
+        "blank todo rejected visibly",
+        "UI adds distinct stable todo identities",
+        "real checkbox completes todo",
+        "pending filter excludes completed row",
+        "completed filter excludes pending row",
+        "invalid edit stays open without losing original",
+        "cancel invalid edit preserves value and completion",
+        "title edit preserves stable identity and completion",
+        "native todo state survives actual process restart",
+        "category created through visible native dialog",
+        "category rename updates visible label",
+        "activity created under selected category",
+        "ordered multiline manual path displays without collapse",
+        "daily check-in writes visible done state",
+        "repeated daily mark remains one visible day",
+        "skipped is distinct from done and unrecorded",
+        "accessible category reorder changes exact visible order",
+        "category order persists after process restart",
+        "skipped mark persists after process restart",
+        "activity path persists after process restart",
+        "actual native screenshots represent distinct states",
+        "default native UI uses schema3 with exact nine-column block layout",
+        "independent SQLite read matches exact UI todo identities titles and states",
+        "independent SQLite read matches renamed reordered categories",
+        "activity stays in its category without invented application",
+        "independent SQLite read preserves path order",
+        "repeated native marks persist exactly one day with entry timestamp",
+        "check-in does not invent money entries",
+        "new native ledger starts with empty selection and zero summary",
+        "calendar multi-select is explicit read-only scope",
+        "three different-day amounts total exactly 80 yuan in native UI",
+        "cancel native entry does not change totals",
+        "native ledger rejects fractional cents without closing editor",
+        "refund reduces net expense without rewriting gross expense",
+        "planned is separate and signed net cash is exact",
+        "nonconsecutive selected days exclude actual refund date",
+        "cancel date selection keeps previous summary",
+        "missing day is not presented as confirmed zero expenditure",
+        "empty date selection is zero not all-time total",
+        "native ledger exact totals survive stopped-process restart",
+        "independent Android SQLite read matches all six exact typed dated entries",
+        "native saves have distinct entry and batch identities without selection-generated writes",
+        "cancel and invalid amount leave no batch journal residue",
+        "money and date filtering never mutate the check-in history",
+        "native check-in editor rejects malformed date without closing",
+        "backdated done check-in appears with its exact date",
+        "un-recording removes the visible history row",
+        "un-recorded backdate leaves the exact prior single mark in independent readback",
+        "check-in editing never mutates the ledger",
+        "backdated check-in survives cancel then re-entered identically",
+        "SAF file selection shows visible restore preview and replacement counts",
+        "canceling SAF restore preview makes no database write",
+        "cancelled restore leaves exact new todo and old state independent",
+        "cancelled restore retains exact ledger rows",
+        "SAF file selection shows visible restore preview and replacement counts",
+        "unchecked consent cannot restore even with visible confirmation control",
+        "SAF file selection shows visible restore preview and replacement counts",
+        "explicit SAF consent replaces data with previewed backup",
+        "SAF restored data survives a separate stopped-process restart",
+        "independent SQLite read matches exact SAF restored state",
+        "SAF restore retains exact ledger after independent readback",
+        "SAF restore retains exact check-in history including the re-entered backdate",
+        "empty note starts visibly empty without fabricated content",
+        "blank note save rejected visibly",
+        "saved note text appears on activity",
+        "note survives process restart",
+        "attached image is registered with note",
+        "note inherits its activity title and stays bound to that activity",
+        "note keeps ordered text then image blocks",
+        "image block is not private by default",
+        "image bytes registered under immutable content id",
+        "image block references exact registered media id",
+        "notes never mutate the ledger",
+        "actual private PNG bytes match registry size and content ID",
+        "independent PNG decoder verifies all 9216 opaque expected pixels",
+        "edit existing note opens with the exact stored text",
+        "cancel note edit preserves original text and identity",
+        "blank existing note edit stays open with visible validation",
+        "cancelled valid and blank note edits leave exact persisted note rows unchanged",
+        "note edit replaces text in place without leaving an old duplicate",
+        "edited note text and stable block identity survive stopped-process restart",
+        "image remains an image view after editing text and restarting",
+        "independent readback proves only text changed with note IDs block IDs order and privacy retained",
+        "editing note leaves exact media registry and complete ledger unchanged",
+        "text editing and restart preserve exact private image bytes",
+        "image import opens the actual system document picker",
+        "cancel system image picker reports no note change",
+        "cancel picker leaves exact blocks and media registrations unchanged",
+        "malformed selected image rejected visibly",
+        "malformed rejection preserves every database table including revision",
+        "oversized dimensions selected image rejected visibly",
+        "oversized dimensions rejection preserves every database table including revision",
+        "excess byte budget selected image rejected visibly",
+        "excess byte budget rejection preserves every database table including revision",
+        "SAF image appends one exact ordered block without replacing text or prior image",
+        "SAF original bytes registered by exact hash MIME and length",
+        "image import preserves notes identity and all unrelated tables",
+        "SAF private copy equals independently generated two-color PNG byte for byte",
+        "selected image still renders after source deletion and stopped-process restart",
+        "selected image block identity order and reference survive restart",
+        "source deletion never removes or changes the private selected image",
+        "independent host decoder proves JPEG and both pixel boundary fixtures really decode with intended dimensions and colors",
+        "new image-first activity has no existing note in independent SQLite read",
+        "image-first activity shows genuine empty note before any import",
+        "first-image cancellation waits for a visible system picker before pressing Back",
+        "canceling first image reports no note change",
+        "first-image cancel creates no orphan note media block or revision",
+        "malformed first image rejected visibly before note creation",
+        "malformed first image leaves every table unchanged with no orphan note or media registration",
+        "20005000-pixel first image rejected visibly before note creation",
+        "20005000-pixel first image leaves every table unchanged with no orphan note or media registration",
+        "JPEG-first import creates exactly one note with correct activity binding title and preserved prior notes",
+        "JPEG-first import creates exactly one position-zero public image block without touching previous blocks",
+        "JPEG-first media registry has exact actual MIME digest and original byte length",
+        "JPEG-first note creation preserves activities todos checkins ledger and all unrelated tables",
+        "selected JPEG private original is byte-exact rather than a recompressed preview",
+        "JPEG-first note displays a real ImageView after external source deletion and process restart",
+        "JPEG-first restart preserves every database table and exact private JPEG bytes",
+        "exactly 20000000 pixels is accepted inclusively as one appended ordered image block",
+        "pixel-limit image keeps exact private original and matching media registry",
+        "pixel-limit import preserves note identity and unrelated complete tables",
+        "20000000-pixel image remains an ImageView after source deletion and restart",
+        "pixel-limit restart preserves exact complete database and original image bytes",
+        "existing single note remains the initial selected note",
+        "blank new note title stays in dialog without creating a note",
+        "canceling a populated new-note dialog preserves every table and revision",
+        "new note selects its own empty content instead of copying the first note",
+        "second note has one fresh identity correct owner title and unchanged old notes",
+        "second note owns exactly its text block while all first-note and other-activity blocks remain exact",
+        "creating and editing second note preserves media ledger checkins and all unrelated tables",
+        "restart opens original first note without replacing its content",
+        "note picker exposes both titles in stable creation order",
+        "canceling note switch keeps selected note",
+        "explicit selection restores second note alone after process restart",
+        "editing second note stays on selected stable note instead of jumping to first",
+        "switching back preserves original first-note text",
+        "first note retains its imported image after multi-note editing",
+        "independent readback proves only second text changed with all note and block identities intact",
+        "multi-note edits preserve unrelated tables and all selected private originals byte for byte",
+        "duplicate note title creates a separate empty note rather than overwriting its namesake",
+        "same-title creation adds only one distinct note and never touches existing blocks or unrelated tables",
+        "restart preserves creation order and separate indexed entries for duplicate titles",
+        "same-title note selection resolves exact second identity not latest matching title",
+        "switching and restarting notes are read-only across the complete database",
+        "image append retains the non-first selected note and its existing text",
+        "non-first image import appends exactly one correctly owned ordered block without modifying any old block",
+        "reused JPEG import preserves notes complete media registry unrelated tables and exact original",
+        "non-first note image survives source deletion and explicit reselect after restart",
+        "new image metadata editor starts with empty caption and public flag",
+        "canceling edited caption and privacy preserves every table revision and original bytes",
+        "caption and private badge render on the selected second note after saving",
+        "private caption save changes only caption and privacy while retaining every block identity owner order and asset reference",
+        "metadata edit preserves complete unrelated tables media registrations and all imported originals",
+        "restart and reselect prefill the persisted caption and true private flag",
+        "editing second image metadata does not leak its caption into first note",
+        "same-title third note stays empty after second note image edits",
+        "restart and switching across private-image notes are read-only for every table",
+        "caption-only edit preserves existing true private flag and all other block fields",
+        "caption-only private edit leaves all unrelated tables and immutable original unchanged",
+        "updated private caption survives another force-stop and explicit note selection",
+        "empty caption is allowed and private flag can be explicitly unset",
+        "clearing caption and unsetting private restores exact original block fields without touching siblings or other tables",
+        "empty caption and false private flag persist after restart",
+        "final metadata cancel and restart preserve every table and exact JPEG original",
+        "derivative dialog shows actual decoded source dimensions with empty selection",
+        "derivative preview without selection rejected visibly",
+        "derivative cancel leaves every table and original bytes unchanged",
+        "corner drag maps to full source extent within touch rounding",
+        "derivative oversize selection rejected with visible pixel budget",
+        "derivative reset clears selection reports",
+        "touch crop maps onto intended source rectangle within rounding",
+        "redact mode adds exactly one reported mask",
+        "touch mask maps onto intended source rectangle within rounding",
+        "derivative preview renders exact reported output dimensions",
+        "derived block preserves note owner position kind empty caption public flag and records exact original",
+        "derived PNG registered with exact mime and byte length",
+        "derivative save preserves all unrelated tables",
+        "original imported PNG bytes unchanged after derivative save",
+        "sibling blocks across notes remain exact after derivative save",
+        "independent decoder proves exact cropped pixels and opaque mask for reported rects",
+        "derived image renders with working entry after process restart",
+        "derivative state and both images survive stopped-process restart exactly",
+        "re-derived preview renders for abandonment check",
+        "abandoned second preview writes nothing and keeps published derivative",
+        "native schema3 survives SAF restore and all ordinary edits without invented image origins"
+      ],
+      "screenshots": [
+        {
+          "file": "01-todos.png",
+          "bytes": 37676,
+          "sha256": "1e97bfba783bd8004da3d7a96472ac4e0a719825d4ac9738e264067dc84eaa76"
+        },
+        {
+          "file": "02-activity.png",
+          "bytes": 47429,
+          "sha256": "449b4a1d0c6b2707ce61465de96b8f4c73c117cbc87ab5d689fba46c4c3df169"
+        },
+        {
+          "file": "03-categories.png",
+          "bytes": 45641,
+          "sha256": "fff2dcec2a763e985233847cbfa332c7051e951fedadeb14e8b601d9440c18ea"
+        },
+        {
+          "file": "04-ledger.png",
+          "bytes": 60215,
+          "sha256": "6762d576d6ebc928a9d2ae8d6ba78ebd828d6d7b29c924a8edcdfd1c5435a1aa"
+        },
+        {
+          "file": "05-selected-dates.png",
+          "bytes": 60322,
+          "sha256": "56d4fbf1cc8c61f7fe7151e149ba5ee7ed8ed654f5927cca39437d970e8dce2c"
+        },
+        {
+          "file": "06-checkin-history.png",
+          "bytes": 43818,
+          "sha256": "abfaf2310ead70b3c60de69692a22c26f551a18b4df8f774359159d1daaa627f"
+        },
+        {
+          "file": "07-backup.png",
+          "bytes": 41933,
+          "sha256": "130469efeb20e4d7599eaf3580e37cab253253641d7528a42727439107efad84"
+        },
+        {
+          "file": "08-restore-preview.png",
+          "bytes": 60118,
+          "sha256": "abe859e217f703360cea3f6cd6cc717e8b721489f2a214711a891ccab4d80086"
+        },
+        {
+          "file": "09-note.png",
+          "bytes": 34953,
+          "sha256": "597e8136e43b2daff2057f7be570ee89b04c4ed2cb5ae52b357a5bc7e26bee32"
+        },
+        {
+          "file": "10-note-edited.png",
+          "bytes": 40711,
+          "sha256": "4a3aebbc57d4951093694f5ccb7b67f31fec89fcd8417b08a5c4a9eb0a02da5e"
+        },
+        {
+          "file": "11-selected-image.png",
+          "bytes": 35892,
+          "sha256": "9e13e185314d347735619ea119d28f36d0af06f4ffa15344d6d464d16d2efa81"
+        },
+        {
+          "file": "12-jpeg-first-note.png",
+          "bytes": 35753,
+          "sha256": "be5f81249238f0424345781d6bc3410e9a4dfca41eefe1774730424b60b96ba0"
+        },
+        {
+          "file": "13-pixel-limit-image.png",
+          "bytes": 35921,
+          "sha256": "cf14db7fb37bf2de56f359086268362b61ca9ad59d0e044f2e7918635319bf09"
+        },
+        {
+          "file": "14-multiple-notes.png",
+          "bytes": 35911,
+          "sha256": "be23695ff4a2e6394ecfb7a743c5b099e17396228eac466192869e766b43bc72"
+        },
+        {
+          "file": "15-second-note.png",
+          "bytes": 34371,
+          "sha256": "788c020d49f95b63ec428a38ba1e97b42fd8a982284a862a7950cfea976ae18d"
+        },
+        {
+          "file": "16-private-image-caption.png",
+          "bytes": 40982,
+          "sha256": "75104b74bb691d7ccf4f2f46ee8d1151f618d1e839a507f50b47077b5a458296"
+        },
+        {
+          "file": "17-second-image-public.png",
+          "bytes": 39796,
+          "sha256": "ebcd5907b7c701a851b2d20c5d3d977319b72f588b4e2d5789f90f01cfb77901"
+        },
+        {
+          "file": "18-derivative-preview.png",
+          "bytes": 39483,
+          "sha256": "50de3ddfc3f0140d8049bbae16c4cee73c8e932dba5031d651b1205f0cc36863"
+        },
+        {
+          "file": "19-derivative-saved.png",
+          "bytes": 36146,
+          "sha256": "6628d640419cea79d7c7032ea25d3fd7ad7ca26f7b06cbe012948a582ac9c1af"
+        },
+        {
+          "file": "20-share-preview.png",
+          "bytes": 48010,
+          "sha256": "0d5cd746eaca77810983f302b27dbe34e7dd86ad75c42cf0a3cd1b686ac97ff0"
+        },
+        {
+          "file": "21-share-saved.png",
+          "bytes": 41283,
+          "sha256": "a78f1f08f82d07d1a187e4e2378470727b7f6dca42a98b38715e94bf2f959d1c"
+        },
+        {
+          "file": "22-share-process-loss-refused.png",
+          "bytes": 40341,
+          "sha256": "b27e72fa89d8e0e4e9bc7089a190a8b69d166f69326231b35333923b5906e18f"
+        },
+        {
+          "file": "23-share-fresh-after-loss.png",
+          "bytes": 41199,
+          "sha256": "ed03894d5b6b2dc9081446689d663cfe491db66097fe3a4fdf6cfcedfc536bf9"
+        }
+      ],
+      "infra_retries": [],
+      "restore_undo": "NOT_IMPLEMENTED",
+      "restore_preview_lifecycle": "NOT_TESTED",
+      "checkin_schedules": "NOT_IMPLEMENTED",
+      "real_photo_selection": "NATIVE_SAF_PNG_JPEG_PASS",
+      "photos": "SYNTHETIC_PNG_JPEG_ONLY",
+      "sharing": "NATIVE_SINGLE_NOTE_MARKDOWN_SAF_SYNTHETIC_NOT_PDF_OR_RECEIVER",
+      "release_ready": false,
+      "image_picker_lifecycle": "CANCEL_AND_RESTART_ONLY",
+      "jpeg": "NATIVE_SAF_EXACT_PRIVATE_COPY_PASS",
+      "camera": "NOT_IMPLEMENTED",
+      "image_first_note": "CANCEL_REJECT_CREATE_RESTART_PASS",
+      "image_pixel_budget": "20000000_ACCEPTED_20005000_REJECTED",
+      "exif_orientation": "NOT_TESTED",
+      "whole_note_memory": "NOT_TESTED",
+      "multiple_notes": "CREATE_SWITCH_EDIT_DUPLICATE_TITLE_RESTART_PASS",
+      "note_selection_persistence": "RESTART_DEFAULTS_FIRST_EXPLICIT_RESELECT",
+      "note_rename_delete_reorder": "NOT_IMPLEMENTED",
+      "nonfirst_image": "APPEND_ISOLATION_RESTART_PASS",
+      "image_metadata": "CAPTION_PRIVATE_CANCEL_EDIT_CLEAR_RESTART_PASS",
+      "private_sharing": "NOT_TESTED",
+      "default_app_schema": 3,
+      "default_schema3_ui": "NATIVE_SCHEMA3_UI_PASS",
+      "derivative_ui": "NATIVE_CROP_MASK_UI_SAVE_CANCEL_RESTART_PASS",
+      "derivative_geometry": [
+        {
+          "source": [
+            1536,
+            768
+          ],
+          "preview": [
+            768,
+            384
+          ],
+          "requested": [
+            0,
+            0,
+            1536,
+            768
+          ],
+          "screen": [
+            28,
+            157,
+            292,
+            289
+          ],
+          "canvas": "[28,103][292,343]",
+          "observed_crop": [
+            0,
+            0,
+            1536,
+            768
+          ]
+        },
+        {
+          "source": [
+            1280,
+            640
+          ],
+          "preview": [
+            640,
+            320
+          ],
+          "requested": [
+            320,
+            160,
+            960,
+            480
+          ],
+          "screen": [
+            94,
+            190,
+            226,
+            256
+          ],
+          "canvas": "[28,103][292,343]",
+          "observed_crop": [
+            320,
+            160,
+            960,
+            480
+          ]
+        },
+        {
+          "source": [
+            1280,
+            640
+          ],
+          "preview": [
+            640,
+            320
+          ],
+          "requested": [
+            640,
+            240,
+            800,
+            400
+          ],
+          "screen": [
+            160,
+            206,
+            193,
+            240
+          ],
+          "canvas": "[28,103][292,343]",
+          "observed_mask": [
+            640,
+            238,
+            800,
+            402
+          ]
+        },
+        {
+          "source": [
+            640,
+            320
+          ],
+          "preview": [
+            640,
+            320
+          ],
+          "requested": [
+            0,
+            0,
+            320,
+            160
+          ],
+          "screen": [
+            28,
+            157,
+            160,
+            223
+          ],
+          "canvas": "[28,103][292,343]"
+        }
+      ],
+      "pixel_oracle": "DERIVATIVE_ORACLE_PASS positive=1 negative=2",
+      "markdown_ui": {
+        "status": "PASS",
+        "api": 26,
+        "commit": "e6a0ba1ce63b17e178b239ac02031d82f6cdf10d",
+        "run_id": "36250840365",
+        "scope": "NATIVE_SINGLE_NOTE_MARKDOWN_SAF_SYNTHETIC_NOT_PDF_OR_RECEIVER",
+        "checks": [
+          "share private fixture changes only chosen image metadata",
+          "share duplicate-title empty note cannot export namesake content",
+          "share picker excludes private image and starts with no selection",
+          "share empty selection stays in selection dialog",
+          "share actual preview contains selected text and image",
+          "share unchecked consent cannot open system save",
+          "share preview cancellation preserves complete database and media",
+          "share system picker cancellation publishes no file and preserves state",
+          "share text-only selection creates exact Markdown without image entries",
+          "share text-only success preserves complete database and media",
+          "share selected export contains exact Markdown and only one current image",
+          "share independent decoder verifies exported crop and opaque mask pixels",
+          "share successful image export preserves complete database and media",
+          "share external writer changes privacy without revision increment",
+          "share stale preview refuses publication through real system picker",
+          "share stale refusal causes no extra database or media mutation",
+          "share background process death is proven while system picker remains",
+          "share recreated owner refuses old preview without nonempty publication",
+          "share returned activity runs in a different proven process",
+          "share process-loss refusal preserves complete database and media",
+          "share fresh explicit selection after process loss exports exact reviewed ZIP",
+          "share fresh post-loss success preserves complete database and media"
+        ],
+        "release_ready": false,
+        "recreation": "PROCESS_DEATH_DURING_SAF_REFUSED_AND_FRESH_EXPORT_PASS",
+        "provider_failures": "NOT_TESTED",
+        "private_text": "NOT_TESTED",
+        "actual_receiver": "NOT_TESTED",
+        "picker_cancel_navigation": [
+          {
+            "backs": 0,
+            "packages": [
+              "com.android.documentsui"
+            ],
+            "cancelled": false
+          },
+          {
+            "backs": 1,
+            "packages": [
+              "com.android.documentsui"
+            ],
+            "cancelled": false
+          },
+          {
+            "backs": 2,
+            "packages": [
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "cancelled": true
+          }
+        ],
+        "zip_sha256": "5d3a4d2b5e2fabfb76350e2918dd77a8a7045d12f86a49807f172ca7262fed6d",
+        "zip_bytes": 577,
+        "external_helper": {
+          "sha256": "8e7b26128c3529da5a01cd2be38001ae1e6e1c242dd01b0e1e22f90a52a61d07",
+          "readback": "EXACT_BYTES",
+          "location": "APP_PRIVATE_CACHE"
+        },
+        "process_loss": {
+          "old_pid": "30319",
+          "absence_probes": [
+            {
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "injection": "CI_APP_UID_SIGKILL_NOT_LMK",
+          "stage": "SIGNAL_SENT",
+          "identity": {
+            "status": "PASS",
+            "pid": "30319",
+            "uid": "10077",
+            "uid_fields": [
+              [
+                "10077",
+                "10077",
+                "10077",
+                "10077"
+              ]
+            ],
+            "expected_package": "com.supercubegame.pockettodo.v12.preview",
+            "cmdline_bytes": 99,
+            "cmdline_sha256": "725588960f59515f7cdbb1bcb02d9fea1e06f7d7d6311703702508cb23a3d55e",
+            "cmdline_hex_head": "636f6d2e73757065726375626567616d652e706f636b6574746f646f2e7631322e707265766965770000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "cmdline_hex_truncated": false,
+            "exact_argv0": true,
+            "nul_only_tail": true,
+            "nul_suffix_bytes": 59
+          },
+          "uid": "10077",
+          "uid_fields": [
+            [
+              "10077",
+              "10077",
+              "10077",
+              "10077"
+            ]
+          ],
+          "picker_package": "com.android.documentsui",
+          "new_pid": "30679"
+        },
+        "count": 22
+      },
+      "paged_ui": {
+        "status": "PASS",
+        "api": 26,
+        "commit": "e6a0ba1ce63b17e178b239ac02031d82f6cdf10d",
+        "run_id": "36250840365",
+        "scope": "NATIVE_SINGLE_NOTE_TEXT_PDF_PNG_SAF_CANCEL_STALE_NOT_PROCESS_DEATH_OR_RECEIVER",
+        "labels": [
+          "private_excluded_and_empty_selection_PDF",
+          "format_picker_selected_PDF",
+          "actual_page_preview_PDF",
+          "unchecked_save_refused_PDF",
+          "picker_cancel_preserves_state_PDF",
+          "real_saf_output_PDF",
+          "independent_text_page_PDF",
+          "save_preserves_state_PDF",
+          "same_revision_privacy_change_PDF",
+          "stale_publication_refused_PDF",
+          "stale_refusal_preserves_state_PDF",
+          "fixture_restored_PDF",
+          "private_excluded_and_empty_selection_PNG_ZIP",
+          "format_picker_selected_PNG_ZIP",
+          "actual_page_preview_PNG_ZIP",
+          "unchecked_save_refused_PNG_ZIP",
+          "picker_cancel_preserves_state_PNG_ZIP",
+          "real_saf_output_PNG_ZIP",
+          "independent_text_page_PNG_ZIP",
+          "save_preserves_state_PNG_ZIP",
+          "same_revision_privacy_change_PNG_ZIP",
+          "stale_publication_refused_PNG_ZIP",
+          "stale_refusal_preserves_state_PNG_ZIP",
+          "fixture_restored_PNG_ZIP"
+        ],
+        "checks": 24,
+        "release_ready": false,
+        "outputs": {
+          "PDF": {
+            "sha256": "ff9cf62eeb3e29f866080e841688d83749b174206e320f83327befca8e680ded",
+            "bytes": 15335,
+            "pdf_text": "EXACT",
+            "page": "SINGLE_NONBLANK_TEXT_REGION_NO_IMAGE"
+          },
+          "PNG_ZIP": {
+            "sha256": "d785f51fdbd28907f2654621421155bedfc9d8edcee6bb4c32bb8c9a640df571",
+            "bytes": 2321,
+            "pdf_text": "NOT_OCR_TESTED",
+            "page": "SINGLE_NONBLANK_TEXT_REGION_NO_IMAGE"
+          }
+        }
+      },
+      "published_screenshots": [
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/7935e2905853725aca83e74246dfab0e0f833388/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/01-todos.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/7935e2905853725aca83e74246dfab0e0f833388/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/01-todos.png",
+          "sha256": "1e97bfba783bd8004da3d7a96472ac4e0a719825d4ac9738e264067dc84eaa76",
+          "file": "01-todos.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/93c45d73863a66ad523c0dcfdc5f8df3c9d966d1/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/02-activity.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/93c45d73863a66ad523c0dcfdc5f8df3c9d966d1/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/02-activity.png",
+          "sha256": "449b4a1d0c6b2707ce61465de96b8f4c73c117cbc87ab5d689fba46c4c3df169",
+          "file": "02-activity.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/6c659371cae7411f3bc8d58c634a79c4b5287b5d/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/03-categories.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/6c659371cae7411f3bc8d58c634a79c4b5287b5d/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/03-categories.png",
+          "sha256": "fff2dcec2a763e985233847cbfa332c7051e951fedadeb14e8b601d9440c18ea",
+          "file": "03-categories.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/5a443030116ba3a1a95ece993dc572ca5f967144/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/04-ledger.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/5a443030116ba3a1a95ece993dc572ca5f967144/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/04-ledger.png",
+          "sha256": "6762d576d6ebc928a9d2ae8d6ba78ebd828d6d7b29c924a8edcdfd1c5435a1aa",
+          "file": "04-ledger.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/dc803bb596921ef506b2253b74494eda3d2e7ad2/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/05-selected-dates.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/dc803bb596921ef506b2253b74494eda3d2e7ad2/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/05-selected-dates.png",
+          "sha256": "56d4fbf1cc8c61f7fe7151e149ba5ee7ed8ed654f5927cca39437d970e8dce2c",
+          "file": "05-selected-dates.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/5539a26d867cb49498f72c67d6fd916ca9cef1e7/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/06-checkin-history.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/5539a26d867cb49498f72c67d6fd916ca9cef1e7/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/06-checkin-history.png",
+          "sha256": "abfaf2310ead70b3c60de69692a22c26f551a18b4df8f774359159d1daaa627f",
+          "file": "06-checkin-history.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/58bc1e0fe46c6877890a8c0ba59a31f9d2811ee4/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/07-backup.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/58bc1e0fe46c6877890a8c0ba59a31f9d2811ee4/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/07-backup.png",
+          "sha256": "130469efeb20e4d7599eaf3580e37cab253253641d7528a42727439107efad84",
+          "file": "07-backup.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/1a2d58523d6934e428bae145bf963a8ea3928fc2/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/08-restore-preview.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/1a2d58523d6934e428bae145bf963a8ea3928fc2/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/08-restore-preview.png",
+          "sha256": "abe859e217f703360cea3f6cd6cc717e8b721489f2a214711a891ccab4d80086",
+          "file": "08-restore-preview.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/647319345163587a730ec2a36fb61f4e611cf5de/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/09-note.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/647319345163587a730ec2a36fb61f4e611cf5de/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/09-note.png",
+          "sha256": "597e8136e43b2daff2057f7be570ee89b04c4ed2cb5ae52b357a5bc7e26bee32",
+          "file": "09-note.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/873b57608d8f0053fd5898333e0a6b0a378058fa/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/10-note-edited.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/873b57608d8f0053fd5898333e0a6b0a378058fa/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/10-note-edited.png",
+          "sha256": "4a3aebbc57d4951093694f5ccb7b67f31fec89fcd8417b08a5c4a9eb0a02da5e",
+          "file": "10-note-edited.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/1841ff85304510d156b50d9ec9cc98cc09cc515d/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/11-selected-image.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/1841ff85304510d156b50d9ec9cc98cc09cc515d/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/11-selected-image.png",
+          "sha256": "9e13e185314d347735619ea119d28f36d0af06f4ffa15344d6d464d16d2efa81",
+          "file": "11-selected-image.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/1fa38763d8b410c2ef4b2f4afb3054805e3c0032/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/12-jpeg-first-note.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/1fa38763d8b410c2ef4b2f4afb3054805e3c0032/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/12-jpeg-first-note.png",
+          "sha256": "be5f81249238f0424345781d6bc3410e9a4dfca41eefe1774730424b60b96ba0",
+          "file": "12-jpeg-first-note.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/59e1b8956b91c8ec55f301a547dd5d0d78283766/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/13-pixel-limit-image.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/59e1b8956b91c8ec55f301a547dd5d0d78283766/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/13-pixel-limit-image.png",
+          "sha256": "cf14db7fb37bf2de56f359086268362b61ca9ad59d0e044f2e7918635319bf09",
+          "file": "13-pixel-limit-image.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/3cdbb8885a516c552ee01d95b4e565579ca9f135/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/14-multiple-notes.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/3cdbb8885a516c552ee01d95b4e565579ca9f135/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/14-multiple-notes.png",
+          "sha256": "be23695ff4a2e6394ecfb7a743c5b099e17396228eac466192869e766b43bc72",
+          "file": "14-multiple-notes.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/38442408e163ebe795efea651144f3595a34058b/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/15-second-note.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/38442408e163ebe795efea651144f3595a34058b/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/15-second-note.png",
+          "sha256": "788c020d49f95b63ec428a38ba1e97b42fd8a982284a862a7950cfea976ae18d",
+          "file": "15-second-note.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/31ce180e832ba02c76734fd39331f044b4631f68/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/16-private-image-caption.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/31ce180e832ba02c76734fd39331f044b4631f68/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/16-private-image-caption.png",
+          "sha256": "75104b74bb691d7ccf4f2f46ee8d1151f618d1e839a507f50b47077b5a458296",
+          "file": "16-private-image-caption.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/e4788bf4c7bdcd629809eb4fce1fa6b6c2d3fabe/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/17-second-image-public.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/e4788bf4c7bdcd629809eb4fce1fa6b6c2d3fabe/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/17-second-image-public.png",
+          "sha256": "ebcd5907b7c701a851b2d20c5d3d977319b72f588b4e2d5789f90f01cfb77901",
+          "file": "17-second-image-public.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/7b0d2d6f70ea9d4af39acc3d62bce8365e30a861/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/18-derivative-preview.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/7b0d2d6f70ea9d4af39acc3d62bce8365e30a861/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/18-derivative-preview.png",
+          "sha256": "50de3ddfc3f0140d8049bbae16c4cee73c8e932dba5031d651b1205f0cc36863",
+          "file": "18-derivative-preview.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/8928d9a7662b9f0708460ad780e31d2bf47f0ca7/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/19-derivative-saved.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/8928d9a7662b9f0708460ad780e31d2bf47f0ca7/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/19-derivative-saved.png",
+          "sha256": "6628d640419cea79d7c7032ea25d3fd7ad7ca26f7b06cbe012948a582ac9c1af",
+          "file": "19-derivative-saved.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/5de49d7f07ec3ae96f7a57315e6548cc7c5e3e68/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/20-share-preview.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/5de49d7f07ec3ae96f7a57315e6548cc7c5e3e68/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/20-share-preview.png",
+          "sha256": "0d5cd746eaca77810983f302b27dbe34e7dd86ad75c42cf0a3cd1b686ac97ff0",
+          "file": "20-share-preview.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/909167e219eeb54bd8fe376d612d8c673b54cf62/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/21-share-saved.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/909167e219eeb54bd8fe376d612d8c673b54cf62/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/21-share-saved.png",
+          "sha256": "a78f1f08f82d07d1a187e4e2378470727b7f6dca42a98b38715e94bf2f959d1c",
+          "file": "21-share-saved.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/0ebbbbcbc89e806c59df06de13703d8bb92f2d40/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/22-share-process-loss-refused.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/0ebbbbcbc89e806c59df06de13703d8bb92f2d40/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/22-share-process-loss-refused.png",
+          "sha256": "b27e72fa89d8e0e4e9bc7089a190a8b69d166f69326231b35333923b5906e18f",
+          "file": "22-share-process-loss-refused.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/e04d3075e343476b01e071036b5913ad376fded4/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/23-share-fresh-after-loss.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/e04d3075e343476b01e071036b5913ad376fded4/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/23-share-fresh-after-loss.png",
+          "sha256": "ed03894d5b6b2dc9081446689d663cfe491db66097fe3a4fdf6cfcedfc536bf9",
+          "file": "23-share-fresh-after-loss.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/7ba659dd891577abf6684d2e6a95b007cef00a95/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/derivative-output.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/7ba659dd891577abf6684d2e6a95b007cef00a95/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/derivative-output.png",
+          "sha256": "dbfe1c06040ad80f6af540798a57e019c98c4aa4e6a277e68535f5265520bc97",
+          "file": "derivative-output.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/e730027147c16360a3b1f5c84c2289b6477f7d67/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/derivative-source.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/e730027147c16360a3b1f5c84c2289b6477f7d67/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/derivative-source.png",
+          "sha256": "101752500846f0a5f6dc4ca52f29d9db89625a555acc1f99d6165f57e144cb8f",
+          "file": "derivative-source.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/00fe206237be66a6bdc4c5963eac08467ffb7783/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/native-pdf-text.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/00fe206237be66a6bdc4c5963eac08467ffb7783/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/native-pdf-text.png",
+          "sha256": "bc60ff39574ead07355bec64d284174660dda8f9497cdf4045e8c9bd792918fb",
+          "file": "native-pdf-text.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/507c90e2a63279442cba004880536719e0cb6cb9/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/native-png-text.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/507c90e2a63279442cba004880536719e0cb6cb9/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/native-png-text.png",
+          "sha256": "49c4405b528f4a8b0b75945e3ae331c119751dd09048468e67c7a9dc4cbcd596",
+          "file": "native-png-text.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/5a0592ead847173588f3f9f7c6bcd4e7ca0e39b7/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/note-media.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/5a0592ead847173588f3f9f7c6bcd4e7ca0e39b7/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/note-media.png",
+          "sha256": "fec9fa80aa4fbad4bbb4cba53702bbca25ab656a6a74cbedca862b25e30e3106",
+          "file": "note-media.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/4ef437f3a3638a797a30fbcf3d1185dcb6989e8e/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/share-exported.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/4ef437f3a3638a797a30fbcf3d1185dcb6989e8e/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/26/share-exported.png",
+          "sha256": "dbfe1c06040ad80f6af540798a57e019c98c4aa4e6a277e68535f5265520bc97",
+          "file": "share-exported.png"
+        }
+      ]
+    },
+    "34": {
+      "status": "PASS",
+      "scope": "NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE",
+      "ledger_calendar": "NATIVE_MULTI_DATE_LEDGER_PASS",
+      "saf_restore": "NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS",
+      "checkin_history": "NATIVE_CHECKIN_HISTORY_BACKDATE_PASS",
+      "note_editor": "NATIVE_TEXT_IMAGE_NOTE_PASS",
+      "api": 34,
+      "count": 186,
+      "checks": [
+        "new UI database starts empty without fabricated activities",
+        "blank todo rejected visibly",
+        "UI adds distinct stable todo identities",
+        "real checkbox completes todo",
+        "pending filter excludes completed row",
+        "completed filter excludes pending row",
+        "invalid edit stays open without losing original",
+        "cancel invalid edit preserves value and completion",
+        "title edit preserves stable identity and completion",
+        "native todo state survives actual process restart",
+        "category created through visible native dialog",
+        "category rename updates visible label",
+        "activity created under selected category",
+        "ordered multiline manual path displays without collapse",
+        "daily check-in writes visible done state",
+        "repeated daily mark remains one visible day",
+        "skipped is distinct from done and unrecorded",
+        "accessible category reorder changes exact visible order",
+        "category order persists after process restart",
+        "skipped mark persists after process restart",
+        "activity path persists after process restart",
+        "actual native screenshots represent distinct states",
+        "default native UI uses schema3 with exact nine-column block layout",
+        "independent SQLite read matches exact UI todo identities titles and states",
+        "independent SQLite read matches renamed reordered categories",
+        "activity stays in its category without invented application",
+        "independent SQLite read preserves path order",
+        "repeated native marks persist exactly one day with entry timestamp",
+        "check-in does not invent money entries",
+        "new native ledger starts with empty selection and zero summary",
+        "calendar multi-select is explicit read-only scope",
+        "three different-day amounts total exactly 80 yuan in native UI",
+        "cancel native entry does not change totals",
+        "native ledger rejects fractional cents without closing editor",
+        "refund reduces net expense without rewriting gross expense",
+        "planned is separate and signed net cash is exact",
+        "nonconsecutive selected days exclude actual refund date",
+        "cancel date selection keeps previous summary",
+        "missing day is not presented as confirmed zero expenditure",
+        "empty date selection is zero not all-time total",
+        "native ledger exact totals survive stopped-process restart",
+        "independent Android SQLite read matches all six exact typed dated entries",
+        "native saves have distinct entry and batch identities without selection-generated writes",
+        "cancel and invalid amount leave no batch journal residue",
+        "money and date filtering never mutate the check-in history",
+        "native check-in editor rejects malformed date without closing",
+        "backdated done check-in appears with its exact date",
+        "un-recording removes the visible history row",
+        "un-recorded backdate leaves the exact prior single mark in independent readback",
+        "check-in editing never mutates the ledger",
+        "backdated check-in survives cancel then re-entered identically",
+        "SAF file selection shows visible restore preview and replacement counts",
+        "canceling SAF restore preview makes no database write",
+        "cancelled restore leaves exact new todo and old state independent",
+        "cancelled restore retains exact ledger rows",
+        "SAF file selection shows visible restore preview and replacement counts",
+        "unchecked consent cannot restore even with visible confirmation control",
+        "SAF file selection shows visible restore preview and replacement counts",
+        "explicit SAF consent replaces data with previewed backup",
+        "SAF restored data survives a separate stopped-process restart",
+        "independent SQLite read matches exact SAF restored state",
+        "SAF restore retains exact ledger after independent readback",
+        "SAF restore retains exact check-in history including the re-entered backdate",
+        "empty note starts visibly empty without fabricated content",
+        "blank note save rejected visibly",
+        "saved note text appears on activity",
+        "note survives process restart",
+        "attached image is registered with note",
+        "note inherits its activity title and stays bound to that activity",
+        "note keeps ordered text then image blocks",
+        "image block is not private by default",
+        "image bytes registered under immutable content id",
+        "image block references exact registered media id",
+        "notes never mutate the ledger",
+        "actual private PNG bytes match registry size and content ID",
+        "independent PNG decoder verifies all 9216 opaque expected pixels",
+        "edit existing note opens with the exact stored text",
+        "cancel note edit preserves original text and identity",
+        "blank existing note edit stays open with visible validation",
+        "cancelled valid and blank note edits leave exact persisted note rows unchanged",
+        "note edit replaces text in place without leaving an old duplicate",
+        "edited note text and stable block identity survive stopped-process restart",
+        "image remains an image view after editing text and restarting",
+        "independent readback proves only text changed with note IDs block IDs order and privacy retained",
+        "editing note leaves exact media registry and complete ledger unchanged",
+        "text editing and restart preserve exact private image bytes",
+        "image import opens the actual system document picker",
+        "cancel system image picker reports no note change",
+        "cancel picker leaves exact blocks and media registrations unchanged",
+        "malformed selected image rejected visibly",
+        "malformed rejection preserves every database table including revision",
+        "oversized dimensions selected image rejected visibly",
+        "oversized dimensions rejection preserves every database table including revision",
+        "excess byte budget selected image rejected visibly",
+        "excess byte budget rejection preserves every database table including revision",
+        "SAF image appends one exact ordered block without replacing text or prior image",
+        "SAF original bytes registered by exact hash MIME and length",
+        "image import preserves notes identity and all unrelated tables",
+        "SAF private copy equals independently generated two-color PNG byte for byte",
+        "selected image still renders after source deletion and stopped-process restart",
+        "selected image block identity order and reference survive restart",
+        "source deletion never removes or changes the private selected image",
+        "independent host decoder proves JPEG and both pixel boundary fixtures really decode with intended dimensions and colors",
+        "new image-first activity has no existing note in independent SQLite read",
+        "image-first activity shows genuine empty note before any import",
+        "first-image cancellation waits for a visible system picker before pressing Back",
+        "canceling first image reports no note change",
+        "first-image cancel creates no orphan note media block or revision",
+        "malformed first image rejected visibly before note creation",
+        "malformed first image leaves every table unchanged with no orphan note or media registration",
+        "20005000-pixel first image rejected visibly before note creation",
+        "20005000-pixel first image leaves every table unchanged with no orphan note or media registration",
+        "JPEG-first import creates exactly one note with correct activity binding title and preserved prior notes",
+        "JPEG-first import creates exactly one position-zero public image block without touching previous blocks",
+        "JPEG-first media registry has exact actual MIME digest and original byte length",
+        "JPEG-first note creation preserves activities todos checkins ledger and all unrelated tables",
+        "selected JPEG private original is byte-exact rather than a recompressed preview",
+        "JPEG-first note displays a real ImageView after external source deletion and process restart",
+        "JPEG-first restart preserves every database table and exact private JPEG bytes",
+        "exactly 20000000 pixels is accepted inclusively as one appended ordered image block",
+        "pixel-limit image keeps exact private original and matching media registry",
+        "pixel-limit import preserves note identity and unrelated complete tables",
+        "20000000-pixel image remains an ImageView after source deletion and restart",
+        "pixel-limit restart preserves exact complete database and original image bytes",
+        "existing single note remains the initial selected note",
+        "blank new note title stays in dialog without creating a note",
+        "canceling a populated new-note dialog preserves every table and revision",
+        "new note selects its own empty content instead of copying the first note",
+        "second note has one fresh identity correct owner title and unchanged old notes",
+        "second note owns exactly its text block while all first-note and other-activity blocks remain exact",
+        "creating and editing second note preserves media ledger checkins and all unrelated tables",
+        "restart opens original first note without replacing its content",
+        "note picker exposes both titles in stable creation order",
+        "canceling note switch keeps selected note",
+        "explicit selection restores second note alone after process restart",
+        "editing second note stays on selected stable note instead of jumping to first",
+        "switching back preserves original first-note text",
+        "first note retains its imported image after multi-note editing",
+        "independent readback proves only second text changed with all note and block identities intact",
+        "multi-note edits preserve unrelated tables and all selected private originals byte for byte",
+        "duplicate note title creates a separate empty note rather than overwriting its namesake",
+        "same-title creation adds only one distinct note and never touches existing blocks or unrelated tables",
+        "restart preserves creation order and separate indexed entries for duplicate titles",
+        "same-title note selection resolves exact second identity not latest matching title",
+        "switching and restarting notes are read-only across the complete database",
+        "image append retains the non-first selected note and its existing text",
+        "non-first image import appends exactly one correctly owned ordered block without modifying any old block",
+        "reused JPEG import preserves notes complete media registry unrelated tables and exact original",
+        "non-first note image survives source deletion and explicit reselect after restart",
+        "new image metadata editor starts with empty caption and public flag",
+        "canceling edited caption and privacy preserves every table revision and original bytes",
+        "caption and private badge render on the selected second note after saving",
+        "private caption save changes only caption and privacy while retaining every block identity owner order and asset reference",
+        "metadata edit preserves complete unrelated tables media registrations and all imported originals",
+        "restart and reselect prefill the persisted caption and true private flag",
+        "editing second image metadata does not leak its caption into first note",
+        "same-title third note stays empty after second note image edits",
+        "restart and switching across private-image notes are read-only for every table",
+        "caption-only edit preserves existing true private flag and all other block fields",
+        "caption-only private edit leaves all unrelated tables and immutable original unchanged",
+        "updated private caption survives another force-stop and explicit note selection",
+        "empty caption is allowed and private flag can be explicitly unset",
+        "clearing caption and unsetting private restores exact original block fields without touching siblings or other tables",
+        "empty caption and false private flag persist after restart",
+        "final metadata cancel and restart preserve every table and exact JPEG original",
+        "derivative dialog shows actual decoded source dimensions with empty selection",
+        "derivative preview without selection rejected visibly",
+        "derivative cancel leaves every table and original bytes unchanged",
+        "corner drag maps to full source extent within touch rounding",
+        "derivative oversize selection rejected with visible pixel budget",
+        "derivative reset clears selection reports",
+        "touch crop maps onto intended source rectangle within rounding",
+        "redact mode adds exactly one reported mask",
+        "touch mask maps onto intended source rectangle within rounding",
+        "derivative preview renders exact reported output dimensions",
+        "derived block preserves note owner position kind empty caption public flag and records exact original",
+        "derived PNG registered with exact mime and byte length",
+        "derivative save preserves all unrelated tables",
+        "original imported PNG bytes unchanged after derivative save",
+        "sibling blocks across notes remain exact after derivative save",
+        "independent decoder proves exact cropped pixels and opaque mask for reported rects",
+        "derived image renders with working entry after process restart",
+        "derivative state and both images survive stopped-process restart exactly",
+        "re-derived preview renders for abandonment check",
+        "abandoned second preview writes nothing and keeps published derivative",
+        "native schema3 survives SAF restore and all ordinary edits without invented image origins"
+      ],
+      "screenshots": [
+        {
+          "file": "01-todos.png",
+          "bytes": 37465,
+          "sha256": "6a33bfeef6d251ca36576ba21e23c77fc535a046e10df82866b8dde5ac6722d8"
+        },
+        {
+          "file": "02-activity.png",
+          "bytes": 46476,
+          "sha256": "71d60a5fcd8e147d5d40540563e1e6371ff5301f19db02cb4d0a923b9d86ad31"
+        },
+        {
+          "file": "03-categories.png",
+          "bytes": 44632,
+          "sha256": "c297eb2b9d014375ad18d2f9d23c5021a6235b9417b7873902b4e8bb5c21763f"
+        },
+        {
+          "file": "04-ledger.png",
+          "bytes": 57822,
+          "sha256": "31b88e7eb3abce04e6072dad99329bc472af86d9cdbd7b55b8405a32c7fcb2cf"
+        },
+        {
+          "file": "05-selected-dates.png",
+          "bytes": 57939,
+          "sha256": "21070157ef502c3c13193ee0f402395187d570345417573f309cfc2baaa71466"
+        },
+        {
+          "file": "06-checkin-history.png",
+          "bytes": 42862,
+          "sha256": "286f3503605419d147e7ffafda4c032e6a0a2b7e64212415b033b1a37fa027a9"
+        },
+        {
+          "file": "07-backup.png",
+          "bytes": 41797,
+          "sha256": "6ae676de7edfac0685331279cc894a8de499fd76ad34a544e86f22ace83587a1"
+        },
+        {
+          "file": "08-restore-preview.png",
+          "bytes": 57991,
+          "sha256": "eabc5bc7d58af97af97779b1ede0485790895d4c26049834394ea5e7d26f7264"
+        },
+        {
+          "file": "09-note.png",
+          "bytes": 34396,
+          "sha256": "4b4940661622b2d354649164423ff9d6cf80d6e2edd443b16d942b74a7f30c27"
+        },
+        {
+          "file": "10-note-edited.png",
+          "bytes": 41079,
+          "sha256": "93159bba9e27adf3d374ffcd188e921968db72d5dbf22874df51393e34441720"
+        },
+        {
+          "file": "11-selected-image.png",
+          "bytes": 35847,
+          "sha256": "f7c86372a623e04131ad749cff70f70acac0d2a3983d0553b1774d3fc350f273"
+        },
+        {
+          "file": "12-jpeg-first-note.png",
+          "bytes": 35541,
+          "sha256": "896a0d7214b6ed19660f272c3e25d59a5f3a3616f60cd9ef353a94bc12a3adef"
+        },
+        {
+          "file": "13-pixel-limit-image.png",
+          "bytes": 35743,
+          "sha256": "772ae62f9bd1e9b32001f9f913bef9587343a150544fed0dcb39981f486da864"
+        },
+        {
+          "file": "14-multiple-notes.png",
+          "bytes": 36116,
+          "sha256": "e0de5020084b04b1dcc9b6228630597efddac95d77f13e95960fadce5fa94451"
+        },
+        {
+          "file": "15-second-note.png",
+          "bytes": 33373,
+          "sha256": "c026570460ec3f6faf11eb85bfe41d090deba59d9eb7158b0acf8561494a2b42"
+        },
+        {
+          "file": "16-private-image-caption.png",
+          "bytes": 41477,
+          "sha256": "65959fb7a332c233e04a83aa6f082c6a6bfbe4618adf46d01a0f1c917208999f"
+        },
+        {
+          "file": "17-second-image-public.png",
+          "bytes": 39334,
+          "sha256": "9a0477421d83dfdb4e0d6b51355d57be9a95a37544884cefd24b25a796ffd58a"
+        },
+        {
+          "file": "18-derivative-preview.png",
+          "bytes": 39155,
+          "sha256": "1e0d78809f42d7036f54dbed7e7d2c48d9aadd9975fab2ccc996829174654a1f"
+        },
+        {
+          "file": "19-derivative-saved.png",
+          "bytes": 36489,
+          "sha256": "c3ed66b6b5f9bfb30e9d705df7f6dc2806c51094644dd75ce67f18580c5fba7d"
+        },
+        {
+          "file": "20-share-preview.png",
+          "bytes": 48506,
+          "sha256": "6c013933bdc940e86cac618eb7ef73fcc7853b019287fae1ae785e3a773c1bb5"
+        },
+        {
+          "file": "21-share-saved.png",
+          "bytes": 41018,
+          "sha256": "5fc93555850289160f2aa84e5f7c46eaa2f434ba567d873254a8159407724c38"
+        },
+        {
+          "file": "22-share-process-loss-refused.png",
+          "bytes": 40174,
+          "sha256": "d55e8d2f93d808215e043f4c55f7b2b46525cddbdd53ffe558f7f786d525c334"
+        },
+        {
+          "file": "23-share-fresh-after-loss.png",
+          "bytes": 40900,
+          "sha256": "189a3be5b7084b7d445b017af1bf49eedc48bdfa7e83925b53d702b3e7ad8e0c"
+        }
+      ],
+      "infra_retries": [],
+      "restore_undo": "NOT_IMPLEMENTED",
+      "restore_preview_lifecycle": "NOT_TESTED",
+      "checkin_schedules": "NOT_IMPLEMENTED",
+      "real_photo_selection": "NATIVE_SAF_PNG_JPEG_PASS",
+      "photos": "SYNTHETIC_PNG_JPEG_ONLY",
+      "sharing": "NATIVE_SINGLE_NOTE_MARKDOWN_SAF_SYNTHETIC_NOT_PDF_OR_RECEIVER",
+      "release_ready": false,
+      "image_picker_lifecycle": "CANCEL_AND_RESTART_ONLY",
+      "jpeg": "NATIVE_SAF_EXACT_PRIVATE_COPY_PASS",
+      "camera": "NOT_IMPLEMENTED",
+      "image_first_note": "CANCEL_REJECT_CREATE_RESTART_PASS",
+      "image_pixel_budget": "20000000_ACCEPTED_20005000_REJECTED",
+      "exif_orientation": "NOT_TESTED",
+      "whole_note_memory": "NOT_TESTED",
+      "multiple_notes": "CREATE_SWITCH_EDIT_DUPLICATE_TITLE_RESTART_PASS",
+      "note_selection_persistence": "RESTART_DEFAULTS_FIRST_EXPLICIT_RESELECT",
+      "note_rename_delete_reorder": "NOT_IMPLEMENTED",
+      "nonfirst_image": "APPEND_ISOLATION_RESTART_PASS",
+      "image_metadata": "CAPTION_PRIVATE_CANCEL_EDIT_CLEAR_RESTART_PASS",
+      "private_sharing": "NOT_TESTED",
+      "default_app_schema": 3,
+      "default_schema3_ui": "NATIVE_SCHEMA3_UI_PASS",
+      "derivative_ui": "NATIVE_CROP_MASK_UI_SAVE_CANCEL_RESTART_PASS",
+      "derivative_geometry": [
+        {
+          "source": [
+            1536,
+            768
+          ],
+          "preview": [
+            768,
+            384
+          ],
+          "requested": [
+            0,
+            0,
+            1536,
+            768
+          ],
+          "screen": [
+            28,
+            151,
+            292,
+            283
+          ],
+          "canvas": "[28,97][292,337]",
+          "observed_crop": [
+            0,
+            0,
+            1536,
+            768
+          ]
+        },
+        {
+          "source": [
+            1280,
+            640
+          ],
+          "preview": [
+            640,
+            320
+          ],
+          "requested": [
+            320,
+            160,
+            960,
+            480
+          ],
+          "screen": [
+            94,
+            184,
+            226,
+            250
+          ],
+          "canvas": "[28,97][292,337]",
+          "observed_crop": [
+            320,
+            160,
+            960,
+            480
+          ]
+        },
+        {
+          "source": [
+            1280,
+            640
+          ],
+          "preview": [
+            640,
+            320
+          ],
+          "requested": [
+            640,
+            240,
+            800,
+            400
+          ],
+          "screen": [
+            160,
+            200,
+            193,
+            234
+          ],
+          "canvas": "[28,97][292,337]",
+          "observed_mask": [
+            640,
+            238,
+            800,
+            402
+          ]
+        },
+        {
+          "source": [
+            640,
+            320
+          ],
+          "preview": [
+            640,
+            320
+          ],
+          "requested": [
+            0,
+            0,
+            320,
+            160
+          ],
+          "screen": [
+            28,
+            151,
+            160,
+            217
+          ],
+          "canvas": "[28,97][292,337]"
+        }
+      ],
+      "pixel_oracle": "DERIVATIVE_ORACLE_PASS positive=1 negative=2",
+      "markdown_ui": {
+        "status": "PASS",
+        "api": 34,
+        "commit": "e6a0ba1ce63b17e178b239ac02031d82f6cdf10d",
+        "run_id": "36250840365",
+        "scope": "NATIVE_SINGLE_NOTE_MARKDOWN_SAF_SYNTHETIC_NOT_PDF_OR_RECEIVER",
+        "checks": [
+          "share private fixture changes only chosen image metadata",
+          "share duplicate-title empty note cannot export namesake content",
+          "share picker excludes private image and starts with no selection",
+          "share empty selection stays in selection dialog",
+          "share actual preview contains selected text and image",
+          "share unchecked consent cannot open system save",
+          "share preview cancellation preserves complete database and media",
+          "share system picker cancellation publishes no file and preserves state",
+          "share text-only selection creates exact Markdown without image entries",
+          "share text-only success preserves complete database and media",
+          "share selected export contains exact Markdown and only one current image",
+          "share independent decoder verifies exported crop and opaque mask pixels",
+          "share successful image export preserves complete database and media",
+          "share external writer changes privacy without revision increment",
+          "share stale preview refuses publication through real system picker",
+          "share stale refusal causes no extra database or media mutation",
+          "share background process death is proven while system picker remains",
+          "share recreated owner refuses old preview without nonempty publication",
+          "share returned activity runs in a different proven process",
+          "share process-loss refusal preserves complete database and media",
+          "share fresh explicit selection after process loss exports exact reviewed ZIP",
+          "share fresh post-loss success preserves complete database and media"
+        ],
+        "release_ready": false,
+        "recreation": "PROCESS_DEATH_DURING_SAF_REFUSED_AND_FRESH_EXPORT_PASS",
+        "provider_failures": "NOT_TESTED",
+        "private_text": "NOT_TESTED",
+        "actual_receiver": "NOT_TESTED",
+        "picker_cancel_navigation": [
+          {
+            "backs": 0,
+            "packages": [
+              "com.google.android.documentsui"
+            ],
+            "cancelled": false
+          },
+          {
+            "backs": 1,
+            "packages": [
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "cancelled": true
+          }
+        ],
+        "zip_sha256": "6a3c4c3305de6a38c2cddf8ac8b9a041fbf8be824a0dc508b0e77161956a144d",
+        "zip_bytes": 589,
+        "external_helper": {
+          "sha256": "8e7b26128c3529da5a01cd2be38001ae1e6e1c242dd01b0e1e22f90a52a61d07",
+          "readback": "EXACT_BYTES",
+          "location": "APP_PRIVATE_CACHE"
+        },
+        "process_loss": {
+          "old_pid": "2407",
+          "absence_probes": [
+            {
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "injection": "CI_APP_UID_SIGKILL_NOT_LMK",
+          "stage": "SIGNAL_SENT",
+          "identity": {
+            "status": "PASS",
+            "pid": "2407",
+            "uid": "10192",
+            "uid_fields": [
+              [
+                "10192",
+                "10192",
+                "10192",
+                "10192"
+              ]
+            ],
+            "expected_package": "com.supercubegame.pockettodo.v12.preview",
+            "cmdline_bytes": 99,
+            "cmdline_sha256": "725588960f59515f7cdbb1bcb02d9fea1e06f7d7d6311703702508cb23a3d55e",
+            "cmdline_hex_head": "636f6d2e73757065726375626567616d652e706f636b6574746f646f2e7631322e707265766965770000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "cmdline_hex_truncated": false,
+            "exact_argv0": true,
+            "nul_only_tail": true,
+            "nul_suffix_bytes": 59
+          },
+          "uid": "10192",
+          "uid_fields": [
+            [
+              "10192",
+              "10192",
+              "10192",
+              "10192"
+            ]
+          ],
+          "picker_package": "com.google.android.documentsui",
+          "new_pid": "2906"
+        },
+        "count": 22
+      },
+      "paged_ui": {
+        "status": "PASS",
+        "api": 34,
+        "commit": "e6a0ba1ce63b17e178b239ac02031d82f6cdf10d",
+        "run_id": "36250840365",
+        "scope": "NATIVE_SINGLE_NOTE_TEXT_PDF_PNG_SAF_CANCEL_STALE_NOT_PROCESS_DEATH_OR_RECEIVER",
+        "labels": [
+          "private_excluded_and_empty_selection_PDF",
+          "format_picker_selected_PDF",
+          "actual_page_preview_PDF",
+          "unchecked_save_refused_PDF",
+          "picker_cancel_preserves_state_PDF",
+          "real_saf_output_PDF",
+          "independent_text_page_PDF",
+          "save_preserves_state_PDF",
+          "same_revision_privacy_change_PDF",
+          "stale_publication_refused_PDF",
+          "stale_refusal_preserves_state_PDF",
+          "fixture_restored_PDF",
+          "private_excluded_and_empty_selection_PNG_ZIP",
+          "format_picker_selected_PNG_ZIP",
+          "actual_page_preview_PNG_ZIP",
+          "unchecked_save_refused_PNG_ZIP",
+          "picker_cancel_preserves_state_PNG_ZIP",
+          "real_saf_output_PNG_ZIP",
+          "independent_text_page_PNG_ZIP",
+          "save_preserves_state_PNG_ZIP",
+          "same_revision_privacy_change_PNG_ZIP",
+          "stale_publication_refused_PNG_ZIP",
+          "stale_refusal_preserves_state_PNG_ZIP",
+          "fixture_restored_PNG_ZIP"
+        ],
+        "checks": 24,
+        "release_ready": false,
+        "outputs": {
+          "PDF": {
+            "sha256": "f5e0b544c3e343182b443d49012547887f963425910ab8f2342792497e7caf96",
+            "bytes": 8033,
+            "pdf_text": "EXACT",
+            "page": "SINGLE_NONBLANK_TEXT_REGION_NO_IMAGE"
+          },
+          "PNG_ZIP": {
+            "sha256": "4fabefe315c148851715422f176ee1789c11422ca04bda906696353728b19516",
+            "bytes": 2260,
+            "pdf_text": "NOT_OCR_TESTED",
+            "page": "SINGLE_NONBLANK_TEXT_REGION_NO_IMAGE"
+          }
+        }
+      },
+      "published_screenshots": [
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/605e01fdaad3b38789677bb358ee032c2ddf945e/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/01-todos.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/605e01fdaad3b38789677bb358ee032c2ddf945e/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/01-todos.png",
+          "sha256": "6a33bfeef6d251ca36576ba21e23c77fc535a046e10df82866b8dde5ac6722d8",
+          "file": "01-todos.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/4a38ffbdd791c66bbd1cca23f7e320d83bbe1f8a/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/02-activity.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/4a38ffbdd791c66bbd1cca23f7e320d83bbe1f8a/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/02-activity.png",
+          "sha256": "71d60a5fcd8e147d5d40540563e1e6371ff5301f19db02cb4d0a923b9d86ad31",
+          "file": "02-activity.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/40cbdf21d130e48e29cb5ee2a86424b8c22f48d8/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/03-categories.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/40cbdf21d130e48e29cb5ee2a86424b8c22f48d8/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/03-categories.png",
+          "sha256": "c297eb2b9d014375ad18d2f9d23c5021a6235b9417b7873902b4e8bb5c21763f",
+          "file": "03-categories.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/43cc0a3349206c68b632d6a266c08afb0a4e9a7f/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/04-ledger.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/43cc0a3349206c68b632d6a266c08afb0a4e9a7f/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/04-ledger.png",
+          "sha256": "31b88e7eb3abce04e6072dad99329bc472af86d9cdbd7b55b8405a32c7fcb2cf",
+          "file": "04-ledger.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/a2e57219ddbc26b5ef8bf0c4b4deb9e6bfcd4576/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/05-selected-dates.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/a2e57219ddbc26b5ef8bf0c4b4deb9e6bfcd4576/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/05-selected-dates.png",
+          "sha256": "21070157ef502c3c13193ee0f402395187d570345417573f309cfc2baaa71466",
+          "file": "05-selected-dates.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/64260abf17dbe202919153c1c3a5b593c2494929/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/06-checkin-history.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/64260abf17dbe202919153c1c3a5b593c2494929/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/06-checkin-history.png",
+          "sha256": "286f3503605419d147e7ffafda4c032e6a0a2b7e64212415b033b1a37fa027a9",
+          "file": "06-checkin-history.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/331492aedd1a4c77daf18ea9b08bed47fc7ccf62/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/07-backup.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/331492aedd1a4c77daf18ea9b08bed47fc7ccf62/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/07-backup.png",
+          "sha256": "6ae676de7edfac0685331279cc894a8de499fd76ad34a544e86f22ace83587a1",
+          "file": "07-backup.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/739e97a11b10def65d9429444f312f39a14b8291/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/08-restore-preview.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/739e97a11b10def65d9429444f312f39a14b8291/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/08-restore-preview.png",
+          "sha256": "eabc5bc7d58af97af97779b1ede0485790895d4c26049834394ea5e7d26f7264",
+          "file": "08-restore-preview.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/48f4c62695b2b1721edc976637a545074d27af88/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/09-note.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/48f4c62695b2b1721edc976637a545074d27af88/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/09-note.png",
+          "sha256": "4b4940661622b2d354649164423ff9d6cf80d6e2edd443b16d942b74a7f30c27",
+          "file": "09-note.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/87e6d059fe0d0637ecddfc5a98dbb24913c1083b/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/10-note-edited.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/87e6d059fe0d0637ecddfc5a98dbb24913c1083b/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/10-note-edited.png",
+          "sha256": "93159bba9e27adf3d374ffcd188e921968db72d5dbf22874df51393e34441720",
+          "file": "10-note-edited.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/7840217b99dc790c00ac0b730bec4e1b7bcfc2bf/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/11-selected-image.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/7840217b99dc790c00ac0b730bec4e1b7bcfc2bf/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/11-selected-image.png",
+          "sha256": "f7c86372a623e04131ad749cff70f70acac0d2a3983d0553b1774d3fc350f273",
+          "file": "11-selected-image.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/0169b4e8dd2f25677809fbed95fa4f194a7bfcf0/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/12-jpeg-first-note.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/0169b4e8dd2f25677809fbed95fa4f194a7bfcf0/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/12-jpeg-first-note.png",
+          "sha256": "896a0d7214b6ed19660f272c3e25d59a5f3a3616f60cd9ef353a94bc12a3adef",
+          "file": "12-jpeg-first-note.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/d52998042d6ae7332fe7bcecfe5a989bbb712d73/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/13-pixel-limit-image.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/d52998042d6ae7332fe7bcecfe5a989bbb712d73/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/13-pixel-limit-image.png",
+          "sha256": "772ae62f9bd1e9b32001f9f913bef9587343a150544fed0dcb39981f486da864",
+          "file": "13-pixel-limit-image.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/5c2716b2c88c3c3528791530005e1387d0cbfd42/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/14-multiple-notes.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/5c2716b2c88c3c3528791530005e1387d0cbfd42/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/14-multiple-notes.png",
+          "sha256": "e0de5020084b04b1dcc9b6228630597efddac95d77f13e95960fadce5fa94451",
+          "file": "14-multiple-notes.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/3a804ff42bc48a7628d58e6763e8dbc54d916dbe/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/15-second-note.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/3a804ff42bc48a7628d58e6763e8dbc54d916dbe/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/15-second-note.png",
+          "sha256": "c026570460ec3f6faf11eb85bfe41d090deba59d9eb7158b0acf8561494a2b42",
+          "file": "15-second-note.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/97872c698513fd5b29edf68a29345e2cf4d89af9/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/16-private-image-caption.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/97872c698513fd5b29edf68a29345e2cf4d89af9/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/16-private-image-caption.png",
+          "sha256": "65959fb7a332c233e04a83aa6f082c6a6bfbe4618adf46d01a0f1c917208999f",
+          "file": "16-private-image-caption.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/267ae872ad25eba373460e2d9eecec27a1e58532/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/17-second-image-public.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/267ae872ad25eba373460e2d9eecec27a1e58532/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/17-second-image-public.png",
+          "sha256": "9a0477421d83dfdb4e0d6b51355d57be9a95a37544884cefd24b25a796ffd58a",
+          "file": "17-second-image-public.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/8355703e1e0e58af07d59c8f3e558ae4a76f1321/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/18-derivative-preview.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/8355703e1e0e58af07d59c8f3e558ae4a76f1321/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/18-derivative-preview.png",
+          "sha256": "1e0d78809f42d7036f54dbed7e7d2c48d9aadd9975fab2ccc996829174654a1f",
+          "file": "18-derivative-preview.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/f28742f9136548c82f0e34c34412905836ff8ae0/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/19-derivative-saved.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/f28742f9136548c82f0e34c34412905836ff8ae0/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/19-derivative-saved.png",
+          "sha256": "c3ed66b6b5f9bfb30e9d705df7f6dc2806c51094644dd75ce67f18580c5fba7d",
+          "file": "19-derivative-saved.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/ad8d809ba712c15ee628d9e52c9c663d15db0e00/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/20-share-preview.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/ad8d809ba712c15ee628d9e52c9c663d15db0e00/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/20-share-preview.png",
+          "sha256": "6c013933bdc940e86cac618eb7ef73fcc7853b019287fae1ae785e3a773c1bb5",
+          "file": "20-share-preview.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/4f60d49b8132d7035942c783139a5c8695c5be92/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/21-share-saved.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/4f60d49b8132d7035942c783139a5c8695c5be92/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/21-share-saved.png",
+          "sha256": "5fc93555850289160f2aa84e5f7c46eaa2f434ba567d873254a8159407724c38",
+          "file": "21-share-saved.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/eb4d4b1c7b44d42c364e04510201e35d4a32f65c/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/22-share-process-loss-refused.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/eb4d4b1c7b44d42c364e04510201e35d4a32f65c/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/22-share-process-loss-refused.png",
+          "sha256": "d55e8d2f93d808215e043f4c55f7b2b46525cddbdd53ffe558f7f786d525c334",
+          "file": "22-share-process-loss-refused.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/f326b032fd31172f30bf82a3406aabb16f6beba4/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/23-share-fresh-after-loss.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/f326b032fd31172f30bf82a3406aabb16f6beba4/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/23-share-fresh-after-loss.png",
+          "sha256": "189a3be5b7084b7d445b017af1bf49eedc48bdfa7e83925b53d702b3e7ad8e0c",
+          "file": "23-share-fresh-after-loss.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/a9fb15d67635d0793d09c67acdf18dbafbdbfdee/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/derivative-output.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/a9fb15d67635d0793d09c67acdf18dbafbdbfdee/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/derivative-output.png",
+          "sha256": "09850540aa76afa2fd7d4c975db1be59b9c49ce8054a24a5a9b289371caf316a",
+          "file": "derivative-output.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/21d186fc14c589ea52a213d83307d06b2d6fe5e7/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/derivative-source.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/21d186fc14c589ea52a213d83307d06b2d6fe5e7/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/derivative-source.png",
+          "sha256": "101752500846f0a5f6dc4ca52f29d9db89625a555acc1f99d6165f57e144cb8f",
+          "file": "derivative-source.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/43afbda7b8228345b662fe2d680bf8e0f0a28e1c/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/native-pdf-text.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/43afbda7b8228345b662fe2d680bf8e0f0a28e1c/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/native-pdf-text.png",
+          "sha256": "e3a73bf6c53e02b3955778bebdea560920b3e98befa05f259ec80985c44dbf98",
+          "file": "native-pdf-text.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/2c60205bb8ee0297e76c3dc065832668a1351136/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/native-png-text.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/2c60205bb8ee0297e76c3dc065832668a1351136/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/native-png-text.png",
+          "sha256": "421971a7efe9819bde0c6fee04401e5f97fe3541fec3564f6bf6d82a92c8cc0f",
+          "file": "native-png-text.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/1aadf2b690087a386b67e092c1b53501ed684e77/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/note-media.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/1aadf2b690087a386b67e092c1b53501ed684e77/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/note-media.png",
+          "sha256": "8880b1c84ddbdca3c4473711900fe94e549356071c7d054f9585c1e2178d64b8",
+          "file": "note-media.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/988ee5834a1cee3baeb17b0625be27afd9e03ff7/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/share-exported.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/988ee5834a1cee3baeb17b0625be27afd9e03ff7/screenshots/e6a0ba1ce63b17e178b239ac02031d82f6cdf10d-36250840365/34/share-exported.png",
+          "sha256": "09850540aa76afa2fd7d4c975db1be59b9c49ce8054a24a5a9b289371caf316a",
+          "file": "share-exported.png"
+        }
+      ]
+    }
+  },
+  "release_ready": false
+}

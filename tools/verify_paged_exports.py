@@ -304,6 +304,14 @@ def text_check(text):
     assert text.index("BEGIN_SELECTED")<text.index("ROW000")<text.index("ROW089")<text.index("END_SELECTED")<text.index("CAPTION_END")
     assert "中文说明" in text.replace(" ","").replace("\n",""),"Chinese PDF text missing"
 
+def pdf_text_diagnostic(text):
+    """Only synthetic CI fixture output. Preserve code points, not a guessed cause."""
+    tail=text[-800:]
+    return {"characters":len(text),"tail":tail,
+            "non_ascii":[{"offset":i,"codepoint":"U+%04X"%ord(c)} for i,c in enumerate(text) if ord(c)>127][:80],
+            "expected":[ "U+%04X"%ord(c) for c in "中文说明"],
+            "form_feeds":text.count("\f")}
+
 def selftest():
     good="BEGIN_SELECTED\n"+"\n".join("ROW%03d"%i for i in range(90))+"\nEND_SELECTED\n中文说明\nCAPTION_END"
     text_check(good)
@@ -314,6 +322,13 @@ def selftest():
         except AssertionError:continue
         raise AssertionError("PDF observer accepted corrupt text")
     print("PAGED_TEXT_OBSERVER 1 positive 5 negatives PASS NOT_PDF_EXECUTION",flush=True)
+    for value in ("中文说明","中文说\u660e","\ufffd\ufffd","\u2f42文说明","中文\f说明",""):
+        diagnostic=pdf_text_diagnostic(value)
+        assert diagnostic["tail"]==value and diagnostic["characters"]==len(value)
+        assert diagnostic["non_ascii"]==[{"offset":i,"codepoint":"U+%04X"%ord(c)} for i,c in enumerate(value) if ord(c)>127]
+    assert len(pdf_text_diagnostic("中"*1000)["tail"])==800
+    assert len(pdf_text_diagnostic("中"*1000)["non_ascii"])==80
+    print("PAGED_TEXT_DIAGNOSTIC 8/8 PASS NOT_PDF_EXECUTION",flush=True)
     good="INSTRUMENTATION_RESULT: stream=PAGED_TARGET test.package 10123\n"
     good+="".join("PAGED_PASS "+label+"\n" for label in LABELS)
     marker="PAGED_RESULT 29/29 PASS BACKEND_NOT_NATIVE_UI_SAF_OR_RECEIVER\n"
@@ -348,7 +363,7 @@ def verify(folder,classes,android,prefix,remote,gate):
     """Called inside the existing codec job; failures propagate to its exit status."""
     selftest()
     # Independent PDF parser/rasterizer. Install only in disposable CI when absent.
-    if not all(shutil.which(x) for x in ("pdftotext","pdftoppm","pdfinfo")):
+    if not all(shutil.which(x) for x in ("pdftotext","pdftoppm","pdfinfo","pdffonts")):
         run(["sudo","apt-get","update"],timeout=240)
         run(["sudo","apt-get","install","-y","poppler-utils"],timeout=240)
     labels,identity=instrumentation(folder,prefix,gate)
@@ -363,6 +378,10 @@ def verify(folder,classes,android,prefix,remote,gate):
         pages=int(match[1]);assert pages==1 if stem=="picture" else 3<=pages<=5
         run(["pdftotext","-enc","UTF-8",folder/(stem+".pdf"),folder/(stem+".txt")])
         text=(folder/(stem+".txt")).read_text()
+        # Emit before assertions, so an independent text failure is diagnosable.
+        # Do not normalize compatibility glyphs or remove the Chinese assertion.
+        print("PAGED_PDF_TEXT "+json.dumps({"stem":stem,**pdf_text_diagnostic(text)},ensure_ascii=True),flush=True)
+        run(["pdffonts",folder/(stem+".pdf")])
         if stem!="picture":text_check(text)
         else:assert text.count("CAPTION_END")==1 and "ROW" not in text
         run(["pdftoppm","-r","72","-png",folder/(stem+".pdf"),folder/(stem+"-pdf")])

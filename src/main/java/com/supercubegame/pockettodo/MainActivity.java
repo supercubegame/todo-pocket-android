@@ -209,6 +209,25 @@ public final class MainActivity extends Activity {
     private void previewShare(byte[][] prepared){
         previewShare(prepared,0);
     }
+    /** Only our bounded generated PDF is accepted here, not an external PDF viewer.
+     * Android 8's PdfRenderer may retain a native error after malformed input.
+     * Reject wrong containers and structural damage before touching that renderer.
+     * This is not a general sanitizer or proof that every PDFium failure is isolated.
+     */
+    private static void validatePdfPreview(byte[] payload)throws IOException{
+        if(payload.length<8||payload[0]!='%'||payload[1]!='P'||payload[2]!='D'||
+                payload[3]!='F'||payload[4]!='-')throw new IOException("Invalid PDF signature");
+        try(com.tom_roush.pdfbox.io.RandomAccessBuffer input=new com.tom_roush.pdfbox.io.RandomAccessBuffer(payload)){
+            com.tom_roush.pdfbox.pdfparser.PDFParser parser=new com.tom_roush.pdfbox.pdfparser.PDFParser(input);
+            parser.setLenient(false);
+            parser.parse();
+            try(com.tom_roush.pdfbox.pdmodel.PDDocument parsed=parser.getPDDocument()){
+                int pages=parsed.getNumberOfPages();
+                if(parsed.isEncrypted()||pages<1||pages>PagedNoteRenderer.MAX_PAGES)
+                    throw new IOException("Invalid preview PDF structure");
+            }
+        }
+    }
     /** Decode the final export bytes, not a second render of the selected source.
      * All physical pages are shown as bounded thumbnails. No original asset access.
      * PDF requires a seekable descriptor; unlink its private cache file before decoding.
@@ -221,6 +240,7 @@ public final class MainActivity extends Activity {
         boolean success=false;
         try{
             if(format==1){
+                validatePdfPreview(payload);
                 Path temp=Files.createTempFile(context.getCacheDir().toPath(),"share-preview-",".pdf");
                 try{
                     Files.write(temp,payload);

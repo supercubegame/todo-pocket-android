@@ -338,7 +338,7 @@ def text_check(text):
     assert text.index("BEGIN_SELECTED")<text.index("ROW000")<text.index("ROW089")<text.index("END_SELECTED")<text.index("CAPTION_END")
     assert "中文说明" in text.replace(" ","").replace("\n",""),"Chinese PDF text missing"
     assert text.count("UNICODE_PAIR 文|⽂|文|⽂ END_PAIR")==1,"PDF original Unicode pair changed"
-    assert re.findall(r"(?m)^ROW\d{3}",text)==rows,"PDF hard line boundaries lost"
+    assert re.findall(r"(?m)(?:^|\f)(ROW\d{3})",text)==rows,"PDF hard line boundaries lost"
 
 def pdf_text_diagnostic(text):
     """Only synthetic CI fixture output. Preserve code points, not a guessed cause."""
@@ -351,6 +351,7 @@ def pdf_text_diagnostic(text):
 def selftest():
     good="BEGIN_SELECTED\n"+"\n".join("ROW%03d"%i for i in range(90))+"\nEND_SELECTED\n中文说明\nUNICODE_PAIR 文|⽂|文|⽂ END_PAIR\nCAPTION_END"
     text_check(good)
+    text_check(good.replace("ROW049\nROW050","ROW049\n\n\fROW050"))
     bad=(good.replace("ROW050",""),good.replace("ROW050","ROW049"),good+"PRIVATE_PAGED_SECRET",
          good.replace("中文说明",""),good.replace("ROW000","ROW999"),
          good.replace("文|⽂|文|⽂","⽂|⽂|⽂|⽂"),good.replace("文|⽂|文|⽂","文|文|文|文"),
@@ -364,7 +365,7 @@ def selftest():
         try:text_check(value)
         except AssertionError:continue
         raise AssertionError("PDF observer accepted corrupt text")
-    print("PAGED_TEXT_OBSERVER 1 positive 13 negatives PASS NOT_PDF_EXECUTION",flush=True)
+    print("PAGED_TEXT_OBSERVER 2 positive 13 negatives PASS NOT_PDF_EXECUTION",flush=True)
     for value in ("中文说明","中文说\u660e","\ufffd\ufffd","\u2f42文说明","中文\f说明",""):
         diagnostic=pdf_text_diagnostic(value)
         assert diagnostic["tail"]==value and diagnostic["characters"]==len(value)
@@ -402,6 +403,44 @@ def selftest():
             raise AssertionError("unverified or ambiguous debug key accepted")
     print("PAGED_KEY_OBSERVER 2 positive 5 negatives PASS NOT_CI_KEYSTORE_EXECUTION",flush=True)
 
+def rasterizer_controls(folder):
+    """Independent raw PDF, not the app renderer. Prove 1:1 sampling before
+    using a rasterizer as the exact-pixel oracle. Splash can resample even with
+    Interpolate=false; Cairo must pass the same unmodified Java checker.
+    """
+    colors=[0x0a141e,0,0,0x0d1a27,0x112233,0,0,0,0x183048,0x19324b,0,0]
+    def sample(name,pixels,x=36,blank=False):
+        image=b"".join(c.to_bytes(3,"big") for c in pixels)
+        content=b"" if blank else ("q 4 0 0 3 %d 803 cm /Im1 Do Q\n"%x).encode("ascii")
+        def stream(header,data):
+            return b"<< "+header+b" /Length "+str(len(data)).encode()+b" >>\nstream\n"+data+b"\nendstream"
+        objects=[b"<< /Type /Catalog /Pages 2 0 R >>",
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /XObject << /Im1 4 0 R >> >> /Contents 5 0 R >>",
+            stream(b"/Type /XObject /Subtype /Image /Width 4 /Height 3 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Interpolate false",image),
+            stream(b"",content)]
+        data=bytearray(b"%PDF-1.4\n");offsets=[0]
+        for i,obj in enumerate(objects,1):
+            offsets.append(len(data));data.extend(("%d 0 obj\n"%i).encode()+obj+b"\nendobj\n")
+        start=len(data);data.extend(b"xref\n0 6\n0000000000 65535 f \n")
+        for offset in offsets[1:]:data.extend(("%010d 00000 n \n"%offset).encode())
+        data.extend(("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n"%start).encode())
+        path=folder/("oracle-"+name+".pdf");path.write_bytes(data);return path
+    good=sample("good",colors)
+    changed=colors.copy();changed[1]=0x010101;assert changed!=colors
+    samples=[good,sample("changed",changed),sample("shifted",colors,x=37),sample("blank",colors,blank=True)]
+    for index,pdf in enumerate(samples):
+        prefix=pdf.with_suffix("")
+        run(["pdftocairo","-r","72","-png",pdf,prefix])
+        p=subprocess.run(["java","-Djava.awt.headless=true","-cp",str(folder),
+            "PagedHostCheck",str(prefix)+"-1.png","picture"],capture_output=True,text=True,timeout=30)
+        if index==0:
+            assert p.returncode==0,p.stdout+p.stderr
+        else:
+            assert p.returncode!=0 and "java.lang.AssertionError: current_only_exact_crop_mask" in p.stderr,p.stdout+p.stderr
+    print("PAGED_RASTER_ORACLE 1 positive 3 negatives PASS INDEPENDENT_PDF_NOT_PRODUCT",flush=True)
+    return {"renderer":"pdftocairo","dpi":72,"positive":1,"negative":3,"scope":"INDEPENDENT_RAW_PDF_SAME_EXACT_PIXEL_CHECKER"}
+
 def apk_size_comparison(gate):
     """Build the exact pre-dependency source with the same SDK and existing key.
     This baseline APK is never installed or delivered. No signing key is created.
@@ -436,12 +475,13 @@ def verify(folder,classes,android,prefix,remote,gate):
     """Called inside the existing codec job; failures propagate to its exit status."""
     selftest()
     # Independent PDF parser/rasterizer. Install only in disposable CI when absent.
-    if not all(shutil.which(x) for x in ("pdftotext","pdftoppm","pdfinfo","pdffonts")):
+    if not all(shutil.which(x) for x in ("pdftotext","pdftoppm","pdftocairo","pdfimages","pdfinfo","pdffonts")):
         run(["sudo","apt-get","update"],timeout=240)
         run(["sudo","apt-get","install","-y","poppler-utils"],timeout=240)
     labels,identity=instrumentation(folder,prefix,gate)
     host=folder/"PagedHostCheck.java";host.write_text(HOST,encoding="utf-8")
     run(["javac","-encoding","UTF-8","-d",folder,host])
+    oracle=rasterizer_controls(folder)
     def check_image(file,mode):
         return run(["java","-Djava.awt.headless=true","-cp",folder,"PagedHostCheck",file,mode])
     evidence={}
@@ -457,15 +497,16 @@ def verify(folder,classes,android,prefix,remote,gate):
         run(["pdffonts",folder/(stem+".pdf")])
         if stem!="picture":text_check(text)
         else:assert text.count("CAPTION_END")==1 and "ROW" not in text
-        run(["pdftoppm","-r","72","-png",folder/(stem+".pdf"),folder/(stem+"-pdf")])
+        run(["pdftocairo","-r","72","-png",folder/(stem+".pdf"),folder/(stem+"-pdf")])
         rendered=sorted(folder.glob(stem+"-pdf-*.png"));assert len(rendered)==pages
         if stem=="picture":
             run(["pdfimages","-list",folder/(stem+".pdf")])
+            run(["pdftoppm","-r","72","-png",folder/(stem+".pdf"),folder/"picture-splash"])
             # Diagnose both representations before either exact comparison aborts.
             with zipfile.ZipFile(folder/(stem+".zip")) as archive:
                 reference=folder/"picture-png-diagnostic.png"
                 reference.write_bytes(archive.read("pages/page-001.png"))
-            for candidate in (reference,rendered[0]):
+            for candidate in (reference,rendered[0],folder/"picture-splash-1.png"):
                 p=subprocess.run(["java","-Djava.awt.headless=true","-cp",str(folder),
                     "PagedHostCheck",str(candidate),"picture"],text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=30)
                 print("PAGED_PIXEL_DIAGNOSTIC exit="+str(p.returncode)+"\n"+p.stdout,flush=True)
@@ -492,7 +533,7 @@ def verify(folder,classes,android,prefix,remote,gate):
     except AssertionError as error:
         assert str(error) in ("Chinese PDF text missing","PDF original Unicode pair changed"),"unrelated mutation failure"
     else:raise AssertionError("ActualText removal did not expose exact-Unicode failure")
-    run(["pdftoppm","-r","72","-png",folder/"unmarked.pdf",folder/"unmarked-pdf"])
+    run(["pdftocairo","-r","72","-png",folder/"unmarked.pdf",folder/"unmarked-pdf"])
     original=sorted(folder.glob("paged-pdf-*.png"));unmarked=sorted(folder.glob("unmarked-pdf-*.png"))
     assert len(original)==len(unmarked)
     for a,b in zip(original,unmarked):
@@ -502,6 +543,7 @@ def verify(folder,classes,android,prefix,remote,gate):
             "status":"PASS","scope":"APK_PAGED_BACKEND_POPPLER_AND_JDK_NOT_UI_SAF_RECEIVER",
             "checks":29,"labels":labels,"independent_outputs":evidence,"text_observer_negative_controls":13,
             "actualtext_removal_control":"REJECTED_WITH_IDENTICAL_PIXELS","apk_size":size,
+            "rasterizer_oracle":oracle,
             "instrumentation":identity,"release_ready":False}
     target=gate.ROOT/"native-ui" if hasattr(gate,"ROOT") else Path("native-ui")
     target.mkdir(exist_ok=True)

@@ -206,6 +206,7 @@ def selftest():
     controls["image_late_race"] = race_selftest()
     controls["markdown_native_ui"] = share_ui_selftest()
     controls["share_picker_navigation"] = share_navigation_selftest()
+    controls["signal_target_identity"] = signal_identity_selftest()
     return controls
 
 def derivative_selftest():
@@ -706,6 +707,56 @@ def share_navigation_selftest():
             assert len(sent) == 1, "sent Back after returning to product"
     return {"checks": len(cases), "scope": "HOST_NAVIGATION_MODEL_NOT_ANDROID_IME"}
 
+def signal_target_identity(pid, cmdline, uid, process_status, package):
+    # Android can rewrite argv[0] in an existing argv buffer, leaving NUL padding.
+    # Accept only the exact package plus one or more NULs, NEVER other arguments.
+    owners = re.findall(r"^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$", process_status, re.M)
+    name, separator, padding = cmdline.partition(b"\x00")
+    exact_name = name == package.encode("ascii")
+    zero_tail = bool(separator) and not padding.strip(b"\x00")
+    passed = (re.fullmatch(r"[1-9][0-9]*", pid) is not None and int(pid) > 1 and
+              exact_name and zero_tail and re.fullmatch(r"[1-9][0-9]*", uid) is not None and
+              owners == [(uid, uid, uid, uid)])
+    return {"status": "PASS" if passed else "NOT_VERIFIED", "pid": pid,
+            "uid": uid, "uid_fields": owners, "expected_package": package,
+            "cmdline_bytes": len(cmdline), "cmdline_sha256": hashlib.sha256(cmdline).hexdigest(),
+            "cmdline_hex_head": cmdline[:256].hex(), "cmdline_hex_truncated": len(cmdline) > 256,
+            "exact_argv0": exact_name, "nul_only_tail": zero_tail,
+            "nul_suffix_bytes": len(padding) + 1 if zero_tail else None}
+
+def signal_identity_selftest():
+    package = "test.package"
+    status = "Name:\ttest\nUid:\t10192\t10192\t10192\t10192\nGid:\t10192\n"
+    good = ("123", package.encode() + b"\x00", "10192", status, package)
+    positives = [good, (good[0], good[1] + b"\x00" * 127, *good[2:]),
+                 (good[0], good[1] + b"\x00" * 511, *good[2:])]
+    for values in positives:
+        observed = signal_target_identity(*values)
+        assert observed["status"] == "PASS", "valid NUL-padded argv0 refused"
+        assert observed["cmdline_bytes"] == len(values[1])
+        assert observed["nul_suffix_bytes"] == len(values[1]) - len(package)
+        assert observed["cmdline_hex_truncated"] == (len(values[1]) > 256)
+    bad = []
+    for pid in ("", "0", "1", "-1", "123 456", "123\n", "１２３"):
+        bad.append((pid, *good[1:]))
+    for raw in (b"", package.encode(), b"other\x00", package.encode()+b":worker\x00",
+                good[1]+b"argument\x00", good[1]+b"\x00argument\x00",
+                good[1]+b"\n", b"\x00"+good[1], good[1]+b"\xff"):
+        bad.append((good[0], raw, *good[2:]))
+    for uid in ("", "0", "-1", "10192\n", "10192 10193"):
+        bad.append((*good[:2], uid, *good[3:]))
+    for index in range(4):
+        fields = ["10192"] * 4
+        fields[index] = "10193"
+        bad.append((*good[:3], "Uid:\t" + "\t".join(fields) + "\n", package))
+    for invalid in ("", status + "Uid:\t10192\t10192\t10192\t10192\n",
+                    "Uid:\t10192\t10192\t10192\n"):
+        bad.append((*good[:3], invalid, package))
+    for values in bad:
+        assert signal_target_identity(*values)["status"] == "NOT_VERIFIED", "unsafe signal target accepted"
+    return {"positive": len(positives), "negative": len(bad),
+            "scope": "HOST_PROC_IDENTITY_CONTROLS_NOT_ANDROID_PROCESS_DEATH"}
+
 def native_share_ui(adb, gate):
     """Continue the real v1.2 UI fixture, not the historical v1.1 ui_test.py.
     No product test hooks. SQLite/media are independently read on the host.
@@ -972,21 +1023,22 @@ public class ShareExternalWriter {
         assert not file_paths()
         start();choose_blocks(True);open_save()
         old_pid = shell("pidof",gate.PKG).strip()
-        assert re.fullmatch(r"[1-9][0-9]*",old_pid), "one live product process required"
+        probes = []
+        result["process_loss"] = {"old_pid":old_pid,"absence_probes":probes,
+                                  "injection":"CI_APP_UID_SIGKILL_NOT_LMK","stage":"IDENTITY_READ"}
+        assert re.fullmatch(r"[1-9][0-9]*",old_pid), "one live product process required: "+repr(old_pid)
         # Deterministic CI fault injection, not a low-memory-killer simulation.
         # am kill left API26 alive; do not force-stop and destroy the result route.
         # Signal only the exact disposable app PID after checking name and UID.
-        identity = shell("run-as",gate.PKG,"cat","/proc/"+old_pid+"/cmdline")
+        identity = command("exec-out","run-as",gate.PKG,"cat","/proc/"+old_pid+"/cmdline",binary=True)
         uid = shell("run-as",gate.PKG,"id","-u").strip()
         process_status = shell("run-as",gate.PKG,"cat","/proc/"+old_pid+"/status")
-        owners = re.findall(r"^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$",process_status,re.M)
-        assert int(old_pid)>1 and identity==gate.PKG+"\x00" and re.fullmatch(r"[1-9][0-9]*",uid)
-        assert owners==[(uid,uid,uid,uid)], "refuse to signal a different UID"
-        probes = []
-        result["process_loss"] = {"old_pid":old_pid,"absence_probes":probes,
-                                  "injection":"CI_APP_UID_SIGKILL_NOT_LMK","uid":uid,
-                                  "cmdline":identity,"uid_fields":owners}
+        target = signal_target_identity(old_pid,identity,uid,process_status,gate.PKG)
+        result["process_loss"].update(identity=target,uid=uid,uid_fields=target["uid_fields"])
+        print("CI_SIGNAL_TARGET "+json.dumps(target),flush=True)
+        assert target["status"]=="PASS", "refuse unverified process signal target: "+json.dumps(target)
         shell("run-as",gate.PKG,"kill","-9",old_pid)
+        result["process_loss"]["stage"] = "SIGNAL_SENT"
         deadline = time.monotonic()+30
         while True:
             probe = subprocess.run(prefix+["shell","pidof",gate.PKG],

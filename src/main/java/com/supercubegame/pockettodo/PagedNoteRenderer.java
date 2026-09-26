@@ -198,11 +198,31 @@ public final class PagedNoteRenderer {
      * Keep all fragments in one source document so shared font resources dedupe.
      */
     private static void pdf(Plan plan,Bounded output)throws IOException{
+        // One ActualText span per visible line. A page-height text span can be
+        // reordered after a later caption by readers' geometric block sorting.
+        // Retain physical positions and refuse any unexpected per-line reflow.
+        List<List<Draw>> fragments=new ArrayList<>();
+        for(List<Draw> page:plan.pages){
+            List<Draw> parts=new ArrayList<>();fragments.add(parts);
+            for(Draw d:page){
+                if(d.text==null){parts.add(d);continue;}
+                for(int line=0;line<d.text.getLineCount();line++){
+                    String value=d.original.substring(d.text.getLineStart(line),d.text.getLineEnd(line));
+                    if(value.endsWith("\n"))value=value.substring(0,value.length()-1);
+                    Draw part=new Draw();part.original=value;part.text=typeset(value);
+                    part.y=d.y+d.text.getLineTop(line);part.start=0;part.end=part.text.getHeight();
+                    part.height=d.text.getLineBottom(line)-d.text.getLineTop(line);
+                    if(part.text.getLineCount()!=1||part.end>part.height)
+                        throw new IOException("PDF line reflow changed; reduce selection");
+                    parts.add(part);
+                }
+            }
+        }
         Bounded raw=new Bounded();
         PdfDocument visual=new PdfDocument();
         try{
             int number=0;
-            for(List<Draw> page:plan.pages)for(Draw d:page){
+            for(List<Draw> page:fragments)for(Draw d:page){
                 PdfDocument.Page fragment=visual.startPage(
                     new PdfDocument.PageInfo.Builder(WIDTH,HEIGHT,++number).create());
                 try{drawOne(fragment.getCanvas(),d);}finally{visual.finishPage(fragment);}
@@ -214,7 +234,7 @@ public final class PagedNoteRenderer {
             document.setVersion(1.7f);
             LayerUtility importer=new LayerUtility(document);
             int index=0;
-            for(List<Draw> draws:plan.pages){
+            for(List<Draw> draws:fragments){
                 PDPage page=new PDPage(new PDRectangle(WIDTH,HEIGHT));
                 document.addPage(page);
                 try(PDPageContentStream stream=new PDPageContentStream(document,page)){

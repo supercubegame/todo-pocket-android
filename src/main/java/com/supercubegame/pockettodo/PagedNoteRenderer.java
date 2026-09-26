@@ -18,7 +18,8 @@ import com.tom_roush.pdfbox.pdmodel.PDDocument;
 import com.tom_roush.pdfbox.pdmodel.PDPage;
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream;
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle;
-import com.tom_roush.pdfbox.pdmodel.documentinterchange.markedcontent.PDPropertyList;
+import com.tom_roush.pdfbox.contentstream.operator.Operator;
+import com.tom_roush.pdfbox.pdfwriter.ContentStreamWriter;
 import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -225,7 +226,12 @@ public final class PagedNoteRenderer {
                             COSDictionary properties=new COSDictionary();
                             properties.setItem(COSName.getPDFName("ActualText"),new COSString(
                                 ("\uFEFF"+d.original).getBytes(java.nio.charset.StandardCharsets.UTF_16BE)));
-                            stream.beginMarkedContent(COSName.getPDFName("Span"),PDPropertyList.create(properties));
+                            // Some readers ignore ActualText through named Properties.
+                            // Serialize a typed inline dictionary; never interpolate user text as PDF syntax.
+                            ByteArrayOutputStream marker=new ByteArrayOutputStream();
+                            new ContentStreamWriter(marker).writeTokens(COSName.getPDFName("Span"),
+                                properties,Operator.getOperator("BDC"));
+                            stream.appendRawCommands(marker.toByteArray());
                         }
                         stream.saveGraphicsState();stream.drawForm(form);stream.restoreGraphicsState();
                         if(d.text!=null)stream.endMarkedContent();

@@ -51,12 +51,20 @@ public final class PagedContractTest {
   try(com.tom_roush.pdfbox.pdmodel.PDDocument doc=com.tom_roush.pdfbox.pdmodel.PDDocument.load(data)){
    int removed=0;
    for(com.tom_roush.pdfbox.pdmodel.PDPage page:doc.getPages()){
-    com.tom_roush.pdfbox.pdmodel.PDResources resources=page.getResources();
-    for(com.tom_roush.pdfbox.cos.COSName name:resources.getPropertiesNames()){
-     com.tom_roush.pdfbox.cos.COSDictionary props=resources.getProperties(name).getCOSObject();
-     com.tom_roush.pdfbox.cos.COSName actual=com.tom_roush.pdfbox.cos.COSName.getPDFName("ActualText");
-     if(props.containsKey(actual)){props.removeItem(actual);removed++;}
+    com.tom_roush.pdfbox.pdfparser.PDFStreamParser parser=new com.tom_roush.pdfbox.pdfparser.PDFStreamParser(page);
+    parser.parse();List<Object> tokens=parser.getTokens();
+    for(Object token:tokens){
+     if(token instanceof com.tom_roush.pdfbox.cos.COSDictionary){
+      com.tom_roush.pdfbox.cos.COSDictionary props=(com.tom_roush.pdfbox.cos.COSDictionary)token;
+      com.tom_roush.pdfbox.cos.COSName actual=com.tom_roush.pdfbox.cos.COSName.getPDFName("ActualText");
+      if(props.containsKey(actual)){props.removeItem(actual);removed++;}
+     }
     }
+    com.tom_roush.pdfbox.pdmodel.common.PDStream replacement=new com.tom_roush.pdfbox.pdmodel.common.PDStream(doc);
+    try(OutputStream output=replacement.createOutputStream()){
+     new com.tom_roush.pdfbox.pdfwriter.ContentStreamWriter(output).writeTokens(tokens);
+    }
+    page.setContents(replacement);
    }
    if(removed==0)throw new AssertionError("ActualText removal control did not modify PDF");
    ByteArrayOutputStream out=new ByteArrayOutputStream();doc.save(out);return out.toByteArray();

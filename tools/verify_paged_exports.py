@@ -309,7 +309,12 @@ public final class PagedHostCheck {
   need(image.getRGB(0,0)==0xffffffff&&image.getRGB(594,841)==0xffffffff,"white_page");
   if(a[1].equals("picture")){
    int[] expected={0xff0a141e,0xff000000,0xff000000,0xff0d1a27,0xff112233,0xff000000,0xff000000,0xff000000,0xff183048,0xff19324b,0xff000000,0xff000000};
-   need(Arrays.equals(image.getRGB(36,36,4,3,null,0,4),expected),"current_only_exact_crop_mask");
+   int[] actual=image.getRGB(36,36,4,3,null,0,4);
+   System.out.println("PAGED_PIXEL_FILE "+new File(a[0]).getName());
+   System.out.println("PAGED_PIXEL_EXPECTED "+Arrays.toString(expected));
+   System.out.println("PAGED_PIXEL_ACTUAL "+Arrays.toString(actual));
+   for(int y=34;y<42;y++)System.out.println("PAGED_PIXEL_NEIGHBOR "+y+" "+Arrays.toString(image.getRGB(34,y,8,1,null,0,8)));
+   need(Arrays.equals(actual,expected),"current_only_exact_crop_mask");
   }else{
    int count=0;for(int y=36;y<806;y++)for(int x=36;x<559;x++)if(image.getRGB(x,y)!=0xffffffff)count++;
    need(count>0,"page_not_empty");
@@ -333,6 +338,7 @@ def text_check(text):
     assert text.index("BEGIN_SELECTED")<text.index("ROW000")<text.index("ROW089")<text.index("END_SELECTED")<text.index("CAPTION_END")
     assert "中文说明" in text.replace(" ","").replace("\n",""),"Chinese PDF text missing"
     assert text.count("UNICODE_PAIR 文|⽂|文|⽂ END_PAIR")==1,"PDF original Unicode pair changed"
+    assert re.findall(r"(?m)^ROW\d{3}",text)==rows,"PDF hard line boundaries lost"
 
 def pdf_text_diagnostic(text):
     """Only synthetic CI fixture output. Preserve code points, not a guessed cause."""
@@ -350,14 +356,15 @@ def selftest():
          good.replace("文|⽂|文|⽂","⽂|⽂|⽂|⽂"),good.replace("文|⽂|文|⽂","文|文|文|文"),
          good.replace("文|⽂|文|⽂","⽂|文|⽂|文"),good.replace("文|⽂|文|⽂","文|⽂"),
          good.replace("UNICODE_PAIR 文|⽂|文|⽂ END_PAIR",""),
-         good.replace("文|⽂|文|⽂","文|�|文|�"),good+"\nUNICODE_PAIR 文|⽂|文|⽂ END_PAIR")
-    assert len(bad)==12
+         good.replace("文|⽂|文|⽂","文|�|文|�"),good+"\nUNICODE_PAIR 文|⽂|文|⽂ END_PAIR",
+         good.replace("ROW049\nROW050","ROW049ROW050"))
+    assert len(bad)==13
     for value in bad:
         assert value!=good,"text mutation did not change fixture"
         try:text_check(value)
         except AssertionError:continue
         raise AssertionError("PDF observer accepted corrupt text")
-    print("PAGED_TEXT_OBSERVER 1 positive 12 negatives PASS NOT_PDF_EXECUTION",flush=True)
+    print("PAGED_TEXT_OBSERVER 1 positive 13 negatives PASS NOT_PDF_EXECUTION",flush=True)
     for value in ("中文说明","中文说\u660e","\ufffd\ufffd","\u2f42文说明","中文\f说明",""):
         diagnostic=pdf_text_diagnostic(value)
         assert diagnostic["tail"]==value and diagnostic["characters"]==len(value)
@@ -452,6 +459,17 @@ def verify(folder,classes,android,prefix,remote,gate):
         else:assert text.count("CAPTION_END")==1 and "ROW" not in text
         run(["pdftoppm","-r","72","-png",folder/(stem+".pdf"),folder/(stem+"-pdf")])
         rendered=sorted(folder.glob(stem+"-pdf-*.png"));assert len(rendered)==pages
+        if stem=="picture":
+            run(["pdfimages","-list",folder/(stem+".pdf")])
+            # Diagnose both representations before either exact comparison aborts.
+            with zipfile.ZipFile(folder/(stem+".zip")) as archive:
+                reference=folder/"picture-png-diagnostic.png"
+                reference.write_bytes(archive.read("pages/page-001.png"))
+            for candidate in (reference,rendered[0]):
+                p=subprocess.run(["java","-Djava.awt.headless=true","-cp",str(folder),
+                    "PagedHostCheck",str(candidate),"picture"],text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=30)
+                print("PAGED_PIXEL_DIAGNOSTIC exit="+str(p.returncode)+"\n"+p.stdout,flush=True)
+            # Retain the original mandatory comparison and failure propagation below.
         for file in rendered:check_image(file,"picture" if stem=="picture" else "text")
         with zipfile.ZipFile(folder/(stem+".zip")) as archive:
             names=archive.namelist()
@@ -482,7 +500,7 @@ def verify(folder,classes,android,prefix,remote,gate):
     size=apk_size_comparison(gate)
     report={"commit":os.environ["GITHUB_SHA"],"run_id":os.environ["GITHUB_RUN_ID"],"api":gate.API,
             "status":"PASS","scope":"APK_PAGED_BACKEND_POPPLER_AND_JDK_NOT_UI_SAF_RECEIVER",
-            "checks":29,"labels":labels,"independent_outputs":evidence,"text_observer_negative_controls":12,
+            "checks":29,"labels":labels,"independent_outputs":evidence,"text_observer_negative_controls":13,
             "actualtext_removal_control":"REJECTED_WITH_IDENTICAL_PIXELS","apk_size":size,
             "instrumentation":identity,"release_ready":False}
     target=gate.ROOT/"native-ui" if hasattr(gate,"ROOT") else Path("native-ui")

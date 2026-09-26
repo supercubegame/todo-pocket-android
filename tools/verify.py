@@ -162,6 +162,7 @@ def v12():
         run(["java", "-cp", out, "FileBoundaryTest"])
     run([sys.executable, "tools/verify_exports.py"])
     share_ticket()
+    share_write()
     print("V12_ACCEPTANCE PARTIAL: JVM domain/file/pixel contracts only; Android codecs/persisted derivatives/UI/share NOT_TESTED by this fast gate")
 
 def share_ticket():
@@ -213,6 +214,120 @@ def share_ticket():
             else:
                 assert result.returncode != 0 and failure in result.stderr, "Share ticket mutant survived or failed for wrong reason: " + name
     print("SHARE_TICKET_MUTANTS 3/3 REJECTED; HOST_EXTRACTED_JAVA_NOT_ANDROID_UI")
+
+def share_write():
+    """Execute the actual stream helper with controlled failures, not Android providers."""
+    import tempfile
+    source = Path("src/main/java/com/supercubegame/pockettodo/MainActivity.java").read_text()
+    start, end = "    static final class VerifiedShareWrite", "    // END_VERIFIED_SHARE_WRITE"
+    assert source.count(start) == source.count(end) == 1, "Missing/ambiguous verified share writer"
+    body = source[source.index(start):source.index(end)]
+    tests = r'''
+ static int checks;
+ interface Action {void run() throws Exception;}
+ static void ok(boolean b,String label){if(!b)throw new AssertionError(label);checks++;System.out.println("PASS "+label);}
+ static IOException failure(Action a)throws Exception{try{a.run();}catch(IOException e){return e;}throw new AssertionError("expected_io_failure");}
+ static byte[] sample(int size){byte[] b=new byte[size];for(int i=0;i<size;i++)b[i]=(byte)(i*37+11);return b;}
+ static final class Sink extends OutputStream {
+  final ByteArrayOutputStream data=new ByteArrayOutputStream();int closes,writes,maxWrite;
+  IOException writeFailure,closeFailure;
+  public void write(int b)throws IOException{write(new byte[]{(byte)b},0,1);}
+  public void write(byte[] b,int off,int n)throws IOException{writes++;maxWrite=Math.max(maxWrite,n);if(writeFailure!=null){data.write(b,off,Math.min(7,n));throw writeFailure;}data.write(b,off,n);}
+  public void close()throws IOException{closes++;if(closeFailure!=null)throw closeFailure;}
+ }
+ static final class Source extends InputStream {
+  final byte[] data;int at,closes,reads;boolean zeroOnce;int failAfter=-1;
+  IOException readFailure,closeFailure;
+  Source(byte[] data){this.data=data;}
+  public int read()throws IOException{throw new AssertionError("bulk_read_required");}
+  public int read(byte[] b,int off,int n)throws IOException{
+   reads++;if(zeroOnce){zeroOnce=false;return 0;}
+   if(readFailure!=null&&at>=failAfter)throw readFailure;
+   if(at==data.length)return -1;
+   int count=Math.min(Math.min(n,1031),data.length-at);
+   if(failAfter>at)count=Math.min(count,failAfter-at);
+   System.arraycopy(data,at,b,off,count);at+=count;return count;
+  }
+  public void close()throws IOException{closes++;if(closeFailure!=null)throw closeFailure;}
+ }
+ static final class Fixture {
+  Sink sink=new Sink();Source source;int outputs,inputs;boolean nullOutput,nullInput;
+  IOException outputFailure,inputFailure;
+  Fixture(byte[] b){source=new Source(b.clone());}
+  OutputStream output()throws IOException{outputs++;if(outputFailure!=null)throw outputFailure;return nullOutput?null:sink;}
+  InputStream input()throws IOException{inputs++;if(sink.closes!=1)throw new AssertionError("read_before_output_close");if(inputFailure!=null)throw inputFailure;return nullInput?null:source;}
+  void run(byte[] b)throws Exception{VerifiedShareWrite.write(b,this::output,this::input);}
+ }
+ public static void main(String[] args)throws Exception{
+  for(int size:new int[]{1,16384,16385,32775,16777216}){
+   byte[] b=sample(size),before=b.clone();Fixture f=new Fixture(b);f.run(b);
+   ok(Arrays.equals(f.sink.data.toByteArray(),before)&&Arrays.equals(b,before)&&f.outputs==1&&f.inputs==1&&f.sink.closes==1&&f.source.closes==1&&f.sink.maxWrite<=16384,"exact_roundtrip_"+size);
+  }
+  for(byte[] invalid:new byte[][]{null,new byte[0],new byte[16777217]}){
+   Fixture f=new Fixture(new byte[]{1});IOException e=failure(()->f.run(invalid));
+   ok(e.getMessage().equals("Share output budget")&&f.outputs==0&&f.inputs==0,"invalid_budget_before_open");
+  }
+  byte[] b=sample(32775);
+  Fixture open=new Fixture(b);open.outputFailure=new IOException("open-output");
+  ok(failure(()->open.run(b))==open.outputFailure&&open.outputs==1&&open.inputs==0,"output_open_failure");
+  Fixture nil=new Fixture(b);nil.nullOutput=true;
+  ok(failure(()->nil.run(b)).getMessage().equals("No output stream")&&nil.inputs==0,"null_output");
+  Fixture partial=new Fixture(b);partial.sink.writeFailure=new IOException("partial-write");
+  ok(failure(()->partial.run(b))==partial.sink.writeFailure&&partial.sink.closes==1&&partial.inputs==0&&partial.sink.data.size()==7&&Arrays.equals(b,sample(32775)),"partial_write_failure_no_readback");
+  Fixture close=new Fixture(b);close.sink.closeFailure=new IOException("close-output");
+  ok(failure(()->close.run(b))==close.sink.closeFailure&&close.sink.closes==1&&close.inputs==0,"output_close_failure_no_readback");
+  Fixture both=new Fixture(b);both.sink.writeFailure=new IOException("write-primary");both.sink.closeFailure=new IOException("close-secondary");
+  IOException combined=failure(()->both.run(b));
+  ok(combined==both.sink.writeFailure&&combined.getSuppressed().length==1&&combined.getSuppressed()[0]==both.sink.closeFailure&&both.inputs==0,"write_failure_keeps_suppressed_close");
+  Fixture readOpen=new Fixture(b);readOpen.inputFailure=new IOException("open-input");
+  ok(failure(()->readOpen.run(b))==readOpen.inputFailure&&readOpen.inputs==1&&readOpen.sink.closes==1,"readback_open_failure");
+  Fixture readNil=new Fixture(b);readNil.nullInput=true;
+  ok(failure(()->readNil.run(b)).getMessage().equals("No output readback")&&readNil.sink.closes==1,"null_readback");
+  for(int prefix:new int[]{0,7,16385}){
+   Fixture f=new Fixture(b);f.source.failAfter=prefix;f.source.readFailure=new IOException("read-"+prefix);
+   ok(failure(()->f.run(b))==f.source.readFailure&&f.source.at==prefix&&f.source.closes==1,"read_failure_"+prefix);
+  }
+  for(int size:new int[]{0,7,b.length-1}){
+   Fixture f=new Fixture(b);f.source=new Source(Arrays.copyOf(b,size));
+   ok(failure(()->f.run(b)).getMessage().equals("Output truncated")&&f.source.closes==1,"truncation_"+size);
+  }
+  Fixture extra=new Fixture(b);extra.source=new Source(Arrays.copyOf(b,b.length+1));
+  ok(failure(()->extra.run(b)).getMessage().equals("Output length differs")&&extra.source.closes==1,"extra_byte_rejected");
+  for(int at:new int[]{0,16384,b.length-1}){
+   Fixture f=new Fixture(b);f.source.data[at]^=1;
+   ok(failure(()->f.run(b)).getMessage().equals("Output bytes differ")&&f.source.closes==1,"mismatch_"+at);
+  }
+  Fixture stalled=new Fixture(b);stalled.source.zeroOnce=true;
+  ok(failure(()->stalled.run(b)).getMessage().equals("Output read made no progress")&&stalled.source.reads==1&&stalled.source.closes==1,"zero_progress_rejected");
+  Fixture readClose=new Fixture(b);readClose.source.closeFailure=new IOException("close-input");
+  ok(failure(()->readClose.run(b))==readClose.source.closeFailure&&readClose.source.closes==1,"readback_close_failure");
+  Fixture mismatchClose=new Fixture(b);mismatchClose.source.data[0]^=1;mismatchClose.source.closeFailure=new IOException("close-after-mismatch");
+  IOException mismatch=failure(()->mismatchClose.run(b));
+  ok(mismatch.getMessage().equals("Output bytes differ")&&mismatch.getSuppressed().length==1&&mismatch.getSuppressed()[0]==mismatchClose.source.closeFailure,"mismatch_keeps_suppressed_close");
+  if(checks!=28)throw new AssertionError("coverage_count_"+checks);
+  System.out.println("SHARE_WRITE_HOST 28/28 PASS NOT_ANDROID_PROVIDER_OR_DB");
+ }
+'''
+    variants = [("real", body)]
+    for name, before, after in (
+        ("mismatch", "if(chunk[i]!=bytes[offset+i])", "if(false)"),
+        ("truncated", "if(offset!=bytes.length)", "if(false)"),
+        ("zero_progress", 'if(n==0)throw new IOException("Output read made no progress");', "if(n==0)continue;"),
+    ):
+        assert body.count(before) == 1, "Share writer mutation anchor drift: " + name
+        variants.append((name, body.replace(before, after, 1)))
+    for name, implementation in variants:
+        with tempfile.TemporaryDirectory(prefix="share-write-", dir="build") as out:
+            test = Path(out) / "WriteTest.java"
+            test.write_text("import java.io.*;import java.util.*;public class WriteTest {\n" + implementation + tests + "\n}", encoding="utf-8")
+            run(["javac", "--release", "8", "-encoding", "UTF-8", "-d", out, str(test)], timeout=40)
+            result = subprocess.run(["java", "-cp", out, "WriteTest"], text=True, capture_output=True, timeout=40)
+            print(name, result.returncode, result.stdout, result.stderr, flush=True)
+            if name == "real":
+                assert result.returncode == 0 and "SHARE_WRITE_HOST 28/28 PASS" in result.stdout, "Real share writer failed"
+            else:
+                assert result.returncode != 0 and "AssertionError: expected_io_failure" in result.stderr, "Share writer mutant survived or wrong failure: " + name
+    print("SHARE_WRITE_MUTANTS 3/3 REJECTED; HOST_EXTRACTED_JAVA_NOT_ANDROID_PROVIDER")
 
 def build():
     # The inherited V1.1 Gradle/UI configuration is not a V1.2 product. No dormant

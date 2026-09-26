@@ -47,6 +47,36 @@ public final class MainActivity extends Activity {
         @Override public synchronized void close(){state=null;zip=null;}
     }
     // END_SHARE_TICKET
+    /** Stream completion is not provider atomicity: failures may leave partial files.
+     * Factories are opened once, only after the caller has consumed valid consent.
+     * Closing output must succeed BEFORE readback; every byte and EOF must match.
+     */
+    static final class VerifiedShareWrite {
+        interface Output { java.io.OutputStream open() throws IOException; }
+        interface Input { InputStream open() throws IOException; }
+        static void write(byte[] bytes,Output output,Input input)throws IOException{
+            if(bytes==null||bytes.length==0||bytes.length>16777216)throw new IOException("Share output budget");
+            try(java.io.OutputStream out=output.open()){
+                if(out==null)throw new IOException("No output stream");
+                for(int offset=0;offset<bytes.length;){
+                    int count=Math.min(16384,bytes.length-offset);
+                    out.write(bytes,offset,count);offset+=count;
+                }
+            }
+            try(InputStream in=input.open()){
+                if(in==null)throw new IOException("No output readback");
+                byte[] chunk=new byte[16384];int offset=0,n;
+                while((n=in.read(chunk))!=-1){
+                    if(n==0)throw new IOException("Output read made no progress");
+                    if(n<0||n>chunk.length||n>bytes.length-offset)throw new IOException("Output length differs");
+                    for(int i=0;i<n;i++)if(chunk[i]!=bytes[offset+i])throw new IOException("Output bytes differ");
+                    offset+=n;
+                }
+                if(offset!=bytes.length)throw new IOException("Output truncated");
+            }
+        }
+    }
+    // END_VERIFIED_SHARE_WRITE
     private static final class ShareChoice {
         byte[] state;String note;
         final java.util.List<NoteDocument.Block> blocks=new java.util.ArrayList<>();
@@ -210,17 +240,8 @@ public final class MainActivity extends Activity {
                         if(isDestroyed()||!"content".equals(uri.getScheme()))throw new IOException("Export owner/destination invalid");
                         // Hold the read snapshot's write lock through publication: another
                         // connection cannot alter privacy between validation and output.
-                        try(java.io.OutputStream out=openDestination(uri)){out.write(bytes);}
-                        try(InputStream in=getContentResolver().openInputStream(uri)){
-                            if(in==null)throw new IOException("No output readback");
-                            byte[] chunk=new byte[16384];int offset=0,n;
-                            while((n=in.read(chunk))!=-1){
-                                if(n==0||n>bytes.length-offset)throw new IOException("Output length differs");
-                                for(int i=0;i<n;i++)if(chunk[i]!=bytes[offset+i])throw new IOException("Output bytes differ");
-                                offset+=n;
-                            }
-                            if(offset!=bytes.length)throw new IOException("Output truncated");
-                        }
+                        VerifiedShareWrite.write(bytes,()->openDestination(uri),
+                            ()->getContentResolver().openInputStream(uri));
                         sql.setTransactionSuccessful();
                     }finally{sql.endTransaction();}
                 }

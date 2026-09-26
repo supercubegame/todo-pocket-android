@@ -163,6 +163,8 @@ def compile_and_run(folder, source, mode):
     return run(["java", "-Xmx512m", "-Djava.awt.headless=true", "-cp", folder, "PixelContractTest", mode])
 
 def main():
+    from verify_paged_exports import selftest as paged_observer_selftest
+    paged_observer_selftest()
     source = SOURCE.read_text(encoding="utf-8")
     # Each mutant compiles, then passes the SAME unedited basic checker.
     # Only its targeted nontrivial input should expose the defect.
@@ -649,6 +651,10 @@ def android_codec(adb, gate):
     assert apks[0].read_bytes()==original_apk
     assert subprocess.check_output([*prefix,"exec-out","cat",remote+"/app.apk"],timeout=30)==original_apk
     exif_report=exif_boundaries(folder,classes,android,prefix,remote,gate)
+    from verify_paged_exports import verify as verify_paged
+    paged_report=verify_paged(folder,classes,android,prefix,remote,gate)
+    assert apks[0].read_bytes()==original_apk
+    assert subprocess.check_output([*prefix,"exec-out","cat",remote+"/app.apk"],timeout=30)==original_apk
     report={"commit":os.environ["GITHUB_SHA"],"run_id":os.environ["GITHUB_RUN_ID"],
             "api":gate.API,"status":"PASS","scope":"ANDROID_APK_CODEC_SHELL_NOT_APP_UI_OR_PERSISTENCE",
             "apk_sha256":hashlib.sha256(original_apk).hexdigest(),"checks":len(labels),"labels":labels,
@@ -656,6 +662,7 @@ def android_codec(adb, gate):
             "host_negative_controls":len(mutations),"device_apk_readback":"EXACT_BYTES",
             "output_metadata":"PNG_CHUNK_ALLOWLIST_NO_TEXT_EXIF_TRAILING_BYTES",
             "exif_boundaries":exif_report,"release_ready":False}
+    report["paged_exports"]=paged_report
     report["markdown_share"]={"status":"PASS","checks":18,"labels":share_labels,
                              "independent_host_png_checks":2,"scope":"READ_ONLY_ZIP_BACKEND_NOT_UI_STALE_PREVIEW_OR_RECEIVER"}
     out=ROOT/"native-ui";out.mkdir(exist_ok=True)

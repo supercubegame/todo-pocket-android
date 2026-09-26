@@ -58,10 +58,9 @@ LABELS = {
         "restore_other_connection_same_revision_stale_refused",
         "restore_staged_tamper_refused_before_publication",
         "restore_failed_attempt_consumed_and_cleaned", "restore_outer_transaction_refused",
-        "restore_late_sql_rollback_keeps_old_state_and_published_blobs",
-        "restore_new_exact_state_origins_and_all_assets", "restore_success_duplicate_refused",
-        "restore_old_complete_replacement", "restore_full_complete_replacement",
-        "restore_empty_complete_replacement",
+        "restore_late_sql_rollback_keeps_old_state_and_published_blobs", "restore_new_exact_state_origins_and_all_assets",
+        "restore_success_duplicate_refused", "restore_old_complete_replacement",
+        "restore_full_complete_replacement", "restore_empty_complete_replacement",
     ],
     "restore_reopen": [
         "restore_new_independent_process_exact", "restore_old_independent_process_exact",
@@ -206,6 +205,7 @@ def selftest():
     controls["derivative_backend"] = derivative_selftest()
     controls["image_late_race"] = race_selftest()
     controls["markdown_native_ui"] = share_ui_selftest()
+    controls["share_picker_navigation"] = share_navigation_selftest()
     return controls
 
 def derivative_selftest():
@@ -645,6 +645,57 @@ def share_ui_selftest():
         assert share_ui_observe(value, 26, "source", "run")["status"] != "PASS", "share UI observer missed"
     return {"positive": 1, "negative": len(bad), "scope": "REPORT_CONTROLS_NOT_ANDROID_EXECUTION"}
 
+def cancel_share_picker(read, back, package, trace):
+    # Back may first dismiss the IME or a provider subview, not the Activity.
+    # Navigation is bounded and conditional, never a retry of the export test.
+    providers = {"com.android.documentsui", "com.google.android.documentsui"}
+    for sent in range(4):
+        current = read()
+        packages = {n.get("package") for n in current if n.get("package")}
+        picker = bool(packages & providers)
+        cancelled = any(n.get("package") == package and n.get("content-desc") == "v12-status" and
+                        n.get("text") == "已取消导出，本机笔记未改变" for n in current)
+        trace.append({"backs": sent, "packages": sorted(packages), "cancelled": cancelled})
+        if cancelled and not picker:
+            assert sent > 0, "picker cancellation was not exercised"
+            return sent
+        assert picker and package not in packages, "unexpected window during picker cancellation: " + repr(trace)
+        assert sent < 3, "picker did not cancel within bounded navigation: " + repr(trace)
+        back()
+    raise AssertionError("unreachable cancellation")
+
+def share_navigation_selftest():
+    package = "test.package"
+    picker = [{"package": "com.android.documentsui", "text": "SAVE"}]
+    cancelled = [{"package": package, "content-desc": "v12-status",
+                  "text": "已取消导出，本机笔记未改变"}]
+    unexpected = [{"package": package, "content-desc": "v12-status", "text": "wrong"}]
+    cases = [
+        ([picker, cancelled], 1),
+        ([picker, picker, cancelled], 2),
+        ([picker, picker, picker, cancelled], 3),
+        ([cancelled], None), ([[]], None),
+        ([[{"package": "other.documentsui.fake"}]], None),
+        ([picker, unexpected], None), ([picker], None),
+    ]
+    for frames, expected in cases:
+        sent = []
+        def read():
+            return frames[min(len(sent), len(frames)-1)]
+        def back():
+            sent.append("BACK")
+        trace = []
+        try:
+            actual = cancel_share_picker(read, back, package, trace)
+        except AssertionError:
+            assert expected is None, "valid picker navigation rejected"
+        else:
+            assert expected is not None and actual == expected == len(sent), "false cancellation"
+        assert len(sent) <= 3 and len(trace) == len(sent)+1
+        if frames == [picker, unexpected]:
+            assert len(sent) == 1, "sent Back after returning to product"
+    return {"checks": len(cases), "scope": "HOST_NAVIGATION_MODEL_NOT_ANDROID_IME"}
+
 def native_share_ui(adb, gate):
     """Continue the real v1.2 UI fixture, not the historical v1.1 ui_test.py.
     No product test hooks. SQLite/media are independently read on the host.
@@ -667,7 +718,7 @@ def native_share_ui(adb, gate):
               "recreation": "NOT_TESTED", "provider_failures": "NOT_TESTED",
               "private_text": "NOT_TESTED", "actual_receiver": "NOT_TESTED"}
     def command(*args, binary=False):
-        return subprocess.check_output(prefix + list(args), text=not binary, timeout=40)
+        return subprocess.check_output(prefix + list(args), text=not binary, stderr=subprocess.PIPE, timeout=40)
     def shell(*args): return command("shell", *args)
     def nodes():
         shell("uiautomator", "dump", "/sdcard/share-window.xml")
@@ -804,7 +855,10 @@ def native_share_ui(adb, gate):
            "share unchecked consent cannot open system save")
         tap("取消");stop()
         ok(snapshot()==(baseline,media),"share preview cancellation preserves complete database and media")
-        start();choose_blocks(True);open_save();shell("input","keyevent","KEYCODE_BACK")
+        start();choose_blocks(True);open_save()
+        result["picker_cancel_navigation"] = []
+        cancel_share_picker(nodes, lambda: shell("input","keyevent","KEYCODE_BACK"),
+                            gate.PKG, result["picker_cancel_navigation"])
         find(**{"content-desc":"v12-status","text":"已取消导出，本机笔记未改变"});stop()
         ok(not file_paths() and snapshot()==(baseline,media),
            "share system picker cancellation publishes no file and preserves state")
@@ -842,12 +896,18 @@ def native_share_ui(adb, gate):
 import android.content.ContentValues;
 public class ShareExternalWriter {
  public static void main(String[] a) {
+  try {
+  System.out.println("EXTERNAL_WRITER_STARTED");
   if(!android.os.Build.HARDWARE.equals("ranchu")&&!android.os.Build.HARDWARE.equals("goldfish"))throw new SecurityException("CI emulator only");
   try(SQLiteDatabase db=SQLiteDatabase.openDatabase(a[0],null,SQLiteDatabase.OPEN_READWRITE)){
    ContentValues v=new ContentValues();v.put("private",Integer.parseInt(a[3]));
    if(db.update("blocks",v,"note_id=? AND id=? AND private=?",new String[]{a[1],a[2],a[4]})!=1)throw new AssertionError("exact external target");
   }
   System.out.println("EXTERNAL_PRIVACY_WRITE_ONE_ROW");
+  } catch(Throwable failure) {
+   System.err.println("EXTERNAL_WRITER_FATAL "+failure);
+   failure.printStackTrace(System.err);System.exit(1);
+  }
  }
 }''',encoding="utf-8")
         android_jar = gate.SDK/"platforms/android-35/android.jar"
@@ -855,12 +915,30 @@ public class ShareExternalWriter {
         jar = helper/"writer.jar"
         subprocess.run([str(gate.SDK/"build-tools/35.0.0/d8"),"--lib",str(android_jar),"--min-api","26",
                         "--output",str(jar),str(helper/"ShareExternalWriter.class")],check=True,timeout=40)
-        command("push",str(jar),"/data/local/tmp/share-writer.jar")
+        # Load the helper from the same app-owned context that executes it.
+        # Exact readback precedes execution; do not relax SELinux or use root.
+        import shlex
+        remote = "/data/user/0/"+gate.PKG+"/cache/share-writer.jar"
+        stage = "run-as "+shlex.quote(gate.PKG)+" sh -c "+shlex.quote("umask 077; cat > cache/share-writer.jar")
+        subprocess.run(prefix+["shell",stage],input=jar.read_bytes(),capture_output=True,check=True,timeout=40)
+        shell("run-as",gate.PKG,"chmod","444",remote)
+        assert command("exec-out","run-as",gate.PKG,"cat",remote,binary=True)==jar.read_bytes(), "external helper bytes differ"
+        result["external_helper"] = {"sha256":hashlib.sha256(jar.read_bytes()).hexdigest(),
+                                     "readback":"EXACT_BYTES","location":"APP_PRIVATE_CACHE"}
         def external(value, previous):
-            output=shell("run-as",gate.PKG,"env","CLASSPATH=/data/local/tmp/share-writer.jar","app_process","/system/bin",
-                         "ShareExternalWriter","/data/user/0/"+gate.PKG+"/databases/pocket-v12.db",
-                         note,block,str(value),str(previous))
-            assert output.strip()=="EXTERNAL_PRIVACY_WRITE_ONE_ROW",output
+            try:
+                output=shell("run-as",gate.PKG,"env","CLASSPATH="+remote,"app_process","/system/bin",
+                             "ShareExternalWriter","/data/user/0/"+gate.PKG+"/databases/pocket-v12.db",
+                             note,block,str(value),str(previous))
+                assert output.splitlines()==["EXTERNAL_WRITER_STARTED","EXTERNAL_PRIVACY_WRITE_ONE_ROW"],output
+            except Exception:
+                try:
+                    crash = shell("logcat","-b","crash","-d","-t","100")
+                    result["external_writer_crash_log"] = output_evidence(crash)
+                    print("EXTERNAL_WRITER_CRASH_LOG "+json.dumps(result["external_writer_crash_log"]),flush=True)
+                except Exception as diagnostic:
+                    result["external_writer_crash_log"] = {"error":exception_evidence(diagnostic)}
+                raise
         start();choose_blocks(True);open_save()
         external(1,0)
         changed, changed_media = snapshot()

@@ -190,11 +190,13 @@ def instrumentation(folder,prefix,gate):
         (src/"PagedContractTest.java").write_text(contract,encoding="utf-8")
         (src/"PagedInstrumentation.java").write_text(RUNNER,encoding="utf-8")
         init=work/"runner.gradle"
-        init.write_text("gradle.projectsEvaluated { rootProject.android {\n"
-            " defaultConfig { testInstrumentationRunner 'ci.paged.PagedInstrumentation' }\n"
-            " sourceSets.androidTest.java.srcDir "+json.dumps(str(src))+"\n"
-            " signingConfigs.debug.storeFile = new File("+json.dumps(str(key))+")\n"
-            "} }\n")
+        init.write_text("gradle.beforeProject { p ->\n"
+            " p.plugins.withId('com.android.application') {\n"
+            "  p.androidComponents.finalizeDsl { dsl ->\n"
+            "   dsl.defaultConfig.testInstrumentationRunner = 'ci.paged.PagedInstrumentation'\n"
+            "   dsl.sourceSets.getByName('androidTest').java.srcDir "+json.dumps(str(src))+"\n"
+            "   dsl.signingConfigs.getByName('debug').storeFile = new File("+json.dumps(str(key))+")\n"
+            "  }\n }\n}\n")
         backup=work/"default-test.apk";backup.write_bytes(saved)
         try:
             run(["gradle","--no-daemon","--console=plain","-I",init,"assembleDebugAndroidTest"],timeout=300)

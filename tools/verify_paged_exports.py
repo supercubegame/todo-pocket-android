@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Actual APK pagination API + independent Poppler/PNG checks. NOT app UI or SAF."""
+"""APK pagination, preview and bounded native SAF text-export verification."""
 import hashlib
 import json
 import os
@@ -238,7 +238,7 @@ public final class PagedContractTest {
     ok(pages(only)==1,"single_page_"+kind);
     write(root,kind.equals("PDF")?"picture.pdf":"picture.zip",only);
     reject(()->render(input,keys(),kind),"empty_selection_"+kind);
-    reject(()->render(input,keys("missing/id"),kind),"unknown_selection_"+kind);
+    reject(()->render(input,keys("missing/id")),kind),"unknown_selection_"+kind);
     reject(()->render(input,keys("n/p","n/q"),kind),"private_only_"+kind);
     reject(()->render(Arrays.asList(prose,prose),keys("n/t"),kind),"duplicate_identity_"+kind);
     Object broken=block("n","broken",null,new byte[]{1,2,3},"",false);
@@ -493,6 +493,7 @@ def pdf_text_diagnostic(text):
             "form_feeds":text.count("\f")}
 
 def selftest():
+    native_receipt_selftest()
     good="BEGIN_SELECTED\n"+"\n".join("ROW%03d"%i for i in range(90))+"\nEND_SELECTED\n中文说明\nUNICODE_PAIR 文|⽂|文|⽂ END_PAIR\nCAPTION_END"
     text_check(good)
     text_check(good.replace("ROW049\nROW050","ROW049\n\n\fROW050"))
@@ -701,6 +702,267 @@ def verify(folder,classes,android,prefix,remote,gate):
     target.mkdir(exist_ok=True)
     (target/"paged-result.json").write_text(json.dumps(report,indent=2)+"\n")
     print("PAGED_EXPORT_EVIDENCE "+json.dumps(report),flush=True)
+    # Compose after the existing native and Markdown suites, once only. Their
+    # failures still abort; the new native result is written into uploaded receipts.
+    previous_native=gate.verify_native_ui
+    def native_and_paged(adb):
+        previous_native(adb)
+        native_paged_ui(adb,gate)
+    gate.verify_native_ui=native_and_paged
     return report
+
+NATIVE_STEPS=(
+    "private_excluded_and_empty_selection","format_picker_selected",
+    "actual_page_preview","unchecked_save_refused","picker_cancel_preserves_state",
+    "real_saf_output","independent_text_page","save_preserves_state",
+    "same_revision_privacy_change","stale_publication_refused",
+    "stale_refusal_preserves_state","fixture_restored")
+NATIVE_LABELS=[step+"_"+kind for kind in ("PDF","PNG_ZIP") for step in NATIVE_STEPS]
+NATIVE_SCOPE="NATIVE_SINGLE_NOTE_TEXT_PDF_PNG_SAF_CANCEL_STALE_NOT_PROCESS_DEATH_OR_RECEIVER"
+
+def native_receipt(value,api,source,run_id):
+    return (isinstance(value,dict) and value.get("status")=="PASS" and
+            type(value.get("api")) is int and value["api"]==api and
+            value.get("commit")==source and value.get("run_id")==run_id and
+            value.get("scope")==NATIVE_SCOPE and value.get("labels")==NATIVE_LABELS and
+            type(value.get("checks")) is int and value["checks"]==24 and
+            value.get("release_ready") is False)
+
+def native_receipt_selftest():
+    import copy
+    good={"status":"PASS","api":26,"commit":"source","run_id":"run",
+          "scope":NATIVE_SCOPE,"labels":NATIVE_LABELS[:],"checks":24,"release_ready":False}
+    assert native_receipt(good,26,"source","run")
+    invalid=[None,{},dict(good,api=34),dict(good,api=True),dict(good,commit="old"),
+             dict(good,run_id="old"),dict(good,status="FAIL"),dict(good,checks=23),
+             dict(good,release_ready=True),dict(good,scope="backend"),
+             dict(good,labels=list(reversed(NATIVE_LABELS)))]
+    for i in range(24):
+        bad=copy.deepcopy(good);del bad["labels"][i];bad["checks"]-=1;invalid.append(bad)
+        bad=copy.deepcopy(good);bad["labels"][i]="unrelated";invalid.append(bad)
+    for bad in invalid:
+        assert not native_receipt(bad,26,"source","run"),"native paged receipt accepted incomplete evidence"
+    print("PAGED_NATIVE_OBSERVER 1 positive "+str(len(invalid))+" negatives PASS NOT_DEVICE_EXECUTION",flush=True)
+
+NATIVE_PAGE_CHECK=r'''
+import java.awt.image.BufferedImage;
+import javax.imageio.ImageIO;
+import java.io.File;
+public class NativeTextPage {
+ static void check(BufferedImage page){
+  if(page==null||page.getWidth()!=595||page.getHeight()!=842)throw new AssertionError("page dimensions");
+  int ink=0;
+  for(int y=0;y<842;y++)for(int x=0;x<595;x++){
+   int pixel=page.getRGB(x,y);
+   if(pixel!=0xffffffff){
+    // Short single-line fixture only: an accidentally exported image or extra
+    // text below this region cannot be hidden behind a nonblank-page assertion.
+    if(x<34||x>=200||y<34||y>=65)throw new AssertionError("unselected content on text-only page");
+    if((pixel>>>24)!=255)throw new AssertionError("transparent text page");
+    ink++;
+   }
+  }
+  if(ink==0)throw new AssertionError("blank text page");
+ }
+ static BufferedImage fixture(){
+  BufferedImage page=new BufferedImage(595,842,BufferedImage.TYPE_INT_ARGB);
+  for(int y=0;y<842;y++)for(int x=0;x<595;x++)page.setRGB(x,y,0xffffffff);
+  return page;
+ }
+ public static void main(String[] args)throws Exception{
+  if(args[0].equals("--selftest")){
+   BufferedImage good=fixture();good.setRGB(36,40,0xff000000);check(good);
+   BufferedImage blank=fixture(),extra=fixture(),alpha=fixture();
+   extra.setRGB(36,40,0xff000000);extra.setRGB(300,200,0xff000000);
+   alpha.setRGB(36,40,0x80000000);
+   int failures=0;
+   for(BufferedImage bad:new BufferedImage[]{blank,extra,alpha,new BufferedImage(1,1,2)}){
+    try{check(bad);}catch(AssertionError expected){failures++;continue;}
+    throw new AssertionError("text page negative control accepted");
+   }
+   if(failures!=4)throw new AssertionError("text page control count");
+   System.out.println("NATIVE_TEXT_PAGE_OBSERVER 1 positive 4 negatives PASS NOT_DEVICE_EXECUTION");return;
+  }
+  check(ImageIO.read(new File(args[0])));
+  System.out.println("NATIVE_TEXT_PAGE_PASS");
+ }
+}
+'''
+
+def native_paged_ui(adb,gate):
+    """Real touch selection and DocumentsUI save. No reflected product methods.
+    Uses the already-accepted synthetic note, media and external-writer fixture.
+    PNG checks layout/nonblank only, not OCR; no receiver or process-loss claim.
+    """
+    import io
+    import sqlite3
+    import time
+    import xml.etree.ElementTree as ET
+    from verify_schema3 import share_ui_observe,cancel_share_picker
+    out=Path("native-ui");path=out/"native-result.json"
+    parent=json.loads(path.read_text())
+    source,run_id=os.environ["GITHUB_SHA"],os.environ["GITHUB_RUN_ID"]
+    assert share_ui_observe(parent.get("markdown_ui"),gate.API,source,run_id)["status"]=="PASS"
+    result={"status":"FAIL","api":gate.API,"commit":source,"run_id":run_id,
+            "scope":NATIVE_SCOPE,"labels":[],"checks":0,"release_ready":False,"outputs":{}}
+    prefix=[str(adb),"-s",gate.SERIAL];serial=0
+    def command(*args,binary=False):
+        return subprocess.check_output(prefix+list(args),text=not binary,stderr=subprocess.PIPE,timeout=40)
+    def shell(*args):return command("shell",*args)
+    def nodes():
+        shell("uiautomator","dump","/sdcard/paged-share-window.xml")
+        return list(ET.fromstring(shell("cat","/sdcard/paged-share-window.xml")).iter("node"))
+    def find(**attrs):
+        deadline=time.monotonic()+20;current=[]
+        while time.monotonic()<deadline:
+            current=nodes()
+            for n in current:
+                if all(n.get(k)==v for k,v in attrs.items()):return n
+            time.sleep(.25)
+        raise AssertionError("native paged missing "+repr(attrs)+" actual="+repr([n.attrib for n in current]))
+    def click(n):
+        assert n.get("enabled")=="true","disabled native paged control"
+        x1,y1,x2,y2=map(int,re.findall(r"\d+",n.get("bounds")))
+        assert x2>x1 and y2>y1
+        shell("input","tap",str((x1+x2)//2),str((y1+y2)//2))
+    def tap(text):click(find(text=text))
+    def stop():shell("am","force-stop",gate.PKG)
+    def start():
+        shell("am","start","-W","-n",gate.PKG+"/com.supercubegame.pockettodo.MainActivity")
+        find(**{"content-desc":"v12-status","text":"已保存到本机"})
+    def state():
+        nonlocal serial
+        serial+=1;local=out/("paged-state-"+str(serial)+".db")
+        local.write_bytes(command("exec-out","run-as",gate.PKG,"cat","databases/pocket-v12.db",binary=True))
+        if "pocket-v12.db-wal" in shell("run-as",gate.PKG,"ls","databases").splitlines():
+            Path(str(local)+"-wal").write_bytes(command("exec-out","run-as",gate.PKG,"cat","databases/pocket-v12.db-wal",binary=True))
+        with sqlite3.connect(local) as db:
+            tables=[r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
+            data={t:db.execute('SELECT * FROM "'+t+'" ORDER BY rowid').fetchall() for t in tables}
+            titles=dict(db.execute("SELECT id,title FROM activities"))
+        media={}
+        for name in shell("run-as",gate.PKG,"ls","files/media").splitlines():
+            assert re.fullmatch(r"[0-9a-f]{64}",name)
+            raw=command("exec-out","run-as",gate.PKG,"cat","files/media/"+name,binary=True)
+            media[name]=hashlib.sha256(raw).hexdigest();assert media[name]==name
+        return data,media,titles
+    def ok(condition,step,kind):
+        label=step+"_"+kind
+        assert condition,label
+        assert NATIVE_LABELS[len(result["labels"])]==label,"native paged check order"
+        result["labels"].append(label);print("PAGED_NATIVE_PASS "+label,flush=True)
+    filename=None
+    def paths():return shell("find","/sdcard/Download","-type","f","-name",filename).splitlines()
+    def preserve_output(tag):
+        found=paths()
+        if found:
+            assert found==["/sdcard/Download/"+filename]
+            destination="/sdcard/Download/paged-"+tag+"-"+filename
+            assert not shell("find","/sdcard/Download","-type","f","-name",destination.rsplit("/",1)[1]).splitlines()
+            shell("mv",found[0],destination)
+    def open_preview(title):
+        tap("导出笔记");tap(note_label);find(text="勾选内容（私有项已排除）")
+        tap("格式：Markdown");tap(title);tap("1. 文字：Second edited");tap("生成预览");find(text=title+"预览")
+    def save_picker():
+        for attempt in range(8):
+            found=[n for n in nodes() if n.get("text")=="我已核对内容与图片，可保存此包"]
+            if found:
+                n=found[0];bounds=list(map(int,re.findall(r"\d+",n.get("bounds"))))
+                if bounds[2]>bounds[0] and bounds[3]>bounds[1]:
+                    assert n.get("checked")=="false";click(n);break
+            shell("input","swipe","160","440","160","190","350")
+        else:raise AssertionError("native paged consent unreachable")
+        tap("选择保存位置")
+        assert find(text=filename).get("package") in ("com.android.documentsui","com.google.android.documentsui")
+        assert find(text="SAVE").get("package") in ("com.android.documentsui","com.google.android.documentsui")
+    def external(value,previous):
+        remote="/data/user/0/"+gate.PKG+"/cache/share-writer.jar"
+        raw=command("exec-out","run-as",gate.PKG,"cat",remote,binary=True)
+        assert hashlib.sha256(raw).hexdigest()==parent["markdown_ui"]["external_helper"]["sha256"]
+        output=shell("run-as",gate.PKG,"env","CLASSPATH="+remote,"app_process","/system/bin",
+                     "ShareExternalWriter","/data/user/0/"+gate.PKG+"/databases/pocket-v12.db",
+                     note,text_row[1],str(value),str(previous))
+        assert output.splitlines()==["EXTERNAL_WRITER_STARTED","EXTERNAL_PRIVACY_WRITE_ONE_ROW"],output
+    try:
+        assert os.environ.get("GITHUB_ACTIONS")=="true" and shell("getprop","ro.kernel.qemu").strip()=="1"
+        stop();baseline=state();data,media,titles=baseline
+        derivatives=[r for r in data["blocks"] if r[8] is not None];assert len(derivatives)==1
+        note=derivatives[0][0]
+        texts=[r for r in data["blocks"] if r[0]==note and r[3]=="TEXT"]
+        assert len(texts)==1 and texts[0][4]=="Second edited" and texts[0][7]==0
+        text_row=texts[0]
+        assert any(r[0]==note and r[7]==1 and r[6]=="PRIVATE_SHARE_SENTINEL" for r in data["blocks"])
+        note_label=next(str(i+1)+". "+titles[r[1]]+" / "+r[2] for i,r in enumerate(data["notes"]) if r[0]==note)
+        java=out/"NativeTextPage.java";java.write_text(NATIVE_PAGE_CHECK)
+        run(["javac","-d",out,java])
+        run(["java","-Djava.awt.headless=true","-cp",out,"NativeTextPage","--selftest"])
+        for kind,title,filename in (("PDF","PDF","PocketTodo-notes.pdf"),("PNG_ZIP","分段PNG图片包","PocketTodo-pages.zip")):
+            assert not paths(),"preexisting paged output"
+            start();tap("导出笔记");tap(note_label);find(text="勾选内容（私有项已排除）")
+            choices=[n for n in nodes() if n.get("class")=="android.widget.CheckedTextView"]
+            ok([n.get("text") for n in choices]==["1. 文字：Second edited","2. 图片："] and
+               all(n.get("checked")=="false" for n in choices),"private_excluded_and_empty_selection",kind)
+            tap("格式：Markdown");find(text="选择导出格式");tap(title)
+            ok(find(text="格式："+title) is not None,"format_picker_selected",kind)
+            tap("1. 文字：Second edited");tap("生成预览");find(text=title+"预览")
+            ok(find(**{"content-desc":"导出第1页"}) is not None and find(text="第 1 / 1 页") is not None,
+               "actual_page_preview",kind)
+            tap("选择保存位置")
+            ok(find(text=title+"预览") is not None and not any("documentsui" in n.get("package","") for n in nodes()),
+               "unchecked_save_refused",kind)
+            save_picker();trace=[]
+            cancel_share_picker(nodes,lambda:shell("input","keyevent","KEYCODE_BACK"),gate.PKG,trace)
+            stop();ok(not paths() and state()==baseline,"picker_cancel_preserves_state",kind)
+            start();open_preview(title);save_picker();tap("SAVE")
+            find(**{"content-desc":"v12-status","text":title+"已保存，逐字节回读一致"})
+            found=paths();assert found==["/sdcard/Download/"+filename],repr(found)
+            raw=command("exec-out","cat",found[0],binary=True)
+            ok(0<len(raw)<=16777216,"real_saf_output",kind)
+            artifact=out/("native-"+filename);artifact.write_bytes(raw)
+            if kind=="PDF":
+                assert re.findall(r"^Pages:\s+(\d+)",run(["pdfinfo",artifact]),re.M)==["1"]
+                extracted=out/"native-paged.txt";run(["pdftotext","-enc","UTF-8",artifact,extracted])
+                assert extracted.read_text().strip()=="Second edited","unexpected PDF content"
+                image_prefix=out/"native-pdf-text"
+                run(["pdftocairo","-r","72","-png","-singlefile",artifact,image_prefix])
+                page=Path(str(image_prefix)+".png")
+            else:
+                with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                    assert archive.namelist()==["pages/page-001.png"]
+                    assert sum(x.file_size for x in archive.infolist())<=16777216
+                    page=out/"native-png-text.png";page.write_bytes(archive.read("pages/page-001.png"))
+            verified=run(["java","-Djava.awt.headless=true","-cp",out,"NativeTextPage",page])
+            ok(verified.strip()=="NATIVE_TEXT_PAGE_PASS","independent_text_page",kind)
+            result["outputs"][kind]={"sha256":hashlib.sha256(raw).hexdigest(),"bytes":len(raw),
+                "pdf_text":"EXACT" if kind=="PDF" else "NOT_OCR_TESTED","page":"SINGLE_NONBLANK_TEXT_REGION_NO_IMAGE"}
+            stop();ok(state()==baseline,"save_preserves_state",kind);preserve_output("accepted")
+            start();open_preview(title);save_picker();external(1,0)
+            changed=state();expected=list(text_row);expected[7]=1
+            ok(changed[0]["blocks"]==[tuple(expected) if r==text_row else r for r in data["blocks"]] and
+               all(changed[0][t]==data[t] for t in data if t!="blocks") and changed[1:]==baseline[1:],
+               "same_revision_privacy_change",kind)
+            tap("SAVE")
+            find(**{"content-desc":"v12-status","text":"导出未完成：预览过期或保存失败；本机笔记未改。目标可能留有空文件或部分文件，请检查"})
+            found=paths()
+            ok(not found or (found==["/sdcard/Download/"+filename] and command("exec-out","cat",found[0],binary=True)==b""),
+               "stale_publication_refused",kind)
+            stop();ok(state()==changed,"stale_refusal_preserves_state",kind)
+            external(0,1);ok(state()==baseline,"fixture_restored",kind);preserve_output("stale-empty")
+        result["checks"]=len(result["labels"]);result["status"]="PASS"
+        assert native_receipt(result,gate.API,source,run_id),"native paged coverage incomplete"
+    except Exception as failure:
+        result["error"]=repr(failure);parent["status"]="FAIL"
+        try:
+            screenshot=command("exec-out","screencap","-p",binary=True)
+            (out/"paged-native-failure.png").write_bytes(screenshot)
+        except Exception as diagnostic:result["screenshot_error"]=repr(diagnostic)
+        raise
+    finally:
+        result["checks"]=len(result["labels"]);parent["paged_ui"]=result
+        path.write_text(json.dumps(parent,ensure_ascii=False,indent=2))
+        codec_path=out/"codec-result.json"
+        codec=json.loads(codec_path.read_text());codec["paged_native_ui"]=result
+        codec_path.write_text(json.dumps(codec,ensure_ascii=False,indent=2))
+        print("PAGED_NATIVE_RESULT "+json.dumps(result,ensure_ascii=False),flush=True)
 
 if __name__=="__main__":selftest()

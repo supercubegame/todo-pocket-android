@@ -238,7 +238,7 @@ public final class PagedContractTest {
     ok(pages(only)==1,"single_page_"+kind);
     write(root,kind.equals("PDF")?"picture.pdf":"picture.zip",only);
     reject(()->render(input,keys(),kind),"empty_selection_"+kind);
-    reject(()->render(input,keys("missing/id")),kind),"unknown_selection_"+kind);
+    reject(()->render(input,keys("missing/id"),kind),"unknown_selection_"+kind);
     reject(()->render(input,keys("n/p","n/q"),kind),"private_only_"+kind);
     reject(()->render(Arrays.asList(prose,prose),keys("n/t"),kind),"duplicate_identity_"+kind);
     Object broken=block("n","broken",null,new byte[]{1,2,3},"",false);

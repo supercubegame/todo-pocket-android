@@ -493,6 +493,7 @@ def pdf_text_diagnostic(text):
             "form_feeds":text.count("\f")}
 
 def selftest():
+    format_button_selftest()
     native_receipt_selftest()
     good="BEGIN_SELECTED\n"+"\n".join("ROW%03d"%i for i in range(90))+"\nEND_SELECTED\n中文说明\nUNICODE_PAIR 文|⽂|文|⽂ END_PAIR\nCAPTION_END"
     text_check(good)
@@ -720,6 +721,43 @@ NATIVE_STEPS=(
 NATIVE_LABELS=[step+"_"+kind for kind in ("PDF","PNG_ZIP") for step in NATIVE_STEPS]
 NATIVE_SCOPE="NATIVE_SINGLE_NOTE_TEXT_PDF_PNG_SAF_CANCEL_STALE_NOT_PROCESS_DEATH_OR_RECEIVER"
 
+def format_button(current,title,package):
+    # Android's Button all-caps transformation affects accessibility text on
+    # both tested APIs. Match the neutral button's identity as well as its
+    # whole label; never relax every text selector or accept a substring.
+    expected="格式："+title
+    matches=[n for n in current if
+             n.get("resource-id")=="android:id/button3" and
+             n.get("class")=="android.widget.Button" and
+             n.get("package")==package and n.get("enabled")=="true" and
+             n.get("clickable")=="true" and
+             n.get("text") in (expected,expected.upper())]
+    assert len(matches)<=1,"ambiguous native format button"
+    return matches[0] if matches else None
+
+def format_button_selftest():
+    good={"resource-id":"android:id/button3","class":"android.widget.Button",
+          "package":"fixture.app","enabled":"true","clickable":"true","text":"格式：Markdown"}
+    positives=0
+    for title in ("Markdown","PDF","分段PNG图片包"):
+        for text in ("格式："+title,("格式："+title).upper()):
+            candidate=dict(good,text=text)
+            assert format_button([candidate],title,"fixture.app") is candidate
+            positives+=1
+    invalid=[dict(good,text="格式：PDF"),dict(good,text="格式：Markdown图片包"),
+             dict(good,text="旧格式：Markdown"),dict(good,text="格式：MARKDOWN "),
+             dict(good,**{"resource-id":"android:id/button1"}),
+             dict(good,**{"class":"android.widget.TextView"}),
+             dict(good,package="other.app"),dict(good,enabled="false"),
+             dict(good,clickable="false"),{}]
+    assert format_button([],"Markdown","fixture.app") is None
+    for candidate in invalid:
+        assert format_button([candidate],"Markdown","fixture.app") is None
+    try:format_button([good,dict(good,text="格式：MARKDOWN")],"Markdown","fixture.app")
+    except AssertionError:pass
+    else:raise AssertionError("duplicate format button accepted")
+    print("PAGED_FORMAT_BUTTON_OBSERVER "+str(positives)+" positives 12 negatives PASS NOT_DEVICE_EXECUTION",flush=True)
+
 def native_receipt(value,api,source,run_id):
     return (isinstance(value,dict) and value.get("status")=="PASS" and
             type(value.get("api")) is int and value["api"]==api and
@@ -826,6 +864,14 @@ def native_paged_ui(adb,gate):
         assert x2>x1 and y2>y1
         shell("input","tap",str((x1+x2)//2),str((y1+y2)//2))
     def tap(text):click(find(text=text))
+    def find_format(title):
+        deadline=time.monotonic()+20;current=[]
+        while time.monotonic()<deadline:
+            current=nodes()
+            selected=format_button(current,title,gate.PKG)
+            if selected is not None:return selected
+            time.sleep(.25)
+        raise AssertionError("native format button missing "+repr(title)+" actual="+repr([n.attrib for n in current]))
     def stop():shell("am","force-stop",gate.PKG)
     def start():
         shell("am","start","-W","-n",gate.PKG+"/com.supercubegame.pockettodo.MainActivity")
@@ -862,7 +908,7 @@ def native_paged_ui(adb,gate):
             shell("mv",found[0],destination)
     def open_preview(title):
         tap("导出笔记");tap(note_label);find(text="勾选内容（私有项已排除）")
-        tap("格式：Markdown");tap(title);tap("1. 文字：Second edited");tap("生成预览");find(text=title+"预览")
+        click(find_format("Markdown"));tap(title);tap("1. 文字：Second edited");tap("生成预览");find(text=title+"预览")
     def save_picker():
         for attempt in range(8):
             found=[n for n in nodes() if n.get("text")=="我已核对内容与图片，可保存此包"]
@@ -902,8 +948,8 @@ def native_paged_ui(adb,gate):
             choices=[n for n in nodes() if n.get("class")=="android.widget.CheckedTextView"]
             ok([n.get("text") for n in choices]==["1. 文字：Second edited","2. 图片："] and
                all(n.get("checked")=="false" for n in choices),"private_excluded_and_empty_selection",kind)
-            tap("格式：Markdown");find(text="选择导出格式");tap(title)
-            ok(find(text="格式："+title) is not None,"format_picker_selected",kind)
+            click(find_format("Markdown"));find(text="选择导出格式");tap(title)
+            ok(find_format(title) is not None,"format_picker_selected",kind)
             tap("1. 文字：Second edited");tap("生成预览");find(text=title+"预览")
             ok(find(**{"content-desc":"导出第1页"}) is not None and find(text="第 1 / 1 页") is not None,
                "actual_page_preview",kind)

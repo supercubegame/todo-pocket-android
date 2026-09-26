@@ -154,7 +154,30 @@ public final class PagedContractTest {
      onUi(inst,()->{
       preview.invoke(activity,new byte[][]{before,payload},selectedFormat);
       List<android.app.AlertDialog> dialogs=(List<android.app.AlertDialog>)field(activity,"shareDialogs");
-      if(dialogs.size()!=1)throw new AssertionError("one actual preview dialog");
+      if(dialogs.size()!=1){
+       // Diagnostics only, never a retry: retain the original failed UI assertion.
+       // previewShare intentionally catches decode/view exceptions for the user.
+       // Re-run its decoder on the SAME main thread to expose a platform exception.
+       Object screen=field(activity,"screen");
+       System.out.println("PAGED_PREVIEW_DIAGNOSTIC format="+selectedFormat+
+         " dialogs="+dialogs.size()+" destroyed="+activity.isDestroyed()+
+         " finishing="+activity.isFinishing()+" busy="+field(screen,"busy")+
+         " status="+((android.widget.TextView)field(screen,"status")).getText());
+       List<android.graphics.Bitmap> probe=null;
+       try{
+        probe=(List<android.graphics.Bitmap>)decoder.invoke(null,activity,payload,selectedFormat);
+        android.widget.LinearLayout body=new android.widget.LinearLayout(activity);
+        for(android.graphics.Bitmap bitmap:probe){
+         android.widget.ImageView image=new android.widget.ImageView(activity);
+         image.setImageBitmap(bitmap);image.setAdjustViewBounds(true);body.addView(image);
+        }
+        System.out.println("PAGED_PREVIEW_DIAGNOSTIC same_thread_decode_and_views=PASS pages="+probe.size());
+       }catch(Throwable failure){
+        System.out.println("PAGED_PREVIEW_DIAGNOSTIC same_thread_decode_and_views=FAILED");
+        failure.printStackTrace(System.out);
+       }finally{if(probe!=null)for(android.graphics.Bitmap bitmap:probe)bitmap.recycle();}
+       throw new AssertionError("one actual preview dialog; observed="+dialogs.size());
+      }
       dialog[0]=dialogs.get(0);collect(dialog[0].getWindow().getDecorView(),views,boxes);
      });
      previewOk(views.size()==3,"actual_dialog_pages_"+suffix);

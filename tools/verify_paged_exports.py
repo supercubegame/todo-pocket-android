@@ -70,7 +70,119 @@ public final class PagedContractTest {
    ByteArrayOutputStream out=new ByteArrayOutputStream();doc.save(out);return out.toByteArray();
   }
  }
- public static void verify(String[] args)throws Exception{
+ static void previewOk(boolean value,String label){if(!value)throw new AssertionError(label);System.out.println("PAGED_PREVIEW_PASS "+label);}
+ static java.lang.reflect.Method privateMethod(Class<?> type,String name,Class<?>... args)throws Exception{
+  for(Class<?> at=type;at!=null;at=at.getSuperclass()){
+   try{java.lang.reflect.Method method=at.getDeclaredMethod(name,args);method.setAccessible(true);return method;}
+   catch(NoSuchMethodException absent){}
+  }
+  throw new NoSuchMethodException(name);
+ }
+ static Object field(Object target,String name)throws Exception{
+  for(Class<?> at=target.getClass();at!=null;at=at.getSuperclass()){
+   try{java.lang.reflect.Field f=at.getDeclaredField(name);f.setAccessible(true);return f.get(target);}
+   catch(NoSuchFieldException absent){}
+  }
+  throw new NoSuchFieldException(name);
+ }
+ static void collect(android.view.View view,List<android.widget.ImageView> images,List<android.widget.CheckBox> boxes){
+  if(view instanceof android.widget.ImageView&&
+     ((android.widget.ImageView)view).getDrawable() instanceof android.graphics.drawable.BitmapDrawable)
+   images.add((android.widget.ImageView)view);
+  if(view instanceof android.widget.CheckBox)boxes.add((android.widget.CheckBox)view);
+  if(view instanceof android.view.ViewGroup){
+   android.view.ViewGroup group=(android.view.ViewGroup)view;
+   for(int i=0;i<group.getChildCount();i++)collect(group.getChildAt(i),images,boxes);
+  }
+ }
+ static void onUi(android.app.Instrumentation inst,Action action)throws Exception{
+  Throwable[] failure={null};
+  inst.runOnMainSync(()->{try{action.run();}catch(Throwable e){failure[0]=e;}});
+  if(failure[0]!=null)throw new AssertionError("preview UI failure",failure[0]);
+ }
+ static byte[] state(android.app.Activity activity)throws Exception{
+  Object db=field(field(activity,"screen"),"db");
+  return(byte[])privateMethod(db.getClass(),"exportState").invoke(db);
+ }
+ @SuppressWarnings("unchecked")
+ static void previewUi(android.app.Instrumentation inst,File root)throws Exception{
+  Class<?> activityClass=Class.forName("com.supercubegame.pockettodo.MainActivity");
+  Method decoder=privateMethod(activityClass,"decodePagedPreview",android.content.Context.class,byte[].class,int.class);
+  Method preview=privateMethod(activityClass,"previewShare",byte[][].class,int.class);
+  android.content.Intent start=new android.content.Intent().setClassName(inst.getTargetContext(),
+    activityClass.getName()).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+  android.app.Activity activity=inst.startActivitySync(start);inst.waitForIdleSync();
+  byte[] before=state(activity);
+  try{
+   for(int format=1;format<=2;format++){
+    final int selectedFormat=format;String suffix=format==1?"PDF":"PNG_ZIP";
+    byte[] payload=read(new File(root,format==1?"paged.pdf":"paged.zip"));
+    List<android.graphics.Bitmap> decoded=(List<android.graphics.Bitmap>)decoder.invoke(null,activity,payload,format);
+    previewOk(decoded.size()==3,"decoded_actual_pages_"+suffix);
+    boolean bounds=true,ink=true;
+    for(android.graphics.Bitmap bitmap:decoded){
+     bounds&=bitmap.getWidth()>0&&bitmap.getWidth()<=256&&bitmap.getHeight()>0&&bitmap.getHeight()<=256;
+     boolean nonwhite=false;
+     for(int y=0;y<bitmap.getHeight();y++)for(int x=0;x<bitmap.getWidth();x++)nonwhite|=bitmap.getPixel(x,y)!=0xffffffff;
+     ink&=nonwhite;bitmap.recycle();
+    }
+    previewOk(bounds&&ink,"decoded_page_bounds_and_ink_"+suffix);
+    boolean refused=false;
+    try{decoder.invoke(null,activity,new byte[]{1,2,3,4},format);}
+    catch(InvocationTargetException e){refused=e.getCause() instanceof IOException||e.getCause() instanceof IllegalArgumentException;}
+    previewOk(refused,"corrupt_payload_rejected_"+suffix);
+    refused=false;
+    try{decoder.invoke(null,activity,read(new File(root,format==1?"paged.zip":"paged.pdf")),format);}
+    catch(InvocationTargetException e){refused=e.getCause() instanceof IOException||e.getCause() instanceof IllegalArgumentException;}
+    previewOk(refused,"wrong_format_rejected_"+suffix);
+    final List<android.widget.ImageView> views=new ArrayList<>();
+    final List<android.widget.CheckBox> boxes=new ArrayList<>();
+    final android.app.AlertDialog[] dialog={null};
+    android.content.Intent[] captured={null};int[] launches={0};
+    android.app.Instrumentation.ActivityMonitor monitor=new android.app.Instrumentation.ActivityMonitor(){
+     @Override public android.app.Instrumentation.ActivityResult onStartActivity(android.content.Intent intent){
+      if(android.content.Intent.ACTION_CREATE_DOCUMENT.equals(intent.getAction())){
+       captured[0]=new android.content.Intent(intent);launches[0]++;
+       return new android.app.Instrumentation.ActivityResult(android.app.Activity.RESULT_CANCELED,null);
+      }
+      return null;
+     }
+    };
+    inst.addMonitor(monitor);
+    List<android.graphics.Bitmap> shown=new ArrayList<>();
+    try{
+     onUi(inst,()->{
+      preview.invoke(activity,new byte[][]{before,payload},selectedFormat);
+      List<android.app.AlertDialog> dialogs=(List<android.app.AlertDialog>)field(activity,"shareDialogs");
+      if(dialogs.size()!=1)throw new AssertionError("one actual preview dialog");
+      dialog[0]=dialogs.get(0);collect(dialog[0].getWindow().getDecorView(),views,boxes);
+     });
+     previewOk(views.size()==3,"actual_dialog_pages_"+suffix);
+     for(android.widget.ImageView view:views)shown.add(((android.graphics.drawable.BitmapDrawable)view.getDrawable()).getBitmap());
+     previewOk(boxes.size()==1&&!boxes.get(0).isChecked(),"unchecked_consent_"+suffix);
+     onUi(inst,()->dialog[0].getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick());
+     inst.waitForIdleSync();
+     previewOk(launches[0]==0&&field(activity,"pendingShare")==null&&dialog[0].isShowing(),"unchecked_save_blocked_"+suffix);
+     onUi(inst,()->{boxes.get(0).setChecked(true);dialog[0].getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick();});
+     inst.waitForIdleSync();
+     String mime=format==1?"application/pdf":"application/zip";
+     String filename=format==1?"PocketTodo-notes.pdf":"PocketTodo-pages.zip";
+     previewOk(launches[0]==1&&captured[0]!=null&&mime.equals(captured[0].getType())&&
+       filename.equals(captured[0].getStringExtra(android.content.Intent.EXTRA_TITLE))&&
+       captured[0].hasCategory(android.content.Intent.CATEGORY_OPENABLE),"saf_format_after_consent_"+suffix);
+     previewOk(field(activity,"pendingShare")==null,"cancel_clears_ticket_"+suffix);
+     previewOk(Arrays.equals(before,state(activity)),"preview_preserves_database_"+suffix);
+     boolean recycled=true;for(android.graphics.Bitmap bitmap:shown)recycled&=bitmap.isRecycled();
+     previewOk(recycled,"dialog_bitmaps_recycled_"+suffix);
+    }finally{
+     inst.removeMonitor(monitor);
+     onUi(inst,()->{if(dialog[0]!=null)dialog[0].dismiss();});
+    }
+   }
+   System.out.println("PAGED_PREVIEW_RESULT 22/22 PASS ACTUAL_DIALOG_AND_INTERCEPTED_SAF_NOT_PROVIDER_E2E");
+  }finally{onUi(inst,activity::finish);inst.waitForIdleSync();}
+ }
+ public static void verify(String[] args,android.app.Instrumentation inst)throws Exception{
    File root=new File(args[0]);
    renderer=Class.forName("com.supercubegame.pockettodo.PagedNoteRenderer");
    block=Class.forName("com.supercubegame.pockettodo.PagedNoteRenderer$Block");
@@ -121,6 +233,7 @@ public final class PagedContractTest {
    Object empty=block("n","empty","",null,"",false);
    reject(()->render(Arrays.asList(empty),keys("n/empty"),"PDF"),"blank_document_rejected");
    if(checks!=29)throw new AssertionError("coverage_count_"+checks);
+   previewUi(inst,root);
    System.out.println("PAGED_RESULT 29/29 PASS BACKEND_NOT_NATIVE_UI_SAF_OR_RECEIVER");
  }
 }
@@ -146,7 +259,7 @@ public final class PagedInstrumentation extends Instrumentation {
    System.out.println("PAGED_TARGET "+getTargetContext().getPackageName()+" "+android.os.Process.myUid());
    if("diagnostic".equals(args.getString("mode")))throw new AssertionError("paged_diagnostic_sentinel");
    File root=new File(getTargetContext().getCacheDir(),args.getString("folder"));
-   PagedContractTest.verify(new String[]{root.getAbsolutePath(),args.getString("expectedApi")});
+   PagedContractTest.verify(new String[]{root.getAbsolutePath(),args.getString("expectedApi")},this);
    code=-1;
   }catch(Throwable e){System.err.println("PAGED_FAILED");e.printStackTrace(System.err);}
   finally{
@@ -167,11 +280,19 @@ LABELS = ["actual_api"] + [
         "invalid_text","page_limit_refuses_not_truncates")
 ] + ["source_file_unchanged","blank_document_rejected"]
 
+PREVIEW_LABELS=[name+"_"+kind for kind in ("PDF","PNG_ZIP") for name in (
+    "decoded_actual_pages","decoded_page_bounds_and_ink","corrupt_payload_rejected","wrong_format_rejected",
+    "actual_dialog_pages","unchecked_consent","unchecked_save_blocked","saf_format_after_consent",
+    "cancel_clears_ticket","preview_preserves_database","dialog_bitmaps_recycled")]
+PREVIEW_RESULT="22/22 PASS ACTUAL_DIALOG_AND_INTERCEPTED_SAF_NOT_PROVIDER_E2E"
+
 def observe(text,package):
     labels=re.findall(r"^PAGED_PASS ([^\r\n]+)",text,re.M)
     targets=re.findall(r"(?:^|stream=)PAGED_TARGET (\S+) (\d+)",text,re.M)
     assert len(targets)==1 and targets[0][0]==package and int(targets[0][1])>=10000
     assert labels==LABELS
+    assert re.findall(r"^PAGED_PREVIEW_PASS ([^\r\n]+)",text,re.M)==PREVIEW_LABELS
+    assert re.findall(r"^PAGED_PREVIEW_RESULT ([^\r\n]+)",text,re.M)==[PREVIEW_RESULT]
     assert re.findall(r"^PAGED_RESULT ([^\r\n]+)",text,re.M)==[
         "29/29 PASS BACKEND_NOT_NATIVE_UI_SAF_OR_RECEIVER"]
     assert re.findall(r"^INSTRUMENTATION_CODE: (-?\d+)\s*$",text,re.M)==["-1"]
@@ -375,6 +496,8 @@ def selftest():
     print("PAGED_TEXT_DIAGNOSTIC 8/8 PASS NOT_PDF_EXECUTION",flush=True)
     good="INSTRUMENTATION_RESULT: stream=PAGED_TARGET test.package 10123\n"
     good+="".join("PAGED_PASS "+label+"\n" for label in LABELS)
+    good+="".join("PAGED_PREVIEW_PASS "+label+"\n" for label in PREVIEW_LABELS)
+    good+="PAGED_PREVIEW_RESULT "+PREVIEW_RESULT+"\n"
     marker="PAGED_RESULT 29/29 PASS BACKEND_NOT_NATIVE_UI_SAF_OR_RECEIVER\n"
     good+=marker+"INSTRUMENTATION_CODE: -1\n"
     assert observe(good,"test.package")==LABELS
@@ -383,6 +506,10 @@ def selftest():
              good.replace("INSTRUMENTATION_CODE: -1\n",""),good+"PAGED_FAILED\n",
              good+"INSTRUMENTATION_FAILED\n",good.replace("PAGED_PASS actual_api","PAGED_PASS unrelated")]
     invalid += [good.replace("PAGED_PASS "+label+"\n","",1) for label in LABELS]
+    invalid += [good.replace("PAGED_PREVIEW_PASS "+label+"\n","",1) for label in PREVIEW_LABELS]
+    invalid += [good.replace("PAGED_PREVIEW_RESULT "+PREVIEW_RESULT+"\n","",1),
+                good.replace(PREVIEW_RESULT,"21/21 PASS ACTUAL_DIALOG_AND_INTERCEPTED_SAF_NOT_PROVIDER_E2E"),
+                good+"PAGED_PREVIEW_PASS "+PREVIEW_LABELS[0]+"\n"]
     for bad in invalid:
         try:observe(bad,"test.package")
         except AssertionError:continue
@@ -544,6 +671,8 @@ def verify(folder,classes,android,prefix,remote,gate):
             "checks":29,"labels":labels,"independent_outputs":evidence,"text_observer_negative_controls":13,
             "actualtext_removal_control":"REJECTED_WITH_IDENTICAL_PIXELS","apk_size":size,
             "rasterizer_oracle":oracle,
+            "preview_ui":{"checks":len(PREVIEW_LABELS),"labels":PREVIEW_LABELS,
+                          "scope":"ACTUAL_DIALOG_AND_INTERCEPTED_SAF_NOT_PROVIDER_E2E"},
             "instrumentation":identity,"release_ready":False}
     target=gate.ROOT/"native-ui" if hasattr(gate,"ROOT") else Path("native-ui")
     target.mkdir(exist_ok=True)

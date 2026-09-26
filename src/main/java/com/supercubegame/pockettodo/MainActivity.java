@@ -16,6 +16,8 @@ public final class MainActivity extends Activity {
     private TodayScreen screen;
     private java.util.function.Consumer<Uri> pendingImage;
     private ShareTicket pendingShare;
+    private int pendingShareFormat;
+    private static final String[] SHARE_FORMATS={"Markdown图片包","PDF","分段PNG图片包"};
     private final java.util.List<android.app.AlertDialog> shareDialogs=new java.util.ArrayList<>();
     private boolean sharing;
     @Override public void onCreate(Bundle saved){super.onCreate(saved);screen=new TodayScreen(this);screen.show(saved);}
@@ -132,29 +134,47 @@ public final class MainActivity extends Activity {
     private void selectShareBlocks(ShareChoice choice){
         if(choice.blocks.isEmpty()){screen.message("这篇笔记没有非私有内容可导出",false);return;}
         String[] labels=new String[choice.blocks.size()];boolean[] checked=new boolean[labels.length];
+        final int[] format={0};
         for(int i=0;i<labels.length;i++){
             NoteDocument.Block b=choice.blocks.get(i);
             labels[i]=(i+1)+". "+(b.kind==NoteDocument.Kind.TEXT?"文字："+shortLabel(b.text):"图片："+shortLabel(b.caption));
         }
         android.app.AlertDialog d=new android.app.AlertDialog.Builder(this).setTitle("勾选内容（私有项已排除）")
             .setMultiChoiceItems(labels,checked,(dialog,which,value)->checked[which]=value)
+            .setNeutralButton("格式：Markdown",null)
             .setNegativeButton("取消",null).setPositiveButton("生成预览",null).create();
-        d.setOnShowListener(unused->d.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+        d.setOnShowListener(unused->{
+          d.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->{
+            android.app.AlertDialog picker=new android.app.AlertDialog.Builder(this).setTitle("选择导出格式")
+                .setItems(SHARE_FORMATS,(dialog,which)->{
+                    format[0]=which;
+                    d.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setText("格式："+SHARE_FORMATS[which]);
+                }).setNegativeButton("取消",null).create();
+            showShareDialog(picker);
+          });
+          d.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
             java.util.Set<String> selected=new java.util.LinkedHashSet<>();
             for(int i=0;i<checked.length;i++)if(checked[i])selected.add(choice.blocks.get(i).id);
             if(selected.isEmpty()){screen.message("请至少勾选一项；空选不会导出全部内容",true);return;}
-            d.dismiss();screen.work(()->prepareShare(choice,selected),this::previewShare,
+            final int chosen=format[0];
+            d.dismiss();screen.work(()->prepareShare(choice,selected,chosen),prepared->previewShare(prepared,chosen),
                 ()->screen.message("导出预览失败：内容可能已变化，或图片超出处理限制；请重新选择",true));
-        }));
+          });
+        });
         showShareDialog(d);
     }
     private byte[][] prepareShare(ShareChoice choice,java.util.Set<String> selected)throws IOException{
+        return prepareShare(choice,selected,0);
+    }
+    private byte[][] prepareShare(ShareChoice choice,java.util.Set<String> selected,int format)throws IOException{
+        if(format<0||format>=SHARE_FORMATS.length)throw new IOException("Unknown share format");
         synchronized(screen.db){
             android.database.sqlite.SQLiteDatabase sql=screen.db.getWritableDatabase();sql.beginTransaction();
             try{
                 if(!java.util.Arrays.equals(choice.state,screen.db.exportState()))throw new IOException("Selection changed");
                 MediaRepository media=new MediaRepository(getFilesDir().toPath().resolve("media"),64L*1024*1024);
                 java.util.List<ShareExporter.MarkdownItem> items=new java.util.ArrayList<>();
+                java.util.List<PagedNoteRenderer.Block> pages=new java.util.ArrayList<>();
                 java.util.Set<String> keys=new java.util.LinkedHashSet<>();long bytes=0;
                 for(NoteDocument.Block b:choice.blocks){
                     if(!selected.contains(b.id)||b.privateContent)continue;
@@ -174,21 +194,96 @@ public final class MainActivity extends Activity {
                         }
                         if(!b.assetId.equals(MediaRepository.digest(image)))throw new IOException("Image changed");
                     }
-                    items.add(new ShareExporter.MarkdownItem(choice.note,b.id,b.kind==NoteDocument.Kind.TEXT?b.text:null,image,b.caption,false));
+                    if(format==0)items.add(new ShareExporter.MarkdownItem(choice.note,b.id,b.kind==NoteDocument.Kind.TEXT?b.text:null,image,b.caption,false));
+                    else pages.add(new PagedNoteRenderer.Block(choice.note,b.id,b.kind==NoteDocument.Kind.TEXT?b.text:null,image,b.caption,false));
                     keys.add(choice.note+"/"+b.id);
                 }
                 if(keys.size()!=selected.size())throw new IOException("Unknown selection");
-                byte[] zip=ShareExporter.markdownZip(items,keys);
+                byte[] zip=format==0?ShareExporter.markdownZip(items,keys):
+                    PagedNoteRenderer.render(pages,keys,format==1?PagedNoteRenderer.Format.PDF:PagedNoteRenderer.Format.PNG_ZIP).bytes();
                 sql.setTransactionSuccessful();return new byte[][]{choice.state,zip};
             }finally{sql.endTransaction();}
         }
     }
     /** Preview the actual ZIP text and newly encoded PNGs, never source/origin files. */
     private void previewShare(byte[][] prepared){
+        previewShare(prepared,0);
+    }
+    /** Decode the final export bytes, not a second render of the selected source.
+     * All physical pages are shown as bounded thumbnails. No original asset access.
+     * PDF requires a seekable descriptor; unlink its private cache file before decoding.
+     */
+    private static java.util.List<android.graphics.Bitmap> decodePagedPreview(
+            android.content.Context context,byte[] payload,int format)throws IOException{
+        if(payload==null||payload.length==0||payload.length>16777216||(format!=1&&format!=2))
+            throw new IOException("Invalid paged preview");
+        java.util.List<android.graphics.Bitmap> images=new java.util.ArrayList<>();
+        boolean success=false;
+        try{
+            if(format==1){
+                Path temp=Files.createTempFile(context.getCacheDir().toPath(),"share-preview-",".pdf");
+                try{
+                    Files.write(temp,payload);
+                    try(android.os.ParcelFileDescriptor fd=android.os.ParcelFileDescriptor.open(
+                            temp.toFile(),android.os.ParcelFileDescriptor.MODE_READ_ONLY)){
+                        Files.delete(temp);
+                        try(android.graphics.pdf.PdfRenderer renderer=new android.graphics.pdf.PdfRenderer(fd)){
+                            int count=renderer.getPageCount();
+                            if(count<1||count>PagedNoteRenderer.MAX_PAGES)throw new IOException("Preview page budget");
+                            for(int i=0;i<count;i++){
+                                try(android.graphics.pdf.PdfRenderer.Page page=renderer.openPage(i)){
+                                    if(page.getWidth()!=PagedNoteRenderer.WIDTH||page.getHeight()!=PagedNoteRenderer.HEIGHT)
+                                        throw new IOException("Unexpected PDF page");
+                                    android.graphics.Bitmap bitmap=android.graphics.Bitmap.createBitmap(181,256,android.graphics.Bitmap.Config.ARGB_8888);
+                                    images.add(bitmap);bitmap.eraseColor(android.graphics.Color.WHITE);
+                                    page.render(bitmap,null,null,android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+                                }
+                            }
+                        }
+                    }
+                }finally{Files.deleteIfExists(temp);}
+            }else{
+                try(java.util.zip.ZipInputStream zip=new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(payload))){
+                    java.util.zip.ZipEntry entry;long expanded=0;
+                    while((entry=zip.getNextEntry())!=null){
+                        String expected=String.format(java.util.Locale.ROOT,"pages/page-%03d.png",images.size()+1);
+                        if(images.size()>=PagedNoteRenderer.MAX_PAGES||entry.isDirectory()||!expected.equals(entry.getName()))
+                            throw new IOException("Unexpected PNG page order");
+                        java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream();byte[] chunk=new byte[16384];int n;
+                        while((n=zip.read(chunk))!=-1){
+                            if(n==0||n>16777216-expanded)throw new IOException("Preview expanded budget");
+                            expanded+=n;out.write(chunk,0,n);
+                        }
+                        byte[] data=out.toByteArray();
+                        android.graphics.BitmapFactory.Options options=new android.graphics.BitmapFactory.Options();
+                        options.inJustDecodeBounds=true;android.graphics.BitmapFactory.decodeByteArray(data,0,data.length,options);
+                        if(options.outWidth!=PagedNoteRenderer.WIDTH||options.outHeight!=PagedNoteRenderer.HEIGHT)
+                            throw new IOException("Unexpected PNG page");
+                        options.inJustDecodeBounds=false;options.inSampleSize=4;
+                        android.graphics.Bitmap bitmap=android.graphics.BitmapFactory.decodeByteArray(data,0,data.length,options);
+                        if(bitmap==null)throw new IOException("Invalid PNG page");
+                        images.add(bitmap);
+                    }
+                }
+                if(images.isEmpty())throw new IOException("Empty PNG preview");
+            }
+            success=true;return images;
+        }finally{if(!success)for(android.graphics.Bitmap bitmap:images)bitmap.recycle();}
+    }
+    private void previewShare(byte[][] prepared,int format){
+        if(format<0||format>=SHARE_FORMATS.length){screen.message("未知导出格式，未导出",true);return;}
         ShareTicket ticket=new ShareTicket(prepared[0],prepared[1]);
         android.widget.LinearLayout body=screen.column();
         final java.util.List<android.graphics.Bitmap> images=new java.util.ArrayList<>();
-        try(java.util.zip.ZipInputStream zip=new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(prepared[1]))){
+        try{
+          if(format!=0){
+            images.addAll(decodePagedPreview(this,prepared[1],format));
+            for(int i=0;i<images.size();i++){
+                body.addView(screen.text("第 "+(i+1)+" / "+images.size()+" 页",14,TodayScreen.MUTED));
+                android.widget.ImageView view=new android.widget.ImageView(this);view.setImageBitmap(images.get(i));
+                view.setAdjustViewBounds(true);view.setContentDescription("导出第"+(i+1)+"页");body.addView(view);
+            }
+          }else try(java.util.zip.ZipInputStream zip=new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(prepared[1]))){
             java.util.zip.ZipEntry entry;long expanded=0,pixels=0;
             while((entry=zip.getNextEntry())!=null){
                 java.io.ByteArrayOutputStream buffer=new java.io.ByteArrayOutputStream();byte[] chunk=new byte[16384];int n;
@@ -208,11 +303,13 @@ public final class MainActivity extends Activity {
                     android.widget.ImageView view=new android.widget.ImageView(this);view.setImageBitmap(image);view.setAdjustViewBounds(true);body.addView(view);
                 }
             }
+          }
         }catch(Exception e){ticket.close();for(android.graphics.Bitmap b:images)b.recycle();screen.message("预览无法完整显示，未导出；请减少选项",true);return;}
-        body.addView(screen.text("以上是实际包内Markdown源码和图片缩略图。仅导出所选非私有内容；图片重新编码不等于自动脱敏。完整备份、账目和原图文件不在包内。",14,TodayScreen.MUTED));
+        body.addView(screen.text(format==0?"以上是实际包内Markdown源码和图片缩略图。仅导出所选非私有内容；图片重新编码不等于自动脱敏。完整备份、账目和原图文件不在包内。":
+            "以上是实际导出文件的全部分页缩略图，不是重新生成的示意图。仅含所选非私有内容；请核对遮挡效果。完整备份、账目和原图文件不在其中。",14,TodayScreen.MUTED));
         android.widget.CheckBox consent=new android.widget.CheckBox(this);consent.setText("我已核对内容与图片，可保存此包");body.addView(consent);
         android.widget.ScrollView scroll=new android.widget.ScrollView(this);scroll.addView(body);
-        android.app.AlertDialog d=new android.app.AlertDialog.Builder(this).setTitle("Markdown图片包预览").setView(scroll)
+        android.app.AlertDialog d=new android.app.AlertDialog.Builder(this).setTitle(SHARE_FORMATS[format]+"预览").setView(scroll)
             .setNegativeButton("取消",null).setPositiveButton("选择保存位置",null).create();
         shareDialogs.add(d);
         d.setOnDismissListener(unused->{shareDialogs.remove(d);if(pendingShare!=ticket)ticket.close();for(android.graphics.Bitmap b:images)b.recycle();});
@@ -220,14 +317,16 @@ public final class MainActivity extends Activity {
             if(!consent.isChecked()){screen.message("请先核对并勾选确认",true);return;}
             if(pendingShare!=null)return;
             pendingShare=ticket;
-            Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/zip").addCategory(Intent.CATEGORY_OPENABLE);
-            intent.putExtra(Intent.EXTRA_TITLE,"PocketTodo-notes.zip");
+            pendingShareFormat=format;
+            Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT).setType(format==1?"application/pdf":"application/zip").addCategory(Intent.CATEGORY_OPENABLE);
+            intent.putExtra(Intent.EXTRA_TITLE,format==1?"PocketTodo-notes.pdf":format==2?"PocketTodo-pages.zip":"PocketTodo-notes.zip");
             try{startActivityForResult(intent,EXPORT_NOTES);d.dismiss();}
             catch(android.content.ActivityNotFoundException e){pendingShare=null;ticket.close();d.dismiss();screen.message("系统保存入口不可用，未导出",true);}
         }));d.show();
     }
     private void finishShare(int result,Intent data){
         final ShareTicket ticket=pendingShare;pendingShare=null;
+        final int format=pendingShareFormat;pendingShareFormat=0;
         if(ticket==null){screen.message("页面已重建，请重新选择导出内容",true);return;}
         if(result!=RESULT_OK||data==null||data.getData()==null){ticket.close();screen.message("已取消导出，本机笔记未改变",false);return;}
         final Uri uri=data.getData();
@@ -247,7 +346,7 @@ public final class MainActivity extends Activity {
                 }
                 return true;
             }finally{ticket.close();}
-        },ignored->screen.message("Markdown图片包已保存，逐字节回读一致",false),
+        },ignored->screen.message(SHARE_FORMATS[format]+"已保存，逐字节回读一致",false),
             ()->screen.message("导出未完成：预览过期或保存失败；本机笔记未改。目标可能留有空文件或部分文件，请检查",true));
     }
     /** Deliberately not restored across Activity recreation: never attach to a new owner.

@@ -136,7 +136,7 @@ public final class PagedNoteRenderer {
     private static StaticLayout typeset(String text){
         TextPaint paint=new TextPaint(Paint.ANTI_ALIAS_FLAG);
         paint.setColor(Color.BLACK);paint.setTextSize(16);
-        // Builder.obtain defaults to SIMPLE on API 23+; avoid the newer LineBreaker API.
+        // Builder.obtain defaults to SIMPLE on 23+; avoid the newer LineBreaker API.
         return StaticLayout.Builder.obtain(text,0,text.length(),paint,CONTENT)
             .setAlignment(Layout.Alignment.ALIGN_NORMAL).setIncludePad(false)
             .setLineSpacing(2,1)
@@ -207,9 +207,10 @@ public final class PagedNoteRenderer {
             for(Draw d:page){
                 if(d.text==null){parts.add(d);continue;}
                 for(int line=0;line<d.text.getLineCount();line++){
-                    String value=d.original.substring(d.text.getLineStart(line),d.text.getLineEnd(line));
+                    String original=d.original.substring(d.text.getLineStart(line),d.text.getLineEnd(line));
+                    String value=original;
                     if(value.endsWith("\n"))value=value.substring(0,value.length()-1);
-                    Draw part=new Draw();part.original=value;part.text=typeset(value);
+                    Draw part=new Draw();part.original=original;part.text=typeset(value);
                     part.y=d.y+d.text.getLineTop(line);part.start=0;part.end=part.text.getHeight();
                     part.height=d.text.getLineBottom(line)-d.text.getLineTop(line);
                     if(part.text.getLineCount()!=1||part.end>part.height)
@@ -238,8 +239,12 @@ public final class PagedNoteRenderer {
                 PDPage page=new PDPage(new PDRectangle(WIDTH,HEIGHT));
                 document.addPage(page);
                 try(PDPageContentStream stream=new PDPageContentStream(document,page)){
+                    // Forms inherit the caller's graphics state. Do not let the
+                    // white background turn default-black source glyphs white.
+                    stream.saveGraphicsState();
                     stream.setNonStrokingColor(1f);
                     stream.addRect(0,0,WIDTH,HEIGHT);stream.fill();
+                    stream.restoreGraphicsState();
                     for(Draw d:draws){
                         PDFormXObject form=importer.importPageAsForm(source,index++);
                         if(d.text!=null){
@@ -275,8 +280,12 @@ public final class PagedNoteRenderer {
             }else{
                 Bitmap image=BitmapFactory.decodeByteArray(d.image,0,d.image.length);
                 if(image==null)throw new IOException("Page image decode failed");
+                int flags=Paint.ANTI_ALIAS_FLAG;
+                // At native size, preserve the exact current pixels. Filtering is
+                // useful only when reducing an image, not for a 1:1 PDF image.
+                if(d.width!=image.getWidth()||d.height!=image.getHeight())flags|=Paint.FILTER_BITMAP_FLAG;
                 try{canvas.drawBitmap(image,null,new RectF(MARGIN,d.y,MARGIN+d.width,d.y+d.height),
-                    new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG));}
+                    new Paint(flags));}
                 finally{image.recycle();}
             }
     }

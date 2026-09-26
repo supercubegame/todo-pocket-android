@@ -64,19 +64,246 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
       - name: Build the current-source disposable APKs
         run: gradle --no-daemon --console=plain assembleDebug assembleDebugAndroidTest
-      - name: Independent export backend and actual preview, not native SAF acceptance
+      - name: Prepare independent synthetic native fixture driver
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/export_native_probe.py" <<'PY'
+          def standalone_native(adb,gate):
+              """Fresh synthetic UI fixture; actual DocumentsUI, no product reflection/DB writes."""
+              import hashlib,json,os,re,sqlite3,subprocess,time,zipfile,io
+              from pathlib import Path
+              import xml.etree.ElementTree as ET
+              from verify_paged_exports import format_button
+              out=Path("export-native");out.mkdir()
+              prefix=[str(adb),"-s",gate.SERIAL]
+              result={"status":"FAIL","commit":os.environ["GITHUB_SHA"],"run_id":os.environ["GITHUB_RUN_ID"],
+                  "api":gate.API,"scope":"SYNTHETIC_NATIVE_IMAGE_MULTIPAGE_SAF_NOT_PROCESS_DEATH_OR_RECEIVER",
+                  "labels":[],"outputs":{},"release_ready":False}
+              serial=0
+              def command(*args,binary=False,timeout=40):
+                  return subprocess.check_output(prefix+list(args),text=not binary,stderr=subprocess.PIPE,timeout=timeout)
+              def shell(*args,**kwargs):return command("shell",*args,**kwargs)
+              def nodes():
+                  shell("uiautomator","dump","/sdcard/export-native-window.xml")
+                  return list(ET.fromstring(shell("cat","/sdcard/export-native-window.xml")).iter("node"))
+              def find(**attrs):
+                  deadline=time.monotonic()+20;current=[]
+                  while time.monotonic()<deadline:
+                      current=nodes()
+                      found=[n for n in current if all(n.get(k)==v for k,v in attrs.items())]
+                      assert len(found)<=1,"ambiguous export control "+repr(attrs)
+                      if found:return found[0]
+                      time.sleep(.25)
+                  raise AssertionError("missing "+repr(attrs)+" actual="+repr([n.attrib for n in current]))
+              def click(n):
+                  assert n.get("enabled")=="true"
+                  x1,y1,x2,y2=map(int,re.findall(r"\d+",n.get("bounds")))
+                  assert x2>x1 and y2>y1
+                  shell("input","tap",str((x1+x2)//2),str((y1+y2)//2))
+              def tap(text):click(find(text=text))
+              def touch(desc):click(find(**{"content-desc":desc}))
+              def ready():find(**{"content-desc":"v12-status","text":"已保存到本机"})
+              def stop():
+                  shell("am","force-stop",gate.PKG)
+                  p=subprocess.run(prefix+["shell","pidof",gate.PKG],capture_output=True,text=True,timeout=10)
+                  assert p.returncode==1 and not p.stdout.strip()
+              def start():
+                  shell("am","start","-W","-n",gate.PKG+"/com.supercubegame.pockettodo.MainActivity");ready()
+              def state():
+                  nonlocal serial
+                  serial+=1;local=out/("state-"+str(serial)+".db")
+                  local.write_bytes(command("exec-out","run-as",gate.PKG,"cat","databases/pocket-v12.db",binary=True))
+                  if "pocket-v12.db-wal" in shell("run-as",gate.PKG,"ls","databases").splitlines():
+                      Path(str(local)+"-wal").write_bytes(command("exec-out","run-as",gate.PKG,"cat","databases/pocket-v12.db-wal",binary=True))
+                  with sqlite3.connect(local) as db:
+                      tables=[r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
+                      data={t:db.execute('SELECT * FROM "'+t+'" ORDER BY rowid').fetchall() for t in tables}
+                  media={}
+                  if shell("run-as",gate.PKG,"sh","-c","'test ! -d files/media || ls files/media'").strip():
+                      for name in shell("run-as",gate.PKG,"ls","files/media").splitlines():
+                          assert re.fullmatch(r"[0-9a-f]{64}",name)
+                          raw=command("exec-out","run-as",gate.PKG,"cat","files/media/"+name,binary=True)
+                          assert hashlib.sha256(raw).hexdigest()==name
+                          media[name]={"sha256":name,"bytes":len(raw)}
+                  return data,media
+              def ok(label):
+                  result["labels"].append(label);print("EXPORT_NATIVE_PASS "+label,flush=True)
+              def note():
+                  stop();start();tap("活动");ready();touch(activity);ready();tap("笔记");ready()
+              def text(value):
+                  tap("加入文字");touch("文字内容")
+                  lines=value.split("\n")
+                  assert all(re.fullmatch(r"[A-Za-z0-9_]+",line) for line in lines)
+                  script="set -e; "+"; input keyevent KEYCODE_ENTER; ".join("input text "+line for line in lines)
+                  shell(script,timeout=180);tap("保存");ready()
+              def format_select(title):
+                  deadline=time.monotonic()+20
+                  while time.monotonic()<deadline:
+                      n=format_button(nodes(),"Markdown",gate.PKG)
+                      if n is not None:click(n);break
+                  else:raise AssertionError("format button not found")
+                  tap(title)
+              def consent():
+                  for attempt in range(16):
+                      current=nodes()
+                      for n in current:
+                          if n.get("text")=="我已核对内容与图片，可保存此包":
+                              b=list(map(int,re.findall(r"\d+",n.get("bounds"))))
+                              if b[2]>b[0] and b[3]>b[1]:
+                                  assert n.get("checked")=="false";click(n);return
+                      shell("input","swipe","160","440","160","190","350")
+                  raise AssertionError("multipage consent unreachable")
+              started=time.monotonic()
+              try:
+                  assert os.environ.get("GITHUB_ACTIONS")=="true" and shell("getprop","ro.kernel.qemu").strip()=="1"
+                  stop();empty=state()
+                  assert not empty[0]["notes"] and not empty[0]["activities"] and not empty[0]["blocks"] and not empty[1]
+                  ok("fresh_ui_database")
+                  start();tap("活动");ready();tap("新建分类");touch("分类名称");shell("input","text","Export_probe");tap("保存");ready()
+                  matches=[n for n in nodes() if n.get("content-desc","").startswith("category-add-")]
+                  assert len(matches)==1;click(matches[0]);touch("活动名称");shell("input","text","Probe_note");tap("保存");ready()
+                  activity=find(text="Probe_note").get("content-desc");assert re.fullmatch(r"activity-\d+",activity)
+                  touch(activity);ready();tap("笔记");ready()
+                  for i in range(2):tap("加入图片");tap("加入合成图");ready()
+                  stop();images=state()[0]["blocks"]
+                  assert len(images)==2 and all(r[3]=="IMAGE" and r[7]==0 for r in images)
+                  note();touch("note-image-edit-"+images[1][1]);touch("image-caption");shell("input","text","PRIVATE_EXPORT_SENTINEL")
+                  touch("image-private");tap("保存");ready()
+                  note()
+                  content="BEGIN_"+("a"*74)+"\n"+"\n".join("ROW%03d"%i for i in range(90))
+                  text(content);note();text("UNSELECTED_EXPORT_SENTINEL")
+                  stop();baseline=state();data,media=baseline;blocks=data["blocks"]
+                  assert len(data["notes"])==1 and len(blocks)==4 and len(media)==1
+                  assert blocks[0]==images[0] and blocks[1][1]==images[1][1] and blocks[1][6:8]==("PRIVATE_EXPORT_SENTINEL",1)
+                  assert blocks[2][3:5]==("TEXT",content) and blocks[3][3:5]==("TEXT","UNSELECTED_EXPORT_SENTINEL")
+                  assert all(r[0]==data["notes"][0][0] for r in blocks)
+                  ok("ui_created_exact_image_private_text_fixture")
+                  (out/"ExportPageCheck.java").write_text(PAGE_CHECK)
+                  gate.run(["javac","-d",out,out/"ExportPageCheck.java"],timeout=40)
+                  proof=gate.run(["java","-Djava.awt.headless=true","-cp",out,"ExportPageCheck","--selftest"],capture=True).stdout.strip()
+                  assert proof=="EXPORT_PAGE_CONTROLS 1 positive 6 negatives"
+                  ok("independent_pixel_observer_controls")
+                  for kind,title,filename in (("PDF","PDF","PocketTodo-notes.pdf"),("PNG_ZIP","分段PNG图片包","PocketTodo-pages.zip")):
+                      start();tap("导出笔记");tap("1. Probe_note / Probe_note");find(text="勾选内容（私有项已排除）")
+                      choices=[n for n in nodes() if n.get("class")=="android.widget.CheckedTextView"]
+                      expected=["1. 图片：","2. 文字："+content[:80]+"…","3. 文字：UNSELECTED_EXPORT_SENTINEL"]
+                      assert [n.get("text") for n in choices]==expected and all(n.get("checked")=="false" for n in choices)
+                      format_select(title);tap(expected[0]);tap(expected[1]);ok("explicit_image_text_private_excluded_"+kind)
+                      tap("生成预览");find(text=title+"预览")
+                      page_label=find(**{"content-desc":"导出第1页"})
+                      assert page_label.get("class")=="android.widget.ImageView"
+                      header=[n.get("text","") for n in nodes() if re.fullmatch(r"第 1 / [34] 页",n.get("text",""))]
+                      assert len(header)==1;preview_pages=int(header[0].split(" / ")[1].split()[0])
+                      ok("actual_multipage_preview_"+kind)
+                      consent();tap("选择保存位置")
+                      assert find(text=filename).get("package") in ("com.android.documentsui","com.google.android.documentsui")
+                      save=find(text="SAVE");assert save.get("package") in ("com.android.documentsui","com.google.android.documentsui")
+                      assert not shell("find","/sdcard/Download","-type","f","-name",filename).splitlines(),"preexisting output"
+                      click(save);find(**{"content-desc":"v12-status","text":title+"已保存，逐字节回读一致"})
+                      assert shell("find","/sdcard/Download","-type","f","-name",filename).splitlines()==["/sdcard/Download/"+filename]
+                      raw=command("exec-out","cat","/sdcard/Download/"+filename,binary=True);assert 0<len(raw)<=16777216
+                      artifact=out/filename;artifact.write_bytes(raw);ok("real_documentsui_saved_"+kind)
+                      if kind=="PDF":
+                          info=gate.run(["pdfinfo",artifact],capture=True).stdout
+                          count=re.findall(r"^Pages:\s+(\d+)",info,re.M);assert count==[str(preview_pages)]
+                          gate.run(["pdftotext","-enc","UTF-8",artifact,out/"text.txt"])
+                          assert "".join((out/"text.txt").read_text().split())=="".join(content.split()),"PDF selected text/order/privacy mismatch"
+                          gate.run(["pdftocairo","-r","72","-png",artifact,out/"page"])
+                          pages=sorted(out.glob("page-*.png"));assert len(pages)==preview_pages
+                      else:
+                          with zipfile.ZipFile(io.BytesIO(raw)) as z:
+                              assert z.namelist()==["pages/page-%03d.png"%i for i in range(1,preview_pages+1)]
+                              assert sum(e.file_size for e in z.infolist())<=16777216 and all(not e.is_dir() for e in z.infolist())
+                              pages=[]
+                              for i,name in enumerate(z.namelist()):
+                                  p=out/("png-page-%03d.png"%(i+1));p.write_bytes(z.read(name));pages.append(p)
+                          assert preview_pages==result["outputs"]["PDF"]["pages"]
+                      gate.run(["java","-Djava.awt.headless=true","-cp",out,"ExportPageCheck",*pages],timeout=60)
+                      ok("independent_image_pixels_and_page_set_"+kind)
+                      result["outputs"][kind]={"pages":preview_pages,"bytes":len(raw),"sha256":hashlib.sha256(raw).hexdigest(),
+                          "text":"EXACT_WHITESPACE_INSENSITIVE" if kind=="PDF" else "NOT_OCR_TESTED",
+                          "image":"EXACT_96X96_GREEN_FIRST_PAGE_NO_OTHER_COLOR"}
+                      stop();assert state()==baseline;ok("all_tables_and_media_unchanged_"+kind)
+                  result["status"]="PASS"
+              except Exception as exc:
+                  result["error"]=repr(exc)
+                  try:(out/"failure.png").write_bytes(command("exec-out","screencap","-p",binary=True))
+                  except Exception:pass
+                  raise
+              finally:
+                  result.update(checks=len(result["labels"]),elapsed_seconds=round(time.monotonic()-started,3))
+                  Path("export-native.json").write_text(json.dumps(result,ensure_ascii=False,indent=2)+"\n")
+                  print("EXPORT_NATIVE_RESULT "+json.dumps(result,ensure_ascii=False),flush=True)
+              return result
+
+          PAGE_CHECK=r'''
+          import java.awt.image.BufferedImage;
+          import javax.imageio.ImageIO;
+          import java.io.File;
+          public class ExportPageCheck {
+           static void check(BufferedImage p,boolean first){
+            if(p==null||p.getWidth()!=595||p.getHeight()!=842)throw new AssertionError("page dimensions");
+            int ink=0;
+            for(int y=0;y<842;y++)for(int x=0;x<595;x++){
+             int c=p.getRGB(x,y);
+             if((c>>>24)!=255)throw new AssertionError("alpha");
+             if(first&&x>=36&&x<132&&y>=36&&y<132){
+              if(c!=0xff21785f)throw new AssertionError("selected image pixel");continue;
+             }
+             if(c!=0xffffffff){
+              int r=(c>>16)&255,g=(c>>8)&255,b=c&255;
+              if(r!=g||g!=b)throw new AssertionError("unexpected color or extra image");
+              if(x<36||x>=559||y<36||y>=806||(first&&y<144))throw new AssertionError("unexpected content region");
+              ink++;
+             }
+            }
+            if(ink==0)throw new AssertionError("empty text page");
+           }
+           static BufferedImage fixture(boolean first){
+            BufferedImage p=new BufferedImage(595,842,BufferedImage.TYPE_INT_ARGB);
+            for(int y=0;y<842;y++)for(int x=0;x<595;x++)p.setRGB(x,y,first&&x>=36&&x<132&&y>=36&&y<132?0xff21785f:0xffffffff);
+            p.setRGB(36,150,0xff000000);return p;
+           }
+           public static void main(String[] a)throws Exception{
+            if(a[0].equals("--selftest")){
+             check(fixture(true),true);int rejected=0;
+             for(int i=0;i<6;i++){
+              BufferedImage p=fixture(true);
+              if(i==0)p.setRGB(50,50,0xffffffff);
+              if(i==1)p.setRGB(200,300,0xff21785f);
+              if(i==2)p.setRGB(5,500,0xff000000);
+              if(i==3)p.setRGB(36,150,0xffffffff);
+              if(i==4)p.setRGB(36,150,0x80000000);
+              if(i==5)p=new BufferedImage(1,1,2);
+              try{check(p,true);}catch(AssertionError e){rejected++;continue;}
+              throw new AssertionError("pixel negative control survived "+i);
+             }
+             if(rejected!=6)throw new AssertionError("control count");
+             System.out.println("EXPORT_PAGE_CONTROLS 1 positive 6 negatives");return;
+            }
+            if(a.length<3||a.length>4)throw new AssertionError("multipage fixture count");
+            for(int i=0;i<a.length;i++)check(ImageIO.read(new File(a[i])),i==0);
+            System.out.println("EXPORT_IMAGE_MULTIPAGE_PIXELS_PASS "+a.length);
+           }
+          }
+          '''
+          PY
+          python3 -m py_compile "$RUNNER_TEMP/export_native_probe.py"
+      - name: Independent backend preview and synthetic image multipage native saves
         run: |
           set -euo pipefail
           python3 - <<'PY' 2>&1 | tee export-probe.log
           import hashlib,json,os,sys,time
           from pathlib import Path
           sys.path.insert(0,'tools')
+          sys.path.insert(0,os.environ['RUNNER_TEMP'])
+          from export_native_probe import standalone_native
           import emulator_gate as gate
           import verify_exports
           from verify_schema3 import PAGED_BACKEND_LABELS,PAGED_PREVIEW_LABELS,require_registration,certificate
           started=time.monotonic()
           result={'status':'FAIL','commit':os.environ['GITHUB_SHA'],'run_id':os.environ['GITHUB_RUN_ID'],
-            'api':gate.API,'scope':'PARALLEL_EXPORT_BACKEND_PREVIEW_NOT_NATIVE_SAF_OR_FULL_REGRESSION',
+            'api':gate.API,'scope':'PARALLEL_EXPORT_BACKEND_PREVIEW_AND_SYNTHETIC_NATIVE_MULTIPAGE_NOT_FULL_REGRESSION',
             'release_ready':False,'durable_upgrade_ready':False}
           calls=[]
           def install_and_probe(adb):
@@ -110,8 +337,11 @@ jobs:
             assert preview['labels']==PAGED_PREVIEW_LABELS and preview['checks']==22
             assert paged['instrumentation']['product_apk_sha256']==hashlib.sha256(actual_product()).hexdigest()
             assert not Path('native-ui/native-result.json').exists(),'probe must not fabricate full native acceptance'
+            result['codec']=codec
+            result['native_image_pages']=standalone_native(adb,gate)
+            calls.append('synthetic_native_saved')
             calls.append('receipt_verified')
-            result.update(status='PASS',codec=codec,native_saf='NOT_EXECUTED_IN_THIS_JOB')
+            result.update(status='PASS',native_saf='SYNTHETIC_IMAGE_MULTIPAGE_ONLY')
           def actual_product():
             apps=list(Path('build/outputs/apk/debug').glob('*.apk'));assert len(apps)==1
             return apps[0].read_bytes()
@@ -119,11 +349,12 @@ jobs:
           gate.verify_native_ui=finish_probe
           try:
             gate.main()
-            assert calls==['installed_exact_product','codec_and_actual_preview','receipt_verified']
+            assert calls==['installed_exact_product','codec_and_actual_preview','synthetic_native_saved','receipt_verified']
           except Exception as exc:
             result.update(status='FAIL',error=repr(exc));raise
           finally:
             result.update(elapsed_seconds=round(time.monotonic()-started,3),stages=calls)
+            if Path('export-native.json').exists():result['native_image_pages']=json.loads(Path('export-native.json').read_text())
             Path('export-probe.json').write_text(json.dumps(result,indent=2)+'\n')
             if Path('emulator.log').exists():
               Path('export-probe-emulator.log').write_bytes(Path('emulator.log').read_bytes())
@@ -137,8 +368,60 @@ jobs:
             export-probe.json
             export-probe.log
             export-probe-emulator.log
+            export-native.json
+            export-native/*.png
             native-ui/codec-result.json
           if-no-files-found: error
+  export_feedback:
+    needs: export_probe
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: export-probe-api-*
+          path: collected
+      - name: Publish early diagnostic receipts without waiting for full regression
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import base64,json,os,urllib.request,urllib.error
+          from pathlib import Path
+          source,run=os.environ['GITHUB_SHA'],os.environ['GITHUB_RUN_ID']
+          devices={}
+          for level in (26,34):
+            path=Path('collected')/('export-probe-api-'+str(level))/'export-probe.json'
+            try:
+              assert path.stat().st_size<=2*1024*1024
+              value=json.loads(path.read_bytes())
+              assert value['commit']==source and value['run_id']==run and type(value['api']) is int and value['api']==level
+              devices[str(level)]=value
+            except (OSError,ValueError,KeyError,TypeError,AssertionError) as exc:
+              devices[str(level)]={'status':'NOT_VERIFIED','error':repr(exc)}
+          doc={'commit':source,'run_id':run,'scope':'EARLY_DIAGNOSTIC_NOT_ACCEPTANCE',
+            'devices':devices,'release_ready':False,'durable_upgrade_ready':False}
+          data=(json.dumps(doc,ensure_ascii=False,indent=2)+'\n').encode()
+          endpoint='https://api.github.com/repos/'+os.environ['GITHUB_REPOSITORY']+'/'
+          def api(path,method='GET',body=None):
+            req=urllib.request.Request(endpoint+path,method=method,data=None if body is None else json.dumps(body).encode(),
+              headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+            with urllib.request.urlopen(req,timeout=30) as response:return json.load(response)
+          path='reports/export-probe-early-'+source+'-'+run+'.json'
+          body={'message':'Record early export diagnostics, not acceptance','branch':'evidence','content':base64.b64encode(data).decode()}
+          try:body['sha']=api('contents/'+path+'?ref=evidence')['sha']
+          except urllib.error.HTTPError as exc:
+            if exc.code!=404:raise
+          written=api('contents/'+path,'PUT',body)
+          actual=api('contents/'+path+'?ref='+written['commit']['sha'])
+          assert base64.b64decode(actual['content'])==data
+          print('EARLY_EXPORT_DIAGNOSTIC '+actual['html_url'],flush=True)
+          PY
   database:
     needs: core
     if: github.event_name != 'pull_request'
@@ -241,7 +524,7 @@ jobs:
             build/reports/lint-results-debug.html
           if-no-files-found: error
   report:
-    needs: [core, database, export_probe]
+    needs: [core, database, export_probe, export_feedback]
     if: always() && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -581,13 +864,57 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
-          import base64,copy,json,os,sys,urllib.request,urllib.error
+          import base64,copy,json,os,re,sys,urllib.request,urllib.error
           from pathlib import Path
           sys.path.insert(0,'tools')
           from verify_schema3 import PAGED_BACKEND_LABELS,PAGED_PREVIEW_LABELS
           source,run=os.environ['GITHUB_SHA'],os.environ['GITHUB_RUN_ID']
-          scope='PARALLEL_EXPORT_BACKEND_PREVIEW_NOT_NATIVE_SAF_OR_FULL_REGRESSION'
-          stages=['installed_exact_product','codec_and_actual_preview','receipt_verified']
+          NATIVE_SCOPE="SYNTHETIC_NATIVE_IMAGE_MULTIPAGE_SAF_NOT_PROCESS_DEATH_OR_RECEIVER"
+          NATIVE_REQUIRED=["fresh_ui_database","ui_created_exact_image_private_text_fixture","independent_pixel_observer_controls"]+[
+              step+"_"+kind for kind in ("PDF","PNG_ZIP") for step in (
+              "explicit_image_text_private_excluded","actual_multipage_preview","real_documentsui_saved",
+              "independent_image_pixels_and_page_set","all_tables_and_media_unchanged")]
+          def native_observe(value,api,source,run):
+              if not isinstance(value,dict):return False
+              if not (value.get("status")=="PASS" and value.get("commit")==source and value.get("run_id")==run and
+                  type(value.get("api")) is int and value["api"]==api and value.get("scope")==NATIVE_SCOPE and
+                  value.get("labels")==NATIVE_REQUIRED and type(value.get("checks")) is int and value["checks"]==13 and
+                  value.get("release_ready") is False):return False
+              outputs=value.get("outputs")
+              if not isinstance(outputs,dict) or set(outputs)!={"PDF","PNG_ZIP"}:return False
+              for kind in ("PDF","PNG_ZIP"):
+                  out=outputs[kind]
+                  if not isinstance(out,dict):return False
+                  if not (type(out.get("pages")) is int and 3<=out["pages"]<=4 and
+                      type(out.get("bytes")) is int and 0<out["bytes"]<=16777216 and
+                      isinstance(out.get("sha256"),str) and re.fullmatch("[0-9a-f]{64}",out["sha256"]) and
+                      out.get("image")=="EXACT_96X96_GREEN_FIRST_PAGE_NO_OTHER_COLOR" and
+                      out.get("text")==("EXACT_WHITESPACE_INSENSITIVE" if kind=="PDF" else "NOT_OCR_TESTED")):return False
+              return outputs["PDF"]["pages"]==outputs["PNG_ZIP"]["pages"]
+          def native_sample(api=26,source="s",run="r"):
+              good={"status":"PASS","commit":source,"run_id":run,"api":api,"scope":NATIVE_SCOPE,
+                  "labels":NATIVE_REQUIRED[:],"checks":13,"release_ready":False,"outputs":{}}
+              for kind in ("PDF","PNG_ZIP"):
+                  good["outputs"][kind]={"pages":3,"bytes":100,"sha256":"a"*64,
+                      "image":"EXACT_96X96_GREEN_FIRST_PAGE_NO_OTHER_COLOR",
+                      "text":"EXACT_WHITESPACE_INSENSITIVE" if kind=="PDF" else "NOT_OCR_TESTED"}
+              return good
+          def native_controls():
+              good=native_sample()
+              assert len(NATIVE_REQUIRED)==13 and native_observe(good,26,"s","r")
+              bad=[None,{},dict(good,commit="old"),dict(good,run_id="old"),dict(good,api=True),dict(good,status="FAIL"),
+                  dict(good,outputs={}),dict(good,release_ready=True),dict(good,scope="BACKEND_ONLY")]
+              for i in range(13):
+                  x=copy.deepcopy(good);del x["labels"][i];x["checks"]-=1;bad.append(x)
+              for kind in ("PDF","PNG_ZIP"):
+                  for key,val in (("pages",1),("pages",True),("bytes",0),("sha256","bad"),("image","NONBLANK"),("text","PASS")):
+                      x=copy.deepcopy(good);x["outputs"][kind][key]=val;bad.append(x)
+              x=copy.deepcopy(good);x["outputs"]["PNG_ZIP"]["pages"]=4;bad.append(x)
+              for x in bad:assert not native_observe(x,26,"s","r"),"native observer accepted missing or wrong evidence"
+              return len(bad)
+          native_negative=native_controls()
+          scope='PARALLEL_EXPORT_BACKEND_PREVIEW_AND_SYNTHETIC_NATIVE_MULTIPAGE_NOT_FULL_REGRESSION'
+          stages=['installed_exact_product','codec_and_actual_preview','synthetic_native_saved','receipt_verified']
           def observe(value,api):
             if not isinstance(value,dict):return False
             codec=value.get('codec',{})
@@ -601,7 +928,8 @@ jobs:
               type(value.get('api')) is int and value['api']==api and
               value.get('stages')==stages and value.get('release_ready') is False and
               value.get('durable_upgrade_ready') is False and
-              value.get('native_saf')=='NOT_EXECUTED_IN_THIS_JOB' and
+              value.get('native_saf')=='SYNTHETIC_IMAGE_MULTIPAGE_ONLY' and
+              native_observe(value.get('native_image_pages'),api,source,run) and
               type(value.get('elapsed_seconds')) in (int,float) and 0<value['elapsed_seconds']<2100 and
               codec.get('status')=='PASS' and codec.get('commit')==source and
               codec.get('run_id')==run and type(codec.get('api')) is int and codec['api']==api and
@@ -615,7 +943,8 @@ jobs:
           for api in (26,34):
             identity={'status':'PASS','commit':source,'run_id':run,'api':api}
             pair[str(api)]=dict(identity,scope=scope,stages=stages[:],release_ready=False,
-              durable_upgrade_ready=False,native_saf='NOT_EXECUTED_IN_THIS_JOB',elapsed_seconds=1,
+              durable_upgrade_ready=False,native_saf='SYNTHETIC_IMAGE_MULTIPAGE_ONLY',elapsed_seconds=1,
+              native_image_pages=native_sample(api,source,run),
               codec=dict(identity,paged_exports=dict(identity,checks=29,labels=PAGED_BACKEND_LABELS[:],
                 preview_ui={'checks':22,'labels':PAGED_PREVIEW_LABELS[:]})))
           assert matrix(pair)
@@ -627,7 +956,7 @@ jobs:
           reject({});reject({'26':pair['26']});reject(dict(pair,extra={}))
           for api in ('26','34'):
             for key,value in [('status','FAIL'),('commit','old'),('run_id','old'),('api',True),('stages',stages[:-1]),
-                              ('release_ready',True),('native_saf','PASS'),('elapsed_seconds',0),('codec',None)]:
+                              ('release_ready',True),('native_saf','PASS'),('elapsed_seconds',0),('codec',None),('native_image_pages',None)]:
               bad=copy.deepcopy(pair);bad[api][key]=value;reject(bad)
             for preview in (False,True):
               labels=PAGED_PREVIEW_LABELS if preview else PAGED_BACKEND_LABELS
@@ -645,7 +974,7 @@ jobs:
               devices[str(api)]={'status':'NOT_VERIFIED','error':repr(exc)}
           passed=matrix(devices)
           doc={'commit':source,'run_id':run,'status':'PASS' if passed else 'NOT_VERIFIED',
-            'scope':scope,'devices':devices,'observer_controls':{'positive':1,'negative':negative},
+            'scope':scope,'devices':devices,'observer_controls':{'positive':1,'negative':negative,'native_positive':1,'native_negative':native_negative},
             'release_ready':False,'durable_upgrade_ready':False}
           data=(json.dumps(doc,ensure_ascii=False,indent=2)+'\n').encode()
           endpoint='https://api.github.com/repos/'+os.environ['GITHUB_REPOSITORY']+'/'
@@ -699,7 +1028,7 @@ jobs:
           import hashlib,json,os
           from pathlib import Path
           needs=json.loads(os.environ['NEEDS_JSON'])
-          assert all(needs[name]['result']=='success' for name in ('core','database','export_probe'))
+          assert all(needs[name]['result']=='success' for name in ('core','database','export_probe','export_feedback'))
           legacy=json.loads(Path('collected/scope/legacy-schema2-result.json').read_text())
           assert legacy['status']=='PASS' and legacy['commit']==os.environ['GITHUB_SHA'] and legacy['run_id']==os.environ['GITHUB_RUN_ID']
           report=json.loads(Path('collected/scope/ui-result.json').read_text())

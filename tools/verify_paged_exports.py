@@ -153,6 +153,39 @@ def observe(text,package):
     assert not any(x in text for x in ("PAGED_FAILED","INSTRUMENTATION_FAILED","INSTRUMENTATION_ABORTED"))
     return labels
 
+def matching_key(paths,expected,fingerprint):
+    matches=[]
+    for path in sorted(set(Path(p).resolve() for p in paths)):
+        if path.is_file() and fingerprint(path)==expected:matches.append(path)
+    assert len(matches)==1,"expected exactly one existing debug key matching product certificate; matches="+str(len(matches))
+    return matches[0]
+
+def debug_key(certificate):
+    # CI may relocate Android preferences. Never create a key or trust a filename:
+    # the existing certificate must match the actual product APK before any build.
+    homes=[Path.home()/".android",Path.home()/".config"/".android"]
+    for variable in ("ANDROID_USER_HOME","ANDROID_EMULATOR_HOME"):
+        if os.environ.get(variable):homes.append(Path(os.environ[variable]))
+    if os.environ.get("ANDROID_SDK_HOME"):homes.append(Path(os.environ["ANDROID_SDK_HOME"])/".android")
+    paths=[p/"debug.keystore" for p in homes]
+    temporary=Path(os.environ["RUNNER_TEMP"]).resolve()
+    visited=0
+    for current,dirs,files in os.walk(temporary,followlinks=False):
+        visited+=1
+        assert visited<=5000,"bounded CI debug key discovery exceeded directory budget"
+        depth=len(Path(current).relative_to(temporary).parts)
+        dirs[:]=[] if depth>=6 else [d for d in dirs if not (Path(current)/d).is_symlink()]
+        if "debug.keystore" in files:paths.append(Path(current)/"debug.keystore")
+    def fingerprint(path):
+        # Standard disposable Android debug credential only; no release key access.
+        p=subprocess.run(["keytool","-exportcert","-keystore",str(path),
+                          "-alias","androiddebugkey","-storepass","android"],
+                         stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=20)
+        return hashlib.sha256(p.stdout).hexdigest() if p.returncode==0 else None
+    key=matching_key(paths,certificate,fingerprint)
+    print("PAGED_DEBUG_KEY existing certificate match verified; no key generated",flush=True)
+    return key
+
 def instrumentation(folder,prefix,gate):
     """Normal target-app startup initializes fonts; never patch hidden framework APIs."""
     from verify_schema3 import certificate, require_registration
@@ -165,10 +198,7 @@ def instrumentation(folder,prefix,gate):
     cert=certificate(app,gate)
     assert cert==certificate(test,gate)
     require_registration(prefix[0],gate,"paged-before","V12DeviceTest")
-    # The original SDK build uses this debug key. Certificate equality below is
-    # mandatory: an absent/different key is a hard failure, not a signing fallback.
-    key=Path.home()/".android/debug.keystore"
-    assert key.is_file(),"original debug keystore unavailable"
+    key=debug_key(cert)
     nonce="paged-contract-"+os.environ["GITHUB_RUN_ID"]
     cache="cache/"+nonce
     run([*prefix,"shell","run-as",gate.PKG,"mkdir",cache])
@@ -299,6 +329,20 @@ def selftest():
         except AssertionError:continue
         raise AssertionError("incomplete paged instrumentation accepted")
     print("PAGED_RUNNER_OBSERVER 1 positive "+str(len(invalid))+" negatives PASS NOT_DEVICE_EXECUTION",flush=True)
+    with tempfile.TemporaryDirectory(prefix="paged-key-controls-") as directory:
+        a,b=Path(directory)/"a",Path(directory)/"b"
+        a.write_bytes(b"test-certificate-a");b.write_bytes(b"test-certificate-b")
+        fingerprint=lambda p:hashlib.sha256(p.read_bytes()).hexdigest()
+        expected=fingerprint(b)
+        assert matching_key([a,b],expected,fingerprint)==b.resolve()
+        assert matching_key([b,b],expected,fingerprint)==b.resolve()
+        for paths,cert,reader in (([],expected,fingerprint),([a],expected,fingerprint),
+            ([a,b],"wrong",fingerprint),([a,b],expected,lambda p:None),
+            ([a,b],expected,lambda p:expected)):
+            try:matching_key(paths,cert,reader)
+            except AssertionError:continue
+            raise AssertionError("unverified or ambiguous debug key accepted")
+    print("PAGED_KEY_OBSERVER 2 positive 5 negatives PASS NOT_CI_KEYSTORE_EXECUTION",flush=True)
 
 def verify(folder,classes,android,prefix,remote,gate):
     """Called inside the existing codec job; failures propagate to its exit status."""

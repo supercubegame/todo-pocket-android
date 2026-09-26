@@ -159,13 +159,14 @@ public final class PagedNoteRenderer {
         if(plan.pages.get(0).isEmpty())throw new IllegalArgumentException("No visible content selected");
         Bounded output=new Bounded();
         if(format==Format.PDF){
-            try(PdfDocument document=new PdfDocument()){
+            PdfDocument document=new PdfDocument();
+            try{
                 for(int i=0;i<plan.pages.size();i++){
                     PdfDocument.Page page=document.startPage(new PdfDocument.PageInfo.Builder(WIDTH,HEIGHT,i+1).create());
                     try{draw(page.getCanvas(),plan.pages.get(i));}finally{document.finishPage(page);}
                 }
                 document.writeTo(output);
-            }
+            }finally{document.close();}
         }else{
             long expanded=0;
             try(ZipOutputStream zip=new ZipOutputStream(output)){

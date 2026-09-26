@@ -124,9 +124,10 @@ public final class PagedNoteRenderer {
     private static StaticLayout typeset(String text){
         TextPaint paint=new TextPaint(Paint.ANTI_ALIAS_FLAG);
         paint.setColor(Color.BLACK);paint.setTextSize(16);
+        // Builder.obtain defaults to SIMPLE on API 23+; avoid the newer LineBreaker API.
         return StaticLayout.Builder.obtain(text,0,text.length(),paint,CONTENT)
             .setAlignment(Layout.Alignment.ALIGN_NORMAL).setIncludePad(false)
-            .setLineSpacing(2,1).setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
+            .setLineSpacing(2,1)
             .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE).build();
     }
     public static Result render(List<Block> input,Set<String> selected,Format format)throws IOException{

@@ -125,6 +125,8 @@ jobs:
           finally:
             result.update(elapsed_seconds=round(time.monotonic()-started,3),stages=calls)
             Path('export-probe.json').write_text(json.dumps(result,indent=2)+'\n')
+            if Path('emulator.log').exists():
+              Path('export-probe-emulator.log').write_bytes(Path('emulator.log').read_bytes())
             print('EXPORT_PROBE_RESULT '+json.dumps(result),flush=True)
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -134,7 +136,7 @@ jobs:
           path: |
             export-probe.json
             export-probe.log
-            emulator.log
+            export-probe-emulator.log
             native-ui/codec-result.json
           if-no-files-found: error
   database:

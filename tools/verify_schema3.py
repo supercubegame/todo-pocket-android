@@ -613,8 +613,15 @@ SHARE_UI_LABELS = [
     "share external writer changes privacy without revision increment",
     "share stale preview refuses publication through real system picker",
     "share stale refusal causes no extra database or media mutation",
+    "share background process death is proven while system picker remains",
+    "share recreated owner refuses old preview without nonempty publication",
+    "share returned activity runs in a different proven process",
+    "share process-loss refusal preserves complete database and media",
+    "share fresh explicit selection after process loss exports exact reviewed ZIP",
+    "share fresh post-loss success preserves complete database and media",
 ]
 SHARE_UI_SCOPE = "NATIVE_SINGLE_NOTE_MARKDOWN_SAF_SYNTHETIC_NOT_PDF_OR_RECEIVER"
+SHARE_RECREATION = "PROCESS_DEATH_DURING_SAF_REFUSED_AND_FRESH_EXPORT_PASS"
 
 def share_ui_observe(value, api, source, run):
     if not isinstance(value, dict):
@@ -623,6 +630,7 @@ def share_ui_observe(value, api, source, run):
               value.get("commit") == source and value.get("run_id") == run and
               value.get("scope") == SHARE_UI_SCOPE and value.get("checks") == SHARE_UI_LABELS and
               type(value.get("count")) is int and value.get("count") == len(SHARE_UI_LABELS) and
+              value.get("recreation") == SHARE_RECREATION and
               value.get("release_ready") is False)
     return {"status": "PASS" if passed else "NOT_VERIFIED", "evidence": value}
 
@@ -630,11 +638,13 @@ def share_ui_selftest():
     import copy
     good = {"status": "PASS", "api": 26, "commit": "source", "run_id": "run",
             "scope": SHARE_UI_SCOPE, "checks": list(SHARE_UI_LABELS),
+            "recreation": SHARE_RECREATION,
             "count": len(SHARE_UI_LABELS), "release_ready": False}
     assert share_ui_observe(good, 26, "source", "run")["status"] == "PASS"
     bad = [None, [], {}, dict(good, api=34), dict(good, commit="old"),
            dict(good, run_id="old"), dict(good, status="FAIL"), dict(good, scope="backend"),
-           dict(good, count=True), dict(good, release_ready=True)]
+           dict(good, count=True), dict(good, release_ready=True),
+           dict(good, recreation="NOT_TESTED"), {k:v for k,v in good.items() if k!="recreation"}]
     for i in range(len(SHARE_UI_LABELS)):
         missing = copy.deepcopy(good);del missing["checks"][i];missing["count"] -= 1
         swapped = copy.deepcopy(good);swapped["checks"][i] = "unrelated"
@@ -955,6 +965,52 @@ public class ShareExternalWriter {
         ok(snapshot()==(changed,media),"share stale refusal causes no extra database or media mutation")
         external(0,1)
         assert snapshot()==(baseline,media), "external test cleanup changed other state"
+        # The prior refusal may leave a zero-byte SAF document. Preserve it under
+        # another fixture name, so it cannot mask publication in the next case.
+        if file_paths():
+            shell("mv","/sdcard/Download/PocketTodo-notes.zip","/sdcard/Download/share-stale-empty.zip")
+        assert not file_paths()
+        start();choose_blocks(True);open_save()
+        old_pid = shell("pidof",gate.PKG).strip()
+        assert re.fullmatch(r"[1-9][0-9]*",old_pid), "one live product process required"
+        # Unlike force-stop, am kill preserves the activity/task and the external
+        # picker result route. Poll disappearance, not a guessed sleep or restart.
+        probes = []
+        result["process_loss"] = {"old_pid":old_pid,"absence_probes":probes}
+        shell("am","kill",gate.PKG)
+        deadline = time.monotonic()+30
+        while True:
+            probe = subprocess.run(prefix+["shell","pidof",gate.PKG],
+                                   capture_output=True,text=True,timeout=10)
+            probes.append({"returncode":probe.returncode,"stdout":probe.stdout.strip(),
+                           "stderr":probe.stderr.strip()})
+            if probe.returncode==1 and not probe.stdout.strip(): break
+            assert probe.returncode==0 and probe.stdout.strip()==old_pid, "unexpected process identity during kill"
+            assert time.monotonic()<deadline, "background process did not die"
+            time.sleep(.25)
+        picker = find(text="SAVE")
+        result["process_loss"]["picker_package"] = picker.get("package")
+        ok(picker.get("package") in ("com.android.documentsui","com.google.android.documentsui") and
+           not file_paths(), "share background process death is proven while system picker remains")
+        tap("SAVE")
+        find(**{"content-desc":"v12-status","text":"页面已重建，请重新选择导出内容"})
+        paths=file_paths()
+        ok(not paths or (len(paths)==1 and command("exec-out","cat",paths[0],binary=True)==b""),
+           "share recreated owner refuses old preview without nonempty publication")
+        new_pid = shell("pidof",gate.PKG).strip()
+        result["process_loss"]["new_pid"] = new_pid
+        ok(re.fullmatch(r"[1-9][0-9]*",new_pid) is not None and new_pid!=old_pid,
+           "share returned activity runs in a different proven process")
+        shot("22-share-process-loss-refused.png");stop()
+        ok(snapshot()==(baseline,media),"share process-loss refusal preserves complete database and media")
+        if file_paths():
+            shell("mv","/sdcard/Download/PocketTodo-notes.zip","/sdcard/Download/share-process-loss-empty.zip")
+        assert not file_paths()
+        start();choose_blocks(True);open_save();tap("SAVE");saved_message()
+        ok(export_bytes()==image_zip,"share fresh explicit selection after process loss exports exact reviewed ZIP")
+        shot("23-share-fresh-after-loss.png");stop()
+        ok(snapshot()==(baseline,media),"share fresh post-loss success preserves complete database and media")
+        result["recreation"]=SHARE_RECREATION
         result["status"]="PASS"
     except Exception as exc:
         result["error"]=exception_evidence(exc)

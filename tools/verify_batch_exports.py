@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 SCOPE = "NATIVE_TWO_NOTE_TEXT_SAF_NOT_OCR_RECEIVER_OR_PROCESS_LOSS"
-FORMATS = (("MARKDOWN", "Markdown", "PocketTodo-notes.zip"),
+FORMATS = (("MARKDOWN", "Markdown图片包", "PocketTodo-notes.zip"),
            ("PDF", "PDF", "PocketTodo-notes.pdf"),
            ("PNG_ZIP", "分段PNG图片包", "PocketTodo-pages.zip"))
 STEPS = ["ui_created_second_note", "empty_note_selection_blocked",
@@ -110,6 +110,16 @@ public class BatchPageCheck {
 
 
 def selftest():
+    # The format button starts abbreviated, but preview/status use full titles.
+    # These explicit expectations are independent of the product constant.
+    assert FORMATS == (("MARKDOWN", "Markdown图片包", "PocketTodo-notes.zip"),
+                       ("PDF", "PDF", "PocketTodo-notes.pdf"),
+                       ("PNG_ZIP", "分段PNG图片包", "PocketTodo-pages.zip"))
+    assert [title+"预览" for _, title, _ in FORMATS] == [
+        "Markdown图片包预览", "PDF预览", "分段PNG图片包预览"]
+    assert [title+"已保存，逐字节回读一致" for _, title, _ in FORMATS] == [
+        "Markdown图片包已保存，逐字节回读一致", "PDF已保存，逐字节回读一致",
+        "分段PNG图片包已保存，逐字节回读一致"]
     def archive(text, extra=False):
         out = io.BytesIO()
         with zipfile.ZipFile(out, "w") as z:
@@ -175,7 +185,7 @@ def selftest():
     finally:
         native = actual_native
     print("BATCH_HOST_CONTROLS outputs=2_positive_7_negative receipts=1_positive_" +
-          str(len(bads)) + "_negative composition=2 HOST_ONLY", flush=True)
+          str(len(bads)) + "_negative composition=2 format_contracts=3 HOST_ONLY", flush=True)
 
 
 def native(adb, gate):

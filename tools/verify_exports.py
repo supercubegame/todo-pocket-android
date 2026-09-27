@@ -163,6 +163,8 @@ def compile_and_run(folder, source, mode):
     return run(["java", "-Xmx512m", "-Djava.awt.headless=true", "-cp", folder, "PixelContractTest", mode])
 
 def main():
+    from verify_batch_exports import selftest as batch_selftest
+    batch_selftest()
     from verify_paged_exports import selftest as paged_observer_selftest
     paged_observer_selftest()
     source = SOURCE.read_text(encoding="utf-8")
@@ -174,7 +176,7 @@ def main():
          "mask", "mask_exact_black_and_outside_pixels"),
         ("transparent_mask", "result[y * outWidth + x] = 0xff000000;",
          "result[y * outWidth + x] = 0x00000000;",
-         "mask", "mask_exact_black_and_outside_pixels"),
+         "mask", "mask_transparent_source_fully_opaque"),
         ("ignore_crop_origin", "(crop.top + y) * width + crop.left",
          "y * width", "crop", "crop_nonzero_origin_pixels"),
         ("expose_result", "return pixels.clone();", "return pixels;",
@@ -677,6 +679,10 @@ def android_main():
     def database_and_codec(adb):
         original(adb)
         android_codec(adb,gate)
+        # Full runner only: the independent export probe calls android_codec directly.
+        # Keep old native/Markdown/paged/derived suites first and propagate every failure.
+        from verify_batch_exports import install as install_batch
+        install_batch(gate)
     gate.verify_database=database_and_codec
     gate.main()
 

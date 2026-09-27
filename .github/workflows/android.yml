@@ -1265,7 +1265,7 @@ jobs:
           meta=json.loads((folder/'preview.json').read_text())
           meta.update(status='PASS',scope='TESTED_STAGE_PREVIEW_NOT_FULL_V12',artifact_id=artifact['id'],download_url=os.environ['ARTIFACT_URL'],expires_at=artifact['expires_at'],archive_sha256=archive_hash,download_readback='EXACT_ALL_FILES_PASS',github_login_required=True)
           data=(json.dumps(meta,ensure_ascii=False,indent=2)+'\n').encode()
-          path='reports/preview-'+os.environ['GITHUB_SHA']+'-'+run+'.json'
+          path='reports/preview-'+os.environ['GITHUB_SHA']+'-'+os.environ['GITHUB_RUN_ID']+'.json'
           written=api('contents/'+path,'PUT',{'message':'Record verified staged APK download','branch':'evidence','content':base64.b64encode(data).decode()})
           actual=api('contents/'+path+'?ref='+written['commit']['sha'])
           assert base64.b64decode(actual['content'])==data

@@ -1,0 +1,4118 @@
+{
+  "commit": "b6ec9499a121503f413ebe6959a12533e59c4038",
+  "run_id": "36347711752",
+  "scope": "NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE",
+  "status": "NOT_VERIFIED",
+  "devices": {
+    "26": {
+      "status": "FAIL",
+      "api": 26,
+      "count": 40,
+      "checks": [
+        "new UI database starts empty without fabricated activities",
+        "blank todo rejected visibly",
+        "UI adds distinct stable todo identities",
+        "real checkbox completes todo",
+        "pending filter excludes completed row",
+        "completed filter excludes pending row",
+        "invalid edit stays open without losing original",
+        "cancel invalid edit preserves value and completion",
+        "title edit preserves stable identity and completion",
+        "native todo state survives actual process restart",
+        "category created through visible native dialog",
+        "category rename updates visible label",
+        "activity created under selected category",
+        "ordered multiline manual path displays without collapse",
+        "daily check-in writes visible done state",
+        "repeated daily mark remains one visible day",
+        "skipped is distinct from done and unrecorded",
+        "accessible category reorder changes exact visible order",
+        "category order persists after process restart",
+        "skipped mark persists after process restart",
+        "activity path persists after process restart",
+        "actual native screenshots represent distinct states",
+        "default native UI uses schema3 with exact nine-column block layout",
+        "independent SQLite read matches exact UI todo identities titles and states",
+        "independent SQLite read matches renamed reordered categories",
+        "activity stays in its category without invented application",
+        "independent SQLite read preserves path order",
+        "repeated native marks persist exactly one day with entry timestamp",
+        "check-in does not invent money entries",
+        "new native ledger starts with empty selection and zero summary",
+        "calendar multi-select is explicit read-only scope",
+        "three different-day amounts total exactly 80 yuan in native UI",
+        "cancel native entry does not change totals",
+        "native ledger rejects fractional cents without closing editor",
+        "refund reduces net expense without rewriting gross expense",
+        "planned is separate and signed net cash is exact",
+        "nonconsecutive selected days exclude actual refund date",
+        "cancel date selection keeps previous summary",
+        "missing day is not presented as confirmed zero expenditure",
+        "empty date selection is zero not all-time total"
+      ],
+      "error": "CalledProcessError(255, ['/usr/local/lib/android/sdk/platform-tools/adb', '-s', 'emulator-5554', 'shell', '-n', '-T', 'pidof', 'com.supercubegame.pockettodo.v12.preview'])",
+      "screenshots": [
+        {
+          "file": "01-todos.png",
+          "bytes": 38071,
+          "sha256": "6936b4fa4a68d94afe64d3451614fa49c88f501e18d18899afe1e0df4ac35e26"
+        },
+        {
+          "file": "02-activity.png",
+          "bytes": 47929,
+          "sha256": "2d5e235f6fafb5c27ecdc0ff3e4a240a249590d070e05a0ccb7e3da82c924c02"
+        },
+        {
+          "file": "03-categories.png",
+          "bytes": 45715,
+          "sha256": "4ac3cf4a0f2bd05f644a7b99849dad115fbe5a0afe5e26d697f690ab79ee7609"
+        },
+        {
+          "file": "04-ledger.png",
+          "bytes": 60255,
+          "sha256": "50052512be2bd8180c5aa7e21d012208b5ecd264553406f62f81ea20626b90a0"
+        },
+        {
+          "file": "05-selected-dates.png",
+          "bytes": 60421,
+          "sha256": "bec4dd65af95143ddcccca4b6581a6071fa1023f36c6a755977ac8b625405b87"
+        },
+        {
+          "file": "failure.png",
+          "bytes": 95112,
+          "sha256": "43c9f2dc0e8e9412f34637829f2448038fe9d18c98e3587f51d52a05c450a7f6"
+        }
+      ],
+      "infra_retries": [],
+      "release_ready": false,
+      "process_stops": [
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "5990\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.097139
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "6859\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.10211
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "7974\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.097745
+        },
+        {
+          "status": "FAIL",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 255,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "8202\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "error": "CalledProcessError(255, ['/usr/local/lib/android/sdk/platform-tools/adb', '-s', 'emulator-5554', 'shell', '-n', '-T', 'pidof', 'com.supercubegame.pockettodo.v12.preview'])",
+          "original_failure": {
+            "type": "CalledProcessError",
+            "command": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "stdout": "",
+            "stderr": "",
+            "returncode": 255
+          },
+          "elapsed_seconds": 0.097034
+        }
+      ],
+      "pixel_oracle": "DERIVATIVE_ORACLE_PASS positive=1 negative=2",
+      "failure_diagnostics": {
+        "status": "DIAGNOSTIC_ONLY_NOT_RETRY_OR_ACCEPTANCE",
+        "original": {
+          "type": "CalledProcessError",
+          "message": "Command '['/usr/local/lib/android/sdk/platform-tools/adb', '-s', 'emulator-5554', 'shell', '-n', '-T', 'pidof', 'com.supercubegame.pockettodo.v12.preview']' returned non-zero exit status 255.",
+          "command": [
+            "/usr/local/lib/android/sdk/platform-tools/adb",
+            "-s",
+            "emulator-5554",
+            "shell",
+            "-n",
+            "-T",
+            "pidof",
+            "com.supercubegame.pockettodo.v12.preview"
+          ],
+          "returncode": 255,
+          "stdout": {
+            "captured": true,
+            "tail": "",
+            "truncated": false
+          },
+          "stderr": {
+            "captured": true,
+            "tail": "",
+            "truncated": false
+          }
+        },
+        "probes": [
+          {
+            "name": "transport",
+            "command": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "get-state"
+            ],
+            "returncode": 0,
+            "stdout": {
+              "captured": true,
+              "tail": "device\n",
+              "truncated": false
+            },
+            "stderr": {
+              "captured": true,
+              "tail": "",
+              "truncated": false
+            }
+          },
+          {
+            "name": "shell_identity",
+            "command": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "id"
+            ],
+            "returncode": 0,
+            "stdout": {
+              "captured": true,
+              "tail": "uid=2000(shell) gid=2000(shell) groups=2000(shell),1004(input),1007(log),1011(adb),1015(sdcard_rw),1028(sdcard_r),3001(net_bt_admin),3002(net_bt),3003(inet),3006(net_bw_stats),3009(readproc) context=u:r:shell:s0\n",
+              "truncated": false
+            },
+            "stderr": {
+              "captured": true,
+              "tail": "",
+              "truncated": false
+            }
+          },
+          {
+            "name": "app_identity",
+            "command": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "run-as",
+              "com.supercubegame.pockettodo.v12.preview",
+              "id"
+            ],
+            "returncode": 0,
+            "stdout": {
+              "captured": true,
+              "tail": "uid=10077(u0_a77) gid=10077(u0_a77) groups=10077(u0_a77) context=u:r:untrusted_app:s0:c512,c768\n",
+              "truncated": false
+            },
+            "stderr": {
+              "captured": true,
+              "tail": "",
+              "truncated": false
+            }
+          },
+          {
+            "name": "database_directory",
+            "command": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "run-as",
+              "com.supercubegame.pockettodo.v12.preview",
+              "ls",
+              "databases"
+            ],
+            "returncode": 0,
+            "stdout": {
+              "captured": true,
+              "tail": "backup-source.db\nbackup-target.db\nfields.db\nfrozen-target.db\nfrozen-v2.db\nfrozen-v2.db-journal\nfuture.db\nfuture.db-journal\nguarded.db\nmigrate-v1.db\npocket-v12.db\npocket-v12.db-shm\npocket-v12.db-wal\nschema3-conflict.db\nschema3-conflict.db-journal\nschema3-contract.db\nschema3-derivative.db\nschema3-domain-restored.db\nschema3-domain.db\nschema3-empty-archive.db\nschema3-facade-old.db\nschema3-facade.db\nschema3-future.db\nschema3-future.db-journal\nschema3-image-race-control.db\nschema3-image-race-stale.db\nschema3-new.db\nschema3-race-control.db\nschema3-race-stale.db\nschema3-restore-empty.db\nschema3-restore-full.db\nschema3-restore-old.db\nschema3-restore.db\nschema3-v1-conflict.db\nschema3-v1-conflict.db-journal\nschema3-v1.db\nschema3-write-budget.db\nv12-contract.db\n",
+              "truncated": false
+            },
+            "stderr": {
+              "captured": true,
+              "tail": "",
+              "truncated": false
+            }
+          }
+        ]
+      },
+      "published_screenshots": [
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/39b7015e670d9684033740504b339d6bf42ad88d/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/26/01-todos.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/39b7015e670d9684033740504b339d6bf42ad88d/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/26/01-todos.png",
+          "sha256": "6936b4fa4a68d94afe64d3451614fa49c88f501e18d18899afe1e0df4ac35e26",
+          "file": "01-todos.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/fe5a25fd65ff227c3aa5d2a97a2c031d8c985826/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/26/02-activity.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/fe5a25fd65ff227c3aa5d2a97a2c031d8c985826/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/26/02-activity.png",
+          "sha256": "2d5e235f6fafb5c27ecdc0ff3e4a240a249590d070e05a0ccb7e3da82c924c02",
+          "file": "02-activity.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/3cbc67fc384e21f465fe8375f35f747cdc9e220b/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/26/03-categories.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/3cbc67fc384e21f465fe8375f35f747cdc9e220b/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/26/03-categories.png",
+          "sha256": "4ac3cf4a0f2bd05f644a7b99849dad115fbe5a0afe5e26d697f690ab79ee7609",
+          "file": "03-categories.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/3f1da5ca5b6c1b19c0646e18a3b16906300cd84d/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/26/04-ledger.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/3f1da5ca5b6c1b19c0646e18a3b16906300cd84d/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/26/04-ledger.png",
+          "sha256": "50052512be2bd8180c5aa7e21d012208b5ecd264553406f62f81ea20626b90a0",
+          "file": "04-ledger.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/76c1b110ae98433b834b961ae6744a9538a6c2e2/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/26/05-selected-dates.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/76c1b110ae98433b834b961ae6744a9538a6c2e2/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/26/05-selected-dates.png",
+          "sha256": "bec4dd65af95143ddcccca4b6581a6071fa1023f36c6a755977ac8b625405b87",
+          "file": "05-selected-dates.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/0115d1c242622a824fc9be2ae3cca0a00d59b6d5/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/26/failure.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/0115d1c242622a824fc9be2ae3cca0a00d59b6d5/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/26/failure.png",
+          "sha256": "43c9f2dc0e8e9412f34637829f2448038fe9d18c98e3587f51d52a05c450a7f6",
+          "file": "failure.png"
+        }
+      ]
+    },
+    "34": {
+      "status": "FAIL",
+      "scope": "NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE",
+      "ledger_calendar": "NATIVE_MULTI_DATE_LEDGER_PASS",
+      "saf_restore": "NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS",
+      "checkin_history": "NATIVE_CHECKIN_HISTORY_BACKDATE_PASS",
+      "note_editor": "NATIVE_TEXT_IMAGE_NOTE_PASS",
+      "api": 34,
+      "count": 186,
+      "checks": [
+        "new UI database starts empty without fabricated activities",
+        "blank todo rejected visibly",
+        "UI adds distinct stable todo identities",
+        "real checkbox completes todo",
+        "pending filter excludes completed row",
+        "completed filter excludes pending row",
+        "invalid edit stays open without losing original",
+        "cancel invalid edit preserves value and completion",
+        "title edit preserves stable identity and completion",
+        "native todo state survives actual process restart",
+        "category created through visible native dialog",
+        "category rename updates visible label",
+        "activity created under selected category",
+        "ordered multiline manual path displays without collapse",
+        "daily check-in writes visible done state",
+        "repeated daily mark remains one visible day",
+        "skipped is distinct from done and unrecorded",
+        "accessible category reorder changes exact visible order",
+        "category order persists after process restart",
+        "skipped mark persists after process restart",
+        "activity path persists after process restart",
+        "actual native screenshots represent distinct states",
+        "default native UI uses schema3 with exact nine-column block layout",
+        "independent SQLite read matches exact UI todo identities titles and states",
+        "independent SQLite read matches renamed reordered categories",
+        "activity stays in its category without invented application",
+        "independent SQLite read preserves path order",
+        "repeated native marks persist exactly one day with entry timestamp",
+        "check-in does not invent money entries",
+        "new native ledger starts with empty selection and zero summary",
+        "calendar multi-select is explicit read-only scope",
+        "three different-day amounts total exactly 80 yuan in native UI",
+        "cancel native entry does not change totals",
+        "native ledger rejects fractional cents without closing editor",
+        "refund reduces net expense without rewriting gross expense",
+        "planned is separate and signed net cash is exact",
+        "nonconsecutive selected days exclude actual refund date",
+        "cancel date selection keeps previous summary",
+        "missing day is not presented as confirmed zero expenditure",
+        "empty date selection is zero not all-time total",
+        "native ledger exact totals survive stopped-process restart",
+        "independent Android SQLite read matches all six exact typed dated entries",
+        "native saves have distinct entry and batch identities without selection-generated writes",
+        "cancel and invalid amount leave no batch journal residue",
+        "money and date filtering never mutate the check-in history",
+        "native check-in editor rejects malformed date without closing",
+        "backdated done check-in appears with its exact date",
+        "un-recording removes the visible history row",
+        "un-recorded backdate leaves the exact prior single mark in independent readback",
+        "check-in editing never mutates the ledger",
+        "backdated check-in survives cancel then re-entered identically",
+        "SAF file selection shows visible restore preview and replacement counts",
+        "canceling SAF restore preview makes no database write",
+        "cancelled restore leaves exact new todo and old state independent",
+        "cancelled restore retains exact ledger rows",
+        "SAF file selection shows visible restore preview and replacement counts",
+        "unchecked consent cannot restore even with visible confirmation control",
+        "SAF file selection shows visible restore preview and replacement counts",
+        "explicit SAF consent replaces data with previewed backup",
+        "SAF restored data survives a separate stopped-process restart",
+        "independent SQLite read matches exact SAF restored state",
+        "SAF restore retains exact ledger after independent readback",
+        "SAF restore retains exact check-in history including the re-entered backdate",
+        "empty note starts visibly empty without fabricated content",
+        "blank note save rejected visibly",
+        "saved note text appears on activity",
+        "note survives process restart",
+        "attached image is registered with note",
+        "note inherits its activity title and stays bound to that activity",
+        "note keeps ordered text then image blocks",
+        "image block is not private by default",
+        "image bytes registered under immutable content id",
+        "image block references exact registered media id",
+        "notes never mutate the ledger",
+        "actual private PNG bytes match registry size and content ID",
+        "independent PNG decoder verifies all 9216 opaque expected pixels",
+        "edit existing note opens with the exact stored text",
+        "cancel note edit preserves original text and identity",
+        "blank existing note edit stays open with visible validation",
+        "cancelled valid and blank note edits leave exact persisted note rows unchanged",
+        "note edit replaces text in place without leaving an old duplicate",
+        "edited note text and stable block identity survive stopped-process restart",
+        "image remains an image view after editing text and restarting",
+        "independent readback proves only text changed with note IDs block IDs order and privacy retained",
+        "editing note leaves exact media registry and complete ledger unchanged",
+        "text editing and restart preserve exact private image bytes",
+        "image import opens the actual system document picker",
+        "cancel system image picker reports no note change",
+        "cancel picker leaves exact blocks and media registrations unchanged",
+        "malformed selected image rejected visibly",
+        "malformed rejection preserves every database table including revision",
+        "oversized dimensions selected image rejected visibly",
+        "oversized dimensions rejection preserves every database table including revision",
+        "excess byte budget selected image rejected visibly",
+        "excess byte budget rejection preserves every database table including revision",
+        "SAF image appends one exact ordered block without replacing text or prior image",
+        "SAF original bytes registered by exact hash MIME and length",
+        "image import preserves notes identity and all unrelated tables",
+        "SAF private copy equals independently generated two-color PNG byte for byte",
+        "selected image still renders after source deletion and stopped-process restart",
+        "selected image block identity order and reference survive restart",
+        "source deletion never removes or changes the private selected image",
+        "independent host decoder proves JPEG and both pixel boundary fixtures really decode with intended dimensions and colors",
+        "new image-first activity has no existing note in independent SQLite read",
+        "image-first activity shows genuine empty note before any import",
+        "first-image cancellation waits for a visible system picker before pressing Back",
+        "canceling first image reports no note change",
+        "first-image cancel creates no orphan note media block or revision",
+        "malformed first image rejected visibly before note creation",
+        "malformed first image leaves every table unchanged with no orphan note or media registration",
+        "20005000-pixel first image rejected visibly before note creation",
+        "20005000-pixel first image leaves every table unchanged with no orphan note or media registration",
+        "JPEG-first import creates exactly one note with correct activity binding title and preserved prior notes",
+        "JPEG-first import creates exactly one position-zero public image block without touching previous blocks",
+        "JPEG-first media registry has exact actual MIME digest and original byte length",
+        "JPEG-first note creation preserves activities todos checkins ledger and all unrelated tables",
+        "selected JPEG private original is byte-exact rather than a recompressed preview",
+        "JPEG-first note displays a real ImageView after external source deletion and process restart",
+        "JPEG-first restart preserves every database table and exact private JPEG bytes",
+        "exactly 20000000 pixels is accepted inclusively as one appended ordered image block",
+        "pixel-limit image keeps exact private original and matching media registry",
+        "pixel-limit import preserves note identity and unrelated complete tables",
+        "20000000-pixel image remains an ImageView after source deletion and restart",
+        "pixel-limit restart preserves exact complete database and original image bytes",
+        "existing single note remains the initial selected note",
+        "blank new note title stays in dialog without creating a note",
+        "canceling a populated new-note dialog preserves every table and revision",
+        "new note selects its own empty content instead of copying the first note",
+        "second note has one fresh identity correct owner title and unchanged old notes",
+        "second note owns exactly its text block while all first-note and other-activity blocks remain exact",
+        "creating and editing second note preserves media ledger checkins and all unrelated tables",
+        "restart opens original first note without replacing its content",
+        "note picker exposes both titles in stable creation order",
+        "canceling note switch keeps selected note",
+        "explicit selection restores second note alone after process restart",
+        "editing second note stays on selected stable note instead of jumping to first",
+        "switching back preserves original first-note text",
+        "first note retains its imported image after multi-note editing",
+        "independent readback proves only second text changed with all note and block identities intact",
+        "multi-note edits preserve unrelated tables and all selected private originals byte for byte",
+        "duplicate note title creates a separate empty note rather than overwriting its namesake",
+        "same-title creation adds only one distinct note and never touches existing blocks or unrelated tables",
+        "restart preserves creation order and separate indexed entries for duplicate titles",
+        "same-title note selection resolves exact second identity not latest matching title",
+        "switching and restarting notes are read-only across the complete database",
+        "image append retains the non-first selected note and its existing text",
+        "non-first image import appends exactly one correctly owned ordered block without modifying any old block",
+        "reused JPEG import preserves notes complete media registry unrelated tables and exact original",
+        "non-first note image survives source deletion and explicit reselect after restart",
+        "new image metadata editor starts with empty caption and public flag",
+        "canceling edited caption and privacy preserves every table revision and original bytes",
+        "caption and private badge render on the selected second note after saving",
+        "private caption save changes only caption and privacy while retaining every block identity owner order and asset reference",
+        "metadata edit preserves complete unrelated tables media registrations and all imported originals",
+        "restart and reselect prefill the persisted caption and true private flag",
+        "editing second image metadata does not leak its caption into first note",
+        "same-title third note stays empty after second note image edits",
+        "restart and switching across private-image notes are read-only for every table",
+        "caption-only edit preserves existing true private flag and all other block fields",
+        "caption-only private edit leaves all unrelated tables and immutable original unchanged",
+        "updated private caption survives another force-stop and explicit note selection",
+        "empty caption is allowed and private flag can be explicitly unset",
+        "clearing caption and unsetting private restores exact original block fields without touching siblings or other tables",
+        "empty caption and false private flag persist after restart",
+        "final metadata cancel and restart preserve every table and exact JPEG original",
+        "derivative dialog shows actual decoded source dimensions with empty selection",
+        "derivative preview without selection rejected visibly",
+        "derivative cancel leaves every table and original bytes unchanged",
+        "corner drag maps to full source extent within touch rounding",
+        "derivative oversize selection rejected with visible pixel budget",
+        "derivative reset clears selection reports",
+        "touch crop maps onto intended source rectangle within rounding",
+        "redact mode adds exactly one reported mask",
+        "touch mask maps onto intended source rectangle within rounding",
+        "derivative preview renders exact reported output dimensions",
+        "derived block preserves note owner position kind empty caption public flag and records exact original",
+        "derived PNG registered with exact mime and byte length",
+        "derivative save preserves all unrelated tables",
+        "original imported PNG bytes unchanged after derivative save",
+        "sibling blocks across notes remain exact after derivative save",
+        "independent decoder proves exact cropped pixels and opaque mask for reported rects",
+        "derived image renders with working entry after process restart",
+        "derivative state and both images survive stopped-process restart exactly",
+        "re-derived preview renders for abandonment check",
+        "abandoned second preview writes nothing and keeps published derivative",
+        "native schema3 survives SAF restore and all ordinary edits without invented image origins"
+      ],
+      "screenshots": [
+        {
+          "file": "01-todos.png",
+          "bytes": 37613,
+          "sha256": "b49032a71c873c5d58e7ed6b7aca0d409e90f29492db1d3d4519365ebceebf3d"
+        },
+        {
+          "file": "02-activity.png",
+          "bytes": 46680,
+          "sha256": "662d8d995e94019cbf8316aff6f94eea955bdcb491ac39e39294659fe36f8a9b"
+        },
+        {
+          "file": "03-categories.png",
+          "bytes": 44747,
+          "sha256": "35c49f1ddb35f6671230fea1f921c67940da27f4d0e62bb514f05b042843b88f"
+        },
+        {
+          "file": "04-ledger.png",
+          "bytes": 57984,
+          "sha256": "cd436f39c2e972412ee23d3927741226b2073123ab0b3f8ac435405c0644a437"
+        },
+        {
+          "file": "05-selected-dates.png",
+          "bytes": 57867,
+          "sha256": "7a5b66cc77b04bc8f7ed368ed847ece738705dc7b80bb8bca03f47c8f43bee25"
+        },
+        {
+          "file": "06-checkin-history.png",
+          "bytes": 43387,
+          "sha256": "c44a3c1dddfceef9b96446c515660fc447297f07713c0f7186630ac957792480"
+        },
+        {
+          "file": "07-backup.png",
+          "bytes": 42042,
+          "sha256": "3c401eddfacf2f8d42e7a8d472f245b4e5f32a8ceeee51e386d773f708eee002"
+        },
+        {
+          "file": "08-restore-preview.png",
+          "bytes": 57956,
+          "sha256": "3499b0995e43ca3c90a0b9371dd76a72cc818ea4ac35a0211921a23ffa1eccf0"
+        },
+        {
+          "file": "09-note.png",
+          "bytes": 34251,
+          "sha256": "98c1c55f9a7888e0eea7b9fae30af968b4c3983ba18ac649631ea9645bfbe57b"
+        },
+        {
+          "file": "10-note-edited.png",
+          "bytes": 40870,
+          "sha256": "fe08e08455e14fcd2ffd55eb1747e32b0769b935c1bff30db0a7cf480cd776b0"
+        },
+        {
+          "file": "11-selected-image.png",
+          "bytes": 36060,
+          "sha256": "a4db663aa9033937c21978f6b0ef4fa739ab0f847818e016dc6609c74259c4d6"
+        },
+        {
+          "file": "12-jpeg-first-note.png",
+          "bytes": 35906,
+          "sha256": "70e88e258c43069672416b69d71e2a13e33cbde82121c672eed30c048f284922"
+        },
+        {
+          "file": "13-pixel-limit-image.png",
+          "bytes": 36057,
+          "sha256": "743ebd8b8dd8ded56ebf630450d6b6d05fbf95480c7858d305afea5296472e6f"
+        },
+        {
+          "file": "14-multiple-notes.png",
+          "bytes": 36341,
+          "sha256": "eee7bdb6981b38a22a712c132c322b505256e3fcc9be0a0dfd04a9a1645fd830"
+        },
+        {
+          "file": "15-second-note.png",
+          "bytes": 33595,
+          "sha256": "a87b6fcfe762f3c67d5ceadda3682b30aeef8ced6b83389b4f0f63335fd60c61"
+        },
+        {
+          "file": "16-private-image-caption.png",
+          "bytes": 41720,
+          "sha256": "6e496bcd89c697dd6983fbb136ed0425abec9e139c94ba64ea7f0ba97989c1c3"
+        },
+        {
+          "file": "17-second-image-public.png",
+          "bytes": 39293,
+          "sha256": "769dc1ebc3bf2db900a187ca1a3d4afd9a94152640bff18221d3ce44f3043514"
+        },
+        {
+          "file": "18-derivative-preview.png",
+          "bytes": 39179,
+          "sha256": "207b9aa009447ee656f6f5a02814c7340754fee7c83dc7cdbff12efc925209af"
+        },
+        {
+          "file": "19-derivative-saved.png",
+          "bytes": 36358,
+          "sha256": "b4375c523fece1fa780dbc4316a2050ec9ab19071bc0b2465bd81cfd61bacdd9"
+        },
+        {
+          "file": "20-share-preview.png",
+          "bytes": 48424,
+          "sha256": "d15f5899d05f8fa9b03cc802b0f906ee6a913b18ecae1957894102a5f8c5b793"
+        },
+        {
+          "file": "21-share-saved.png",
+          "bytes": 41066,
+          "sha256": "b875f7ea3ef1d01c165a577ed51e34728d061667203ef7f3fee343deb8138997"
+        },
+        {
+          "file": "22-share-process-loss-refused.png",
+          "bytes": 40160,
+          "sha256": "1dad88a45ce91564e9d0189e2cb895682f250925a6ba583b6eab6bbe26a2a04c"
+        },
+        {
+          "file": "23-share-fresh-after-loss.png",
+          "bytes": 41051,
+          "sha256": "de936e2fc11f335dc19c1d04e6975a9d0e4ea570bea1b05db7eebaf94f07a724"
+        }
+      ],
+      "infra_retries": [],
+      "restore_undo": "NOT_IMPLEMENTED",
+      "restore_preview_lifecycle": "NOT_TESTED",
+      "checkin_schedules": "NOT_IMPLEMENTED",
+      "real_photo_selection": "NATIVE_SAF_PNG_JPEG_PASS",
+      "photos": "SYNTHETIC_PNG_JPEG_ONLY",
+      "sharing": "NATIVE_SINGLE_NOTE_MARKDOWN_SAF_SYNTHETIC_NOT_PDF_OR_RECEIVER",
+      "release_ready": false,
+      "image_picker_lifecycle": "CANCEL_AND_RESTART_ONLY",
+      "jpeg": "NATIVE_SAF_EXACT_PRIVATE_COPY_PASS",
+      "camera": "NOT_IMPLEMENTED",
+      "image_first_note": "CANCEL_REJECT_CREATE_RESTART_PASS",
+      "image_pixel_budget": "20000000_ACCEPTED_20005000_REJECTED",
+      "exif_orientation": "NOT_TESTED",
+      "whole_note_memory": "NOT_TESTED",
+      "multiple_notes": "CREATE_SWITCH_EDIT_DUPLICATE_TITLE_RESTART_PASS",
+      "note_selection_persistence": "RESTART_DEFAULTS_FIRST_EXPLICIT_RESELECT",
+      "note_rename_delete_reorder": "NOT_IMPLEMENTED",
+      "nonfirst_image": "APPEND_ISOLATION_RESTART_PASS",
+      "image_metadata": "CAPTION_PRIVATE_CANCEL_EDIT_CLEAR_RESTART_PASS",
+      "private_sharing": "NOT_TESTED",
+      "default_app_schema": 3,
+      "default_schema3_ui": "NATIVE_SCHEMA3_UI_PASS",
+      "derivative_ui": "NATIVE_CROP_MASK_UI_SAVE_CANCEL_RESTART_PASS",
+      "derivative_geometry": [
+        {
+          "source": [
+            1536,
+            768
+          ],
+          "preview": [
+            768,
+            384
+          ],
+          "requested": [
+            0,
+            0,
+            1536,
+            768
+          ],
+          "screen": [
+            28,
+            151,
+            292,
+            283
+          ],
+          "canvas": "[28,97][292,337]",
+          "observed_crop": [
+            0,
+            0,
+            1536,
+            768
+          ]
+        },
+        {
+          "source": [
+            1280,
+            640
+          ],
+          "preview": [
+            640,
+            320
+          ],
+          "requested": [
+            320,
+            160,
+            960,
+            480
+          ],
+          "screen": [
+            94,
+            184,
+            226,
+            250
+          ],
+          "canvas": "[28,97][292,337]",
+          "observed_crop": [
+            320,
+            160,
+            960,
+            480
+          ]
+        },
+        {
+          "source": [
+            1280,
+            640
+          ],
+          "preview": [
+            640,
+            320
+          ],
+          "requested": [
+            640,
+            240,
+            800,
+            400
+          ],
+          "screen": [
+            160,
+            200,
+            193,
+            234
+          ],
+          "canvas": "[28,97][292,337]",
+          "observed_mask": [
+            640,
+            238,
+            800,
+            402
+          ]
+        },
+        {
+          "source": [
+            640,
+            320
+          ],
+          "preview": [
+            640,
+            320
+          ],
+          "requested": [
+            0,
+            0,
+            320,
+            160
+          ],
+          "screen": [
+            28,
+            151,
+            160,
+            217
+          ],
+          "canvas": "[28,97][292,337]"
+        }
+      ],
+      "pixel_oracle": "DERIVATIVE_ORACLE_PASS positive=1 negative=2",
+      "process_stops": [
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "6494\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.07649
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "7557\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.079456
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "8754\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.058937
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "9028\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.068048
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "12168\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.064183
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "12707\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.071603
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "13402\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.081144
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "14707\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.064052
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "15425\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.084052
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "15555\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.060903
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "16039\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.064109
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "16371\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.058718
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "16965\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.098902
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "17344\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.049959
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "17616\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.070189
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "17964\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.099158
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "18379\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.055523
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "18729\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.072489
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "19079\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.079138
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "19428\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.057021
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "19703\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.080624
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "19963\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.077099
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "20314\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.092099
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "20658\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.080034
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "21009\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.09014
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "21359\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.064096
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "21610\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.076109
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "21963\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.064112
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "22216\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.057444
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "22584\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.06671
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "23071\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.055658
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "23863\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.058864
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "24223\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.075519
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "24555\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.070641
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "25014\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.092127
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "25467\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.062569
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "25943\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.054908
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "26542\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.055611
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "26962\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.063693
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "27483\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.07528
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "27892\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.090286
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "28378\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.087588
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "28965\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.109414
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "29431\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.065539
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "30192\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.085054
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "30617\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.087127
+        }
+      ],
+      "markdown_ui": {
+        "status": "PASS",
+        "api": 34,
+        "commit": "b6ec9499a121503f413ebe6959a12533e59c4038",
+        "run_id": "36347711752",
+        "scope": "NATIVE_SINGLE_NOTE_MARKDOWN_SAF_SYNTHETIC_NOT_PDF_OR_RECEIVER",
+        "checks": [
+          "share private fixture changes only chosen image metadata",
+          "share duplicate-title empty note cannot export namesake content",
+          "share picker excludes private image and starts with no selection",
+          "share empty selection stays in selection dialog",
+          "share actual preview contains selected text and image",
+          "share unchecked consent cannot open system save",
+          "share preview cancellation preserves complete database and media",
+          "share system picker cancellation publishes no file and preserves state",
+          "share text-only selection creates exact Markdown without image entries",
+          "share text-only success preserves complete database and media",
+          "share selected export contains exact Markdown and only one current image",
+          "share independent decoder verifies exported crop and opaque mask pixels",
+          "share successful image export preserves complete database and media",
+          "share external writer changes privacy without revision increment",
+          "share stale preview refuses publication through real system picker",
+          "share stale refusal causes no extra database or media mutation",
+          "share background process death is proven while system picker remains",
+          "share recreated owner refuses old preview without nonempty publication",
+          "share returned activity runs in a different proven process",
+          "share process-loss refusal preserves complete database and media",
+          "share fresh explicit selection after process loss exports exact reviewed ZIP",
+          "share fresh post-loss success preserves complete database and media"
+        ],
+        "release_ready": false,
+        "recreation": "PROCESS_DEATH_DURING_SAF_REFUSED_AND_FRESH_EXPORT_PASS",
+        "provider_failures": "NOT_TESTED",
+        "private_text": "NOT_TESTED",
+        "actual_receiver": "NOT_TESTED",
+        "picker_cancel_navigation": [
+          {
+            "backs": 0,
+            "packages": [
+              "com.google.android.documentsui"
+            ],
+            "cancelled": false
+          },
+          {
+            "backs": 1,
+            "packages": [
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "cancelled": true
+          }
+        ],
+        "zip_sha256": "6a3c4c3305de6a38c2cddf8ac8b9a041fbf8be824a0dc508b0e77161956a144d",
+        "zip_bytes": 589,
+        "external_helper": {
+          "sha256": "8e7b26128c3529da5a01cd2be38001ae1e6e1c242dd01b0e1e22f90a52a61d07",
+          "readback": "EXACT_BYTES",
+          "location": "APP_PRIVATE_CACHE"
+        },
+        "process_loss": {
+          "old_pid": "2502",
+          "absence_probes": [
+            {
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "injection": "CI_APP_UID_SIGKILL_NOT_LMK",
+          "stage": "SIGNAL_SENT",
+          "identity": {
+            "status": "PASS",
+            "pid": "2502",
+            "uid": "10192",
+            "uid_fields": [
+              [
+                "10192",
+                "10192",
+                "10192",
+                "10192"
+              ]
+            ],
+            "expected_package": "com.supercubegame.pockettodo.v12.preview",
+            "cmdline_bytes": 99,
+            "cmdline_sha256": "725588960f59515f7cdbb1bcb02d9fea1e06f7d7d6311703702508cb23a3d55e",
+            "cmdline_hex_head": "636f6d2e73757065726375626567616d652e706f636b6574746f646f2e7631322e707265766965770000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "cmdline_hex_truncated": false,
+            "exact_argv0": true,
+            "nul_only_tail": true,
+            "nul_suffix_bytes": 59
+          },
+          "uid": "10192",
+          "uid_fields": [
+            [
+              "10192",
+              "10192",
+              "10192",
+              "10192"
+            ]
+          ],
+          "picker_package": "com.google.android.documentsui",
+          "new_pid": "2968"
+        },
+        "count": 22
+      },
+      "derived_paged_ui": {
+        "status": "PASS",
+        "scope": "NATIVE_DERIVED_IMAGE_SAF_NOT_RECEIVER",
+        "commit": "b6ec9499a121503f413ebe6959a12533e59c4038",
+        "run_id": "36347711752",
+        "api": 34,
+        "outputs": {
+          "PDF": {
+            "status": "PASS",
+            "pages": 1,
+            "bytes": 4413,
+            "sha256": "f1e6aa6931d4f3001e9405d5b434af79e1986dd4a6de97589d5b82ab3fa3ea87",
+            "current_asset": "09850540aa76afa2fd7d4c975db1be59b9c49ce8054a24a5a9b289371caf316a",
+            "original_asset": "101752500846f0a5f6dc4ca52f29d9db89625a555acc1f99d6165f57e144cb8f",
+            "crop": [
+              320,
+              160,
+              960,
+              480
+            ],
+            "mask": [
+              640,
+              238,
+              800,
+              402
+            ],
+            "pixels": "EXACT_OPAQUE_INTERIORS_EDGE_INTERPOLATION_NOT_ASSERTED",
+            "state": "ALL_TABLES_AND_ALL_MEDIA_UNCHANGED"
+          },
+          "PNG_ZIP": {
+            "status": "PASS",
+            "pages": 1,
+            "bytes": 560,
+            "sha256": "aa680009dbf99873e1c5290127141dd7b3c8397bde2d866a5732213b9be56fd8",
+            "current_asset": "09850540aa76afa2fd7d4c975db1be59b9c49ce8054a24a5a9b289371caf316a",
+            "original_asset": "101752500846f0a5f6dc4ca52f29d9db89625a555acc1f99d6165f57e144cb8f",
+            "crop": [
+              320,
+              160,
+              960,
+              480
+            ],
+            "mask": [
+              640,
+              238,
+              800,
+              402
+            ],
+            "pixels": "EXACT_OPAQUE_INTERIORS_EDGE_INTERPOLATION_NOT_ASSERTED",
+            "state": "ALL_TABLES_AND_ALL_MEDIA_UNCHANGED"
+          }
+        },
+        "release_ready": false
+      },
+      "paged_ui": {
+        "status": "PASS",
+        "api": 34,
+        "commit": "b6ec9499a121503f413ebe6959a12533e59c4038",
+        "run_id": "36347711752",
+        "scope": "NATIVE_SINGLE_NOTE_TEXT_PDF_PNG_SAF_CANCEL_STALE_NOT_PROCESS_DEATH_OR_RECEIVER",
+        "labels": [
+          "private_excluded_and_empty_selection_PDF",
+          "format_picker_selected_PDF",
+          "actual_page_preview_PDF",
+          "unchecked_save_refused_PDF",
+          "picker_cancel_preserves_state_PDF",
+          "real_saf_output_PDF",
+          "independent_text_page_PDF",
+          "save_preserves_state_PDF",
+          "same_revision_privacy_change_PDF",
+          "stale_publication_refused_PDF",
+          "stale_refusal_preserves_state_PDF",
+          "fixture_restored_PDF",
+          "private_excluded_and_empty_selection_PNG_ZIP",
+          "format_picker_selected_PNG_ZIP",
+          "actual_page_preview_PNG_ZIP",
+          "unchecked_save_refused_PNG_ZIP",
+          "picker_cancel_preserves_state_PNG_ZIP",
+          "real_saf_output_PNG_ZIP",
+          "independent_text_page_PNG_ZIP",
+          "save_preserves_state_PNG_ZIP",
+          "same_revision_privacy_change_PNG_ZIP",
+          "stale_publication_refused_PNG_ZIP",
+          "stale_refusal_preserves_state_PNG_ZIP",
+          "fixture_restored_PNG_ZIP"
+        ],
+        "checks": 24,
+        "release_ready": false,
+        "outputs": {
+          "PDF": {
+            "sha256": "60a72331b0ddb757b7aa0c403b5bc3c83e569951cd8881bc4006febc1c061d52",
+            "bytes": 8033,
+            "pdf_text": "EXACT",
+            "page": "SINGLE_NONBLANK_TEXT_REGION_NO_IMAGE"
+          },
+          "PNG_ZIP": {
+            "sha256": "4fabefe315c148851715422f176ee1789c11422ca04bda906696353728b19516",
+            "bytes": 2260,
+            "pdf_text": "NOT_OCR_TESTED",
+            "page": "SINGLE_NONBLANK_TEXT_REGION_NO_IMAGE"
+          }
+        },
+        "derived": {
+          "status": "PASS",
+          "scope": "NATIVE_DERIVED_IMAGE_SAF_NOT_RECEIVER",
+          "commit": "b6ec9499a121503f413ebe6959a12533e59c4038",
+          "run_id": "36347711752",
+          "api": 34,
+          "outputs": {
+            "PDF": {
+              "status": "PASS",
+              "pages": 1,
+              "bytes": 4413,
+              "sha256": "f1e6aa6931d4f3001e9405d5b434af79e1986dd4a6de97589d5b82ab3fa3ea87",
+              "current_asset": "09850540aa76afa2fd7d4c975db1be59b9c49ce8054a24a5a9b289371caf316a",
+              "original_asset": "101752500846f0a5f6dc4ca52f29d9db89625a555acc1f99d6165f57e144cb8f",
+              "crop": [
+                320,
+                160,
+                960,
+                480
+              ],
+              "mask": [
+                640,
+                238,
+                800,
+                402
+              ],
+              "pixels": "EXACT_OPAQUE_INTERIORS_EDGE_INTERPOLATION_NOT_ASSERTED",
+              "state": "ALL_TABLES_AND_ALL_MEDIA_UNCHANGED"
+            },
+            "PNG_ZIP": {
+              "status": "PASS",
+              "pages": 1,
+              "bytes": 560,
+              "sha256": "aa680009dbf99873e1c5290127141dd7b3c8397bde2d866a5732213b9be56fd8",
+              "current_asset": "09850540aa76afa2fd7d4c975db1be59b9c49ce8054a24a5a9b289371caf316a",
+              "original_asset": "101752500846f0a5f6dc4ca52f29d9db89625a555acc1f99d6165f57e144cb8f",
+              "crop": [
+                320,
+                160,
+                960,
+                480
+              ],
+              "mask": [
+                640,
+                238,
+                800,
+                402
+              ],
+              "pixels": "EXACT_OPAQUE_INTERIORS_EDGE_INTERPOLATION_NOT_ASSERTED",
+              "state": "ALL_TABLES_AND_ALL_MEDIA_UNCHANGED"
+            }
+          },
+          "release_ready": false
+        }
+      },
+      "batch_ui": {
+        "status": "FAIL",
+        "scope": "NATIVE_TWO_NOTE_TEXT_SAF_NOT_OCR_RECEIVER_OR_PROCESS_LOSS",
+        "commit": "b6ec9499a121503f413ebe6959a12533e59c4038",
+        "run_id": "36347711752",
+        "api": 34,
+        "labels": [
+          "ui_created_second_note",
+          "empty_note_selection_blocked",
+          "note_cancel_preserves_state",
+          "content_cancel_preserves_state",
+          "explicit_reverse_clicks_private_excluded_MARKDOWN",
+          "empty_content_blocked_MARKDOWN"
+        ],
+        "checks": 6,
+        "outputs": {},
+        "release_ready": false,
+        "apk_sha256": "48063a4cf63ee1507801202ebd4c50e136329961d6e662eb11ac363c6d9fe493",
+        "error": "AssertionError(\"batch control missing {'text': 'Markdown预览'} actual=[{'index': '0', 'text': '', 'resource-id': '', 'class': 'android.widget.FrameLayout', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[0,140][320,524]'}, {'index': '0', 'text': '', 'resource-id': '', 'class': 'android.widget.FrameLayout', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,156][304,508]'}, {'index': '0', 'text': '', 'resource-id': 'android:id/content', 'class': 'android.widget.FrameLayout', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,156][304,508]'}, {'index': '0', 'text': '', 'resource-id': 'android:id/parentPanel', 'class': 'android.widget.LinearLayout', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,156][304,508]'}, {'index': '0', 'text': '', 'resource-id': 'android:id/topPanel', 'class': 'android.widget.LinearLayout', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,156][304,204]'}, {'index': '0', 'text': '', 'resource-id': 'android:id/title_template', 'class': 'android.widget.LinearLayout', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,156][304,204]'}, {'index': '0', 'text': 'Markdown图片包预览', 'resource-id': 'android:id/alertTitle', 'class': 'android.widget.TextView', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[40,174][280,204]'}, {'index': '1', 'text': '', 'resource-id': 'android:id/customPanel', 'class': 'android.widget.FrameLayout', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,204][304,452]'}, {'index': '0', 'text': '', 'resource-id': 'android:id/custom', 'class': 'android.widget.FrameLayout', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,204][304,452]'}, {'index': '0', 'text': '', 'resource-id': '', 'class': 'android.widget.ScrollView', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'true', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,204][304,452]'}, {'index': '0', 'text': '', 'resource-id': '', 'class': 'android.widget.LinearLayout', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,204][304,452]'}, {'index': '0', 'text': '# Pocket Todo\\\\n\\\\nSecond edited\\\\n\\\\nBatchsecond\\\\n\\\\n', 'resource-id': '', 'class': 'android.widget.TextView', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,204][304,340]'}, {'index': '1', 'text': '以上是实际包内Markdown源码和图片缩略图。仅导出所选非私有内容；图片重新编码不等于自动脱敏。完整备份、账目和原图文件不在包内。', 'resource-id': '', 'class': 'android.widget.TextView', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,340][304,420]'}, {'index': '2', 'text': '我已核对内容与图片，可保存此包', 'resource-id': '', 'class': 'android.widget.CheckBox', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'true', 'checked': 'false', 'clickable': 'true', 'enabled': 'true', 'focusable': 'true', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,420][304,452]'}, {'index': '2', 'text': '', 'resource-id': 'android:id/buttonPanel', 'class': 'android.widget.ScrollView', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'true', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,452][304,508]'}, {'index': '0', 'text': '', 'resource-id': '', 'class': 'android.widget.LinearLayout', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,452][304,508]'}, {'index': '0', 'text': '取消', 'resource-id': 'android:id/button2', 'class': 'android.widget.Button', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'true', 'enabled': 'true', 'focusable': 'true', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[120,456][184,504]'}, {'index': '1', 'text': '选择保存位置', 'resource-id': 'android:id/button1', 'class': 'android.widget.Button', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'true', 'enabled': 'true', 'focusable': 'true', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[184,456][292,504]'}]\")",
+        "original_failure": {
+          "type": "AssertionError",
+          "message": "batch control missing {'text': 'Markdown预览'} actual=[{'index': '0', 'text': '', 'resource-id': '', 'class': 'android.widget.FrameLayout', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[0,140][320,524]'}, {'index': '0', 'text': '', 'resource-id': '', 'class': 'android.widget.FrameLayout', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,156][304,508]'}, {'index': '0', 'text': '', 'resource-id': 'android:id/content', 'class': 'android.widget.FrameLayout', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,156][304,508]'}, {'index': '0', 'text': '', 'resource-id': 'android:id/parentPanel', 'class': 'android.widget.LinearLayout', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,156][304,508]'}, {'index': '0', 'text': '', 'resource-id': 'android:id/topPanel', 'class': 'android.widget.LinearLayout', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,156][304,204]'}, {'index': '0', 'text': '', 'resource-id': 'android:id/title_template', 'class': 'android.widget.LinearLayout', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,156][304,204]'}, {'index': '0', 'text': 'Markdown图片包预览', 'resource-id': 'android:id/alertTitle', 'class': 'android.widget.TextView', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[40,174][280,204]'}, {'index': '1', 'text': '', 'resource-id': 'android:id/customPanel', 'class': 'android.widget.FrameLayout', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,204][304,452]'}, {'index': '0', 'text': '', 'resource-id': 'android:id/custom', 'class': 'android.widget.FrameLayout', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,204][304,452]'}, {'index': '0', 'text': '', 'resource-id': '', 'class': 'android.widget.ScrollView', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'true', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,204][304,452]'}, {'index': '0', 'text': '', 'resource-id': '', 'class': 'android.widget.LinearLayout', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,204][304,452]'}, {'index': '0', 'text': '# Pocket Todo\\n\\nSecond edited\\n\\nBatchsecond\\n\\n', 'resource-id': '', 'class': 'android.widget.TextView', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,204][304,340]'}, {'index': '1', 'text': '以上是实际包内Markdown源码和图片缩略图。仅导出所选非私有内容；图片重新编码不等于自动脱敏。完整备份、账目和原图文件不在包内。', 'resource-id': '', 'class': 'android.widget.TextView', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,340][304,420]'}, {'index': '2', 'text': '我已核对内容与图片，可保存此包', 'resource-id': '', 'class': 'android.widget.CheckBox', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'true', 'checked': 'false', 'clickable': 'true', 'enabled': 'true', 'focusable': 'true', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,420][304,452]'}, {'index': '2', 'text': '', 'resource-id': 'android:id/buttonPanel', 'class': 'android.widget.ScrollView', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'true', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,452][304,508]'}, {'index': '0', 'text': '', 'resource-id': '', 'class': 'android.widget.LinearLayout', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'false', 'enabled': 'true', 'focusable': 'false', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[16,452][304,508]'}, {'index': '0', 'text': '取消', 'resource-id': 'android:id/button2', 'class': 'android.widget.Button', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'true', 'enabled': 'true', 'focusable': 'true', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[120,456][184,504]'}, {'index': '1', 'text': '选择保存位置', 'resource-id': 'android:id/button1', 'class': 'android.widget.Button', 'package': 'com.supercubegame.pockettodo.v12.preview', 'content-desc': '', 'checkable': 'false', 'checked': 'false', 'clickable': 'true', 'enabled': 'true', 'focusable': 'true', 'focused': 'false', 'scrollable': 'false', 'long-clickable': 'false', 'password': 'false', 'selected': 'false', 'bounds': '[184,456][292,504]'}]",
+          "command": null,
+          "returncode": null,
+          "stdout": {
+            "captured": false,
+            "tail": null,
+            "truncated": false
+          },
+          "stderr": {
+            "captured": false,
+            "tail": null,
+            "truncated": false
+          }
+        }
+      },
+      "published_screenshots": [
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/99df03ec754382069c43e69bc036b6018ed82b00/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/01-todos.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/99df03ec754382069c43e69bc036b6018ed82b00/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/01-todos.png",
+          "sha256": "b49032a71c873c5d58e7ed6b7aca0d409e90f29492db1d3d4519365ebceebf3d",
+          "file": "01-todos.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/e1ed0d323bda7dc9bae1927f78bb58d0d99c9c64/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/02-activity.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/e1ed0d323bda7dc9bae1927f78bb58d0d99c9c64/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/02-activity.png",
+          "sha256": "662d8d995e94019cbf8316aff6f94eea955bdcb491ac39e39294659fe36f8a9b",
+          "file": "02-activity.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/37ff7b0219676107a601822c9966fcfaf5a5a1e2/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/03-categories.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/37ff7b0219676107a601822c9966fcfaf5a5a1e2/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/03-categories.png",
+          "sha256": "35c49f1ddb35f6671230fea1f921c67940da27f4d0e62bb514f05b042843b88f",
+          "file": "03-categories.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/3931425e55d1136b5fe4d4dcb11ea0146b780a19/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/04-ledger.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/3931425e55d1136b5fe4d4dcb11ea0146b780a19/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/04-ledger.png",
+          "sha256": "cd436f39c2e972412ee23d3927741226b2073123ab0b3f8ac435405c0644a437",
+          "file": "04-ledger.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/e8dc667dbad93af179975375395d86c7b60fb588/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/05-selected-dates.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/e8dc667dbad93af179975375395d86c7b60fb588/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/05-selected-dates.png",
+          "sha256": "7a5b66cc77b04bc8f7ed368ed847ece738705dc7b80bb8bca03f47c8f43bee25",
+          "file": "05-selected-dates.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/d778437380b97fff48016952c6ca19068a70cc09/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/06-checkin-history.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/d778437380b97fff48016952c6ca19068a70cc09/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/06-checkin-history.png",
+          "sha256": "c44a3c1dddfceef9b96446c515660fc447297f07713c0f7186630ac957792480",
+          "file": "06-checkin-history.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/e53b978862374bf8131923eafa31f0cd3707a42d/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/07-backup.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/e53b978862374bf8131923eafa31f0cd3707a42d/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/07-backup.png",
+          "sha256": "3c401eddfacf2f8d42e7a8d472f245b4e5f32a8ceeee51e386d773f708eee002",
+          "file": "07-backup.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/aec52ef210fe52e4cbc51a97f33114df0712c486/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/08-restore-preview.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/aec52ef210fe52e4cbc51a97f33114df0712c486/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/08-restore-preview.png",
+          "sha256": "3499b0995e43ca3c90a0b9371dd76a72cc818ea4ac35a0211921a23ffa1eccf0",
+          "file": "08-restore-preview.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/553a6348ddab0ab1a355ebeffb58557fc69ee3d9/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/09-note.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/553a6348ddab0ab1a355ebeffb58557fc69ee3d9/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/09-note.png",
+          "sha256": "98c1c55f9a7888e0eea7b9fae30af968b4c3983ba18ac649631ea9645bfbe57b",
+          "file": "09-note.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/939ecfb0fa2ef14f689e1b29c390005ac314d6af/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/10-note-edited.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/939ecfb0fa2ef14f689e1b29c390005ac314d6af/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/10-note-edited.png",
+          "sha256": "fe08e08455e14fcd2ffd55eb1747e32b0769b935c1bff30db0a7cf480cd776b0",
+          "file": "10-note-edited.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/5e0d112fddf1ec6ca5c0af09be9e873309811c01/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/11-selected-image.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/5e0d112fddf1ec6ca5c0af09be9e873309811c01/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/11-selected-image.png",
+          "sha256": "a4db663aa9033937c21978f6b0ef4fa739ab0f847818e016dc6609c74259c4d6",
+          "file": "11-selected-image.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/d6c5600d6e0fa5bb55ac9297d7e68b17ded4adf7/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/12-jpeg-first-note.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/d6c5600d6e0fa5bb55ac9297d7e68b17ded4adf7/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/12-jpeg-first-note.png",
+          "sha256": "70e88e258c43069672416b69d71e2a13e33cbde82121c672eed30c048f284922",
+          "file": "12-jpeg-first-note.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/a809363d4d6136e577cc64cfa1aa98cbdd8254bc/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/13-pixel-limit-image.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/a809363d4d6136e577cc64cfa1aa98cbdd8254bc/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/13-pixel-limit-image.png",
+          "sha256": "743ebd8b8dd8ded56ebf630450d6b6d05fbf95480c7858d305afea5296472e6f",
+          "file": "13-pixel-limit-image.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/27e6759828983d925dd926631b47068cdf994267/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/14-multiple-notes.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/27e6759828983d925dd926631b47068cdf994267/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/14-multiple-notes.png",
+          "sha256": "eee7bdb6981b38a22a712c132c322b505256e3fcc9be0a0dfd04a9a1645fd830",
+          "file": "14-multiple-notes.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/ae29e87b1c6fa975f1947d62a7ed9465dff15cfd/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/15-second-note.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/ae29e87b1c6fa975f1947d62a7ed9465dff15cfd/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/15-second-note.png",
+          "sha256": "a87b6fcfe762f3c67d5ceadda3682b30aeef8ced6b83389b4f0f63335fd60c61",
+          "file": "15-second-note.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/c1936e2a4ac27fe21b7f6b7a93205f3ee66e7082/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/16-private-image-caption.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/c1936e2a4ac27fe21b7f6b7a93205f3ee66e7082/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/16-private-image-caption.png",
+          "sha256": "6e496bcd89c697dd6983fbb136ed0425abec9e139c94ba64ea7f0ba97989c1c3",
+          "file": "16-private-image-caption.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/61c6dea115003e571db0a06b8d43d635ab2a01e5/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/17-second-image-public.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/61c6dea115003e571db0a06b8d43d635ab2a01e5/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/17-second-image-public.png",
+          "sha256": "769dc1ebc3bf2db900a187ca1a3d4afd9a94152640bff18221d3ce44f3043514",
+          "file": "17-second-image-public.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/0340490c2244e778f98c9bb1a8bc8932c131b8c8/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/18-derivative-preview.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/0340490c2244e778f98c9bb1a8bc8932c131b8c8/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/18-derivative-preview.png",
+          "sha256": "207b9aa009447ee656f6f5a02814c7340754fee7c83dc7cdbff12efc925209af",
+          "file": "18-derivative-preview.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/fd95c3ae2ed44b80191013eea78e69eb52e0ad22/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/19-derivative-saved.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/fd95c3ae2ed44b80191013eea78e69eb52e0ad22/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/19-derivative-saved.png",
+          "sha256": "b4375c523fece1fa780dbc4316a2050ec9ab19071bc0b2465bd81cfd61bacdd9",
+          "file": "19-derivative-saved.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/29ec4abe3d7942d996058c1d7dd49b160229ca96/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/20-share-preview.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/29ec4abe3d7942d996058c1d7dd49b160229ca96/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/20-share-preview.png",
+          "sha256": "d15f5899d05f8fa9b03cc802b0f906ee6a913b18ecae1957894102a5f8c5b793",
+          "file": "20-share-preview.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/55797a77f68d695740d09cc79bd42a4a0c53133a/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/21-share-saved.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/55797a77f68d695740d09cc79bd42a4a0c53133a/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/21-share-saved.png",
+          "sha256": "b875f7ea3ef1d01c165a577ed51e34728d061667203ef7f3fee343deb8138997",
+          "file": "21-share-saved.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/019a03a716d016bd5c0040a13ff8a237b324c8bb/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/22-share-process-loss-refused.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/019a03a716d016bd5c0040a13ff8a237b324c8bb/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/22-share-process-loss-refused.png",
+          "sha256": "1dad88a45ce91564e9d0189e2cb895682f250925a6ba583b6eab6bbe26a2a04c",
+          "file": "22-share-process-loss-refused.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/ad2f362d1d0c5a31d99a26e187f8970e6385ffa4/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/23-share-fresh-after-loss.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/ad2f362d1d0c5a31d99a26e187f8970e6385ffa4/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/23-share-fresh-after-loss.png",
+          "sha256": "de936e2fc11f335dc19c1d04e6975a9d0e4ea570bea1b05db7eebaf94f07a724",
+          "file": "23-share-fresh-after-loss.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/55e275898dd9c24769a171ced29dcfb58b2f3a84/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/batch-failure.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/55e275898dd9c24769a171ced29dcfb58b2f3a84/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/batch-failure.png",
+          "sha256": "7d7f75f53381b34d79449c22521500f9e6f83c384b6ec06a1fb15d88b5da0a87",
+          "file": "batch-failure.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/fe854003f60e2ead9afd38dc4b75541e8ad3561e/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/derivative-output.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/fe854003f60e2ead9afd38dc4b75541e8ad3561e/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/derivative-output.png",
+          "sha256": "09850540aa76afa2fd7d4c975db1be59b9c49ce8054a24a5a9b289371caf316a",
+          "file": "derivative-output.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/11bda2e10088b3e9005ead4d774eeec1ef6b51ee/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/derivative-source.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/11bda2e10088b3e9005ead4d774eeec1ef6b51ee/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/derivative-source.png",
+          "sha256": "101752500846f0a5f6dc4ca52f29d9db89625a555acc1f99d6165f57e144cb8f",
+          "file": "derivative-source.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/9cd0e148b260abfad786a583e558c6e9bc723762/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/derived-pdf.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/9cd0e148b260abfad786a583e558c6e9bc723762/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/derived-pdf.png",
+          "sha256": "08f66b73fb75ada342068a363f28282675595a37e00ae083425dcc43224c03af",
+          "file": "derived-pdf.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/d578dd13b5940244157eb4877871ce232c916595/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/derived-png.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/d578dd13b5940244157eb4877871ce232c916595/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/derived-png.png",
+          "sha256": "db161393ce65affa2a01739b170e45e7b59a86a68c774ec94e5c6f694ca9658a",
+          "file": "derived-png.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/edf36a6233b4546612b54ad68fa69fe5061dd140/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/export-current-derived.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/edf36a6233b4546612b54ad68fa69fe5061dd140/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/export-current-derived.png",
+          "sha256": "09850540aa76afa2fd7d4c975db1be59b9c49ce8054a24a5a9b289371caf316a",
+          "file": "export-current-derived.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/c9b57432c0ebcdc9a25beecef4fa6a48b67922b2/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/native-pdf-text.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/c9b57432c0ebcdc9a25beecef4fa6a48b67922b2/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/native-pdf-text.png",
+          "sha256": "e3a73bf6c53e02b3955778bebdea560920b3e98befa05f259ec80985c44dbf98",
+          "file": "native-pdf-text.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/d428bf2ec3686ec534b487cb7d9cd262b1f6b408/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/native-png-text.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/d428bf2ec3686ec534b487cb7d9cd262b1f6b408/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/native-png-text.png",
+          "sha256": "421971a7efe9819bde0c6fee04401e5f97fe3541fec3564f6bf6d82a92c8cc0f",
+          "file": "native-png-text.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/b76c56df07704bbdb920acdbbd9f41c69c56d8ab/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/note-media.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/b76c56df07704bbdb920acdbbd9f41c69c56d8ab/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/note-media.png",
+          "sha256": "8880b1c84ddbdca3c4473711900fe94e549356071c7d054f9585c1e2178d64b8",
+          "file": "note-media.png"
+        },
+        {
+          "url": "https://github.com/supercubegame/todo-pocket-android/blob/1adb5609bacc2b07647b283da73f40bfb3818243/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/share-exported.png",
+          "raw_url": "https://raw.githubusercontent.com/supercubegame/todo-pocket-android/1adb5609bacc2b07647b283da73f40bfb3818243/screenshots/b6ec9499a121503f413ebe6959a12533e59c4038-36347711752/34/share-exported.png",
+          "sha256": "09850540aa76afa2fd7d4c975db1be59b9c49ce8054a24a5a9b289371caf316a",
+          "file": "share-exported.png"
+        }
+      ]
+    }
+  },
+  "release_ready": false
+}

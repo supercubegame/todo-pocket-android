@@ -1167,10 +1167,12 @@ def paged_observe(codec, native, api, source, run):
             output.get("pdf_text")!=("EXACT" if kind=="PDF" else "NOT_OCR_TESTED") or
             output.get("page")!="SINGLE_NONBLANK_TEXT_REGION_NO_IMAGE"):
             errors.append("invalid_output_"+kind)
+    derived = paged_derived_observe(receipt.get("derived"), api, source, run)
+    if derived["status"] != "PASS": errors.append("required_derived_saf")
     return {"status":"PASS" if not errors else "NOT_VERIFIED","errors":errors,
             "scope":"PAGED_BACKEND_PREVIEW_AND_SINGLE_NOTE_TEXT_SAF_NOT_FULL_SHARING",
             "backend_checks":backend.get("checks"),"preview_checks":preview.get("checks"),
-            "native_checks":receipt.get("checks"),"outputs":outputs,"release_ready":False}
+            "native_checks":receipt.get("checks"),"outputs":outputs,"derived":derived,"release_ready":False}
 
 def paged_observer_selftest():
     import copy
@@ -1185,12 +1187,21 @@ def paged_observer_selftest():
     receipt=dict(common,checks=24,labels=PAGED_NATIVE_LABELS[:],scope=PAGED_NATIVE_SCOPE,
         outputs={kind:{"sha256":"b"*64,"bytes":100,"pdf_text":"EXACT" if kind=="PDF" else "NOT_OCR_TESTED",
                        "page":"SINGLE_NONBLANK_TEXT_REGION_NO_IMAGE"} for kind in ("PDF","PNG_ZIP")})
+    derived_good, derived_bad = paged_derived_cases()
+    receipt["derived"] = derived_good
     codec=dict(common,apk_sha256="a"*64,paged_exports=backend,paged_native_ui=receipt)
     native={"status":"PASS","paged_ui":copy.deepcopy(receipt)}
     baseline=copy.deepcopy((codec,native))
     def accepted(c,n): return paged_observe(c,n,26,"source","run")["status"]=="PASS"
     assert accepted(codec,native) and (codec,native)==baseline
     mutants=[]
+    for value in derived_bad:
+        c=copy.deepcopy(codec);c["paged_native_ui"]["derived"]=copy.deepcopy(value)
+        n=copy.deepcopy(native);n["paged_ui"]=copy.deepcopy(c["paged_native_ui"])
+        assert c["status"]==n["status"]=="PASS"
+        mutants.append((c,n))
+    c=copy.deepcopy(codec);del c["paged_native_ui"]["derived"]
+    n=copy.deepcopy(native);n["paged_ui"]=copy.deepcopy(c["paged_native_ui"]);mutants.append((c,n))
     for path in ((),("paged_exports",),("paged_exports","preview_ui"),("paged_native_ui",)):
         for key,value in (("checks",0),("labels",[]),("scope","wrong")) if path else (("commit","old"),("run_id","old"),("api",True),("status","FAIL"),("release_ready",True)):
             c=copy.deepcopy(codec);target=c
@@ -1228,9 +1239,85 @@ def paged_observer_selftest():
     mutants.extend([(None,native),(codec,None),(codec,{"status":"PASS"}),
                     (codec,dict(native,status="FAIL"))])
     for c,n in mutants:
-        assert (c,n)!=baseline,"paged mutation did not apply"
+        assert repr((c,n))!=repr(baseline),"paged mutation did not apply"
         assert not accepted(c,n),"paged aggregate accepted missing/failed evidence"
-    return {"positive":1,"negative":len(mutants),"scope":"REPORT_MUTATIONS_NOT_DEVICE_EXECUTION"}
+    return {"positive":1,"negative":len(mutants),"derived_negative":len(derived_bad)+1,"scope":"REPORT_MUTATIONS_NOT_DEVICE_EXECUTION"}
+
+def paged_derived_observe(value, api, source, run):
+    """Independent report contract, not imported from the device emitter."""
+    def obj(v): return v if isinstance(v, dict) else {}
+    def digest(v): return isinstance(v, str) and re.fullmatch(r"[0-9a-f]{64}", v) is not None
+    value = obj(value)
+    errors = []
+    if not (value.get("status") == "PASS" and type(value.get("api")) is int and
+            value.get("api") == api and value.get("commit") == source and
+            value.get("run_id") == run and value.get("release_ready") is False and
+            value.get("scope") == "NATIVE_DERIVED_IMAGE_SAF_NOT_RECEIVER"):
+        errors.append("derived_identity")
+    outputs = obj(value.get("outputs"))
+    if set(outputs) != {"PDF", "PNG_ZIP"}:
+        errors.append("derived_formats")
+    for kind in ("PDF", "PNG_ZIP"):
+        output = obj(outputs.get(kind))
+        if not (output.get("status") == "PASS" and type(output.get("pages")) is int and
+                output.get("pages") == 1 and type(output.get("bytes")) is int and
+                0 < output.get("bytes", 0) <= 16777216):
+            errors.append(kind + "_derived_output")
+        if not all(digest(output.get(key)) for key in ("sha256", "current_asset", "original_asset")):
+            errors.append(kind + "_derived_digest")
+        if output.get("current_asset") == output.get("original_asset"):
+            errors.append(kind + "_origin_substitution")
+        if (output.get("pixels") != "EXACT_OPAQUE_INTERIORS_EDGE_INTERPOLATION_NOT_ASSERTED" or
+                output.get("state") != "ALL_TABLES_AND_ALL_MEDIA_UNCHANGED"):
+            errors.append(kind + "_derived_assertions")
+        for key in ("crop", "mask"):
+            rect = output.get(key)
+            if not (isinstance(rect, list) and len(rect) == 4 and
+                    all(type(n) is int for n in rect) and
+                    0 <= rect[0] < rect[2] <= 1280 and 0 <= rect[1] < rect[3] <= 640):
+                errors.append(kind + "_derived_" + key)
+    a, b = obj(outputs.get("PDF")), obj(outputs.get("PNG_ZIP"))
+    if any(a.get(key) != b.get(key) for key in ("current_asset", "original_asset", "crop", "mask")):
+        errors.append("derived_cross_format_identity")
+    return {"status": "PASS" if not errors else "NOT_VERIFIED", "errors": errors,
+            "scope": "INDEPENDENT_DERIVED_SAF_RECEIPT_NOT_FULL_SHARING",
+            "commit": source, "run_id": run, "api": api,
+            "outputs": outputs, "release_ready": False}
+
+
+def paged_derived_cases():
+    """Handwritten report fixtures independent of verify_paged_exports.py."""
+    import copy
+    output = {"status": "PASS", "pages": 1, "bytes": 548, "sha256": "d"*64,
+              "current_asset": "e"*64, "original_asset": "f"*64,
+              "crop": [320, 160, 960, 480], "mask": [640, 238, 800, 402],
+              "pixels": "EXACT_OPAQUE_INTERIORS_EDGE_INTERPOLATION_NOT_ASSERTED",
+              "state": "ALL_TABLES_AND_ALL_MEDIA_UNCHANGED"}
+    good = {"status": "PASS", "scope": "NATIVE_DERIVED_IMAGE_SAF_NOT_RECEIVER",
+            "api": 26, "commit": "source", "run_id": "run", "release_ready": False,
+            "outputs": {kind: copy.deepcopy(output) for kind in ("PDF", "PNG_ZIP")}}
+    bad = [None, [], {}]
+    for key in good:
+        v = copy.deepcopy(good); del v[key]; bad.append(v)
+    for key, value in (("status", "FAIL"), ("scope", "backend"), ("api", True),
+                       ("api", 34), ("commit", "old"), ("run_id", "old"), ("release_ready", True)):
+        v = copy.deepcopy(good); v[key] = value; bad.append(v)
+    for kind in ("PDF", "PNG_ZIP"):
+        v = copy.deepcopy(good); del v["outputs"][kind]; bad.append(v)
+        for key in output:
+            v = copy.deepcopy(good); del v["outputs"][kind][key]; bad.append(v)
+        for key, value in (("status", "FAIL"), ("pages", True), ("pages", 2),
+            ("bytes", True), ("bytes", 0), ("bytes", 16777217), ("sha256", "bad"),
+            ("current_asset", "f"*64), ("current_asset", "a"*64),
+            ("original_asset", "b"*64), ("pixels", "NONBLANK"), ("state", "NOT_TESTED"),
+            ("crop", []), ("crop", [True, 160, 960, 480]),
+            ("crop", [320, 160, 320, 480]), ("crop", [320, 160, 1281, 480]),
+            ("crop", [321, 160, 960, 480]), ("mask", [640, 238, 800, 641]),
+            ("mask", [640, 239, 800, 402])):
+            v = copy.deepcopy(good); v["outputs"][kind][key] = value; bad.append(v)
+    v = copy.deepcopy(good); v["outputs"]["other"] = copy.deepcopy(output); bad.append(v)
+    assert all(repr(v) != repr(good) for v in bad), "derived mutation did not apply"
+    return good, bad
 
 def report():
     controls = selftest()
@@ -1272,6 +1359,7 @@ def report():
     passed = passed and derivative["status"] == "PASS"
     doc = {"commit": source, "run_id": run, "status": "PASS" if passed else "NOT_VERIFIED",
            "scope": "SCHEMA3_STORAGE_ARCHIVE_GUARDED_RESTORE_AND_DEFAULT_NATIVE_UI",
+           "paged_exports_summary": {api: phases["paged_exports"] for api, phases in devices.items()},
            "devices": devices, "observer_selftests": controls, "release_ready": False,
            "archive_compatibility": {"export_and_candidate": "PASS" if passed else "NOT_VERIFIED",
                                      "guarded_live_restore": "PASS" if passed else "NOT_VERIFIED",

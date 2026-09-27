@@ -54,6 +54,7 @@ jobs:
       - name: Fixed Android build setup for independent export probe
         run: |
           set -euo pipefail
+          exec > >(tee export-probe-setup.log) 2>&1
           echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
           echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
           curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
@@ -63,7 +64,9 @@ jobs:
           echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
       - name: Build the current-source disposable APKs
-        run: gradle --no-daemon --console=plain assembleDebug assembleDebugAndroidTest
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --console=plain assembleDebug assembleDebugAndroidTest 2>&1 | tee export-probe-build.log
       - name: Prepare independent synthetic native fixture driver
         run: |
           set -euo pipefail
@@ -356,35 +359,51 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY' 2>&1 | tee export-probe.log
-          import hashlib,json,os,sys,time
+          import hashlib,json,os,sys,time,traceback
           from pathlib import Path
           sys.path.insert(0,'tools')
           sys.path.insert(0,os.environ['RUNNER_TEMP'])
           from export_native_probe import standalone_native
           import emulator_gate as gate
           import verify_exports
-          from verify_schema3 import PAGED_BACKEND_LABELS,PAGED_PREVIEW_LABELS,require_registration,certificate
+          from verify_schema3 import PAGED_BACKEND_LABELS,PAGED_PREVIEW_LABELS,require_registration,certificate,exception_evidence
           started=time.monotonic()
           result={'status':'FAIL','commit':os.environ['GITHUB_SHA'],'run_id':os.environ['GITHUB_RUN_ID'],
             'api':gate.API,'scope':'PARALLEL_EXPORT_BACKEND_PREVIEW_AND_SYNTHETIC_NATIVE_MULTIPAGE_NOT_FULL_REGRESSION',
             'release_ready':False,'durable_upgrade_ready':False}
           calls=[]
+          preflight={'phase':'EMULATOR_START'};result['preflight']=preflight
           def install_and_probe(adb):
+            preflight['phase']='APK_DISCOVERY'
             apps=list(Path('build/outputs/apk/debug').glob('*.apk'))
             tests=list(Path('build/outputs/apk/androidTest/debug').glob('*.apk'))
-            assert len(apps)==len(tests)==1
-            assert certificate(apps[0],gate)==certificate(tests[0],gate)
+            preflight.update(apps=list(map(str,apps)),tests=list(map(str,tests)))
+            assert len(apps)==len(tests)==1,'expected exactly one product and one test APK'
+            preflight['phase']='CERTIFICATES'
+            app_cert=certificate(apps[0],gate);test_cert=certificate(tests[0],gate)
+            preflight.update(app_certificate=app_cert,test_certificate=test_cert)
+            assert app_cert==test_cert,'product/test APK certificate mismatch'
+            preflight['phase']='BADGING'
             badging=gate.run([gate.SDK/'build-tools/35.0.0/aapt','dump','badging',apps[0]],capture=True).stdout
-            assert "name='"+gate.PKG+"'" in badging and "sdkVersion:'26'" in badging
+            preflight['badging']=badging[:4096]
+            assert "name='"+gate.PKG+"'" in badging and "sdkVersion:'26'" in badging,'product package/minSdk mismatch'
             for apk in (apps[0],tests[0]):
+              preflight.update(phase='INSTALL',apk=str(apk))
               gate.run([adb,'-s',gate.SERIAL,'install','-t',apk],timeout=120)
+            preflight['phase']='REGISTRATION'
             require_registration(adb,gate,'probe','V12DeviceTest')
+            preflight['phase']='INSTALLED_PATH'
             installed=gate.run([adb,'-s',gate.SERIAL,'shell','pm','path',gate.PKG],capture=True).stdout.strip()
-            assert installed.startswith('package:') and '\n' not in installed
+            preflight['installed_path']=installed
+            assert installed.startswith('package:') and '\n' not in installed,'installed APK path missing or ambiguous'
             import subprocess
-            actual=subprocess.check_output([str(adb),'-s',gate.SERIAL,'exec-out','cat',installed[8:]],timeout=30)
-            assert actual==apps[0].read_bytes()
+            preflight['phase']='INSTALLED_BYTES'
+            actual=subprocess.check_output([str(adb),'-s',gate.SERIAL,'exec-out','cat',installed[8:]],stderr=subprocess.PIPE,timeout=30)
+            expected=apps[0].read_bytes()
+            preflight.update(actual_bytes=len(actual),expected_bytes=len(expected),actual_sha256=hashlib.sha256(actual).hexdigest(),expected_sha256=hashlib.sha256(expected).hexdigest())
+            assert actual==expected,'installed product bytes differ from built APK'
             calls.append('installed_exact_product')
+            preflight['phase']='CODEC_AND_PREVIEW'
             verify_exports.android_codec(adb,gate)
             calls.append('codec_and_actual_preview')
             # The codec composes a later native callback for the FULL runner.
@@ -392,6 +411,7 @@ jobs:
             # Restore only this job's receipt callback, never alter full jobs.
             gate.verify_native_ui=finish_probe
           def finish_probe(adb):
+            preflight['phase']='CODEC_RECEIPT'
             assert calls==['installed_exact_product','codec_and_actual_preview']
             codec=json.loads(Path('native-ui/codec-result.json').read_text())
             assert codec['status']=='PASS' and codec['commit']==result['commit'] and codec['run_id']==result['run_id'] and codec['api']==gate.API
@@ -401,6 +421,7 @@ jobs:
             assert paged['instrumentation']['product_apk_sha256']==hashlib.sha256(actual_product()).hexdigest()
             assert not Path('native-ui/native-result.json').exists(),'probe must not fabricate full native acceptance'
             result['codec']=codec
+            preflight['phase']='NATIVE_SAF'
             result['native_image_pages']=standalone_native(adb,gate)
             calls.append('synthetic_native_saved')
             calls.append('receipt_verified')
@@ -414,7 +435,7 @@ jobs:
             gate.main()
             assert calls==['installed_exact_product','codec_and_actual_preview','synthetic_native_saved','receipt_verified']
           except Exception as exc:
-            result.update(status='FAIL',error=repr(exc));raise
+            result.update(status='FAIL',error=repr(exc),original_failure=exception_evidence(exc),traceback=traceback.format_exc()[-16000:]);raise
           finally:
             result.update(elapsed_seconds=round(time.monotonic()-started,3),stages=calls)
             if Path('export-native.json').exists():result['native_image_pages']=json.loads(Path('export-native.json').read_text())
@@ -430,6 +451,8 @@ jobs:
           path: |
             export-probe.json
             export-probe.log
+            export-probe-setup.log
+            export-probe-build.log
             export-probe-emulator.log
             export-native.json
             export-native/*.png
@@ -454,12 +477,37 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
-          import base64,json,os,urllib.request,urllib.error
+          import base64,json,os,tempfile,urllib.request,urllib.error
           from pathlib import Path
           source,run=os.environ['GITHUB_SHA'],os.environ['GITHUB_RUN_ID']
-          devices={}
+          def log_tail(path):
+              try:
+                  with path.open("rb") as stream:
+                      stream.seek(0,2);size=stream.tell()
+                      stream.seek(max(0,size-24000));raw=stream.read(24000)
+                  return {"status":"OBSERVED_NOT_ACCEPTANCE","bytes":size,
+                      "truncated":size>24000,"tail":raw.decode("utf-8",errors="replace")}
+              except OSError as exc:
+                  return {"status":"NOT_OBSERVED","error":repr(exc)}
+          def log_controls():
+              with tempfile.TemporaryDirectory() as folder:
+                  p=Path(folder)/"log"
+                  assert log_tail(p)["status"]=="NOT_OBSERVED"
+                  assert log_tail(Path(folder))["status"]=="NOT_OBSERVED"
+                  p.write_bytes(b"");v=log_tail(p)
+                  assert v["tail"]=="" and v["bytes"]==0 and v["truncated"] is False
+                  p.write_bytes(b"x"*23999+b"\xff");v=log_tail(p)
+                  assert len(v["tail"])==24000 and v["tail"].endswith("\ufffd") and v["truncated"] is False
+                  p.write_bytes(b"x"*24001+b"TRACEBACK_SENTINEL");v=log_tail(p)
+                  assert len(v["tail"])==24000 and v["truncated"] is True and v["tail"].endswith("TRACEBACK_SENTINEL")
+              return {"checks":5,"scope":"HOST_LOG_CAPTURE_NOT_DEVICE"}
+          controls=log_controls()
+          devices={};logs={}
           for level in (26,34):
-            path=Path('collected')/('export-probe-api-'+str(level))/'export-probe.json'
+            folder=Path('collected')/('export-probe-api-'+str(level))
+            path=folder/'export-probe.json'
+            logs[str(level)]={name:log_tail(folder/name) for name in (
+              'export-probe-setup.log','export-probe-build.log','export-probe.log','export-probe-emulator.log')}
             try:
               assert path.stat().st_size<=2*1024*1024
               value=json.loads(path.read_bytes())
@@ -468,7 +516,7 @@ jobs:
             except (OSError,ValueError,KeyError,TypeError,AssertionError) as exc:
               devices[str(level)]={'status':'NOT_VERIFIED','error':repr(exc)}
           doc={'commit':source,'run_id':run,'scope':'EARLY_DIAGNOSTIC_NOT_ACCEPTANCE',
-            'devices':devices,'release_ready':False,'durable_upgrade_ready':False}
+            'devices':devices,'logs':logs,'log_controls':controls,'release_ready':False,'durable_upgrade_ready':False}
           data=(json.dumps(doc,ensure_ascii=False,indent=2)+'\n').encode()
           endpoint='https://api.github.com/repos/'+os.environ['GITHUB_REPOSITORY']+'/'
           def api(path,method='GET',body=None):

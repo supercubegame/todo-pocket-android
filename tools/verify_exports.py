@@ -176,7 +176,7 @@ def main():
          "mask", "mask_exact_black_and_outside_pixels"),
         ("transparent_mask", "result[y * outWidth + x] = 0xff000000;",
          "result[y * outWidth + x] = 0x00000000;",
-         "mask", "mask_transparent_source_fully_opaque"),
+         "mask", "mask_exact_black_and_outside_pixels"),
         ("ignore_crop_origin", "(crop.top + y) * width + crop.left",
          "y * width", "crop", "crop_nonzero_origin_pixels"),
         ("expose_result", "return pixels.clone();", "return pixels;",

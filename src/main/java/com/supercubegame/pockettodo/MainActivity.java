@@ -82,8 +82,26 @@ public final class MainActivity extends Activity {
     private static final class ShareChoice {
         byte[] state;String note;
         final java.util.List<NoteDocument.Block> blocks=new java.util.ArrayList<>();
+        java.util.List<NoteDocument.ShareBlock> batch;
+        final java.util.Map<String,String> noteLabels=new java.util.LinkedHashMap<>();
+        java.util.List<NoteDocument.ShareBlock> candidates(){
+            if(batch!=null)return batch;
+            java.util.List<NoteDocument.ShareBlock> result=new java.util.ArrayList<>();
+            for(NoteDocument.Block b:blocks)result.add(new NoteDocument.ShareBlock(note,b));
+            return result;
+        }
+        String selectionKey(NoteDocument.ShareBlock entry){return batch==null?entry.block.id:entry.key();}
+        java.util.Set<String> qualified(java.util.Set<String> selected)throws IOException{
+            if(selected==null)throw new IOException("Explicit selection required");
+            java.util.Set<String> result=new java.util.LinkedHashSet<>();
+            for(String key:selected){
+                if(key==null)throw new IOException("Missing selection identity");
+                result.add(batch==null?note+"/"+key:key);
+            }
+            return result;
+        }
     }
-    /** Explicit one-note/block slice; no ledger, backup or origin assets are selected. */
+    /** Explicit note/block selection; no ledger, backup or origin assets are selected. */
     void openNoteShare(){
         if(sharing||pendingShare!=null)return;
         sharing=true;
@@ -103,13 +121,54 @@ public final class MainActivity extends Activity {
             String[] labels=new String[notes.size()];
             for(int i=0;i<labels.length;i++)labels[i]=(i+1)+". "+shortLabel(notes.get(i)[2])+" / "+shortLabel(notes.get(i)[1]);
             android.app.AlertDialog d=new android.app.AlertDialog.Builder(this).setTitle("导出哪篇笔记？")
-                .setItems(labels,(dialog,which)->loadShareChoice(notes.get(which)[0])).setNegativeButton("取消",null).create();
+                .setItems(labels,(dialog,which)->loadShareChoice(notes.get(which)[0]))
+                .setNeutralButton("批量选择",(dialog,which)->selectShareNotes(notes,labels))
+                .setNegativeButton("取消",null).create();
             showShareDialog(d);
         },()->{sharing=false;screen.message("无法读取笔记列表；超过1000篇时请先缩小数据范围",true);});
     }
     private static String shortLabel(String value){return value.length()>80?value.substring(0,80)+"…":value;}
     private void showShareDialog(android.app.AlertDialog d){
         shareDialogs.add(d);d.setOnDismissListener(unused->shareDialogs.remove(d));d.show();
+    }
+    private void selectShareNotes(java.util.List<String[]> notes,String[] labels){
+        boolean[] checked=new boolean[notes.size()];
+        android.app.AlertDialog d=new android.app.AlertDialog.Builder(this).setTitle("勾选笔记（下一步逐项选择内容）")
+            .setMultiChoiceItems(labels,checked,(dialog,which,value)->checked[which]=value)
+            .setNegativeButton("取消",null).setPositiveButton("选择内容",null).create();
+        d.setOnShowListener(unused->d.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+            java.util.List<String> selected=new java.util.ArrayList<>();
+            for(int i=0;i<checked.length;i++)if(checked[i])selected.add(notes.get(i)[0]);
+            if(selected.isEmpty()){screen.message("请至少勾选一篇笔记；不会默认导出全部",true);return;}
+            d.dismiss();loadBatchShareChoice(selected);
+        }));
+        showShareDialog(d);
+    }
+    private void loadBatchShareChoice(java.util.List<String> notes){
+        final java.util.List<String> requested=new java.util.ArrayList<>(notes);
+        screen.work(()->{
+            if(requested.isEmpty()||requested.size()>1000||new java.util.HashSet<>(requested).size()!=requested.size())
+                throw new IOException("Explicit unique note selection required");
+            synchronized(screen.db){
+                android.database.sqlite.SQLiteDatabase sql=screen.db.getWritableDatabase();sql.beginTransaction();
+                try{
+                    ShareChoice choice=new ShareChoice();choice.batch=new java.util.ArrayList<>();choice.state=screen.db.exportState();
+                    for(String note:requested){
+                        try(android.database.Cursor c=sql.rawQuery(
+                            "SELECT n.title,a.title FROM notes n JOIN activities a ON a.id=n.activity_id WHERE n.id=?",new String[]{note})){
+                            if(!c.moveToFirst())throw new IOException("Selected note disappeared");
+                            choice.noteLabels.put(note,shortLabel(c.getString(1))+" / "+shortLabel(c.getString(0)));
+                        }
+                        for(NoteDocument.Block b:screen.db.noteBlocks(note)){
+                            if(b.privateContent)continue; // Filter before any media access, across every selected note.
+                            if(choice.batch.size()==1000)throw new IOException("Too many selected blocks");
+                            choice.batch.add(new NoteDocument.ShareBlock(note,b));
+                        }
+                    }
+                    sql.setTransactionSuccessful();return choice;
+                }finally{sql.endTransaction();}
+            }
+        },this::selectShareBlocks,()->screen.message("无法读取所选笔记：内容可能已变化或超过1000项；请减少范围后重选",true));
     }
     private void loadShareChoice(String note){
         screen.work(()->{
@@ -132,12 +191,14 @@ public final class MainActivity extends Activity {
         },this::selectShareBlocks,()->screen.message("无法读取这篇笔记，请重新选择",true));
     }
     private void selectShareBlocks(ShareChoice choice){
-        if(choice.blocks.isEmpty()){screen.message("这篇笔记没有非私有内容可导出",false);return;}
-        String[] labels=new String[choice.blocks.size()];boolean[] checked=new boolean[labels.length];
+        java.util.List<NoteDocument.ShareBlock> candidates=choice.candidates();
+        if(candidates.isEmpty()){screen.message("所选笔记没有非私有内容可导出",false);return;}
+        String[] labels=new String[candidates.size()];boolean[] checked=new boolean[labels.length];
         final int[] format={0};
         for(int i=0;i<labels.length;i++){
-            NoteDocument.Block b=choice.blocks.get(i);
-            labels[i]=(i+1)+". "+(b.kind==NoteDocument.Kind.TEXT?"文字："+shortLabel(b.text):"图片："+shortLabel(b.caption));
+            NoteDocument.ShareBlock entry=candidates.get(i);NoteDocument.Block b=entry.block;
+            String owner=choice.batch==null?"":"["+choice.noteLabels.get(entry.noteId)+"] ";
+            labels[i]=(i+1)+". "+owner+(b.kind==NoteDocument.Kind.TEXT?"文字："+shortLabel(b.text):"图片："+shortLabel(b.caption));
         }
         android.app.AlertDialog d=new android.app.AlertDialog.Builder(this).setTitle("勾选内容（私有项已排除）")
             .setMultiChoiceItems(labels,checked,(dialog,which,value)->checked[which]=value)
@@ -154,7 +215,7 @@ public final class MainActivity extends Activity {
           });
           d.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
             java.util.Set<String> selected=new java.util.LinkedHashSet<>();
-            for(int i=0;i<checked.length;i++)if(checked[i])selected.add(choice.blocks.get(i).id);
+            for(int i=0;i<checked.length;i++)if(checked[i])selected.add(choice.selectionKey(candidates.get(i)));
             if(selected.isEmpty()){screen.message("请至少勾选一项；空选不会导出全部内容",true);return;}
             final int chosen=format[0];
             d.dismiss();screen.work(()->prepareShare(choice,selected,chosen),prepared->previewShare(prepared,chosen),
@@ -176,8 +237,8 @@ public final class MainActivity extends Activity {
                 java.util.List<ShareExporter.MarkdownItem> items=new java.util.ArrayList<>();
                 java.util.List<PagedNoteRenderer.Block> pages=new java.util.ArrayList<>();
                 java.util.Set<String> keys=new java.util.LinkedHashSet<>();long bytes=0;
-                for(NoteDocument.Block b:choice.blocks){
-                    if(!selected.contains(b.id)||b.privateContent)continue;
+                for(NoteDocument.ShareBlock entry:NoteDocument.shareAcrossNotes(choice.candidates(),choice.qualified(selected))){
+                    NoteDocument.Block b=entry.block;
                     byte[] image=null;
                     if(b.kind==NoteDocument.Kind.IMAGE){
                         long size;
@@ -194,9 +255,9 @@ public final class MainActivity extends Activity {
                         }
                         if(!b.assetId.equals(MediaRepository.digest(image)))throw new IOException("Image changed");
                     }
-                    if(format==0)items.add(new ShareExporter.MarkdownItem(choice.note,b.id,b.kind==NoteDocument.Kind.TEXT?b.text:null,image,b.caption,false));
-                    else pages.add(new PagedNoteRenderer.Block(choice.note,b.id,b.kind==NoteDocument.Kind.TEXT?b.text:null,image,b.caption,false));
-                    keys.add(choice.note+"/"+b.id);
+                    if(format==0)items.add(new ShareExporter.MarkdownItem(entry.noteId,b.id,b.kind==NoteDocument.Kind.TEXT?b.text:null,image,b.caption,false));
+                    else pages.add(new PagedNoteRenderer.Block(entry.noteId,b.id,b.kind==NoteDocument.Kind.TEXT?b.text:null,image,b.caption,false));
+                    keys.add(entry.key());
                 }
                 if(keys.size()!=selected.size())throw new IOException("Unknown selection");
                 byte[] zip=format==0?ShareExporter.markdownZip(items,keys):

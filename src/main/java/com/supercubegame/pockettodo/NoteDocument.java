@@ -90,6 +90,36 @@ public final class NoteDocument {
             return new ImageEdit(this,revision,caption,privateContent);
         }
     }
+    /** Explicit cross-note identity. No titles, source files or original-asset sets. */
+    public static final class ShareBlock {
+        public final String noteId;
+        public final Block block;
+        public ShareBlock(String noteId,Block block) {
+            this.noteId=Ledger.identifier(noteId);
+            if(block==null||noteId.indexOf('/')>=0||block.id.indexOf('/')>=0)
+                throw new IllegalArgumentException("Unambiguous note/block identity required");
+            this.block=block;
+        }
+        public String key(){return noteId+"/"+block.id;}
+    }
+    /** Pure selection only. Callers still owe a frozen database snapshot, current
+     * image verification, output preview, fresh consent and verified publication.
+     * Retains the existing 1000-candidate export budget; never silently truncates.
+     */
+    public static List<ShareBlock> shareAcrossNotes(List<ShareBlock> candidates,Set<String> selected) {
+        if(candidates==null||selected==null||selected.isEmpty()||candidates.size()>1000||
+                selected.size()>1000||Ledger.hasNull(candidates)||Ledger.hasNull(selected))
+            throw new IllegalArgumentException("Explicit bounded share selection required");
+        Set<String> seen=new HashSet<>(),remaining=new HashSet<>(selected);
+        List<ShareBlock> result=new ArrayList<>();
+        for(ShareBlock entry:candidates){
+            String key=entry.key();
+            if(!seen.add(key))throw new IllegalArgumentException("Duplicate share identity");
+            if(remaining.remove(key)&&!entry.block.privateContent)result.add(entry);
+        }
+        if(!remaining.isEmpty()||result.isEmpty())throw new IllegalArgumentException("Unknown or empty share selection");
+        return Collections.unmodifiableList(result);
+    }
     private final List<Block> blocks=new ArrayList<>();
     public NoteDocument() {}
     private int index(String id) {

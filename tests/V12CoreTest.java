@@ -269,8 +269,68 @@ public final class V12CoreTest {
         boolean immutable=true;for(Field f:draft.getClass().getDeclaredFields())if(!Modifier.isStatic(f.getModifiers()))immutable&=Modifier.isFinal(f.getModifiers());
         ok(immutable,"every image edit instance field is final");
     }
+    static Object shareBlock(String note,NoteDocument.Block block)throws Exception {
+        try{return cls("NoteDocument$ShareBlock").getConstructor(String.class,NoteDocument.Block.class).newInstance(note,block);}
+        catch(InvocationTargetException e){if(e.getCause() instanceof Exception)throw(Exception)e.getCause();throw e;}
+    }
+    @SuppressWarnings("unchecked")
+    static List<Object> across(List<Object> blocks,Set<String> selected)throws Exception {
+        return (List<Object>)stat("NoteDocument","shareAcrossNotes",new Class<?>[]{List.class,Set.class},blocks,selected);
+    }
+    static void batchShares()throws Exception {
+        NoteDocument.Block first=NoteDocument.Block.text("same","FIRST",false);
+        NoteDocument.Block second=NoteDocument.Block.text("same","SECOND",false);
+        NoteDocument.Block hidden=NoteDocument.Block.image("secret","unread-private-asset","PRIVATE",true);
+        Object a=shareBlock("n1",first),b=shareBlock("n2",second),p=shareBlock("n2",hidden);
+        Object image=shareBlock("n2",NoteDocument.Block.image("image","current-asset","CURRENT",false));
+        List<Object> input=new ArrayList<>(List.of(a,p,b,image));
+        Set<String> selected=new LinkedHashSet<>(List.of("n2/image","n2/same","n1/same","n2/secret"));
+        List<Object> result=across(input,selected);
+        ok(result.equals(List.of(a,b,image)),"batch share follows source order not checkbox click order");
+        ok(result.get(0).getClass().getField("noteId").get(result.get(0)).equals("n1")&&
+            result.get(1).getClass().getField("noteId").get(result.get(1)).equals("n2"),
+            "batch share same block IDs remain distinct across notes");
+        ok(call(a,"key",new Class<?>[]{}).equals("n1/same")&&call(b,"key",new Class<?>[]{}).equals("n2/same"),
+            "batch share keys use note and block identities");
+        ok(across(input,Set.of("n2/same")).equals(List.of(b)),"batch share unselected note excluded");
+        ok(!result.contains(p)&&selected.contains("n2/secret"),"batch share private selected image excluded without mutating selection");
+        NoteDocument.Block projected=(NoteDocument.Block)image.getClass().getField("block").get(image);
+        ok(projected.assetId.equals("current-asset")&&projected.caption.equals("CURRENT"),
+            "batch share retains current image reference and caption only");
+        input.clear();selected.clear();
+        ok(result.equals(List.of(a,b,image)),"batch share result survives caller collection mutation");
+        boolean frozen=false;try{result.clear();}catch(UnsupportedOperationException e){frozen=true;}
+        ok(frozen&&result.size()==3,"batch share result cannot be mutated");
+        reject(()->across(List.of(a),Set.of()),"batch share empty selection refused not all");
+        reject(()->across(List.of(p),Set.of("n2/secret")),"batch share private-only selection refused");
+        reject(()->across(List.of(a),Set.of("n1/missing")),"batch share unknown selection refused");
+        reject(()->across(List.of(a),Set.of("same")),"batch share bare block identity refused");
+        reject(()->across(List.of(a,a),Set.of("n1/same")),"batch share duplicate compound identity refused");
+        reject(()->across(List.of(p,p,a),Set.of("n1/same")),"batch share duplicate excluded identity refused");
+        reject(()->across(null,Set.of("n1/same")),"batch share null candidates refused");
+        reject(()->across(Arrays.asList(a,null),Set.of("n1/same")),"batch share null candidate refused");
+        reject(()->across(List.of(a),null),"batch share null selection refused");
+        reject(()->across(List.of(a),new HashSet<>(Arrays.asList("n1/same",null))),"batch share null selected key refused");
+        reject(()->shareBlock("n",null),"batch share missing block refused");
+        reject(()->shareBlock("",first),"batch share empty note ID refused");
+        reject(()->shareBlock(null,first),"batch share null note ID refused");
+        reject(()->shareBlock("n/1",first),"batch share slash note ID refused to prevent key collision");
+        reject(()->shareBlock("n",NoteDocument.Block.text("a/b","x",false)),"batch share slash block ID refused to prevent key collision");
+        List<Object> limit=new ArrayList<>();Set<String> keys=new LinkedHashSet<>();
+        for(int i=0;i<1000;i++){limit.add(shareBlock("n",NoteDocument.Block.text("b"+i,"x",false)));keys.add("n/b"+i);}
+        ok(across(limit,keys).size()==1000,"batch share exact candidate budget accepted without truncation");
+        limit.add(shareBlock("n",NoteDocument.Block.text("over","x",false)));
+        reject(()->across(limit,keys),"batch share over candidate budget rejects whole request");
+        keys.add("n/over");
+        reject(()->across(List.of(a),keys),"batch share over selection budget rejects whole request");
+        ok(across(List.of(b,a),Set.of("n1/same","n2/same")).equals(List.of(b,a)),
+            "batch share retains explicit source note order");
+        ok(Modifier.isFinal(a.getClass().getModifiers()),"batch share entry cannot be subclassed");
+        boolean immutable=true;for(Field f:a.getClass().getDeclaredFields())if(!Modifier.isStatic(f.getModifiers()))immutable&=Modifier.isFinal(f.getModifiers());
+        ok(immutable&&a.getClass().getField("block").get(a)==first,"batch share entry fields and block reference immutable");
+    }
     public static void main(String[] args) throws Exception {
-        ledger(); calendar(); notes(); safety(); categories(); fields(); imageRevisions(); imageEdits();
+        ledger(); calendar(); notes(); safety(); categories(); fields(); imageRevisions(); imageEdits(); batchShares();
         System.out.println("V12_CORE_RESULT "+checks+"/"+checks+" PASS; DOMAIN_ONLY; ANDROID_EXPORT_RESTORE_NOT_TESTED");
     }
 }

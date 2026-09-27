@@ -75,6 +75,7 @@ jobs:
               import xml.etree.ElementTree as ET
               from verify_paged_exports import format_button
               from verify_schema3 import signal_target_identity,signal_identity_selftest
+              from verify_schema3 import exception_evidence,native_failure_evidence,diagnostics_selftest
               out=Path("export-native");out.mkdir()
               prefix=[str(adb),"-s",gate.SERIAL]
               result={"status":"FAIL","commit":os.environ["GITHUB_SHA"],"run_id":os.environ["GITHUB_RUN_ID"],
@@ -159,15 +160,20 @@ jobs:
                   result["process_loss"][kind]=record
                   def step(label):record["labels"].append(label)
                   uid=shell("run-as",gate.PKG,"id","-u").strip()
-                  def identity():
+                  def identity(phase):
+                      trace={"phase":phase,"uid":uid,"stage":"PID_READ"}
+                      record.setdefault("identity_reads",[]).append(trace)
                       pid=shell("pidof",gate.PKG).strip()
+                      trace.update(pid=pid,stage="CMDLINE_READ")
                       assert re.fullmatch(r"[1-9][0-9]*",pid) and int(pid)>1
                       raw=command("exec-out","run-as",gate.PKG,"cat","/proc/"+pid+"/cmdline",binary=True)
+                      trace.update(cmdline_bytes=len(raw),cmdline_sha256=hashlib.sha256(raw).hexdigest(),stage="STATUS_READ")
                       status=shell("run-as",gate.PKG,"cat","/proc/"+pid+"/status")
                       observed=signal_target_identity(pid,raw,uid,status,gate.PKG)
+                      trace.update(stage="IDENTITY_CHECK",observed=observed)
                       assert observed["status"]=="PASS","unverified process identity"
                       return observed
-                  old=identity();record["old_identity"]=old;step("exact_old_identity")
+                  old=identity("old");record["old_identity"]=old;step("exact_old_identity")
                   assert find(text="SAVE").get("package") in ("com.android.documentsui","com.google.android.documentsui")
                   shell("run-as",gate.PKG,"kill","-9",old["pid"])
                   probes=[];record["absence_probes"]=probes;deadline=time.monotonic()+30
@@ -185,7 +191,7 @@ jobs:
                   paths=shell("find","/sdcard/Download","-type","f","-name",filename).splitlines()
                   assert not paths or (paths==["/sdcard/Download/"+filename] and command("exec-out","cat",paths[0],binary=True)==b"")
                   record["stale_output_bytes"]=0;step("stale_owner_no_nonempty_output")
-                  new=identity();assert new["pid"]!=old["pid"]
+                  new=identity("new");assert new["pid"]!=old["pid"]
                   record["new_identity"]=new;step("exact_new_identity")
                   stop();assert state()==baseline;step("loss_preserves_all_tables_media")
                   if paths:
@@ -205,6 +211,7 @@ jobs:
               try:
                   assert os.environ.get("GITHUB_ACTIONS")=="true" and shell("getprop","ro.kernel.qemu").strip()=="1"
                   result["signal_identity_controls"]=signal_identity_selftest()
+                  result["failure_diagnostic_controls"]=diagnostics_selftest()
                   stop();empty=state()
                   assert not empty[0]["notes"] and not empty[0]["activities"] and not empty[0]["blocks"] and not empty[1]
                   ok("fresh_ui_database")
@@ -280,6 +287,9 @@ jobs:
                   result["status"]="PASS"
               except Exception as exc:
                   result["error"]=repr(exc)
+                  result["original_failure"]=exception_evidence(exc)
+                  try:result["failure_diagnostics"]=native_failure_evidence(adb,gate,exc)
+                  except Exception as diagnostic:result["diagnostic_error"]=exception_evidence(diagnostic)
                   try:(out/"failure.png").write_bytes(command("exec-out","screencap","-p",binary=True))
                   except Exception:pass
                   raise

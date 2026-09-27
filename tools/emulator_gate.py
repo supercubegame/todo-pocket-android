@@ -9,6 +9,7 @@ import sqlite3
 import subprocess
 import time
 import xml.etree.ElementTree as ET
+from verify_process_control import stop_verified
 
 ROOT = Path(__file__).resolve().parents[1]
 os.chdir(ROOT)
@@ -107,9 +108,7 @@ def verify_database(adb):
     results = {}
     for phase in ('seed', 'reopen'):
         if phase == 'reopen':
-            run([adb, '-s', SERIAL, 'shell', 'am', 'force-stop', PKG])
-            proc = subprocess.run([str(adb), '-s', SERIAL, 'shell', 'pidof', PKG], text=True, capture_output=True, timeout=10)
-            assert proc.returncode == 1 and not proc.stdout.strip(), 'prior app process must be absent before reopen'
+            stop_verified(adb, SERIAL, PKG)
         output = run([adb, '-s', SERIAL, 'shell', 'am', 'instrument', '-w', '-r', '-e', 'phase', phase,
                       '-e', 'expectedApi', str(API), PKG + '.test/com.supercubegame.pockettodo.V12DeviceTest'], timeout=180, capture=True).stdout
         print(output, flush=True)
@@ -174,6 +173,7 @@ def verify_native_ui(adb):
     out = Path('native-ui'); out.mkdir(exist_ok=True)
     checks, shots = [], []
     infra_retries = []
+    process_stops = []
     def shell(*args):
         return subprocess.check_output([str(adb), '-s', SERIAL, 'shell', *args], text=True, timeout=40)
     def nodes():
@@ -226,9 +226,7 @@ def verify_native_ui(adb):
     def start():
         shell('am','start','-W','-n',PKG+'/com.supercubegame.pockettodo.MainActivity'); desc('v12-home'); ready()
     def stop():
-        shell('am','force-stop',PKG)
-        p=subprocess.run([str(adb),'-s',SERIAL,'shell','pidof',PKG],text=True,capture_output=True,timeout=10)
-        assert p.returncode==1 and not p.stdout.strip(),'UI process must actually stop'
+        return stop_verified(adb, SERIAL, PKG, emit=process_stops.append)
     def restart(): stop(); start()
     def clear_field(description):
         n=desc(description); count=len(n.get('text','').encode('utf-16-le'))//2
@@ -881,9 +879,9 @@ public class ImageImportFixture {
         result.update(nonfirst_image='APPEND_ISOLATION_RESTART_PASS',image_metadata='CAPTION_PRIVATE_CANCEL_EDIT_CLEAR_RESTART_PASS',private_sharing='NOT_TESTED')
         result.update(default_app_schema=3,default_schema3_ui='NATIVE_SCHEMA3_UI_PASS')
         result.update(derivative_ui='NATIVE_CROP_MASK_UI_SAVE_CANCEL_RESTART_PASS')
-        result.update(derivative_geometry=derive_geometry,pixel_oracle=pixel_oracle)
+        result.update(derivative_geometry=derive_geometry,pixel_oracle=pixel_oracle,process_stops=process_stops)
     except Exception as exc:
-        result={'status':'FAIL','api':API,'count':len(checks),'checks':checks,'error':repr(exc),'screenshots':shots,'infra_retries':infra_retries,'release_ready':False}
+        result={'status':'FAIL','api':API,'count':len(checks),'checks':checks,'error':repr(exc),'screenshots':shots,'infra_retries':infra_retries,'release_ready':False,'process_stops':process_stops}
         if 'derive_geometry' in locals():result['derivative_geometry']=derive_geometry
         if 'pixel_oracle' in locals():result['pixel_oracle']=pixel_oracle
         try: shot('failure.png')

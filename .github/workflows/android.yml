@@ -20,7 +20,8 @@ jobs:
       - name: Legacy, domain and real JVM file boundary contracts
         run: |
           set -euo pipefail
-          python3 tools/verify.py v12 2>&1 | tee core.log
+          python3 tools/verify_process_control.py selftest 2>&1 | tee core.log
+          python3 tools/verify.py v12 2>&1 | tee -a core.log
           python3 tools/verify_schema3.py selftest 2>&1 | tee -a core.log
       - name: Verify unfinished delivery cannot be mislabeled
         run: |
@@ -79,11 +80,12 @@ jobs:
               from verify_paged_exports import format_button
               from verify_schema3 import signal_target_identity,signal_identity_selftest
               from verify_schema3 import exception_evidence,native_failure_evidence,diagnostics_selftest
+              from verify_process_control import stop_verified
               out=Path("export-native");out.mkdir()
               prefix=[str(adb),"-s",gate.SERIAL]
               result={"status":"FAIL","commit":os.environ["GITHUB_SHA"],"run_id":os.environ["GITHUB_RUN_ID"],
                   "api":gate.API,"scope":"SYNTHETIC_NATIVE_IMAGE_MULTIPAGE_SAF_WITH_PROCESS_LOSS_NOT_RECEIVER",
-                  "labels":[],"outputs":{},"process_loss":{},"release_ready":False}
+                  "labels":[],"outputs":{},"process_loss":{},"process_stops":[],"release_ready":False}
               serial=0
               def command(*args,binary=False,timeout=40):
                   return subprocess.check_output(prefix+list(args),text=not binary,stderr=subprocess.PIPE,timeout=timeout)
@@ -109,9 +111,7 @@ jobs:
               def touch(desc):click(find(**{"content-desc":desc}))
               def ready():find(**{"content-desc":"v12-status","text":"已保存到本机"})
               def stop():
-                  shell("am","force-stop",gate.PKG)
-                  p=subprocess.run(prefix+["shell","pidof",gate.PKG],capture_output=True,text=True,timeout=10)
-                  assert p.returncode==1 and not p.stdout.strip()
+                  return stop_verified(adb,gate.SERIAL,gate.PKG,emit=result["process_stops"].append)
               def start():
                   shell("am","start","-W","-n",gate.PKG+"/com.supercubegame.pockettodo.MainActivity");ready()
               def state():
@@ -1265,7 +1265,7 @@ jobs:
           meta=json.loads((folder/'preview.json').read_text())
           meta.update(status='PASS',scope='TESTED_STAGE_PREVIEW_NOT_FULL_V12',artifact_id=artifact['id'],download_url=os.environ['ARTIFACT_URL'],expires_at=artifact['expires_at'],archive_sha256=archive_hash,download_readback='EXACT_ALL_FILES_PASS',github_login_required=True)
           data=(json.dumps(meta,ensure_ascii=False,indent=2)+'\n').encode()
-          path='reports/preview-'+os.environ['GITHUB_SHA']+'-'+os.environ['GITHUB_RUN_ID']+'.json'
+          path='reports/preview-'+os.environ['GITHUB_SHA']+'-'+run+'.json'
           written=api('contents/'+path,'PUT',{'message':'Record verified staged APK download','branch':'evidence','content':base64.b64encode(data).decode()})
           actual=api('contents/'+path+'?ref='+written['commit']['sha'])
           assert base64.b64decode(actual['content'])==data

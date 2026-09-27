@@ -192,7 +192,7 @@ public final class MainActivity extends Activity {
     }
     private void selectShareBlocks(ShareChoice choice){
         java.util.List<NoteDocument.ShareBlock> candidates=choice.candidates();
-        if(candidates.isEmpty()){screen.message("所选笔记没有非私有内容可导出",false);return;}
+        if(candidates.isEmpty()){screen.message(choice.batch==null?"这篇笔记没有非私有内容可导出":"所选笔记没有非私有内容可导出",false);return;}
         String[] labels=new String[candidates.size()];boolean[] checked=new boolean[labels.length];
         final int[] format={0};
         for(int i=0;i<labels.length;i++){

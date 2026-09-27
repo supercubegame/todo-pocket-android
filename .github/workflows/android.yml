@@ -74,11 +74,12 @@ jobs:
               from pathlib import Path
               import xml.etree.ElementTree as ET
               from verify_paged_exports import format_button
+              from verify_schema3 import signal_target_identity,signal_identity_selftest
               out=Path("export-native");out.mkdir()
               prefix=[str(adb),"-s",gate.SERIAL]
               result={"status":"FAIL","commit":os.environ["GITHUB_SHA"],"run_id":os.environ["GITHUB_RUN_ID"],
-                  "api":gate.API,"scope":"SYNTHETIC_NATIVE_IMAGE_MULTIPAGE_SAF_NOT_PROCESS_DEATH_OR_RECEIVER",
-                  "labels":[],"outputs":{},"release_ready":False}
+                  "api":gate.API,"scope":"SYNTHETIC_NATIVE_IMAGE_MULTIPAGE_SAF_WITH_PROCESS_LOSS_NOT_RECEIVER",
+                  "labels":[],"outputs":{},"process_loss":{},"release_ready":False}
               serial=0
               def command(*args,binary=False,timeout=40):
                   return subprocess.check_output(prefix+list(args),text=not binary,stderr=subprocess.PIPE,timeout=timeout)
@@ -153,9 +154,57 @@ jobs:
                                   assert n.get("checked")=="false";click(n);return
                       shell("input","swipe","160","440","160","190","350")
                   raise AssertionError("multipage consent unreachable")
+              def lost_owner(kind,title,filename):
+                  record={"status":"FAIL","injection":"CI_APP_UID_SIGKILL_NOT_LMK","labels":[]}
+                  result["process_loss"][kind]=record
+                  def step(label):record["labels"].append(label)
+                  uid=shell("run-as",gate.PKG,"id","-u").strip()
+                  def identity():
+                      pid=shell("pidof",gate.PKG).strip()
+                      assert re.fullmatch(r"[1-9][0-9]*",pid) and int(pid)>1
+                      raw=command("exec-out","run-as",gate.PKG,"cat","/proc/"+pid+"/cmdline",binary=True)
+                      status=shell("run-as",gate.PKG,"cat","/proc/"+pid+"/status")
+                      observed=signal_target_identity(pid,raw,uid,status,gate.PKG)
+                      assert observed["status"]=="PASS","unverified process identity"
+                      return observed
+                  old=identity();record["old_identity"]=old;step("exact_old_identity")
+                  assert find(text="SAVE").get("package") in ("com.android.documentsui","com.google.android.documentsui")
+                  shell("run-as",gate.PKG,"kill","-9",old["pid"])
+                  probes=[];record["absence_probes"]=probes;deadline=time.monotonic()+30
+                  while True:
+                      p=subprocess.run(prefix+["shell","pidof",gate.PKG],capture_output=True,text=True,timeout=10)
+                      probes.append({"returncode":p.returncode,"stdout":p.stdout.strip()})
+                      if p.returncode==1 and not p.stdout.strip():break
+                      assert p.returncode==0 and p.stdout.strip()==old["pid"]
+                      assert time.monotonic()<deadline,"old process survived signal"
+                      time.sleep(.25)
+                  save=find(text="SAVE");record["picker_package"]=save.get("package")
+                  assert record["picker_package"] in ("com.android.documentsui","com.google.android.documentsui")
+                  step("old_process_absent_picker_retained")
+                  click(save);find(**{"content-desc":"v12-status","text":"页面已重建，请重新选择导出内容"})
+                  paths=shell("find","/sdcard/Download","-type","f","-name",filename).splitlines()
+                  assert not paths or (paths==["/sdcard/Download/"+filename] and command("exec-out","cat",paths[0],binary=True)==b"")
+                  record["stale_output_bytes"]=0;step("stale_owner_no_nonempty_output")
+                  new=identity();assert new["pid"]!=old["pid"]
+                  record["new_identity"]=new;step("exact_new_identity")
+                  stop();assert state()==baseline;step("loss_preserves_all_tables_media")
+                  if paths:
+                      destination="/sdcard/Download/loss-empty-"+filename
+                      assert not shell("find","/sdcard/Download","-type","f","-name","loss-empty-"+filename).splitlines()
+                      shell("mv",paths[0],destination)
+                  assert not shell("find","/sdcard/Download","-type","f","-name",filename).splitlines()
+                  start();tap("导出笔记");tap("1. Probe_note / Probe_note");find(text="勾选内容（私有项已排除）")
+                  choices=[n for n in nodes() if n.get("class")=="android.widget.CheckedTextView"]
+                  assert [n.get("text") for n in choices]==expected and all(n.get("checked")=="false" for n in choices)
+                  format_select(title);tap(expected[0]);tap(expected[1]);tap("生成预览");find(text=title+"预览")
+                  consent();tap("选择保存位置")
+                  assert find(text=filename).get("package") in ("com.android.documentsui","com.google.android.documentsui")
+                  assert find(text="SAVE").get("package") in ("com.android.documentsui","com.google.android.documentsui")
+                  step("fresh_explicit_selection_and_consent")
               started=time.monotonic()
               try:
                   assert os.environ.get("GITHUB_ACTIONS")=="true" and shell("getprop","ro.kernel.qemu").strip()=="1"
+                  result["signal_identity_controls"]=signal_identity_selftest()
                   stop();empty=state()
                   assert not empty[0]["notes"] and not empty[0]["activities"] and not empty[0]["blocks"] and not empty[1]
                   ok("fresh_ui_database")
@@ -199,7 +248,8 @@ jobs:
                       assert find(text=filename).get("package") in ("com.android.documentsui","com.google.android.documentsui")
                       save=find(text="SAVE");assert save.get("package") in ("com.android.documentsui","com.google.android.documentsui")
                       assert not shell("find","/sdcard/Download","-type","f","-name",filename).splitlines(),"preexisting output"
-                      click(save);find(**{"content-desc":"v12-status","text":title+"已保存，逐字节回读一致"})
+                      lost_owner(kind,title,filename)
+                      click(find(text="SAVE"));find(**{"content-desc":"v12-status","text":title+"已保存，逐字节回读一致"})
                       assert shell("find","/sdcard/Download","-type","f","-name",filename).splitlines()==["/sdcard/Download/"+filename]
                       raw=command("exec-out","cat","/sdcard/Download/"+filename,binary=True);assert 0<len(raw)<=16777216
                       artifact=out/filename;artifact.write_bytes(raw);ok("real_documentsui_saved_"+kind)
@@ -224,6 +274,9 @@ jobs:
                           "text":"EXACT_WHITESPACE_INSENSITIVE" if kind=="PDF" else "NOT_OCR_TESTED",
                           "image":"EXACT_96X96_GREEN_FIRST_PAGE_NO_OTHER_COLOR"}
                       stop();assert state()==baseline;ok("all_tables_and_media_unchanged_"+kind)
+                      record=result["process_loss"][kind]
+                      record["labels"].append("fresh_saved_independent_output_and_state")
+                      record.update(status="PASS",fresh_output=dict(result["outputs"][kind]))
                   result["status"]="PASS"
               except Exception as exc:
                   result["error"]=repr(exc)
@@ -869,7 +922,58 @@ jobs:
           sys.path.insert(0,'tools')
           from verify_schema3 import PAGED_BACKEND_LABELS,PAGED_PREVIEW_LABELS
           source,run=os.environ['GITHUB_SHA'],os.environ['GITHUB_RUN_ID']
-          NATIVE_SCOPE="SYNTHETIC_NATIVE_IMAGE_MULTIPAGE_SAF_NOT_PROCESS_DEATH_OR_RECEIVER"
+          LOSS_LABELS=["exact_old_identity","old_process_absent_picker_retained","stale_owner_no_nonempty_output",
+              "exact_new_identity","loss_preserves_all_tables_media","fresh_explicit_selection_and_consent",
+              "fresh_saved_independent_output_and_state"]
+          def loss_observe(receipt,output):
+              if not isinstance(receipt,dict):return False
+              if not (receipt.get("status")=="PASS" and receipt.get("labels")==LOSS_LABELS and
+                  receipt.get("injection")=="CI_APP_UID_SIGKILL_NOT_LMK" and
+                  type(receipt.get("stale_output_bytes")) is int and receipt["stale_output_bytes"]==0 and
+                  receipt.get("picker_package") in ("com.android.documentsui","com.google.android.documentsui") and
+                  receipt.get("fresh_output")==output and isinstance(output,dict) and bool(output)):return False
+              identities=[]
+              for key in ("old_identity","new_identity"):
+                  value=receipt.get(key)
+                  if not isinstance(value,dict):return False
+                  pid,uid=value.get("pid"),value.get("uid")
+                  if not (isinstance(pid,str) and re.fullmatch("[1-9][0-9]*",pid) and int(pid)>1 and
+                      isinstance(uid,str) and re.fullmatch("[1-9][0-9]*",uid) and
+                      value.get("status")=="PASS" and value.get("expected_package")=="com.supercubegame.pockettodo.v12.preview" and
+                      value.get("exact_argv0") is True and value.get("nul_only_tail") is True and
+                      value.get("uid_fields")==[[uid]*4]):return False
+                  identities.append(value)
+              if identities[0]["pid"]==identities[1]["pid"] or identities[0]["uid"]!=identities[1]["uid"]:return False
+              probes=receipt.get("absence_probes")
+              if not isinstance(probes,list) or not probes:return False
+              if probes[-1]!={"returncode":1,"stdout":""}:return False
+              return all(p=={"returncode":0,"stdout":identities[0]["pid"]} for p in probes[:-1])
+          def loss_sample(output):
+              identity={"status":"PASS","expected_package":"com.supercubegame.pockettodo.v12.preview",
+                  "uid":"10123","uid_fields":[["10123"]*4],"exact_argv0":True,"nul_only_tail":True}
+              return {"status":"PASS","labels":LOSS_LABELS[:],"injection":"CI_APP_UID_SIGKILL_NOT_LMK",
+                  "old_identity":dict(identity,pid="123"),"new_identity":dict(identity,pid="456"),
+                  "stale_output_bytes":0,"picker_package":"com.android.documentsui",
+                  "absence_probes":[{"returncode":1,"stdout":""}],"fresh_output":copy.deepcopy(output)}
+          def loss_controls():
+              output={"sha256":"a"*64};good=loss_sample(output)
+              assert loss_observe(good,output)
+              bad=[{},None,dict(good,status="FAIL"),dict(good,stale_output_bytes=1),
+                  dict(good,stale_output_bytes=False),dict(good,injection="LMK"),
+                  dict(good,absence_probes=[]),dict(good,absence_probes=[{"returncode":0,"stdout":"123"}]),
+                  dict(good,picker_package="fake.documentsui"),dict(good,fresh_output={})]
+              for i in range(len(LOSS_LABELS)):
+                  b=copy.deepcopy(good);del b["labels"][i];bad.append(b)
+              for key in ("old_identity","new_identity"):
+                  for field,value in (("pid","1"),("pid","123 456"),("uid","0"),("uid_fields",[]),
+                      ("status","FAIL"),("exact_argv0",False),("nul_only_tail",False),("expected_package","other")):
+                      b=copy.deepcopy(good);b[key][field]=value;bad.append(b)
+              b=copy.deepcopy(good);b["new_identity"]["pid"]="123";bad.append(b)
+              b=copy.deepcopy(good);b["new_identity"]["uid"]="10124";b["new_identity"]["uid_fields"]=[["10124"]*4];bad.append(b)
+              for b in bad:assert not loss_observe(b,output),"process-loss observer accepted false proof"
+              return len(bad)
+          loss_negative=loss_controls()
+          NATIVE_SCOPE="SYNTHETIC_NATIVE_IMAGE_MULTIPAGE_SAF_WITH_PROCESS_LOSS_NOT_RECEIVER"
           NATIVE_REQUIRED=["fresh_ui_database","ui_created_exact_image_private_text_fixture","independent_pixel_observer_controls"]+[
               step+"_"+kind for kind in ("PDF","PNG_ZIP") for step in (
               "explicit_image_text_private_excluded","actual_multipage_preview","real_documentsui_saved",
@@ -882,9 +986,11 @@ jobs:
                   value.get("release_ready") is False):return False
               outputs=value.get("outputs")
               if not isinstance(outputs,dict) or set(outputs)!={"PDF","PNG_ZIP"}:return False
+              loss=value.get("process_loss")
+              if not isinstance(loss,dict) or set(loss)!={"PDF","PNG_ZIP"}:return False
               for kind in ("PDF","PNG_ZIP"):
                   out=outputs[kind]
-                  if not isinstance(out,dict):return False
+                  if not isinstance(out,dict) or not loss_observe(loss[kind],out):return False
                   if not (type(out.get("pages")) is int and 3<=out["pages"]<=4 and
                       type(out.get("bytes")) is int and 0<out["bytes"]<=16777216 and
                       isinstance(out.get("sha256"),str) and re.fullmatch("[0-9a-f]{64}",out["sha256"]) and
@@ -893,23 +999,28 @@ jobs:
               return outputs["PDF"]["pages"]==outputs["PNG_ZIP"]["pages"]
           def native_sample(api=26,source="s",run="r"):
               good={"status":"PASS","commit":source,"run_id":run,"api":api,"scope":NATIVE_SCOPE,
-                  "labels":NATIVE_REQUIRED[:],"checks":13,"release_ready":False,"outputs":{}}
+                  "labels":NATIVE_REQUIRED[:],"checks":13,"release_ready":False,"outputs":{},"process_loss":{}}
               for kind in ("PDF","PNG_ZIP"):
                   good["outputs"][kind]={"pages":3,"bytes":100,"sha256":"a"*64,
                       "image":"EXACT_96X96_GREEN_FIRST_PAGE_NO_OTHER_COLOR",
                       "text":"EXACT_WHITESPACE_INSENSITIVE" if kind=="PDF" else "NOT_OCR_TESTED"}
+                  good["process_loss"][kind]=loss_sample(good["outputs"][kind])
               return good
           def native_controls():
               good=native_sample()
               assert len(NATIVE_REQUIRED)==13 and native_observe(good,26,"s","r")
               bad=[None,{},dict(good,commit="old"),dict(good,run_id="old"),dict(good,api=True),dict(good,status="FAIL"),
-                  dict(good,outputs={}),dict(good,release_ready=True),dict(good,scope="BACKEND_ONLY")]
+                  dict(good,outputs={}),dict(good,release_ready=True),dict(good,scope="BACKEND_ONLY"),dict(good,process_loss={})]
               for i in range(13):
                   x=copy.deepcopy(good);del x["labels"][i];x["checks"]-=1;bad.append(x)
               for kind in ("PDF","PNG_ZIP"):
                   for key,val in (("pages",1),("pages",True),("bytes",0),("sha256","bad"),("image","NONBLANK"),("text","PASS")):
-                      x=copy.deepcopy(good);x["outputs"][kind][key]=val;bad.append(x)
-              x=copy.deepcopy(good);x["outputs"]["PNG_ZIP"]["pages"]=4;bad.append(x)
+                      x=copy.deepcopy(good);x["outputs"][kind][key]=val
+                      x["process_loss"][kind]["fresh_output"]=copy.deepcopy(x["outputs"][kind]);bad.append(x)
+                  for i in range(len(LOSS_LABELS)):
+                      x=copy.deepcopy(good);del x["process_loss"][kind]["labels"][i];bad.append(x)
+              x=copy.deepcopy(good);x["outputs"]["PNG_ZIP"]["pages"]=4
+              x["process_loss"]["PNG_ZIP"]["fresh_output"]=copy.deepcopy(x["outputs"]["PNG_ZIP"]);bad.append(x)
               for x in bad:assert not native_observe(x,26,"s","r"),"native observer accepted missing or wrong evidence"
               return len(bad)
           native_negative=native_controls()
@@ -974,7 +1085,7 @@ jobs:
               devices[str(api)]={'status':'NOT_VERIFIED','error':repr(exc)}
           passed=matrix(devices)
           doc={'commit':source,'run_id':run,'status':'PASS' if passed else 'NOT_VERIFIED',
-            'scope':scope,'devices':devices,'observer_controls':{'positive':1,'negative':negative,'native_positive':1,'native_negative':native_negative},
+            'scope':scope,'devices':devices,'observer_controls':{'positive':1,'negative':negative,'native_positive':1,'native_negative':native_negative,'loss_positive':1,'loss_negative':loss_negative},
             'release_ready':False,'durable_upgrade_ready':False}
           data=(json.dumps(doc,ensure_ascii=False,indent=2)+'\n').encode()
           endpoint='https://api.github.com/repos/'+os.environ['GITHUB_REPOSITORY']+'/'

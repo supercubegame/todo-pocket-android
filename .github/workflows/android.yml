@@ -65,9 +65,124 @@ jobs:
           echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
       - name: Build the current-source disposable APKs
-        run: |
+        env:
+          BUILD_429_EXECUTE: 'true'
+          BUILD_LOG: export-probe-build.log
+        run: &verified_build |
           set -euo pipefail
-          gradle --no-daemon --console=plain assembleDebug assembleDebugAndroidTest 2>&1 | tee export-probe-build.log
+          python3 - <<'PY'
+          import json, os, re, subprocess, time
+          from pathlib import Path
+
+          def rate_limited_configuration(text):
+              # Retry dependency configuration only. Never replay a task, lint, or device test.
+              if text.count("* What went wrong:") != 1 or text.count("* Try:") != 1:
+                  return False
+              if re.search(r"(?m)^> Task |^.*(?:error:|AssertionError|OutOfMemoryError)", text):
+                  return False
+              body = text.split("* What went wrong:", 1)[1].split("* Try:", 1)[0]
+              lines = [line.strip() for line in body.splitlines() if line.strip()]
+              if not lines or not re.fullmatch(r"A problem occurred configuring root project '[^'\n]+'\.", lines[0]):
+                  return False
+              url = r"https://(?:repo1\.maven\.org/maven2|repo\.maven\.apache\.org/maven2|plugins\.gradle\.org/m2)/[A-Za-z0-9_./+-]+"
+              leaf = r"> Could not (?:GET|HEAD) '" + url + r"'\. Received status code 429 from server: Too Many Requests"
+              containers = (
+                  r"> Could not resolve all (?:artifacts|files) for configuration ':classpath'\.",
+                  r"> Could not resolve [A-Za-z0-9_.+-]+:[A-Za-z0-9_.+-]+:[A-Za-z0-9_.+-]+\.",
+                  r"> Could not get resource '" + url + r"'\.",
+                  r"Required by:", r"project : > [A-Za-z0-9_.:+> -]+",
+                  r"> There are [1-9][0-9]* more failures with identical causes\.",
+              )
+              found = 0
+              for line in lines[1:]:
+                  if re.fullmatch(leaf, line):
+                      found += 1
+                  elif not any(re.fullmatch(pattern, line) for pattern in containers):
+                      return False
+              return found > 0 and re.search(r"(?m)^BUILD FAILED in .+$", text) is not None
+
+          def execute_build(command, invoke, pause, emit):
+              attempts = []
+              for number in range(1, 4):
+                  code, text = invoke(command, number)
+                  retryable = code != 0 and rate_limited_configuration(text)
+                  wait = (60, 180)[number - 1] if retryable and number < 3 else 0
+                  attempts.append({"attempt": number, "returncode": code,
+                                   "dependency_429_only": retryable, "retry_wait_seconds": wait})
+                  if code == 0 or not wait:
+                      emit(attempts)
+                      return code
+                  pause(wait)
+              raise AssertionError("unreachable retry exit")
+
+          def selftest():
+              good = """FAILURE: Build failed with an exception.
+          * What went wrong:
+          A problem occurred configuring root project 'fixture'.
+          > Could not resolve all artifacts for configuration ':classpath'.
+             > Could not resolve org.example:example:1.0.
+               Required by:
+                   project : > org.example:plugin:1.0
+                > Could not get resource 'https://repo.maven.apache.org/maven2/org/example/example/1.0/example-1.0.pom'.
+                   > Could not GET 'https://repo.maven.apache.org/maven2/org/example/example/1.0/example-1.0.pom'. Received status code 429 from server: Too Many Requests
+          * Try:
+          > Run with --stacktrace option to get the stack trace.
+          BUILD FAILED in 2m 18s
+          """
+              assert rate_limited_configuration(good)
+              bad = ["", good.replace("429", "403"), good.replace("429", "500"),
+                     good.replace("repo.maven.apache.org", "untrusted.example"),
+                     good.replace("A problem occurred configuring root project 'fixture'.", "Execution failed for task ':compileDebugJavaWithJavac'."),
+                     good + "> Task :compileDebugJavaWithJavac FAILED\n",
+                     good + "error: cannot find symbol\n", good + "AssertionError\n",
+                     good.replace("* What went wrong:", "missing section"),
+                     good.replace("* Try:", "missing boundary"),
+                     good.replace("BUILD FAILED", "BUILD SUCCESSFUL"),
+                     good.replace("   > Could not resolve org.example:example:1.0.", "   > Could not resolve org.example:example:1.0.\n      > Permission denied"),
+                     good + good]
+              for text in bad:
+                  assert text != good and not rate_limited_configuration(text)
+              cases = [
+                  ([(0, "BUILD SUCCESSFUL")], 0, []),
+                  ([(1, good), (0, "BUILD SUCCESSFUL")], 0, [60]),
+                  ([(1, good)] * 3, 1, [60, 180]),
+                  ([(7, "compile error")], 7, []),
+                  ([(1, good), (9, "compile error")], 9, [60]),
+              ] + [([(2, text)], 2, []) for text in bad]
+              for answers, expected, waits in cases:
+                  calls = []; sleeps = []; receipts = []
+                  def invoke(command, number):
+                      assert command == ["gradle", "assembleDebug"] and number == len(calls) + 1
+                      calls.append(number)
+                      return answers[number - 1]
+                  assert execute_build(["gradle", "assembleDebug"], invoke, sleeps.append, receipts.append) == expected
+                  assert len(calls) == len(answers) and sleeps == waits
+                  assert len(receipts) == 1 and [v["returncode"] for v in receipts[0]] == [v[0] for v in answers]
+              print("BUILD_429_CONTROLS", 1, "positive", len(bad), "negative", len(cases), "execution_cases HOST_ONLY", flush=True)
+
+          selftest()
+          if os.environ.get("BUILD_429_EXECUTE") == "true":
+              log = Path(os.environ["BUILD_LOG"])
+              command = ["gradle", "--no-daemon", "--console=plain", "assembleDebug", "assembleDebugAndroidTest"]
+              if os.environ.get("BUILD_LINT") == "true":
+                  command.append("lintDebug")
+              def invoke(command, number):
+                  result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                  raw = result.stdout
+                  with log.open("ab") as stream:
+                      stream.write(("\nBUILD_ATTEMPT " + str(number) + "\n").encode() + raw)
+                  print(raw.decode("utf-8", errors="replace"), flush=True)
+                  return result.returncode, raw.decode("utf-8", errors="replace")
+              def emit(attempts):
+                  record = {"scope": "BUILD_CONFIGURATION_RETRY_NOT_DEVICE_RETRY",
+                            "commit": os.environ["GITHUB_SHA"], "run_id": os.environ["GITHUB_RUN_ID"],
+                            "api": int(os.environ["TEST_API"]), "attempts": attempts}
+                  line = "BUILD_ATTEMPTS " + json.dumps(record) + "\n"
+                  with log.open("a") as stream:
+                      stream.write(line)
+                  print(line, flush=True)
+              raise SystemExit(execute_build(command, invoke, time.sleep, emit))
+          PY
       - name: Prepare independent synthetic native fixture driver
         run: |
           set -euo pipefail
@@ -561,9 +676,11 @@ jobs:
           echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
       - name: Compile internal test APKs and lint (not deliverable)
-        run: |
-          set -euo pipefail
-          gradle --no-daemon --console=plain assembleDebug assembleDebugAndroidTest lintDebug 2>&1 | tee build.log
+        env:
+          BUILD_429_EXECUTE: 'true'
+          BUILD_LOG: build.log
+          BUILD_LINT: 'true'
+        run: *verified_build
       - name: Freeze API34 candidate bytes before device tests
         if: matrix.api == 34
         run: |

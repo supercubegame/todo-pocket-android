@@ -495,6 +495,7 @@ def pdf_text_diagnostic(text):
 def selftest():
     format_button_selftest()
     native_receipt_selftest()
+    derived_receipt_selftest()
     good="BEGIN_SELECTED\n"+"\n".join("ROW%03d"%i for i in range(90))+"\nEND_SELECTED\n中文说明\nUNICODE_PAIR 文|⽂|文|⽂ END_PAIR\nCAPTION_END"
     text_check(good)
     text_check(good.replace("ROW049\nROW050","ROW049\n\n\fROW050"))
@@ -764,17 +765,18 @@ def native_receipt(value,api,source,run_id):
             value.get("commit")==source and value.get("run_id")==run_id and
             value.get("scope")==NATIVE_SCOPE and value.get("labels")==NATIVE_LABELS and
             type(value.get("checks")) is int and value["checks"]==24 and
-            value.get("release_ready") is False)
+            value.get("release_ready") is False and
+            derived_receipt(value.get("derived"),api,source,run_id))
 
 def native_receipt_selftest():
     import copy
     good={"status":"PASS","api":26,"commit":"source","run_id":"run",
-          "scope":NATIVE_SCOPE,"labels":NATIVE_LABELS[:],"checks":24,"release_ready":False}
+          "scope":NATIVE_SCOPE,"labels":NATIVE_LABELS[:],"checks":24,"release_ready":False,"derived":derived_sample()}
     assert native_receipt(good,26,"source","run")
     invalid=[None,{},dict(good,api=34),dict(good,api=True),dict(good,commit="old"),
              dict(good,run_id="old"),dict(good,status="FAIL"),dict(good,checks=23),
              dict(good,release_ready=True),dict(good,scope="backend"),
-             dict(good,labels=list(reversed(NATIVE_LABELS)))]
+             dict(good,labels=list(reversed(NATIVE_LABELS))),dict(good,derived=None)]
     for i in range(24):
         bad=copy.deepcopy(good);del bad["labels"][i];bad["checks"]-=1;invalid.append(bad)
         bad=copy.deepcopy(good);bad["labels"][i]="unrelated";invalid.append(bad)
@@ -872,7 +874,9 @@ def native_paged_ui(adb,gate):
             if selected is not None:return selected
             time.sleep(.25)
         raise AssertionError("native format button missing "+repr(title)+" actual="+repr([n.attrib for n in current]))
-    def stop():shell("am","force-stop",gate.PKG)
+    def stop():
+        from verify_process_control import stop_verified
+        return stop_verified(adb,gate.SERIAL,gate.PKG)
     def start():
         shell("am","start","-W","-n",gate.PKG+"/com.supercubegame.pockettodo.MainActivity")
         find(**{"content-desc":"v12-status","text":"已保存到本机"})
@@ -994,6 +998,11 @@ def native_paged_ui(adb,gate):
                "stale_publication_refused",kind)
             stop();ok(state()==changed,"stale_refusal_preserves_state",kind)
             external(0,1);ok(state()==baseline,"fixture_restored",kind);preserve_output("stale-empty")
+        def set_filename(value):
+            nonlocal filename
+            filename=value
+        result["derived"]=native_derived_exports(adb,gate,parent,baseline,state,stop,start,tap,find,
+            nodes,click,find_format,save_picker,command,shell,note_label,derivatives[0],set_filename)
         result["checks"]=len(result["labels"]);result["status"]="PASS"
         assert native_receipt(result,gate.API,source,run_id),"native paged coverage incomplete"
     except Exception as failure:
@@ -1010,5 +1019,202 @@ def native_paged_ui(adb,gate):
         codec=json.loads(codec_path.read_text());codec["paged_native_ui"]=result
         codec_path.write_text(json.dumps(codec,ensure_ascii=False,indent=2))
         print("PAGED_NATIVE_RESULT "+json.dumps(result,ensure_ascii=False),flush=True)
+
+DERIVED_PAGE_CHECK=r'''
+import java.awt.image.BufferedImage;
+import javax.imageio.ImageIO;
+import java.io.File;
+public class NativeDerivedPage {
+ static final int RED=0xffdc4628,BLUE=0xff235ad2,BLACK=0xff000000,WHITE=0xffffffff;
+ static void need(boolean b,String s){if(!b)throw new AssertionError(s);}
+ static int expected(int x,int y,int[] c,int[] m){
+  int sx=x+c[0],sy=y+c[1];
+  return sx>=m[0]&&sx<m[2]&&sy>=m[1]&&sy<m[3]?BLACK:sx<640?RED:BLUE;
+ }
+ static void check(BufferedImage page,BufferedImage derivative,int[] c,int[] m){
+  need(page!=null&&page.getWidth()==595&&page.getHeight()==842,"page dimensions");
+  need(derivative!=null&&derivative.getWidth()==c[2]-c[0]&&derivative.getHeight()==c[3]-c[1],"crop dimensions");
+  int sw=derivative.getWidth(),sh=derivative.getHeight();
+  need(c[0]>=316&&c[0]<=324&&c[1]>=156&&c[1]<=164&&c[2]>=956&&c[2]<=964&&c[3]>=476&&c[3]<=484,"UI crop fixture");
+  need(m[0]>=636&&m[0]<=644&&m[1]>=234&&m[1]<=246&&m[2]>=796&&m[2]<=804&&m[3]>=394&&m[3]<=406,"UI mask fixture");
+  for(int y=0;y<sh;y++)for(int x=0;x<sw;x++)
+   need(derivative.getRGB(x,y)==expected(x,y,c,m),"actual stored derivative pixel");
+  int w=523,h=(int)Math.floor(sh*523.0/sw),red=0,blue=0,black=0;
+  for(int y=0;y<842;y++)for(int x=0;x<595;x++){
+   int actual=page.getRGB(x,y);need((actual>>>24)==255,"export alpha");
+   if(x<36||x>=36+w||y<36||y>=36+h){
+    need(actual==WHITE,"extra content outside selected image");continue;
+   }
+   double sx=(x-36+.5)*sw/w+c[0],sy=(y-36+.5)*sh/h+c[1];
+   // Independently test solid interiors. A three-source-pixel guard isolates
+   // renderer interpolation at the image/color/mask edges, not mask interiors.
+   if(sx<c[0]+3||sx>c[2]-3||sy<c[1]+3||sy>c[3]-3||
+      Math.abs(sx-640)<3||Math.abs(sx-m[0])<3||Math.abs(sx-m[2])<3||
+      Math.abs(sy-m[1])<3||Math.abs(sy-m[3])<3)continue;
+   int e=sx>=m[0]&&sx<m[2]&&sy>=m[1]&&sy<m[3]?BLACK:sx<640?RED:BLUE;
+   need(actual==e,"export crop or opaque mask differs");
+   if(e==RED)red++;else if(e==BLUE)blue++;else black++;
+  }
+  need(red>10000&&blue>10000&&black>10000,"fixture must exercise both colors and opaque mask");
+ }
+ static BufferedImage derivative(int[] c,int[] m){
+  BufferedImage b=new BufferedImage(c[2]-c[0],c[3]-c[1],2);
+  for(int y=0;y<b.getHeight();y++)for(int x=0;x<b.getWidth();x++)b.setRGB(x,y,expected(x,y,c,m));
+  return b;
+ }
+ static BufferedImage page(int[] c,int[] m){
+  BufferedImage b=new BufferedImage(595,842,2);
+  int sw=c[2]-c[0],sh=c[3]-c[1],h=(int)Math.floor(sh*523.0/sw);
+  for(int y=0;y<842;y++)for(int x=0;x<595;x++)
+   b.setRGB(x,y,x>=36&&x<559&&y>=36&&y<36+h?
+    expected((int)((x-36+.5)*sw/523),(int)((y-36+.5)*sh/h),c,m):WHITE);
+  return b;
+ }
+ public static void main(String[] a)throws Exception{
+  if(a[0].equals("--selftest")){
+   int[] c={320,160,960,480},m={640,238,800,402};
+   check(page(c,m),derivative(c,m),c,m);int refused=0;
+   for(int i=0;i<8;i++){
+    BufferedImage p=page(c,m),d=derivative(c,m);
+    if(i==0)p.setRGB(330,150,BLUE); // removed interior redaction
+    if(i==1)p.setRGB(100,80,BLUE); // wrong crop/source, away from interpolation guards
+    if(i==2)p.setRGB(500,600,BLACK); // leaked extra text/image
+    if(i==3)p.setRGB(330,150,0x80000000);
+    if(i==4)d.setRGB(350,100,BLUE);
+    if(i==5)p=new BufferedImage(594,842,2);
+    if(i==6)d=new BufferedImage(1280,640,2); // origin substituted
+    if(i==7)p.setRGB(330,150,0xff010101); // even almost-black is not opaque exact black
+    try{check(p,d,c,m);}catch(AssertionError e){refused++;continue;}
+    throw new AssertionError("derived observer accepted mutant "+i);
+   }
+   need(refused==8,"negative controls");
+   System.out.println("DERIVED_PAGE_CONTROLS 1 positive 8 negatives");return;
+  }
+  need(a.length==10,"geometry required");
+  int[] c=new int[4],m=new int[4];
+  for(int i=0;i<4;i++){c[i]=Integer.parseInt(a[i+2]);m[i]=Integer.parseInt(a[i+6]);}
+  check(ImageIO.read(new File(a[0])),ImageIO.read(new File(a[1])),c,m);
+  System.out.println("DERIVED_PAGE_PASS EXACT_INTERIORS_AND_STORED_IMAGE");
+ }
+}
+'''
+
+
+def native_derived_exports(adb,gate,parent,baseline,state,stop,start,tap,find,
+                           nodes,click,find_format,save_picker,command,shell,
+                           note_label,derivative,set_filename):
+    """Actual UI-created crop/mask, exported via DocumentsUI; no DB writes."""
+    import io
+    record={"status":"FAIL","scope":"NATIVE_DERIVED_IMAGE_SAF_NOT_RECEIVER",
+            "commit":os.environ["GITHUB_SHA"],"run_id":os.environ["GITHUB_RUN_ID"],
+            "api":gate.API,"outputs":{},"release_ready":False}
+    parent["derived_paged_ui"]=record
+    out=Path("native-ui")
+    geometry=parent["derivative_geometry"]
+    crops=[g["observed_crop"] for g in geometry if g.get("source")==[1280,640] and "observed_crop" in g]
+    masks=[g["observed_mask"] for g in geometry if g.get("source")==[1280,640] and "observed_mask" in g]
+    assert len(crops)==len(masks)==1,"exact prior UI geometry required"
+    crop,mask=crops[0],masks[0]
+    assert derivative[3]=="IMAGE" and derivative[7]==0 and derivative[5]!=derivative[8]
+    def private(asset):
+        assert re.fullmatch(r"[0-9a-f]{64}",asset)
+        b=command("exec-out","run-as",gate.PKG,"cat","files/media/"+asset,binary=True)
+        assert hashlib.sha256(b).hexdigest()==asset
+        return b
+    current=private(derivative[5]);origin=private(derivative[8])
+    assert current!=origin
+    source=out/"export-current-derived.png";source.write_bytes(current)
+    java=out/"NativeDerivedPage.java";java.write_text(DERIVED_PAGE_CHECK)
+    run(["javac","-d",out,java])
+    assert run(["java","-Djava.awt.headless=true","-cp",out,"NativeDerivedPage","--selftest"]).strip()=="DERIVED_PAGE_CONTROLS 1 positive 8 negatives"
+    try:
+        for kind,title,filename in (("PDF","PDF","PocketTodo-notes.pdf"),("PNG_ZIP","分段PNG图片包","PocketTodo-pages.zip")):
+            set_filename(filename)
+            assert not shell("find","/sdcard/Download","-type","f","-name",filename).splitlines()
+            start();tap("导出笔记");tap(note_label);find(text="勾选内容（私有项已排除）")
+            choices=[n for n in nodes() if n.get("class")=="android.widget.CheckedTextView"]
+            assert [n.get("text") for n in choices]==["1. 文字：Second edited","2. 图片："]
+            assert all(n.get("checked")=="false" for n in choices)
+            click(find_format("Markdown"));tap(title);tap("2. 图片：");tap("生成预览")
+            find(text=title+"预览");find(text="第 1 / 1 页");find(**{"content-desc":"导出第1页"})
+            save_picker();tap("SAVE")
+            find(**{"content-desc":"v12-status","text":title+"已保存，逐字节回读一致"})
+            assert shell("find","/sdcard/Download","-type","f","-name",filename).splitlines()==["/sdcard/Download/"+filename]
+            raw=command("exec-out","cat","/sdcard/Download/"+filename,binary=True)
+            assert 0<len(raw)<=16777216
+            artifact=out/("derived-"+filename);artifact.write_bytes(raw)
+            if kind=="PDF":
+                assert re.findall(r"^Pages:\s+(\d+)",run(["pdfinfo",artifact]),re.M)==["1"]
+                text=out/"derived-export.txt";run(["pdftotext","-enc","UTF-8",artifact,text])
+                assert not text.read_text().strip(),"unselected/private text leaked"
+                prefix=out/"derived-pdf";run(["pdftocairo","-r","72","-png","-singlefile",artifact,prefix])
+                page=Path(str(prefix)+".png")
+            else:
+                with zipfile.ZipFile(io.BytesIO(raw)) as z:
+                    assert z.namelist()==["pages/page-001.png"]
+                    assert sum(e.file_size for e in z.infolist())<=16777216
+                    page=out/"derived-png.png";page.write_bytes(z.read("pages/page-001.png"))
+            proof=run(["java","-Djava.awt.headless=true","-cp",out,"NativeDerivedPage",page,source,*map(str,crop+mask)])
+            assert proof.strip()=="DERIVED_PAGE_PASS EXACT_INTERIORS_AND_STORED_IMAGE"
+            stop();assert state()==baseline
+            assert private(derivative[5])==current and private(derivative[8])==origin
+            record["outputs"][kind]={"status":"PASS","pages":1,"bytes":len(raw),
+                "sha256":hashlib.sha256(raw).hexdigest(),"current_asset":derivative[5],
+                "original_asset":derivative[8],"crop":crop,"mask":mask,
+                "pixels":"EXACT_OPAQUE_INTERIORS_EDGE_INTERPOLATION_NOT_ASSERTED",
+                "state":"ALL_TABLES_AND_ALL_MEDIA_UNCHANGED"}
+        assert set(record["outputs"])=={"PDF","PNG_ZIP"}
+        record["status"]="PASS"
+        return record
+    except Exception as exc:
+        record["error"]=repr(exc)
+        raise
+    finally:
+        print("DERIVED_PAGED_RESULT "+json.dumps(record),flush=True)
+
+
+def derived_receipt(value,api,source,run_id):
+    if not isinstance(value,dict):return False
+    if not (value.get("status")=="PASS" and value.get("scope")=="NATIVE_DERIVED_IMAGE_SAF_NOT_RECEIVER" and
+        type(value.get("api")) is int and value["api"]==api and value.get("commit")==source and
+        value.get("run_id")==run_id and value.get("release_ready") is False):return False
+    outputs=value.get("outputs")
+    if not isinstance(outputs,dict) or set(outputs)!={"PDF","PNG_ZIP"}:return False
+    for out in outputs.values():
+        if not isinstance(out,dict):return False
+        if not (out.get("status")=="PASS" and type(out.get("pages")) is int and out["pages"]==1 and
+            type(out.get("bytes")) is int and 0<out["bytes"]<=16777216 and
+            out.get("pixels")=="EXACT_OPAQUE_INTERIORS_EDGE_INTERPOLATION_NOT_ASSERTED" and
+            out.get("state")=="ALL_TABLES_AND_ALL_MEDIA_UNCHANGED"):return False
+        for k in ("sha256","current_asset","original_asset"):
+            if not isinstance(out.get(k),str) or not re.fullmatch("[0-9a-f]{64}",out[k]):return False
+        if out["current_asset"]==out["original_asset"]:return False
+        for k in ("crop","mask"):
+            rect=out.get(k)
+            if not isinstance(rect,list) or len(rect)!=4 or any(type(n) is not int for n in rect):return False
+            if not (0<=rect[0]<rect[2]<=1280 and 0<=rect[1]<rect[3]<=640):return False
+    return all(outputs["PDF"][k]==outputs["PNG_ZIP"][k] for k in ("current_asset","original_asset","crop","mask"))
+
+
+def derived_sample(api=26,source="source",run_id="run"):
+    output={"status":"PASS","pages":1,"bytes":100,"sha256":"a"*64,
+        "current_asset":"b"*64,"original_asset":"c"*64,"crop":[320,160,960,480],"mask":[640,238,800,402],
+        "pixels":"EXACT_OPAQUE_INTERIORS_EDGE_INTERPOLATION_NOT_ASSERTED","state":"ALL_TABLES_AND_ALL_MEDIA_UNCHANGED"}
+    return {"status":"PASS","scope":"NATIVE_DERIVED_IMAGE_SAF_NOT_RECEIVER","api":api,"commit":source,
+        "run_id":run_id,"release_ready":False,"outputs":{"PDF":dict(output),"PNG_ZIP":dict(output)}}
+
+
+def derived_receipt_selftest():
+    import copy
+    good=derived_sample();assert derived_receipt(good,26,"source","run")
+    bad=[None,{},dict(good,status="FAIL"),dict(good,api=True),dict(good,commit="old"),
+        dict(good,run_id="old"),dict(good,outputs={}),dict(good,release_ready=True)]
+    for kind in ("PDF","PNG_ZIP"):
+        for field,value in (("pages",True),("pages",2),("bytes",0),("sha256","bad"),
+            ("current_asset","c"*64),("pixels","NONBLANK"),("state","NOT_VERIFIED"),
+            ("crop",[]),("mask",[0,0,0,0]),("current_asset","d"*64)):
+            v=copy.deepcopy(good);v["outputs"][kind][field]=value;bad.append(v)
+    for v in bad:assert not derived_receipt(v,26,"source","run"),"missing derived evidence accepted"
+    print("DERIVED_RECEIPT_CONTROLS 1 positive "+str(len(bad))+" negatives HOST_ONLY",flush=True)
 
 if __name__=="__main__":selftest()

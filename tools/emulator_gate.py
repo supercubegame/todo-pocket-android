@@ -470,7 +470,10 @@ def verify_native_ui(adb):
         # The activity summary can be below the viewport after accessible title controls grow.
         # Navigate by stable identity, then assert exact content once; never retry wrong text.
         ok(reveal_summary(nodes,swipe_up,PKG,'note-activity-1','Watered 20 min today') is not None,'note survives process restart')
-        tap('活动'); ready(); touch('activity-1'); ready()
+        # The bottom tab reloads the selected detail; it does not clear selected activity.
+        # Verify that detail before entering notes, rather than seeking a category-list row.
+        tap('活动'); ready()
+        assert desc('note-count-1').get('text')=='笔记 · 1 篇','activity tab must retain the selected detail before opening notes'
         tap('笔记'); ready(); tap('加入图片')
         tap('加入合成图'); ready()
         ok(any(n.get('content-desc','').startswith('note-image-') for n in nodes()),'attached image is registered with note')

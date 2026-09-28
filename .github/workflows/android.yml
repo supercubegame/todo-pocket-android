@@ -21,6 +21,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/verify_process_control.py selftest 2>&1 | tee core.log
+          python3 tools/verify_evidence.py 2>&1 | tee -a core.log
           python3 tools/verify.py v12 2>&1 | tee -a core.log
           python3 tools/verify_schema3.py selftest 2>&1 | tee -a core.log
       - name: Verify unfinished delivery cannot be mislabeled
@@ -911,6 +912,7 @@ jobs:
           python3 - <<'PY' 2>&1 | tee collected/publication.log
           import base64,hashlib,json,os,re,urllib.request,urllib.error
           from pathlib import Path
+          from tools.verify_evidence import publish as publish_evidence
           root=Path('collected')
           repo=os.environ['GITHUB_REPOSITORY']
           source=os.environ['GITHUB_SHA']
@@ -919,14 +921,7 @@ jobs:
             req=urllib.request.Request('https://api.github.com/repos/'+repo+'/'+path,data=json.dumps(body).encode() if body is not None else None,method=method,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
             with urllib.request.urlopen(req,timeout=30) as response:return json.load(response)
           def publish(path,data):
-            body={'message':'Record synthetic native UI evidence','branch':'evidence','content':base64.b64encode(data).decode()}
-            try:body['sha']=api('contents/'+path+'?ref=evidence')['sha']
-            except urllib.error.HTTPError as exc:
-              if exc.code!=404:raise
-            written=api('contents/'+path,'PUT',body)
-            actual=api('contents/'+path+'?ref='+written['commit']['sha'])
-            assert base64.b64decode(actual['content'])==data,'native evidence readback mismatch'
-            return {'url':actual['html_url'],'raw_url':actual['download_url'],'sha256':hashlib.sha256(data).hexdigest()}
+            return publish_evidence(api,path,data,emit=lambda row: print('EVIDENCE_TRANSPORT '+json.dumps(row),flush=True))
           required={
             'seed':[
               'restore preview does not mutate any live table or publish media',
@@ -1095,9 +1090,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 - <<'PY'
+          set -o pipefail
+          python3 - <<'PY' 2>&1 | tee collected/matrix-publication.log
           import base64,copy,hashlib,json,os,tempfile,urllib.request,urllib.error
           from pathlib import Path
+          from tools.verify_evidence import publish as publish_evidence
           source,run=os.environ['GITHUB_SHA'],os.environ['GITHUB_RUN_ID']
           required=[
             'exact_selected_zip_members','private_and_unselected_text_absent',
@@ -1214,17 +1211,19 @@ jobs:
               headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
             with urllib.request.urlopen(request,timeout=30) as response:return json.load(response)
           path='reports/matrix-receipt-'+source+'-'+run+'.json'
-          body={'message':'Record independent matrix receipt, not delivery acceptance',
-                'branch':'evidence','content':base64.b64encode(data).decode()}
-          try:body['sha']=api('contents/'+path+'?ref=evidence')['sha']
-          except urllib.error.HTTPError as exc:
-            if exc.code!=404:raise
-          written=api('contents/'+path,'PUT',body)
-          actual=api('contents/'+path+'?ref='+written['commit']['sha'])
-          assert base64.b64decode(actual['content'])==data,'matrix receipt exact readback differs'
-          print('MATRIX_RECEIPT '+actual['html_url'],flush=True)
+          asset=publish_evidence(api,path,data,emit=lambda row: print('EVIDENCE_TRANSPORT '+json.dumps(row),flush=True))
+          print('MATRIX_RECEIPT '+asset['url'],flush=True)
           assert passed,'Markdown backend checks missing/failed; receipt published, not a native sharing acceptance'
           PY
+      - name: Preserve publication diagnostics independently of evidence branch
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: report-publication-diagnostics
+          path: |
+            collected/publication.log
+            collected/matrix-publication.log
+          if-no-files-found: error
       - name: Publish and require both independent export probes
         if: always()
         env:

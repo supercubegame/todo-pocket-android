@@ -123,9 +123,11 @@ public final class ActivitiesScreen {
         details.addView(host.button("打卡记录",()->{historyPanel=true;load();}));
         details.addView(host.button("笔记",()->new NoteEditorScreen(host,id,d.title,this::load).load()));
         TextView count=host.text("笔记 · "+d.notes.size()+" 篇",16,TodayScreen.INK);count.setContentDescription("note-count-"+id);details.addView(count);
+        if(!d.notes.isEmpty())details.addView(host.text("点击笔记标题可改名；同名笔记分开保存。",14,TodayScreen.MUTED));
         for(int i=0;i<d.notes.size();i++){
             NoteSummary summary=d.notes.get(i);
             TextView heading=host.text((i+1)+". "+summary.title,16,TodayScreen.INK);heading.setContentDescription("note-title-"+summary.id);heading.setMaxLines(2);details.addView(heading);
+            heading.setMinHeight(host.dp(48));heading.setFocusable(true);heading.setOnClickListener(v->renameNote(id,summary));
             TextView preview=host.text(summary.text,15,TodayScreen.MUTED);
             // Keep the old first-note accessibility identity for existing regression.
             preview.setContentDescription(i==0?"note-activity-"+id:"note-summary-"+summary.id);
@@ -138,6 +140,24 @@ public final class ActivitiesScreen {
             List<String> steps=new ArrayList<>();if(!value.isEmpty())for(String step:value.split("\\r?\\n",-1)){if(step.trim().isEmpty())throw new IllegalArgumentException("步骤不能为空");steps.add(step.trim());}
             host.db.savePath(id,steps);
         },this::load)));
+    }
+    /** A title-only edit. Opening/cancelling never writes; the captured ID and owner
+     * remain fixed even when another note has exactly the same displayed title. */
+    private void renameNote(long owner,NoteSummary note){
+        LinearLayout body=host.column();body.setPadding(host.dp(20),host.dp(4),host.dp(20),host.dp(8));
+        EditText field=host.field("笔记标题",false);field.setContentDescription("note-rename-title");field.setText(note.title);body.addView(field,new LinearLayout.LayoutParams(-1,-2));
+        TextView validation=host.text("只改这一篇的标题，不改变正文、图片或顺序。",14,TodayScreen.MUTED);body.addView(validation);
+        AlertDialog dialog=new AlertDialog.Builder(host.activity).setTitle("笔记改名").setView(body).setNegativeButton("取消",null).setPositiveButton("保存标题",null).create();
+        dialog.setOnShowListener(unused->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+            String value=field.getText().toString().trim();
+            if(value.isEmpty()){validation.setText("笔记标题不能为空");validation.setTextColor(TodayScreen.ERROR);return;}
+            dialog.setCancelable(false);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);field.setEnabled(false);
+            host.work(()->host.db.renameNote(note.id,owner,note.title,value),changed->{dialog.dismiss();load();},()->{
+                dialog.setCancelable(true);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);field.setEnabled(true);
+                validation.setText("未能改名；请取消后重新打开，避免覆盖已变化的标题。");validation.setTextColor(TodayScreen.ERROR);
+            });
+        }));
+        dialog.show();
     }
     private void loadHistory(long id){host.work(()->host.db.marks(id),marks->renderHistory(id,marks),null);}
     private void renderHistory(long id,List<CalendarRules.Mark> marks){

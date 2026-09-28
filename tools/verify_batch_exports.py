@@ -29,6 +29,57 @@ SUMMARY_LABELS = ["all_same_title_and_empty_notes", "second_activity_isolated",
                   "restart_all_notes", "restart_second_activity",
                   "same_revision_privacy", "newly_private_text_hidden",
                   "privacy_fixture_restored", "all_tables_media_unchanged"]
+RENAME_LABELS = ["cancel_readonly", "blank_blocked_readonly", "same_title_noop",
+                 "same_title_target_only", "restart_title_persisted", "duplicate_title_allowed"]
+
+
+def rename_expected(before, note, owner, title):
+    expected = copy.deepcopy(before)
+    rows = expected[0]["notes"]
+    indexes = [i for i, row in enumerate(rows) if row[0] == note and row[1] == owner]
+    assert len(indexes) == 1 and isinstance(title, str) and title.strip()
+    index = indexes[0]
+    assert len(rows[index]) == 3 and expected[0]["revision"][0][0] == 1
+    if title != rows[index][2]:
+        rows[index] = (note, owner, title)
+        rev = expected[0]["revision"]
+        assert len(rev) == 1 and type(rev[0][1]) is int and rev[0][1] < 9223372036854775807
+        rev[0] = (1, rev[0][1]+1)
+    return expected
+
+
+def rename_readback_check(before, actual, note, owner, title):
+    assert actual == rename_expected(before, note, owner, title), "rename changed wrong note, order, revision, content or media"
+
+
+def rename_selftest():
+    before = ({"notes": [("a", 1, "Same"), ("b", 1, "Same"), ("c", 2, "Same")],
+               "revision": [(1, 9)], "blocks": [("b", "t", "private")]},
+              {"asset": "bytes"}, {1: "First", 2: "Second"})
+    good = copy.deepcopy(before)
+    good[0]["notes"][1] = ("b", 1, "Renamed")
+    good[0]["revision"] = [(1, 10)]
+    rename_readback_check(before, good, "b", 1, "Renamed")
+    rename_readback_check(before, copy.deepcopy(before), "b", 1, "Same")
+    reverted = copy.deepcopy(before); reverted[0]["revision"] = [(1, 11)]
+    rename_readback_check(good, reverted, "b", 1, "Same")
+    bads = [copy.deepcopy(before)]
+    for mode in range(8):
+        bad = copy.deepcopy(good)
+        if mode == 0: bad[0]["notes"][0] = ("a", 1, "Renamed")
+        if mode == 1: bad[0]["notes"][2] = ("c", 2, "Renamed")
+        if mode == 2: bad[0]["notes"].reverse()
+        if mode == 3: bad[0]["notes"][1] = ("b", 2, "Renamed")
+        if mode == 4: bad[0]["revision"] = [(1, 11)]
+        if mode == 5: bad[0]["blocks"] = []
+        if mode == 6: bad[1]["asset"] = "changed"
+        if mode == 7: bad[2][1] = "changed"
+        bads.append(bad)
+    for bad in bads:
+        try: rename_readback_check(before, bad, "b", 1, "Renamed")
+        except AssertionError: continue
+        raise AssertionError("rename negative survived")
+    print("RENAME_HOST_CONTROLS 3_positive_9_negative HOST_ONLY", flush=True)
 
 
 def summary_expected(data, owner):
@@ -129,6 +180,15 @@ def receipt(value, api, source, run, apk):
             value.get("release_ready") is False):
         return False
     summary = value.get("summary_ui")
+    rename = value.get("rename_ui")
+    if not isinstance(rename, dict) or not (
+            rename.get("status") == "PASS" and rename.get("labels") == RENAME_LABELS and
+            type(rename.get("checks")) is int and rename["checks"] == len(RENAME_LABELS) and
+            type(rename.get("api")) is int and rename["api"] == api and
+            rename.get("commit") == source and rename.get("run_id") == run and
+            rename.get("apk_sha256") == apk and rename.get("release_ready") is False and
+            rename.get("scope") == "NATIVE_NOTE_RENAME_EXACT_ID_RESTART_NOT_LMK"):
+        return False
     if not isinstance(summary, dict) or not (
             summary.get("status") == "PASS" and summary.get("labels") == SUMMARY_LABELS and
             type(summary.get("checks")) is int and summary["checks"] == len(SUMMARY_LABELS) and
@@ -212,6 +272,7 @@ public class BatchPageCheck {
 
 
 def selftest():
+    rename_selftest()
     summary_selftest()
     assert len(LABELS) == 34 and all("picker_cancel_preserves_state_"+kind in LABELS
                                    for kind in ("MARKDOWN", "PDF", "PNG_ZIP"))
@@ -320,6 +381,9 @@ def selftest():
     good["summary_ui"] = {"status": "PASS", "labels": SUMMARY_LABELS[:], "checks": len(SUMMARY_LABELS),
         "api": 26, "commit": "source", "run_id": "run", "apk_sha256": "a"*64,
         "scope": "NATIVE_ACTIVITY_SUMMARIES_SYNTHETIC_RESTART_NOT_LMK", "release_ready": False}
+    good["rename_ui"] = {"status": "PASS", "labels": RENAME_LABELS[:], "checks": len(RENAME_LABELS),
+        "api": 26, "commit": "source", "run_id": "run", "apk_sha256": "a"*64,
+        "scope": "NATIVE_NOTE_RENAME_EXACT_ID_RESTART_NOT_LMK", "release_ready": False}
     for kind, _, _ in FORMATS:
         good["stale_privacy"][kind] = {
             "note_id": "second", "block_id": "selected", "helper_sha256": "c"*64,
@@ -336,6 +400,14 @@ def selftest():
             dict(good, checks=True), dict(good, release_ready=True), dict(good, scope="backend")]
     bads.extend([dict(good, stale_privacy=None), dict(good, stale_privacy={})])
     bads.extend([dict(good, summary_ui=None), dict(good, summary_ui={})])
+    bads.extend([dict(good, rename_ui=None), dict(good, rename_ui={})])
+    for key, value in (("status", "FAIL"), ("checks", True), ("api", 34), ("api", True),
+                       ("commit", "old"), ("run_id", "old"), ("apk_sha256", "d"*64),
+                       ("scope", "HOST_ONLY"), ("release_ready", True)):
+        b = copy.deepcopy(good); b["rename_ui"][key] = value; bads.append(b)
+    for index in range(len(RENAME_LABELS)):
+        b = copy.deepcopy(good); b["rename_ui"]["labels"].pop(index)
+        b["rename_ui"]["checks"] -= 1; bads.append(b)
     for key, value in (("status", "FAIL"), ("checks", True), ("api", 34), ("api", True),
                        ("commit", "old"), ("run_id", "old"), ("apk_sha256", "d"*64),
                        ("scope", "HOST_ONLY"), ("release_ready", True)):
@@ -547,6 +619,70 @@ def native(adb, gate):
         assert state() == baseline; passed("all_tables_media_unchanged")
         assert proof["labels"] == SUMMARY_LABELS and len(proof["screens"]) == 5
         proof.update(status="PASS", checks=len(proof["labels"]))
+    def rename_ui():
+        # Real dialogs on the second of two same-title notes, not injected SQL edits.
+        proof = {"status": "FAIL", "api": gate.API, "commit": source, "run_id": run_id,
+                 "apk_sha256": result["apk_sha256"], "labels": [], "checks": 0,
+                 "scope": "NATIVE_NOTE_RENAME_EXACT_ID_RESTART_NOT_LMK", "release_ready": False}
+        result["rename_ui"] = proof
+        pairs = [(a, b) for i, a in enumerate(data["notes"]) for b in data["notes"][i+1:]
+                 if a[1] == b[1] and a[2] == b[2]]
+        assert pairs, "same-title rename fixture missing"
+        sibling, target = pairs[0]
+        note, owner, original = target
+        proof.update(note_id=note, sibling_id=sibling[0], owner=owner)
+        def passed(label):
+            assert RENAME_LABELS[len(proof["labels"])] == label
+            proof["labels"].append(label); proof["checks"] = len(proof["labels"])
+        def locate(desc):
+            for _ in range(25):
+                found = [n for n in nodes() if n.get("content-desc") == desc]
+                assert len(found) <= 1
+                if found:
+                    assert found[0].get("package") == gate.PKG
+                    return found[0]
+                shell("input", "swipe", "160", "440", "160", "190", "350")
+            raise AssertionError("rename identity unreachable "+desc)
+        def form(expected):
+            start(); tap("活动"); ready()
+            click(locate("activity-"+str(owner))); ready()
+            heading = locate("note-title-"+note)
+            index = [r[0] for r in data["notes"] if r[1] == owner].index(note)
+            assert heading.get("text") == str(index+1)+". "+expected
+            click(heading); find(text="笔记改名")
+            field = find(**{"content-desc": "note-rename-title"})
+            assert field.get("text") == expected
+            click(field); shell("input", "keyevent", "KEYCODE_MOVE_END")
+        stop(); assert state() == baseline
+        form(original); shell("input", "text", "_cancel"); tap("取消")
+        stop(); assert state() == baseline; passed("cancel_readonly")
+        form(original)
+        # Delete UTF-16 units from the prefilled field; no clipboard/IME Unicode injection.
+        units = len(original.encode("utf-16-le"))//2
+        assert 0 < units <= 200, "fixture title outside bounded input driver"
+        shell("input", "keyevent", *(["KEYCODE_DEL"]*units))
+        assert find(**{"content-desc": "note-rename-title"}).get("text") == ""
+        tap("保存标题"); find(text="笔记标题不能为空"); find(text="笔记改名"); tap("取消")
+        stop(); assert state() == baseline; passed("blank_blocked_readonly")
+        form(original); tap("保存标题"); ready()
+        stop(); assert state() == baseline; passed("same_title_noop")
+        changed_title = original+"_renamed"
+        form(original); shell("input", "text", "_renamed"); tap("保存标题"); ready()
+        stop(); saved = state()
+        rename_readback_check(baseline, saved, note, owner, changed_title)
+        passed("same_title_target_only")
+        form(changed_title); tap("取消"); stop()
+        assert state() == saved; passed("restart_title_persisted")
+        form(changed_title)
+        shell("input", "keyevent", *(["KEYCODE_DEL"]*len("_renamed")))
+        assert find(**{"content-desc": "note-rename-title"}).get("text") == original
+        tap("保存标题"); ready(); stop()
+        restored = state()
+        rename_readback_check(saved, restored, note, owner, original)
+        assert [r for r in restored[0]["notes"] if r[0] in (note, sibling[0])] == [sibling, target]
+        passed("duplicate_title_allowed")
+        assert proof["labels"] == RENAME_LABELS
+        proof.update(status="PASS", state="ONLY_TARGET_TITLE_AND_TWO_REVISION_INCREMENTS_TITLE_RESTORED")
     try:
         assert os.environ.get("GITHUB_ACTIONS") == "true" and shell("getprop", "ro.kernel.qemu").strip() == "1"
         prior = json.loads((out/"native-result.json").read_text())
@@ -684,6 +820,7 @@ def native(adb, gate):
                 "state": "EXACT_CHANGED_STATE_THEN_EXACT_BASELINE_RESTORED"}
             preserve_output("stale-empty", filename)
         summary_ui()
+        rename_ui()
         assert command("exec-out", "cat", installed[8:], binary=True) == product
         result.update(status="PASS", checks=len(result["labels"]))
         assert receipt(result, gate.API, source, run_id, result["apk_sha256"])

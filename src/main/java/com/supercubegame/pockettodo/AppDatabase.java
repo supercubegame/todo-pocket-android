@@ -118,7 +118,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
     public synchronized void moveCategory(long id,int to){tx(db->{List<Long> ids=categoryIds(db);int from=ids.indexOf(id);if(from<0||to<0||to>=ids.size())throw new IllegalArgumentException("分类位置无效");ids.add(to,ids.remove(from));for(int i=0;i<ids.size();i++)db.execSQL("UPDATE categories SET position=? WHERE id=?",new Object[]{i,ids.get(i)});bump(db);return null;});}
     public synchronized void addApplication(long id,String name,String packageName){Ledger.positive(id);String clean=text(name);if(packageName==null||(!packageName.isEmpty()&&!packageName.matches("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")))throw new IllegalArgumentException("应用包名无效");tx(db->{db.execSQL("INSERT INTO applications VALUES(?,?,?)",new Object[]{id,clean,packageName});bump(db);return null;});}
     public synchronized void addActivity(long id,long category,long application,String title){Ledger.positive(id);Ledger.positive(category);if(application<0)throw new IllegalArgumentException("应用标识无效");String clean=text(title);tx(db->{exists(db,"categories",category);if(application!=0)exists(db,"applications",application);db.execSQL("INSERT INTO activities(id,category_id,application_id,title) VALUES(?,?,?,?)",new Object[]{id,category,application==0?null:application,clean});bump(db);return null;});}
-    private void orderedStrings(String table,long activity,List<String> values,boolean deduplicate){if(values==null)throw new IllegalArgumentException("缺少有序内容");List<String> clean=new ArrayList<>();for(String value:values){String s=text(value);if(!deduplicate||!clean.contains(s))clean.add(s);}tx(db->{exists(db,"activities",activity);db.delete(table,"activity_id=?",new String[]{Long.toString(activity)});for(int i=0;i<clean.size();i++)db.execSQL("INSERT INTO "+table+" VALUES(?,?,?)",new Object[]{activity,i,clean.get(i)});bump(db);return null;});}
+    private void orderedStrings(String table,long activity,List<String> values,boolean deduplicate){if(values==null||Ledger.hasNull(values))throw new IllegalArgumentException("缺少有序内容");List<String> clean=new ArrayList<>();for(String value:values){String s=text(value);if(!deduplicate||!clean.contains(s))clean.add(s);}tx(db->{exists(db,"activities",activity);db.delete(table,"activity_id=?",new String[]{Long.toString(activity)});for(int i=0;i<clean.size();i++)db.execSQL("INSERT INTO "+table+" VALUES(?,?,?)",new Object[]{activity,i,clean.get(i)});bump(db);return null;});}
     private List<String> orderedStrings(String table,long activity){SQLiteDatabase db=getReadableDatabase();exists(db,"activities",activity);List<String> out=new ArrayList<>();try(Cursor c=db.rawQuery("SELECT text FROM "+table+" WHERE activity_id=? ORDER BY position",new String[]{Long.toString(activity)})){while(c.moveToNext())out.add(c.getString(0));}return Collections.unmodifiableList(out);}
     public synchronized void savePath(long activity,List<String> steps){orderedStrings("paths",activity,steps,false);}
     public synchronized List<String> path(long activity){return orderedStrings("paths",activity);}
@@ -133,6 +133,25 @@ public final class AppDatabase extends SQLiteOpenHelper {
     public synchronized void putMark(CalendarRules.Mark mark){if(mark==null||mark.recordedAt==null)throw new IllegalArgumentException("需要真实录入时间");tx(db->{exists(db,"activities",mark.activityId);db.delete("checkins","activity_id=? AND day=?",new String[]{Long.toString(mark.activityId),mark.date.toString()});if(mark.status!=CalendarRules.Status.UNRECORDED)db.execSQL("INSERT INTO checkins VALUES(?,?,?,?,?)",new Object[]{mark.activityId,mark.date.toString(),mark.status.name(),mark.memo,mark.recordedAt.toString()});bump(db);return null;});}
     public synchronized List<CalendarRules.Mark> marks(long activity){SQLiteDatabase db=getReadableDatabase();exists(db,"activities",activity);List<CalendarRules.Mark> out=new ArrayList<>();try(Cursor c=db.rawQuery("SELECT day,status,memo,recorded_at FROM checkins WHERE activity_id=? ORDER BY day",new String[]{Long.toString(activity)})){while(c.moveToNext())out.add(new CalendarRules.Mark(activity,LocalDate.parse(c.getString(0)),CalendarRules.Status.valueOf(c.getString(1)),c.getString(2),Instant.parse(c.getString(3))));}return Collections.unmodifiableList(out);}
     public synchronized void createNote(String id,long activity,String title){Ledger.identifier(id);String clean=text(title);tx(db->{exists(db,"activities",activity);db.execSQL("INSERT INTO notes VALUES(?,?,?)",new Object[]{id,activity,clean});bump(db);return null;});}
+    /** Rename one stable note identity. Compare the displayed title inside the write
+     * transaction, so a stale dialog cannot overwrite a newer title. Same-title saves
+     * are read-only; block order, ownership, field links and immutable media stay intact.
+     */
+    public synchronized boolean renameNote(String id,long activity,String expectedTitle,String title){
+        Ledger.identifier(id);Ledger.positive(activity);String clean=text(title);
+        if(expectedTitle==null)throw new IllegalArgumentException("缺少原笔记标题");
+        return tx(db->{
+            String current;
+            try(Cursor c=db.rawQuery("SELECT activity_id,title FROM notes WHERE id=?",new String[]{id})){
+                if(!c.moveToFirst()||c.getLong(0)!=activity)throw new IllegalArgumentException("所选笔记不存在或不属于当前活动");
+                current=c.getString(1);
+            }
+            if(!current.equals(expectedTitle))throw new IllegalStateException("笔记标题已变化，请重新打开改名");
+            if(current.equals(clean))return false;
+            db.execSQL("UPDATE notes SET title=? WHERE id=? AND activity_id=?",new Object[]{clean,id,activity});
+            bump(db);return true;
+        });
+    }
     /** Registry only: caller must copy/verify files and validate actual image format. */
     public synchronized void registerMedia(String id,String mime,long bytes){MediaRepository.validId(id);String clean=text(mime);if(bytes<=0)throw new IllegalArgumentException("媒体大小无效");tx(db->{try(Cursor c=db.rawQuery("SELECT mime,bytes FROM media WHERE id=?",new String[]{id})){if(c.moveToFirst()){if(!clean.equals(c.getString(0))||bytes!=c.getLong(1))throw new IllegalStateException("媒体标识对应的元数据冲突");return null;}}db.execSQL("INSERT INTO media VALUES(?,?,?)",new Object[]{id,clean,bytes});bump(db);return null;});}
     public synchronized void saveNote(String id,List<NoteDocument.Block> blocks){if(schema3!=null){schema3.saveNote(id,blocks,schema3.snapshot());return;}Ledger.identifier(id);if(blocks==null||Ledger.hasNull(blocks))throw new IllegalArgumentException("缺少笔记内容");List<NoteDocument.Block> owned=new ArrayList<>(blocks);NoteDocument validator=new NoteDocument();for(NoteDocument.Block b:owned)validator.add(b);tx(db->{exists(db,"notes",id);db.delete("blocks","note_id=?",new String[]{id});for(int i=0;i<owned.size();i++){NoteDocument.Block b=owned.get(i);if(b.kind==NoteDocument.Kind.IMAGE)exists(db,"media",b.assetId);db.execSQL("INSERT INTO blocks VALUES(?,?,?,?,?,?,?,?)",new Object[]{id,b.id,i,b.kind.name(),b.text,b.kind==NoteDocument.Kind.IMAGE?b.assetId:null,b.caption,b.privateContent?1:0});}bump(db);return null;});}
@@ -213,7 +232,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
             for(String table:SNAPSHOT_TABLES)try(Cursor c=db.rawQuery("SELECT * FROM "+table+" ORDER BY rowid",null)){
                 utf8(out,table);out.writeInt(c.getColumnCount());for(String name:c.getColumnNames())utf8(out,name);out.writeInt(c.getCount());
                 while(c.moveToNext())for(int i=0;i<c.getColumnCount();i++){
-                    Object value=cell(c,i);out.writeByte(c.getType(i));if(value instanceof Long)out.writeLong((Long)value);else if(value instanceof String)utf8(out,(String)value);else if(value instanceof byte[])blob(out,(byte[])value);
+                    Object value=cell(c,i);out.writeByte(c.getType(i));if(value instanceof Long)out.writeLong((Long)value);else if(value instanceof String)utf8(out,value.toString());else if(value instanceof byte[])blob(out,(byte[])value);
                 }
             }out.flush();return bytes.toByteArray();
         }catch(IOException e){throw new IllegalStateException("无法编码备份状态",e);}

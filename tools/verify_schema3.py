@@ -157,7 +157,9 @@ def registration(text, runner):
             "expected_runner": runner, "log": text}
 
 def selftest():
+    from verify_note_management import selftest as note_management_selftest
     controls = {}
+    controls["note_management"] = note_management_selftest()
     for phase, labels in LABELS.items():
         records = "".join("SCHEMA3_PASS " + x + "\n" for x in labels)
         records += race_fixture(phase)
@@ -1333,6 +1335,8 @@ def report():
         path = folder / "native-ui/codec-result.json"
         codec = json.loads(path.read_text()) if path.exists() else {}
         devices[str(api)]["paged_exports"] = paged_observe(codec, native, api, source, run)
+        from verify_note_management import aggregate as note_management_aggregate
+        devices[str(api)]["note_management"] = note_management_aggregate(codec, native, api, source, run)
         for stage, runner in (("default", "V12DeviceTest"), ("schema3", "Schema3DeviceTest"), ("restore", "Schema3RestoreTests"), ("restored", "V12DeviceTest")):
             path = folder / ("device-schema3-registration-" + stage + ".txt")
             text = path.read_text(errors="replace") if path.exists() else ""

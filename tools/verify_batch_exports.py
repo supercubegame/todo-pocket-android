@@ -20,7 +20,7 @@ FORMATS = (("MARKDOWN", "Markdown图片包", "PocketTodo-notes.zip"),
 STEPS = ["ui_created_second_note", "empty_note_selection_blocked",
          "note_cancel_preserves_state", "content_cancel_preserves_state"]
 PER_FORMAT = ["explicit_reverse_clicks_private_excluded", "empty_content_blocked",
-              "unchecked_save_blocked", "saved_and_independently_read",
+              "unchecked_save_blocked", "picker_cancel_preserves_state", "saved_and_independently_read",
               "all_tables_media_unchanged"]
 LABELS = STEPS + [step + "_" + kind for kind, _, _ in FORMATS for step in PER_FORMAT]
 EXPECTED = "# Pocket Todo\n\nSecond edited\n\nBatchsecond\n\n"
@@ -35,6 +35,13 @@ def markdown_check(raw):
 
 def pdf_text_check(text):
     assert "".join(text.split()) == "SecondeditedBatchsecond", "batch PDF text/order/privacy"
+
+
+def cancel_readback_check(before_paths, after_paths, filename, baseline, actual):
+    # Download directory membership, not arbitrary-provider atomicity or file-content proof.
+    assert "/sdcard/Download/"+filename not in before_paths, "cancel target already exists"
+    assert after_paths == before_paths, "cancel changed Download file membership"
+    assert actual == baseline, "cancel changed database or private media"
 
 
 def receipt(value, api, source, run, apk):
@@ -110,6 +117,29 @@ public class BatchPageCheck {
 
 
 def selftest():
+    assert len(LABELS) == 22 and all("picker_cancel_preserves_state_"+kind in LABELS
+                                   for kind in ("MARKDOWN", "PDF", "PNG_ZIP"))
+    paths = ["/sdcard/Download/existing.zip"]
+    baseline = ({"notes": [(1, "public")], "meta": [(9,)]}, {"asset": "digest"}, {1: "title"})
+    cancel_readback_check(paths, paths[:], "new.zip", baseline, copy.deepcopy(baseline))
+    changed_db = copy.deepcopy(baseline); changed_db[0]["notes"] = [(1, "private")]
+    changed_revision = copy.deepcopy(baseline); changed_revision[0]["meta"] = [(10,)]
+    changed_media = copy.deepcopy(baseline); changed_media[1]["asset"] = "different"
+    cancel_bad = [
+        (paths, paths, "existing.zip", baseline),
+        (paths, paths+["/sdcard/Download/new.zip"], "new.zip", baseline),
+        (paths, [], "new.zip", baseline),
+        (paths, paths+["/sdcard/Download/unexpected.zip"], "new.zip", baseline),
+        (paths, paths, "new.zip", changed_db),
+        (paths, paths, "new.zip", changed_revision),
+        (paths, paths, "new.zip", changed_media),
+    ]
+    for before, after, filename, actual in cancel_bad:
+        try:
+            cancel_readback_check(before, after, filename, baseline, actual)
+        except AssertionError:
+            continue
+        raise AssertionError("batch cancellation negative survived")
     # The format button starts abbreviated, but preview/status use full titles.
     # These explicit expectations are independent of the product constant.
     assert FORMATS == (("MARKDOWN", "Markdown图片包", "PocketTodo-notes.zip"),
@@ -185,13 +215,14 @@ def selftest():
     finally:
         native = actual_native
     print("BATCH_HOST_CONTROLS outputs=2_positive_7_negative receipts=1_positive_" +
-          str(len(bads)) + "_negative composition=2 format_contracts=3 HOST_ONLY", flush=True)
+          str(len(bads)) + "_negative composition=2 format_contracts=3 cancel=1_positive_7_negative HOST_ONLY", flush=True)
 
 
 def native(adb, gate):
     """All fixture writes use visible app UI. State snapshots are read-only."""
     from verify_paged_exports import format_button
     from verify_process_control import stop_verified
+    from verify_schema3 import cancel_share_picker
     source, run_id = os.environ["GITHUB_SHA"], os.environ["GITHUB_RUN_ID"]
     out = Path("native-ui"); prefix = [str(adb), "-s", gate.SERIAL]; serial = 0
     result = {"status": "FAIL", "scope": SCOPE, "commit": source, "run_id": run_id,
@@ -262,6 +293,8 @@ def native(adb, gate):
                 click(c[0]); return
             shell("input", "swipe", "160", "440", "160", "190", "350")
         raise AssertionError("batch consent unreachable")
+    def downloads():
+        return sorted(shell("find", "/sdcard/Download", "-type", "f").splitlines())
     try:
         assert os.environ.get("GITHUB_ACTIONS") == "true" and shell("getprop", "ro.kernel.qemu").strip() == "1"
         prior = json.loads((out/"native-result.json").read_text())
@@ -313,6 +346,7 @@ def native(adb, gate):
                 destination = "/sdcard/Download/pre-batch-"+filename
                 assert not shell("find", "/sdcard/Download", "-type", "f", "-name", "pre-batch-"+filename).splitlines()
                 shell("mv", old[0], destination)
+            before_downloads = downloads()
             start(); open_notes(); select_notes(); ok("explicit_reverse_clicks_private_excluded_"+kind)
             tap("生成预览"); find(text="勾选内容（私有项已排除）")
             assert all(n.get("checked") == "false" for n in checked()); ok("empty_content_blocked_"+kind)
@@ -323,6 +357,21 @@ def native(adb, gate):
             tap("选择保存位置"); find(text=title+"预览")
             assert not any("documentsui" in n.get("package", "") for n in nodes())
             ok("unchecked_save_blocked_"+kind); consent(); tap("选择保存位置")
+            assert find(text=filename).get("package") in ("com.android.documentsui", "com.google.android.documentsui")
+            assert find(text="SAVE").get("package") in ("com.android.documentsui", "com.google.android.documentsui")
+            trace = []
+            result.setdefault("cancel_traces", {})[kind] = trace
+            cancel_share_picker(nodes, lambda: shell("input", "keyevent", "KEYCODE_BACK"), gate.PKG, trace)
+            stop()
+            cancel_readback_check(before_downloads, downloads(), filename, baseline, state())
+            ok("picker_cancel_preserves_state_"+kind)
+            # Cancellation consumes the old preview. Generate and consent afresh.
+            start(); open_notes(); select_notes()
+            if kind != "MARKDOWN":
+                button = format_button(nodes(), "Markdown", gate.PKG); assert button is not None
+                click(button); tap(title)
+            tap(chosen[1]); tap(chosen[0]); tap("生成预览"); find(text=title+"预览")
+            consent(); tap("选择保存位置")
             assert find(text=filename).get("package") in ("com.android.documentsui", "com.google.android.documentsui")
             assert find(text="SAVE").get("package") in ("com.android.documentsui", "com.google.android.documentsui")
             tap("SAVE"); find(**{"content-desc": "v12-status", "text": title+"已保存，逐字节回读一致"})

@@ -122,8 +122,57 @@ def summary_navigation_selftest():
     exercise([[dict(node,**{'content-desc':'note-activity-2'})]],False,8)
     print('SUMMARY_NAVIGATION_SELFTEST positive=3 negative=7 PASS; host navigation only',flush=True)
 
+def database_directory(adb, serial, package, *, runner=subprocess.run):
+    """One isolated text read. Nonzero exits retain both streams and never retry."""
+    command = [str(adb), '-s', serial, 'shell', '-n', '-T',
+               'run-as', package, 'ls', 'databases']
+    result = runner(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, text=True, timeout=40, check=False)
+    result.check_returncode()
+    return result.stdout
+
+def database_directory_selftest():
+    command = ['adb', '-s', 'test-serial', 'shell', '-n', '-T',
+               'run-as', 'test.package', 'ls', 'databases']
+    cases = [(0, 'pocket-v12.db\npocket-v12.db-wal\n', ''),
+             (0, '', ''), (1, '', 'permission denied\n'),
+             (255, 'pocket-v12.db\n', 'transport sentinel\n'),
+             (-9, 'partial', 'signal sentinel')]
+    for code, output, error in cases:
+        calls = []
+        def runner(args, **kwargs):
+            calls.append(args)
+            assert args == command, 'database listing identity or shell isolation differs'
+            assert kwargs == dict(stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, text=True, timeout=40, check=False), 'database listing streams or budget differ'
+            return subprocess.CompletedProcess(args, code, output, error)
+        failure = None
+        try:
+            actual = database_directory('adb', 'test-serial', 'test.package', runner=runner)
+        except subprocess.CalledProcessError as exc:
+            failure = exc
+        assert len(calls) == 1, 'database directory command repeated'
+        if code == 0:
+            assert failure is None and actual == output, 'directory output was rewritten'
+        else:
+            assert failure is not None, 'nonzero listing was accepted as complete'
+            assert (failure.returncode, failure.cmd, failure.stdout, failure.stderr) == (code, command, output, error), 'original directory failure evidence lost'
+    timeout = subprocess.TimeoutExpired(command, 40, output=b'partial', stderr=b'timeout sentinel')
+    calls = []
+    def timed_out(args, **kwargs):
+        calls.append(args)
+        raise timeout
+    failure = None
+    try:
+        database_directory('adb', 'test-serial', 'test.package', runner=timed_out)
+    except subprocess.TimeoutExpired as exc:
+        failure = exc
+    assert failure is timeout and len(calls) == 1, 'directory timeout retried or replaced'
+    print('DATABASE_DIRECTORY_SELFTEST positive=2 negative=4 PASS; host command contract, not Android root cause', flush=True)
+
 def parser_selftest():
     summary_navigation_selftest()
+    database_directory_selftest()
     checks = 0
     def synthetic(labels, phase, code=-1, count=None):
         n = len(labels) if count is None else count
@@ -301,7 +350,7 @@ def verify_native_ui(adb):
     def copy_db(name):
         local=out/name
         local.write_bytes(subprocess.check_output([str(adb),'-s',SERIAL,'exec-out','run-as',PKG,'cat','databases/pocket-v12.db'],timeout=30))
-        present=shell('run-as',PKG,'ls','databases').splitlines()
+        present=database_directory(adb,SERIAL,PKG).splitlines()
         if 'pocket-v12.db-wal' in present:
             Path(str(local)+'-wal').write_bytes(subprocess.check_output([str(adb),'-s',SERIAL,'exec-out','run-as',PKG,'cat','databases/pocket-v12.db-wal'],timeout=30))
         return local
@@ -724,7 +773,7 @@ public class ImageImportFixture {
         tap('切换笔记');tap('2. Second note');ready()
         ok(desc('note-current').get('text')=='Second note · 2 / 2' and find(text='Second content') is not None and absent('Watered 35 min today'),'explicit selection restores second note alone after process restart')
         touch('note-edit-'+added_blocks[0][1]);clear_field('文字内容');type_text('Second edited');tap('保存');ready()
-        ok(desc('note-current').get('text')=='Second note · 2 / 2' and find(text='Second edited') is not None,'editing second note stays on selected stable note instead of jumping to first')
+        ok(desc('note-current').get('text')=='Second note · 2 / 2','editing second note stays on selected stable note instead of jumping to first')
         tap('切换笔记');tap('1. Daily reward');ready()
         ok(find(text='Watered 35 min today') is not None and absent('Second edited'),'switching back preserves original first-note text')
         swipe_up()

@@ -68,7 +68,62 @@ def verify_phase(output, phase):
     assert not missing, 'restore coverage missing: ' + repr(sorted(missing))
     return int(found[0][0])
 
+def reveal_summary(read_nodes, swipe, package, description, expected, max_swipes=8):
+    """Scroll only while identity is absent; wrong visible content fails immediately."""
+    assert type(max_swipes) is int and 0 <= max_swipes <= 8, 'invalid summary navigation bound'
+    for attempt in range(max_swipes + 1):
+        frame = read_nodes()
+        matches = [n for n in frame if n.get('content-desc') == description]
+        assert len(matches) <= 1, 'duplicate summary identity'
+        if matches:
+            node = matches[0]
+            assert node.get('package') == package, 'summary belongs to another package'
+            bounds = re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', node.get('bounds', ''))
+            assert bounds, 'summary has malformed bounds'
+            x1,y1,x2,y2 = map(int,bounds.groups())
+            assert x2 > x1 and y2 > y1, 'summary has empty visible bounds'
+            assert node.get('text') == expected, 'summary text differs: '+repr(node.get('text'))
+            return node
+        if attempt < max_swipes:
+            swipe()
+    raise AssertionError('summary identity absent after bounded scroll: '+description)
+
+def summary_navigation_selftest():
+    package = 'synthetic.app'
+    description = 'note-activity-1'
+    expected = 'Watered 20 min today'
+    node = {'package':package,'content-desc':description,'text':expected,'bounds':'[16,120][300,150]'}
+    def exercise(frames, passes, swipes, bound=8):
+        state = {'frame':0,'reads':0}
+        def read():
+            state['reads'] += 1
+            return frames[min(state['frame'],len(frames)-1)]
+        def swipe():
+            state['frame'] += 1
+        accepted = False
+        try:
+            result = reveal_summary(read,swipe,package,description,expected,bound)
+            accepted = True
+        except AssertionError:
+            pass
+        assert accepted == passes, 'summary navigation control accepted wrong outcome'
+        if accepted: assert result == node, 'summary navigation returned wrong node'
+        assert state['frame'] == swipes, 'summary navigation retried content or exceeded scroll bound'
+        assert state['reads'] == swipes+1, 'summary navigation observation count differs'
+    exercise([[node]],True,0)
+    exercise([[],[node]],True,1)
+    exercise([[]]*8+[[node]],True,8)
+    exercise([[]],False,8)
+    exercise([[dict(node,text='wrong')],[node]],False,0)
+    exercise([[dict(node,package='foreign.app')],[node]],False,0)
+    exercise([[dict(node,bounds='[0,0][0,0]')]],False,0)
+    exercise([[dict(node,bounds='broken')]],False,0)
+    exercise([[node,node]],False,0)
+    exercise([[dict(node,**{'content-desc':'note-activity-2'})]],False,8)
+    print('SUMMARY_NAVIGATION_SELFTEST positive=3 negative=7 PASS; host navigation only',flush=True)
+
 def parser_selftest():
+    summary_navigation_selftest()
     checks = 0
     def synthetic(labels, phase, code=-1, count=None):
         n = len(labels) if count is None else count
@@ -412,7 +467,10 @@ def verify_native_ui(adb):
         ok(find(text='Watered 20 min today') is not None,'saved note text appears on activity')
         shot('09-note.png')
         restart(); tap('活动'); ready(); touch('activity-1'); ready()
-        ok(find(text='Watered 20 min today') is not None,'note survives process restart')
+        # The activity summary can be below the viewport after accessible title controls grow.
+        # Navigate by stable identity, then assert exact content once; never retry wrong text.
+        ok(reveal_summary(nodes,swipe_up,PKG,'note-activity-1','Watered 20 min today') is not None,'note survives process restart')
+        tap('活动'); ready(); touch('activity-1'); ready()
         tap('笔记'); ready(); tap('加入图片')
         tap('加入合成图'); ready()
         ok(any(n.get('content-desc','').startswith('note-image-') for n in nodes()),'attached image is registered with note')

@@ -33,6 +33,34 @@ jobs:
           assert 'V1.2 Android phase is not wired' in result.stderr, 'Unexpected failure is not proof of release guard'
           print('PASS unfinished V1.2 delivery explicitly blocked')
           PY
+      - name: Require approved full-regression budget
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' 2>&1 | tee -a core.log
+          from pathlib import Path
+          def budget(text):
+              # Scoped to canonical job-level YAML, never inline script/comment text.
+              values=[]; in_job=False
+              for line in text.splitlines():
+                  code=line.split('#',1)[0].rstrip()
+                  if code.startswith('  ') and not code.startswith('   '):
+                      in_job=code=='  database:'
+                  if in_job and code.startswith('    timeout-minutes:'):
+                      value=code.split(':',1)[1].strip()
+                      assert value.isascii() and value.isdecimal(), 'numeric full-regression budget required'
+                      values.append(int(value))
+              assert values==[75], 'full-regression budget must be exactly 75 minutes'
+          good='  database:\n    timeout-minutes: 75\n'
+          budget(good)
+          for bad in (good.replace('75','55'),good.replace('75','750'),good.replace('75','true'),
+                      good.replace('    timeout-minutes:','    # timeout-minutes:'),
+                      good.replace('  database:','  other:'),good+'    timeout-minutes: 75\n'):
+              try: budget(bad)
+              except AssertionError: pass
+              else: raise AssertionError('budget negative control survived')
+          budget(Path('.github/workflows/android.yml').read_text())
+          print('BUDGET_HOST_CONTROLS 1 positive 6 negative; actual workflow 75 minutes; NOT_ANDROID_ACCEPTANCE')
+          PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -767,9 +795,9 @@ jobs:
       matrix:
         api: [26, 34]
     runs-on: ubuntu-24.04
-    # Run36108321597 reached both 186-check native PASS results but API34 hit 40m.
-    # Bounded headroom for the full suite and packaging; no assertion or stage is skipped.
-    timeout-minutes: 55
+    # Run36359317036 API34 exceeded 55m; 75m approved on 2026-09-28.
+    # Provisional headroom, not measured completion time; no assertion or stage is skipped.
+    timeout-minutes: 75
     env:
       TEST_API: ${{ matrix.api }}
     steps:

@@ -773,7 +773,7 @@ public class ImageImportFixture {
         tap('切换笔记');tap('2. Second note');ready()
         ok(desc('note-current').get('text')=='Second note · 2 / 2' and find(text='Second content') is not None and absent('Watered 35 min today'),'explicit selection restores second note alone after process restart')
         touch('note-edit-'+added_blocks[0][1]);clear_field('文字内容');type_text('Second edited');tap('保存');ready()
-        ok(desc('note-current').get('text')=='Second note · 2 / 2','editing second note stays on selected stable note instead of jumping to first')
+        ok(desc('note-current').get('text')=='Second note · 2 / 2' and find(text='Second edited') is not None,'editing second note stays on selected stable note instead of jumping to first')
         tap('切换笔记');tap('1. Daily reward');ready()
         ok(find(text='Watered 35 min today') is not None and absent('Second edited'),'switching back preserves original first-note text')
         swipe_up()

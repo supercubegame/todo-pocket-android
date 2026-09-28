@@ -25,6 +25,60 @@ PER_FORMAT = ["explicit_reverse_clicks_private_excluded", "empty_content_blocked
               "stale_publication_refused", "stale_refusal_preserves_state", "privacy_fixture_restored"]
 LABELS = STEPS + [step + "_" + kind for kind, _, _ in FORMATS for step in PER_FORMAT]
 EXPECTED = "# Pocket Todo\n\nSecond edited\n\nBatchsecond\n\n"
+SUMMARY_LABELS = ["all_same_title_and_empty_notes", "second_activity_isolated",
+                  "restart_all_notes", "restart_second_activity",
+                  "same_revision_privacy", "newly_private_text_hidden",
+                  "privacy_fixture_restored", "all_tables_media_unchanged"]
+
+
+def summary_expected(data, owner):
+    notes = [r for r in data["notes"] if r[1] == owner]
+    result = {"note-count-"+str(owner): "笔记 · "+str(len(notes))+" 篇"}
+    trim = "".join(chr(i) for i in range(33))
+    for index, note in enumerate(notes):
+        blocks = sorted((r for r in data["blocks"] if r[0] == note[0]), key=lambda r: r[2])
+        texts = [r[4].strip(trim) for r in blocks if r[7] == 0 and r[3] == "TEXT" and r[4].strip(trim)]
+        if texts:
+            preview = texts[0][:80] + ("…" if len(texts[0]) > 80 else "")
+        elif any(r[7] == 0 and r[3] == "IMAGE" for r in blocks):
+            preview = "图片笔记"
+        else:
+            preview = "私有内容（摘要已隐藏）" if any(r[7] == 1 for r in blocks) else "空笔记"
+        result["note-title-"+note[0]] = str(index+1)+". "+note[2]
+        result["note-activity-"+str(owner) if index == 0 else "note-summary-"+note[0]] = preview
+    return result
+
+
+def summary_ui_check(expected, actual, order):
+    assert actual == expected, "summary UI missing, extra, private, wrong-owner or wrong-text row"
+    assert order == [key for key in expected if key.startswith("note-title-")], "summary display order differs"
+
+
+def summary_selftest():
+    data = {"notes": [("n1", 1, "Same"), ("n2", 1, "Same"), ("n3", 2, "Other")],
+            "blocks": [("n1", "t", 0, "TEXT", "PRIVATE", None, "", 1, None),
+                       ("n1", "u", 1, "TEXT", "Public", None, "", 0, None),
+                       ("n3", "v", 0, "TEXT", "OTHER_OWNER", None, "", 0, None)]}
+    expected = {"note-count-1": "笔记 · 2 篇", "note-title-n1": "1. Same",
+                "note-activity-1": "Public", "note-title-n2": "2. Same", "note-summary-n2": "空笔记"}
+    assert summary_expected(data, 1) == expected
+    assert summary_expected(data, 99) == {"note-count-99": "笔记 · 0 篇"}
+    summary_ui_check(expected, dict(expected), ["note-title-n1", "note-title-n2"])
+    bads = []
+    for key in expected:
+        bad = dict(expected); del bad[key]; bads.append((bad, ["note-title-n1", "note-title-n2"]))
+    for key, value in (("note-activity-1", "PRIVATE"), ("note-summary-n2", "OTHER_OWNER"),
+                       ("note-count-1", "笔记 · 1 篇"), ("note-title-n2", "1. Same"),
+                       ("note-summary-n3", "OTHER_OWNER")):
+        bad = dict(expected); bad[key] = value; bads.append((bad, ["note-title-n1", "note-title-n2"]))
+    bads.append((dict(expected), ["note-title-n2", "note-title-n1"]))
+    for actual, order in bads:
+        try: summary_ui_check(expected, actual, order)
+        except AssertionError: continue
+        raise AssertionError("summary UI negative survived")
+    hidden = copy.deepcopy(data); hidden["blocks"][1] = ("n1", "u", 1, "TEXT", "Public", None, "", 1, None)
+    assert summary_expected(hidden, 1)["note-activity-1"] == "私有内容（摘要已隐藏）"
+    print("SUMMARY_UI_HOST_CONTROLS projection=3 observer=1_positive_11_negative HOST_ONLY", flush=True)
 
 
 def markdown_check(raw):
@@ -73,6 +127,15 @@ def receipt(value, api, source, run, apk):
             value.get("apk_sha256") == apk and value.get("labels") == LABELS and
             type(value.get("checks")) is int and value["checks"] == len(LABELS) and
             value.get("release_ready") is False):
+        return False
+    summary = value.get("summary_ui")
+    if not isinstance(summary, dict) or not (
+            summary.get("status") == "PASS" and summary.get("labels") == SUMMARY_LABELS and
+            type(summary.get("checks")) is int and summary["checks"] == len(SUMMARY_LABELS) and
+            type(summary.get("api")) is int and summary["api"] == api and
+            summary.get("commit") == source and summary.get("run_id") == run and
+            summary.get("apk_sha256") == apk and summary.get("release_ready") is False and
+            summary.get("scope") == "NATIVE_ACTIVITY_SUMMARIES_SYNTHETIC_RESTART_NOT_LMK"):
         return False
     outputs = value.get("outputs")
     if not isinstance(outputs, dict) or set(outputs) != {x[0] for x in FORMATS}:
@@ -149,6 +212,7 @@ public class BatchPageCheck {
 
 
 def selftest():
+    summary_selftest()
     assert len(LABELS) == 34 and all("picker_cancel_preserves_state_"+kind in LABELS
                                    for kind in ("MARKDOWN", "PDF", "PNG_ZIP"))
     assert all(step+"_"+kind in LABELS for kind in ("MARKDOWN", "PDF", "PNG_ZIP")
@@ -253,6 +317,9 @@ def selftest():
     good = {"status": "PASS", "scope": SCOPE, "api": 26, "commit": "source", "run_id": "run",
             "apk_sha256": "a"*64, "labels": LABELS[:], "checks": len(LABELS),
             "release_ready": False, "outputs": {}, "stale_privacy": {}}
+    good["summary_ui"] = {"status": "PASS", "labels": SUMMARY_LABELS[:], "checks": len(SUMMARY_LABELS),
+        "api": 26, "commit": "source", "run_id": "run", "apk_sha256": "a"*64,
+        "scope": "NATIVE_ACTIVITY_SUMMARIES_SYNTHETIC_RESTART_NOT_LMK", "release_ready": False}
     for kind, _, _ in FORMATS:
         good["stale_privacy"][kind] = {
             "note_id": "second", "block_id": "selected", "helper_sha256": "c"*64,
@@ -268,6 +335,14 @@ def selftest():
             dict(good, commit="old"), dict(good, run_id="old"), dict(good, apk_sha256="c"*64),
             dict(good, checks=True), dict(good, release_ready=True), dict(good, scope="backend")]
     bads.extend([dict(good, stale_privacy=None), dict(good, stale_privacy={})])
+    bads.extend([dict(good, summary_ui=None), dict(good, summary_ui={})])
+    for key, value in (("status", "FAIL"), ("checks", True), ("api", 34), ("api", True),
+                       ("commit", "old"), ("run_id", "old"), ("apk_sha256", "d"*64),
+                       ("scope", "HOST_ONLY"), ("release_ready", True)):
+        b = copy.deepcopy(good); b["summary_ui"][key] = value; bads.append(b)
+    for index in range(len(SUMMARY_LABELS)):
+        b = copy.deepcopy(good); b["summary_ui"]["labels"].pop(index)
+        b["summary_ui"]["checks"] -= 1; bads.append(b)
     for i in range(len(LABELS)):
         b = copy.deepcopy(good); b["labels"].pop(i); b["checks"] -= 1; bads.append(b)
     for kind, _, _ in FORMATS:
@@ -403,6 +478,75 @@ def native(adb, gate):
             assert destination not in downloads()
             shell("mv", paths[0], destination)
         assert not shell("find", "/sdcard/Download", "-type", "f", "-name", filename).splitlines()
+    def summary_ui():
+        # Reuse existing real-UI-created fixtures; no second APK, DB injection or suite rerun.
+        proof = {"status": "FAIL", "api": gate.API, "commit": source, "run_id": run_id,
+                 "apk_sha256": result["apk_sha256"], "labels": [], "screens": [],
+                 "scope": "NATIVE_ACTIVITY_SUMMARIES_SYNTHETIC_RESTART_NOT_LMK", "release_ready": False}
+        result["summary_ui"] = proof
+        first_owner = next(r[1] for r in data["notes"] if r[0] == first)
+        second_owner = second_rows[0][1]
+        first_notes = [r for r in data["notes"] if r[1] == first_owner]
+        assert first_owner != second_owner and len(first_notes) >= 3
+        assert len({r[2] for r in first_notes}) < len(first_notes), "same-title fixture required"
+        assert any(not any(b[0] == n[0] for b in data["blocks"]) for n in first_notes), "empty fixture required"
+        def passed(label):
+            assert SUMMARY_LABELS[len(proof["labels"])] == label
+            proof["labels"].append(label)
+        def swipe():
+            shell("input", "swipe", "160", "440", "160", "190", "350")
+        def observe(owner, snapshot, label):
+            start(); tap("活动"); ready()
+            # Locate an exact stable activity identity, scrolling rather than matching titles.
+            for _ in range(20):
+                visible = [n for n in nodes() if n.get("content-desc") == "activity-"+str(owner)]
+                assert len(visible) <= 1
+                if visible:
+                    click(visible[0]); ready(); break
+                swipe()
+            else: raise AssertionError("summary fixture activity unreachable")
+            expected = summary_expected(snapshot[0], owner)
+            actual, order, frames = {}, [], []
+            for attempt in range(25):
+                current = nodes()
+                frame = []
+                for n in current:
+                    key = n.get("content-desc", "")
+                    if key.startswith(("note-count-", "note-title-", "note-activity-", "note-summary-")):
+                        assert n.get("package") == gate.PKG
+                        value = n.get("text", "")
+                        assert key not in actual or actual[key] == value, "summary changed while scrolling"
+                        if key.startswith("note-title-") and key not in actual: order.append(key)
+                        actual[key] = value
+                        frame.append({"id": key, "text": value, "bounds": n.get("bounds")})
+                frames.append(frame)
+                # Check once coverage is complete, never retry a mismatched assertion.
+                if set(expected) <= set(actual):
+                    summary_ui_check(expected, actual, order); break
+                swipe()
+            else: raise AssertionError("summary rows unreachable: "+repr(set(expected)-set(actual)))
+            file = out/("summary-"+label+".png")
+            file.write_bytes(command("exec-out", "screencap", "-p", binary=True))
+            proof["screens"].append({"label": label, "owner": owner, "frames": frames,
+                                     "screenshot": file.name, "sha256": hashlib.sha256(file.read_bytes()).hexdigest()})
+            stop(); assert state() == snapshot, "summary browsing mutated database or media"
+            passed(label)
+        stop(); assert state() == baseline
+        observe(first_owner, baseline, "all_same_title_and_empty_notes")
+        observe(second_owner, baseline, "second_activity_isolated")
+        observe(first_owner, baseline, "restart_all_notes")
+        observe(second_owner, baseline, "restart_second_activity")
+        external_privacy(1, 0); changed = state()
+        privacy_readback_check(baseline, changed, second, privacy_target[1])
+        assert summary_expected(baseline[0], second_owner)["note-activity-"+str(second_owner)] == "Batchsecond"
+        assert summary_expected(changed[0], second_owner)["note-activity-"+str(second_owner)] == "Batchunselected"
+        passed("same_revision_privacy")
+        observe(second_owner, changed, "newly_private_text_hidden")
+        external_privacy(0, 1); assert state() == baseline; passed("privacy_fixture_restored")
+        assert command("exec-out", "cat", installed[8:], binary=True) == product
+        assert state() == baseline; passed("all_tables_media_unchanged")
+        assert proof["labels"] == SUMMARY_LABELS and len(proof["screens"]) == 5
+        proof.update(status="PASS", checks=len(proof["labels"]))
     try:
         assert os.environ.get("GITHUB_ACTIONS") == "true" and shell("getprop", "ro.kernel.qemu").strip() == "1"
         prior = json.loads((out/"native-result.json").read_text())
@@ -539,6 +683,7 @@ def native(adb, gate):
                 "publication": "EMPTY" if paths else "ABSENT", "published_bytes": 0,
                 "state": "EXACT_CHANGED_STATE_THEN_EXACT_BASELINE_RESTORED"}
             preserve_output("stale-empty", filename)
+        summary_ui()
         assert command("exec-out", "cat", installed[8:], binary=True) == product
         result.update(status="PASS", checks=len(result["labels"]))
         assert receipt(result, gate.API, source, run_id, result["apk_sha256"])

@@ -21,7 +21,8 @@ STEPS = ["ui_created_second_note", "empty_note_selection_blocked",
          "note_cancel_preserves_state", "content_cancel_preserves_state"]
 PER_FORMAT = ["explicit_reverse_clicks_private_excluded", "empty_content_blocked",
               "unchecked_save_blocked", "picker_cancel_preserves_state", "saved_and_independently_read",
-              "all_tables_media_unchanged"]
+              "all_tables_media_unchanged", "same_revision_second_note_privacy",
+              "stale_publication_refused", "stale_refusal_preserves_state", "privacy_fixture_restored"]
 LABELS = STEPS + [step + "_" + kind for kind, _, _ in FORMATS for step in PER_FORMAT]
 EXPECTED = "# Pocket Todo\n\nSecond edited\n\nBatchsecond\n\n"
 
@@ -44,6 +45,24 @@ def cancel_readback_check(before_paths, after_paths, filename, baseline, actual)
     assert actual == baseline, "cancel changed database or private media"
 
 
+def privacy_readback_check(baseline, actual, note, block):
+    rows = baseline[0]["blocks"]
+    matches = [i for i, row in enumerate(rows) if row[0] == note and row[1] == block]
+    assert len(matches) == 1, "privacy target must be one exact composite identity"
+    index = matches[0]
+    assert len(rows[index]) == 9 and rows[index][3] == "TEXT" and rows[index][7] == 0
+    expected = copy.deepcopy(baseline)
+    changed = list(rows[index]); changed[7] = 1
+    expected[0]["blocks"][index] = tuple(changed)
+    assert actual == expected, "privacy injection changed more than target flag or bumped revision"
+
+
+def stale_output_check(paths, filename, raw):
+    assert (paths == [] and raw is None) or (
+        paths == ["/sdcard/Download/"+filename] and type(raw) is bytes and raw == b""
+    ), "stale batch output must be absent or exactly empty"
+
+
 def receipt(value, api, source, run, apk):
     if not isinstance(value, dict):
         return False
@@ -58,7 +77,20 @@ def receipt(value, api, source, run, apk):
     outputs = value.get("outputs")
     if not isinstance(outputs, dict) or set(outputs) != {x[0] for x in FORMATS}:
         return False
+    stale = value.get("stale_privacy")
+    if not isinstance(stale, dict) or set(stale) != {x[0] for x in FORMATS}:
+        return False
     for kind, _, _ in FORMATS:
+        proof = stale[kind]
+        if not isinstance(proof, dict) or not (
+                isinstance(proof.get("note_id"), str) and proof["note_id"] and
+                isinstance(proof.get("block_id"), str) and proof["block_id"] and
+                isinstance(proof.get("helper_sha256"), str) and re.fullmatch("[0-9a-f]{64}", proof["helper_sha256"]) and
+                proof.get("scope") == "SAME_REVISION_SECOND_NOTE_ONE_PRIVATE_FLAG" and
+                proof.get("publication") in ("EMPTY", "ABSENT") and
+                type(proof.get("published_bytes")) is int and proof["published_bytes"] == 0 and
+                proof.get("state") == "EXACT_CHANGED_STATE_THEN_EXACT_BASELINE_RESTORED"):
+            return False
         o = outputs[kind]
         if not isinstance(o, dict):
             return False
@@ -117,8 +149,52 @@ public class BatchPageCheck {
 
 
 def selftest():
-    assert len(LABELS) == 22 and all("picker_cancel_preserves_state_"+kind in LABELS
+    assert len(LABELS) == 34 and all("picker_cancel_preserves_state_"+kind in LABELS
                                    for kind in ("MARKDOWN", "PDF", "PNG_ZIP"))
+    assert all(step+"_"+kind in LABELS for kind in ("MARKDOWN", "PDF", "PNG_ZIP")
+               for step in ("same_revision_second_note_privacy", "stale_publication_refused",
+                            "stale_refusal_preserves_state", "privacy_fixture_restored"))
+    # Composite identity matters: both notes deliberately use the same block ID.
+    row = ("second", "shared", 0, "TEXT", "chosen", None, "", 0, None)
+    other = ("first", "shared", 0, "TEXT", "other", None, "", 0, None)
+    original = ({"blocks": [other, row], "revision": [(1, 9)], "notes": [("first",), ("second",)]},
+                {"asset": "digest"}, {1: "owner"})
+    changed = copy.deepcopy(original)
+    changed[0]["blocks"][1] = row[:7]+(1,)+row[8:]
+    privacy_readback_check(original, changed, "second", "shared")
+    bad_privacy = [copy.deepcopy(original)]
+    for mode in range(6):
+        bad = copy.deepcopy(changed)
+        if mode == 0: bad[0]["revision"] = [(1, 10)]
+        if mode == 1: bad[0]["blocks"][0] = other[:7]+(1,)+other[8:]
+        if mode == 2: bad[0]["blocks"].reverse()
+        if mode == 3: bad[1]["asset"] = "changed"
+        if mode == 4: bad[0]["notes"].pop()
+        if mode == 5: bad[0]["blocks"][1] = row[:4]+("leaked change",)+row[5:7]+(1,)+row[8:]
+        bad_privacy.append(bad)
+    actions = [lambda bad=bad: privacy_readback_check(original, bad, "second", "shared")
+               for bad in bad_privacy]
+    actions.append(lambda: privacy_readback_check(original, changed, "missing", "shared"))
+    actions.append(lambda: privacy_readback_check(original, changed, "first", "shared"))
+    duplicate = copy.deepcopy(original); duplicate[0]["blocks"].append(row)
+    actions.append(lambda: privacy_readback_check(duplicate, changed, "second", "shared"))
+    for action in actions:
+        try: action()
+        except AssertionError: continue
+        raise AssertionError("privacy negative survived")
+    stale_output_check([], "new.zip", None)
+    stale_output_check(["/sdcard/Download/new.zip"], "new.zip", b"")
+    stale_bad = [
+        (["/sdcard/Download/new.zip"], b"private"),
+        (["/sdcard/Download/new.zip"], None),
+        (["/sdcard/Download/wrong.zip"], b""),
+        (["/sdcard/Download/new.zip", "/sdcard/Download/extra.zip"], b""),
+        ([], b"private"), (["/sdcard/Download/new.zip"], ""),
+    ]
+    for paths, raw in stale_bad:
+        try: stale_output_check(paths, "new.zip", raw)
+        except AssertionError: continue
+        raise AssertionError("stale output negative survived")
     paths = ["/sdcard/Download/existing.zip"]
     baseline = ({"notes": [(1, "public")], "meta": [(9,)]}, {"asset": "digest"}, {1: "title"})
     cancel_readback_check(paths, paths[:], "new.zip", baseline, copy.deepcopy(baseline))
@@ -176,8 +252,13 @@ def selftest():
         raise AssertionError("batch output negative survived")
     good = {"status": "PASS", "scope": SCOPE, "api": 26, "commit": "source", "run_id": "run",
             "apk_sha256": "a"*64, "labels": LABELS[:], "checks": len(LABELS),
-            "release_ready": False, "outputs": {}}
+            "release_ready": False, "outputs": {}, "stale_privacy": {}}
     for kind, _, _ in FORMATS:
+        good["stale_privacy"][kind] = {
+            "note_id": "second", "block_id": "selected", "helper_sha256": "c"*64,
+            "scope": "SAME_REVISION_SECOND_NOTE_ONE_PRIVATE_FLAG",
+            "publication": "EMPTY", "published_bytes": 0,
+            "state": "EXACT_CHANGED_STATE_THEN_EXACT_BASELINE_RESTORED"}
         good["outputs"][kind] = {"bytes": 100, "sha256": "b"*64,
             "state": "ALL_TABLES_AND_ALL_MEDIA_UNCHANGED",
             "observer": "EXACT_MEMBERS_UTF8" if kind == "MARKDOWN" else
@@ -186,9 +267,15 @@ def selftest():
     bads = [None, {}, dict(good, status="FAIL"), dict(good, api=True), dict(good, api=34),
             dict(good, commit="old"), dict(good, run_id="old"), dict(good, apk_sha256="c"*64),
             dict(good, checks=True), dict(good, release_ready=True), dict(good, scope="backend")]
+    bads.extend([dict(good, stale_privacy=None), dict(good, stale_privacy={})])
     for i in range(len(LABELS)):
         b = copy.deepcopy(good); b["labels"].pop(i); b["checks"] -= 1; bads.append(b)
     for kind, _, _ in FORMATS:
+        b = copy.deepcopy(good); del b["stale_privacy"][kind]; bads.append(b)
+        for key, value in (("note_id", ""), ("block_id", None), ("helper_sha256", "bad"),
+                           ("scope", "SINGLE_NOTE"), ("publication", "NONEMPTY"),
+                           ("published_bytes", True), ("published_bytes", 1), ("state", "NOT_VERIFIED")):
+            b = copy.deepcopy(good); b["stale_privacy"][kind][key] = value; bads.append(b)
         b = copy.deepcopy(good); del b["outputs"][kind]; bads.append(b)
         for key, value in (("bytes", True), ("bytes", 0), ("sha256", "bad"),
                            ("state", "NOT_VERIFIED"), ("observer", "NONBLANK")):
@@ -215,11 +302,13 @@ def selftest():
     finally:
         native = actual_native
     print("BATCH_HOST_CONTROLS outputs=2_positive_7_negative receipts=1_positive_" +
-          str(len(bads)) + "_negative composition=2 format_contracts=3 cancel=1_positive_7_negative HOST_ONLY", flush=True)
+          str(len(bads)) + "_negative composition=2 format_contracts=3 cancel=1_positive_7_negative "
+          "privacy=1_positive_10_negative stale=2_positive_6_negative HOST_ONLY", flush=True)
 
 
 def native(adb, gate):
-    """All fixture writes use visible app UI. State snapshots are read-only."""
+    """Fixtures originate in visible UI. A verified external helper changes one
+    privacy flag at the same revision while DocumentsUI holds a reviewed ticket."""
     from verify_paged_exports import format_button
     from verify_process_control import stop_verified
     from verify_schema3 import cancel_share_picker
@@ -295,6 +384,25 @@ def native(adb, gate):
         raise AssertionError("batch consent unreachable")
     def downloads():
         return sorted(shell("find", "/sdcard/Download", "-type", "f").splitlines())
+    def external_privacy(value, previous):
+        remote = "/data/user/0/"+gate.PKG+"/cache/share-writer.jar"
+        helper = command("exec-out", "run-as", gate.PKG, "cat", remote, binary=True)
+        digest = hashlib.sha256(helper).hexdigest()
+        assert digest == prior["markdown_ui"]["external_helper"]["sha256"]
+        output = shell("run-as", gate.PKG, "env", "CLASSPATH="+remote, "app_process",
+                       "/system/bin", "ShareExternalWriter",
+                       "/data/user/0/"+gate.PKG+"/databases/pocket-v12.db",
+                       second, privacy_target[1], str(value), str(previous))
+        assert output.splitlines() == ["EXTERNAL_WRITER_STARTED", "EXTERNAL_PRIVACY_WRITE_ONE_ROW"], output
+        return digest
+    def preserve_output(tag, filename):
+        paths = shell("find", "/sdcard/Download", "-type", "f", "-name", filename).splitlines()
+        if paths:
+            assert paths == ["/sdcard/Download/"+filename]
+            destination = "/sdcard/Download/batch-"+tag+"-"+filename
+            assert destination not in downloads()
+            shell("mv", paths[0], destination)
+        assert not shell("find", "/sdcard/Download", "-type", "f", "-name", filename).splitlines()
     try:
         assert os.environ.get("GITHUB_ACTIONS") == "true" and shell("getprop", "ro.kernel.qemu").strip() == "1"
         prior = json.loads((out/"native-result.json").read_text())
@@ -320,6 +428,9 @@ def native(adb, gate):
         second_rows = [r for r in data["notes"] if r[2] == "Batchnote"]; assert len(second_rows) == 1
         second = second_rows[0][0]
         assert [r[4] for r in data["blocks"] if r[0] == second] == ["Batchsecond", "Batchunselected"]
+        privacy_targets = [r for r in data["blocks"] if r[0] == second and r[3] == "TEXT" and r[4] == "Batchsecond"]
+        assert len(privacy_targets) == 1 and privacy_targets[0][7] == 0
+        privacy_target = privacy_targets[0]
         assert media == before[1] and len(data["notes"]) == len(before[0]["notes"]) + 1
         note_labels = [next(str(i+1)+". "+titles[r[1]]+" / "+r[2] for i, r in enumerate(data["notes"]) if r[0] == n)
                        for n in (first, second)]
@@ -399,6 +510,35 @@ def native(adb, gate):
                 "state": "ALL_TABLES_AND_ALL_MEDIA_UNCHANGED",
                 "observer": "EXACT_MEMBERS_UTF8" if kind == "MARKDOWN" else
                             "EXACT_PDF_TEXT" if kind == "PDF" else "TWO_TEXT_BANDS_NOT_OCR"}
+            preserve_output("accepted", filename)
+            start(); open_notes(); select_notes()
+            if kind != "MARKDOWN":
+                button = format_button(nodes(), "Markdown", gate.PKG); assert button is not None
+                click(button); tap(title)
+            tap(chosen[1]); tap(chosen[0]); tap("生成预览"); find(text=title+"预览")
+            consent(); tap("选择保存位置")
+            assert find(text=filename).get("package") in ("com.android.documentsui", "com.google.android.documentsui")
+            assert find(text="SAVE").get("package") in ("com.android.documentsui", "com.google.android.documentsui")
+            digest = external_privacy(1, 0)
+            changed = state()
+            privacy_readback_check(baseline, changed, second, privacy_target[1])
+            ok("same_revision_second_note_privacy_"+kind)
+            tap("SAVE")
+            find(**{"content-desc": "v12-status",
+                    "text": "导出未完成：预览过期或保存失败；本机笔记未改。目标可能留有空文件或部分文件，请检查"})
+            paths = shell("find", "/sdcard/Download", "-type", "f", "-name", filename).splitlines()
+            stale = command("exec-out", "cat", paths[0], binary=True) if paths == ["/sdcard/Download/"+filename] else None
+            stale_output_check(paths, filename, stale)
+            ok("stale_publication_refused_"+kind)
+            stop(); assert state() == changed; ok("stale_refusal_preserves_state_"+kind)
+            assert external_privacy(0, 1) == digest
+            assert state() == baseline; ok("privacy_fixture_restored_"+kind)
+            result.setdefault("stale_privacy", {})[kind] = {
+                "note_id": second, "block_id": privacy_target[1], "helper_sha256": digest,
+                "scope": "SAME_REVISION_SECOND_NOTE_ONE_PRIVATE_FLAG",
+                "publication": "EMPTY" if paths else "ABSENT", "published_bytes": 0,
+                "state": "EXACT_CHANGED_STATE_THEN_EXACT_BASELINE_RESTORED"}
+            preserve_output("stale-empty", filename)
         assert command("exec-out", "cat", installed[8:], binary=True) == product
         result.update(status="PASS", checks=len(result["labels"]))
         assert receipt(result, gate.API, source, run_id, result["apk_sha256"])

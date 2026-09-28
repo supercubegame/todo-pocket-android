@@ -329,8 +329,31 @@ public final class V12CoreTest {
         boolean immutable=true;for(Field f:a.getClass().getDeclaredFields())if(!Modifier.isStatic(f.getModifiers()))immutable&=Modifier.isFinal(f.getModifiers());
         ok(immutable&&a.getClass().getField("block").get(a)==first,"batch share entry fields and block reference immutable");
     }
+    static String summary(List<NoteDocument.Block> blocks)throws Exception {
+        return (String)stat("NoteDocument","summary",new Class<?>[]{List.class},blocks);
+    }
+    static void noteSummaries()throws Exception {
+        ok(summary(List.of()).equals("空笔记"),"empty note has explicit summary");
+        ok(summary(List.of(NoteDocument.Block.text("a","  原文\n下一行  ",false))).equals("原文\n下一行"),"summary trims edges but preserves original multiline text");
+        ok(summary(List.of(NoteDocument.Block.text("a"," \n ",false),NoteDocument.Block.text("b","第二段",false))).equals("第二段"),"summary skips blank text without losing later content");
+        ok(summary(List.of(NoteDocument.Block.text("a","PRIVATE",true),NoteDocument.Block.text("b","公开",false))).equals("公开"),"summary omits private text before choosing public text");
+        ok(summary(List.of(NoteDocument.Block.text("a","PRIVATE",true))).equals("私有内容（摘要已隐藏）"),"private-only text summary is a placeholder");
+        ok(summary(List.of(NoteDocument.Block.image("i","asset","PRIVATE_CAPTION",false))).equals("图片笔记"),"image-only summary never exposes caption or reads media");
+        ok(summary(List.of(NoteDocument.Block.image("i","asset","PRIVATE_CAPTION",true))).equals("私有内容（摘要已隐藏）"),"private image summary omits caption");
+        ok(summary(List.of(NoteDocument.Block.image("i","asset","caption",false),NoteDocument.Block.text("t","公开文字",false))).equals("公开文字"),"public text summary found after image block");
+        ok(summary(List.of(NoteDocument.Block.text("t"," \n ",false))).equals("空笔记"),"blank-only note summary is empty placeholder");
+        String face="\ud83d\ude00";
+        ok(summary(List.of(NoteDocument.Block.text("t",face.repeat(80),false))).equals(face.repeat(80)),"summary exact eighty code points stays untruncated");
+        ok(summary(List.of(NoteDocument.Block.text("t",face.repeat(81),false))).equals(face.repeat(80)+"…"),"summary truncation preserves supplementary Unicode pairs");
+        ok(summary(List.of(NoteDocument.Block.text("t","文⽂",false))).equals("文⽂"),"summary does not normalize distinct Unicode characters");
+        List<NoteDocument.Block> blocks=new ArrayList<>(List.of(NoteDocument.Block.text("a","one",false),NoteDocument.Block.text("b","two",false)));
+        ok(summary(blocks).equals("one"),"summary uses first public text in document order");
+        ok(blocks.size()==2&&blocks.get(0).id.equals("a")&&blocks.get(1).text.equals("two"),"summary leaves input order and content unchanged");
+        reject(()->summary(null),"summary rejects null blocks");
+        reject(()->summary(Arrays.asList((NoteDocument.Block)null)),"summary rejects null block member");
+    }
     public static void main(String[] args) throws Exception {
-        ledger(); calendar(); notes(); safety(); categories(); fields(); imageRevisions(); imageEdits(); batchShares();
+        ledger(); calendar(); notes(); safety(); categories(); fields(); imageRevisions(); imageEdits(); batchShares(); noteSummaries();
         System.out.println("V12_CORE_RESULT "+checks+"/"+checks+" PASS; DOMAIN_ONLY; ANDROID_EXPORT_RESTORE_NOT_TESTED");
     }
 }

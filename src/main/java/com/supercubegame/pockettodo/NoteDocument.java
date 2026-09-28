@@ -120,6 +120,20 @@ public final class NoteDocument {
         if(!remaining.isEmpty()||result.isEmpty())throw new IllegalArgumentException("Unknown or empty share selection");
         return Collections.unmodifiableList(result);
     }
+    /** Read-only local overview, never an export selection. Private text/captions
+     * are omitted before inspecting content. Clip by code point, not UTF-16 unit. */
+    public static String summary(List<Block> blocks) {
+        if(blocks==null||Ledger.hasNull(blocks))throw new IllegalArgumentException("Missing summary blocks");
+        boolean image=false,hidden=false;
+        for(Block b:blocks){
+            if(b.privateContent){hidden=true;continue;}
+            if(b.kind==Kind.IMAGE){image=true;continue;}
+            String text=b.text.trim();
+            if(!text.isEmpty())return text.codePointCount(0,text.length())<=80?text:
+                text.substring(0,text.offsetByCodePoints(0,80))+"…";
+        }
+        return image?"图片笔记":hidden?"私有内容（摘要已隐藏）":"空笔记";
+    }
     private final List<Block> blocks=new ArrayList<>();
     public NoteDocument() {}
     private int index(String id) {

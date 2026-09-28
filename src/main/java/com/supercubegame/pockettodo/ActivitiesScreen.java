@@ -11,7 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** Native category/path/check-in workbench with activity-specific calendar ledger.
- * Category drag, schedules, application catalog and notes remain subsequent work.
+ * Category drag, schedules and application catalog remain subsequent work.
  * Writes go through validated AppDatabase APIs; UI read queries never mutate raw SQL.
  */
 public final class ActivitiesScreen {
@@ -28,7 +28,11 @@ public final class ActivitiesScreen {
         long id;String name;List<Item> items=new ArrayList<>();
         Category(long id,String name){this.id=id;this.name=name;}
     }
-    private static final class Detail {String title,status;List<String> path;LocalDate day;String noteSummary;boolean hasNote;}
+    private static final class NoteSummary {
+        final String id,title,text;
+        NoteSummary(String id,String title,String text){this.id=id;this.title=title;this.text=text;}
+    }
+    private static final class Detail {String title,status;List<String> path;LocalDate day;final List<NoteSummary> notes=new ArrayList<>();}
     void load(){if(backupPanel)renderBackup();else if(selected==0)loadCategories();else if(historyPanel)loadHistory(selected);else loadDetail(selected);}
     private long nextId(String table){
         // Only fixed internal table names, and one UI writer on the shared executor.
@@ -84,19 +88,24 @@ public final class ActivitiesScreen {
     private void move(long id,int position){host.work(()->{host.db.moveCategory(id,position);return true;},ignored->load(),null);}
     private void loadDetail(long id){
         host.work(()->{
-            Detail d=new Detail();
-            try(Cursor c=host.db.getReadableDatabase().rawQuery("SELECT title FROM activities WHERE id=?",new String[]{Long.toString(id)})){if(!c.moveToFirst())throw new IllegalArgumentException("活动不存在");d.title=c.getString(0);}
-            d.path=host.db.path(id);d.day=LocalDate.now(CN);d.status="未记录";
-            for(CalendarRules.Mark mark:host.db.marks(id))if(mark.date.equals(d.day))d.status=mark.status==CalendarRules.Status.DONE?"已完成":"已跳过";
-            d.hasNote=false;d.noteSummary="";
-            List<String> noteIds=new ArrayList<>();
-            try(Cursor c=host.db.getReadableDatabase().rawQuery("SELECT id FROM notes WHERE activity_id=? ORDER BY rowid",new String[]{Long.toString(id)})){while(c.moveToNext())noteIds.add(c.getString(0));}
-            if(!noteIds.isEmpty()){
-                List<NoteDocument.Block> blocks=host.db.noteBlocks(noteIds.get(0));
-                for(NoteDocument.Block b:blocks)if(b.kind==NoteDocument.Kind.TEXT){d.noteSummary=b.text;break;}
-                d.hasNote=!blocks.isEmpty();
+            // One consistent read transaction, no revision changes or image decoding.
+            synchronized(host.db){
+                android.database.sqlite.SQLiteDatabase sql=host.db.getReadableDatabase();
+                sql.beginTransaction();
+                try{
+                    Detail d=new Detail();
+                    try(Cursor c=sql.rawQuery("SELECT title FROM activities WHERE id=?",new String[]{Long.toString(id)})){if(!c.moveToFirst())throw new IllegalArgumentException("活动不存在");d.title=c.getString(0);}
+                    d.path=host.db.path(id);d.day=LocalDate.now(CN);d.status="未记录";
+                    for(CalendarRules.Mark mark:host.db.marks(id))if(mark.date.equals(d.day))d.status=mark.status==CalendarRules.Status.DONE?"已完成":"已跳过";
+                    try(Cursor c=sql.rawQuery("SELECT id,title FROM notes WHERE activity_id=? ORDER BY rowid",new String[]{Long.toString(id)})){
+                        while(c.moveToNext()){
+                            String noteId=c.getString(0);
+                            d.notes.add(new NoteSummary(noteId,c.getString(1),NoteDocument.summary(host.db.noteBlocks(noteId))));
+                        }
+                    }
+                    sql.setTransactionSuccessful();return d;
+                }finally{sql.endTransaction();}
             }
-            return d;
         },d->renderDetail(id,d),null);
     }
     private void renderDetail(long id,Detail d){
@@ -112,8 +121,16 @@ public final class ActivitiesScreen {
         marks.addView(host.button("标记完成",()->mark(id,LocalDate.now(CN),CalendarRules.Status.DONE)),new LinearLayout.LayoutParams(0,host.dp(52),1));
         marks.addView(host.button("跳过今天",()->mark(id,LocalDate.now(CN),CalendarRules.Status.SKIPPED)),new LinearLayout.LayoutParams(0,host.dp(52),1));details.addView(marks);
         details.addView(host.button("打卡记录",()->{historyPanel=true;load();}));
-        if(d.hasNote){TextView preview=host.text(d.noteSummary,15,TodayScreen.MUTED);preview.setContentDescription("note-activity-"+id);preview.setMaxLines(2);details.addView(preview);}
         details.addView(host.button("笔记",()->new NoteEditorScreen(host,id,d.title,this::load).load()));
+        TextView count=host.text("笔记 · "+d.notes.size()+" 篇",16,TodayScreen.INK);count.setContentDescription("note-count-"+id);details.addView(count);
+        for(int i=0;i<d.notes.size();i++){
+            NoteSummary summary=d.notes.get(i);
+            TextView heading=host.text((i+1)+". "+summary.title,16,TodayScreen.INK);heading.setContentDescription("note-title-"+summary.id);heading.setMaxLines(2);details.addView(heading);
+            TextView preview=host.text(summary.text,15,TodayScreen.MUTED);
+            // Keep the old first-note accessibility identity for existing regression.
+            preview.setContentDescription(i==0?"note-activity-"+id:"note-summary-"+summary.id);
+            preview.setMaxLines(2);preview.setPadding(0,0,0,host.dp(8));details.addView(preview);
+        }
         TextView pathTitle=host.text("去哪里操作",20,TodayScreen.INK);pathTitle.setPadding(0,host.dp(18),0,host.dp(8));details.addView(pathTitle);
         if(d.path.isEmpty())details.addView(host.text("把入口一行行记下来，下次不用找。",16,TodayScreen.MUTED));
         for(int i=0;i<d.path.size();i++){TextView step=host.text((i+1)+". "+d.path.get(i),17,TodayScreen.INK);step.setPadding(host.dp(8),host.dp(8),host.dp(8),host.dp(8));details.addView(step);}

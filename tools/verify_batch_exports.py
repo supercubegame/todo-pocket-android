@@ -12,6 +12,7 @@ import subprocess
 import time
 import xml.etree.ElementTree as ET
 import zipfile
+import verify_note_management as note_management
 
 SCOPE = "NATIVE_TWO_NOTE_TEXT_SAF_NOT_OCR_RECEIVER_OR_PROCESS_LOSS"
 FORMATS = (("MARKDOWN", "Markdown图片包", "PocketTodo-notes.zip"),
@@ -171,6 +172,8 @@ def stale_output_check(paths, filename, raw):
 def receipt(value, api, source, run, apk):
     if not isinstance(value, dict):
         return False
+    if not note_management.accepted(value.get("note_management"), api, source, run, apk):
+        return False
     if not (value.get("status") == "PASS" and value.get("scope") == SCOPE and
             type(value.get("api")) is int and value["api"] == api and
             value.get("commit") == source and value.get("run_id") == run and
@@ -272,6 +275,7 @@ public class BatchPageCheck {
 
 
 def selftest():
+    note_management.selftest()
     rename_selftest()
     summary_selftest()
     assert len(LABELS) == 34 and all("picker_cancel_preserves_state_"+kind in LABELS
@@ -378,6 +382,7 @@ def selftest():
     good = {"status": "PASS", "scope": SCOPE, "api": 26, "commit": "source", "run_id": "run",
             "apk_sha256": "a"*64, "labels": LABELS[:], "checks": len(LABELS),
             "release_ready": False, "outputs": {}, "stale_privacy": {}}
+    good["note_management"] = note_management.sample()
     good["summary_ui"] = {"status": "PASS", "labels": SUMMARY_LABELS[:], "checks": len(SUMMARY_LABELS),
         "api": 26, "commit": "source", "run_id": "run", "apk_sha256": "a"*64,
         "scope": "NATIVE_ACTIVITY_SUMMARIES_SYNTHETIC_RESTART_NOT_LMK", "release_ready": False}
@@ -401,6 +406,7 @@ def selftest():
     bads.extend([dict(good, stale_privacy=None), dict(good, stale_privacy={})])
     bads.extend([dict(good, summary_ui=None), dict(good, summary_ui={})])
     bads.extend([dict(good, rename_ui=None), dict(good, rename_ui={})])
+    bads.extend([dict(good, note_management=None), dict(good, note_management={})])
     for key, value in (("status", "FAIL"), ("checks", True), ("api", 34), ("api", True),
                        ("commit", "old"), ("run_id", "old"), ("apk_sha256", "d"*64),
                        ("scope", "HOST_ONLY"), ("release_ready", True)):
@@ -821,6 +827,7 @@ def native(adb, gate):
             preserve_output("stale-empty", filename)
         summary_ui()
         rename_ui()
+        result["note_management"] = note_management.native(adb, gate, state)
         assert command("exec-out", "cat", installed[8:], binary=True) == product
         result.update(status="PASS", checks=len(result["labels"]))
         assert receipt(result, gate.API, source, run_id, result["apk_sha256"])

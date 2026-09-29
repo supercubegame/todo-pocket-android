@@ -339,7 +339,7 @@ jobs:
               from verify_paged_exports import format_button
               from verify_schema3 import signal_target_identity,signal_identity_selftest
               from verify_schema3 import exception_evidence,native_failure_evidence,diagnostics_selftest
-              from verify_process_control import stop_verified
+              from verify_process_control import stop_verified,capture_crash_logs
               out=Path("export-native");out.mkdir()
               prefix=[str(adb),"-s",gate.SERIAL]
               result={"status":"FAIL","commit":os.environ["GITHUB_SHA"],"run_id":os.environ["GITHUB_RUN_ID"],
@@ -543,6 +543,8 @@ jobs:
               except Exception as exc:
                   result["error"]=repr(exc)
                   result["original_failure"]=exception_evidence(exc)
+                  try:result["crash_logs"]=capture_crash_logs(adb,gate.SERIAL)
+                  except Exception as diagnostic:result["crash_diagnostic_error"]=exception_evidence(diagnostic)
                   try:result["failure_diagnostics"]=native_failure_evidence(adb,gate,exc)
                   except Exception as diagnostic:result["diagnostic_error"]=exception_evidence(diagnostic)
                   try:(out/"failure.png").write_bytes(command("exec-out","screencap","-p",binary=True))

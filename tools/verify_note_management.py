@@ -814,6 +814,250 @@ def selftest():
     return result
 
 
+# Stable-ID ordering contracts. This is deliberately test-first: the installed
+# product must expose moveNote before the device can emit any ordering PASS.
+ORDER_LABELS = [
+    "order_null_id", "order_blank_id", "order_missing_note", "order_wrong_owner",
+    "order_zero_owner", "order_null_list", "order_empty_list",
+    "order_duplicate_id", "order_null_member", "order_missing_member",
+    "order_foreign_member", "order_negative_position", "order_past_end",
+    "order_same_position_readonly", "order_move_up_exact", "order_move_down_exact",
+    "order_linked_first_exact", "order_input_list_preserved",
+    "order_stale_sequence", "order_external_same_revision",
+    "order_new_note_stale", "order_late_rollback",
+    "order_helper_reopen", "order_backup_restore",
+]
+
+
+def observe_order(text):
+    text = text.replace("\r\n", "\n")
+    labels = re.findall(r"^NOTE_ORDER_PASS ([^\r\n]+)$", text, re.M)
+    results = re.findall(r"^NOTE_ORDER_RESULT ([^\r\n]+)$", text, re.M)
+    assert labels == ORDER_LABELS
+    assert results == [str(len(ORDER_LABELS))+" PASS"]
+    assert "NOTE_ORDER_FAILED" not in text
+    assert text.index("NOTE_DELETE_RESULT ") < text.index("NOTE_ORDER_PASS ")
+    assert text.rindex("NOTE_ORDER_PASS ") < text.index("NOTE_ORDER_RESULT ")
+    assert text.index("NOTE_ORDER_RESULT ") < text.index("NOTE_MANAGEMENT_RESULT ")
+    return labels
+
+
+def order_log_accepted(text):
+    try:
+        observe_order(text)
+        return True
+    except (AssertionError, ValueError, TypeError, AttributeError):
+        return False
+
+
+ORDER_JAVA = r'''
+ private int orderCount;
+ private void orderPass(String label){orderCount++;System.out.println("NOTE_ORDER_PASS "+label);}
+ private static boolean moveNote(AppDatabase h,String id,long owner,List<String> seen,int to){
+  Object answer=invoke(h,"moveNote",new Class<?>[]{String.class,long.class,List.class,int.class},id,owner,seen,to);
+  need(answer instanceof Boolean,"moveNote must return actual change");return (Boolean)answer;
+ }
+ private static List<String> noteOrder(AppDatabase h,long owner){
+  List<String> ids=new ArrayList<>();
+  try(Cursor c=h.getReadableDatabase().rawQuery("SELECT id FROM notes WHERE activity_id=? ORDER BY rowid",new String[]{Long.toString(owner)})){
+   while(c.moveToNext())ids.add(c.getString(0));
+  }return ids;
+ }
+ private static Map<String,List<List<String>>> orderExpected(Map<String,List<List<String>>> before,List<String> wanted){
+  Map<String,List<List<String>>> out=copyState(before);
+  List<List<String>> rows=out.get("notes");
+  need(rows.get(0).equals(Arrays.asList("rowid","id","activity_id","title")),"order fixture columns");
+  List<Integer> slots=new ArrayList<>();Map<String,List<String>> byId=new HashMap<>();
+  for(int i=1;i<rows.size();i++)if(rows.get(i).get(2).equals("1:1")){
+   slots.add(i);byId.put(rows.get(i).get(1).substring(2),new ArrayList<>(rows.get(i)));
+  }
+  need(slots.size()==wanted.size()&&new HashSet<>(wanted).equals(byId.keySet()),"expected exact owner permutation");
+  List<String> rowids=new ArrayList<>();for(int slot:slots)rowids.add(rows.get(slot).get(0));
+  for(int i=0;i<slots.size();i++){
+   List<String> row=new ArrayList<>(byId.get(wanted.get(i)));row.set(0,rowids.get(i));rows.set(slots.get(i),row);
+  }
+  List<List<String>> revision=out.get("revision");
+  need(revision.size()==2&&revision.get(0).equals(Arrays.asList("rowid","id","value")),"order revision fixture");
+  revision.get(1).set(2,"1:"+Math.incrementExact(Long.parseLong(revision.get(1).get(2).substring(2))));
+  return out;
+ }
+ private void orderRefused(AppDatabase h,Class<? extends Throwable> type,Action action,String label)throws Exception{
+  Map<String,List<List<String>>> before=state(h);Throwable caught=null;
+  try{action.run();}catch(Throwable failure){caught=failure;}
+  need(caught!=null&&caught.getClass()==type,"wrong order refusal "+label+" actual="+caught);
+  need(state(h).equals(before),"order refusal changed full state "+label);media();orderPass(label);
+ }
+ private void orderVerify()throws Exception{
+  Context context=getTargetContext();String nonce=args.getString("nonce");
+  String name="ci-note-order-"+nonce+".db",restoredName="ci-note-order-restored-"+nonce+".db";
+  need(!context.getDatabasePath(name).exists()&&!context.getDatabasePath(restoredName).exists(),"no order fixture reuse");
+  Path folder=new File(context.getCacheDir(),"note-order-"+nonce).toPath();Files.createDirectory(folder);
+  com.supercubegame.pockettodo.MediaRepository mediaStore=new com.supercubegame.pockettodo.MediaRepository(folder.resolve("media"),8388608);
+  String digest=mediaStore.copy(new ByteArrayInputStream(assetBytes));
+  Map<String,List<List<String>>> finalState;byte[] wire;Path archive=folder.resolve("ordered.zip");
+  try(AppDatabase h=AppDatabase.openSchema3(context,name)){
+   h.addCategory(1,"Order");h.addActivity(1,1,0,"First");h.addActivity(2,1,0,"Other");
+   h.createNote("a",1,"Same");h.createNote("foreign",2,"Same");h.createNote("b",1,"Same");
+   h.defineField("field","Field","LONG_TEXT",Collections.emptyList());
+   h.createFieldNote("linked",1,"field","Same");h.putField(1,"field",Collections.singletonList("Field value"));
+   h.addTodo("todo","Keep");h.registerMedia(digest,"image/png",assetBytes.length);
+   h.saveNote("a",Arrays.asList(NoteDocument.Block.text("text","Private sentinel",true),NoteDocument.Block.image("image",digest,"caption",false)));
+   h.saveNote("b",Collections.singletonList(NoteDocument.Block.image("image",digest,"shared",true)));
+   h.saveNote("linked",Collections.singletonList(NoteDocument.Block.text("text","Linked",false)));
+   final List<String> original=Arrays.asList("a","b","linked");
+   need(noteOrder(h,1).equals(original)&&noteOrder(h,2).equals(Collections.singletonList("foreign")),"explicit interleaved order fixture");
+   h.exportState();
+   orderRefused(h,IllegalArgumentException.class,()->moveNote(h,null,1,original,0),"order_null_id");
+   orderRefused(h,IllegalArgumentException.class,()->moveNote(h,"",1,original,0),"order_blank_id");
+   orderRefused(h,IllegalArgumentException.class,()->moveNote(h,"missing",1,original,0),"order_missing_note");
+   orderRefused(h,IllegalArgumentException.class,()->moveNote(h,"b",2,Collections.singletonList("foreign"),0),"order_wrong_owner");
+   orderRefused(h,IllegalArgumentException.class,()->moveNote(h,"b",0,original,0),"order_zero_owner");
+   orderRefused(h,IllegalArgumentException.class,()->moveNote(h,"b",1,null,0),"order_null_list");
+   orderRefused(h,IllegalArgumentException.class,()->moveNote(h,"b",1,Collections.emptyList(),0),"order_empty_list");
+   orderRefused(h,IllegalArgumentException.class,()->moveNote(h,"b",1,Arrays.asList("a","b","b"),0),"order_duplicate_id");
+   orderRefused(h,IllegalArgumentException.class,()->moveNote(h,"b",1,Arrays.asList("a","b",null),0),"order_null_member");
+   orderRefused(h,IllegalStateException.class,()->moveNote(h,"b",1,Arrays.asList("a","b"),0),"order_missing_member");
+   orderRefused(h,IllegalStateException.class,()->moveNote(h,"b",1,Arrays.asList("a","b","foreign"),0),"order_foreign_member");
+   orderRefused(h,IllegalArgumentException.class,()->moveNote(h,"b",1,original,-1),"order_negative_position");
+   orderRefused(h,IllegalArgumentException.class,()->moveNote(h,"b",1,original,3),"order_past_end");
+   Map<String,List<List<String>>> before=state(h);
+   need(!moveNote(h,"b",1,original,1)&&state(h).equals(before),"same position changed state");media();orderPass("order_same_position_readonly");
+   need(moveNote(h,"b",1,original,0),"move up no change");
+   need(noteOrder(h,1).equals(Arrays.asList("b","a","linked"))&&state(h).equals(orderExpected(before,Arrays.asList("b","a","linked"))),"up changed identity, body, foreign row, link or revision");media();orderPass("order_move_up_exact");
+   before=state(h);
+   need(moveNote(h,"b",1,Arrays.asList("b","a","linked"),2),"move down no change");
+   need(noteOrder(h,1).equals(Arrays.asList("a","linked","b"))&&state(h).equals(orderExpected(before,Arrays.asList("a","linked","b"))),"down exact state");media();orderPass("order_move_down_exact");
+   before=state(h);List<String> input=new ArrayList<>(Arrays.asList("a","linked","b"));
+   need(moveNote(h,"linked",1,input,0),"linked move no change");
+   need(noteOrder(h,1).equals(Arrays.asList("linked","a","b"))&&state(h).equals(orderExpected(before,Arrays.asList("linked","a","b"))),"linked move altered other state");media();orderPass("order_linked_first_exact");
+   need(input.equals(Arrays.asList("a","linked","b"))&&h.fieldNoteIds(1,"field").equals(Collections.singletonList("linked")),"caller list or field link changed");orderPass("order_input_list_preserved");
+   orderRefused(h,IllegalStateException.class,()->moveNote(h,"a",1,original,1),"order_stale_sequence");
+   // External writer changes membership without a revision bump. Fully prove
+   // that fixture before checking stale refusal; never infer it from API failure.
+   before=state(h);
+   try(SQLiteDatabase external=SQLiteDatabase.openDatabase(context.getDatabasePath(name).getPath(),null,SQLiteDatabase.OPEN_READWRITE)){
+    external.execSQL("INSERT INTO notes(id,activity_id,title) VALUES('external',1,'Same')");
+   }
+   need(state(h).get("revision").equals(before.get("revision"))&&noteOrder(h,1).equals(Arrays.asList("linked","a","b","external")),"same-revision external fixture");
+   orderRefused(h,IllegalStateException.class,()->moveNote(h,"a",1,Arrays.asList("linked","a","b"),0),"order_external_same_revision");
+   List<String> seen=noteOrder(h,1);h.createNote("new",1,"Same");
+   orderRefused(h,IllegalStateException.class,()->moveNote(h,"a",1,seen,0),"order_new_note_stale");
+   SQLiteDatabase db=h.getWritableDatabase();
+   db.execSQL("CREATE TRIGGER ci_order_late BEFORE UPDATE OF value ON revision WHEN (SELECT id FROM notes WHERE activity_id=1 ORDER BY rowid LIMIT 1)='a' BEGIN SELECT RAISE(ABORT,'note_order_late_fault'); END");
+   before=state(h);Throwable caught=null;
+   try{moveNote(h,"a",1,noteOrder(h,1),0);}catch(Throwable failure){caught=failure;}
+   finally{db.execSQL("DROP TRIGGER ci_order_late");}
+   need(caught instanceof IllegalArgumentException&&caught.getCause() instanceof SQLiteConstraintException&&caught.getCause().getMessage().contains("note_order_late_fault"),"late reorder barrier not reached "+caught);
+   need(state(h).equals(before),"partial row moves or revision escaped rollback");media();orderPass("order_late_rollback");
+   finalState=state(h);wire=h.exportState();h.exportBackup(archive,mediaStore);
+   need(state(h).equals(finalState),"backup changed source");mediaStore.verify(digest);
+   need(Arrays.equals(Files.readAllBytes(mediaStore.path(digest)),assetBytes),"registered shared asset changed");
+  }
+  try(AppDatabase reopened=AppDatabase.openSchema3(context,name)){
+   need(state(reopened).equals(finalState)&&Arrays.equals(reopened.exportState(),wire),"helper reopen changed order/state");media();orderPass("order_helper_reopen");
+  }
+  com.supercubegame.pockettodo.MediaRepository restoredMedia=new com.supercubegame.pockettodo.MediaRepository(folder.resolve("restored-media"),8388608);
+  try(AppDatabase restored=AppDatabase.openSchema3(context,restoredName)){
+   try(AppDatabase.RestorePlan plan=restored.prepareRestore(archive,folder.resolve("staging"),16777216)){
+    restored.confirmRestore(plan,restoredMedia);
+   }
+   need(Arrays.equals(restored.exportState(),wire),"backup semantic bytes/order differ");
+   need(noteOrder(restored,1).equals(Arrays.asList("linked","a","b","external","new"))&&noteOrder(restored,2).equals(Collections.singletonList("foreign")),"backup note ordering differs");
+   need(restored.fieldNoteIds(1,"field").equals(Collections.singletonList("linked")),"backup field association differs");
+   restoredMedia.verify(digest);need(Arrays.equals(Files.readAllBytes(restoredMedia.path(digest)),assetBytes),"backup shared asset differs");
+   media();orderPass("order_backup_restore");
+  }
+  need(orderCount==24,"order contract count");System.out.println("NOTE_ORDER_RESULT "+orderCount+" PASS");
+ }
+'''
+
+
+_before_order_accepted = accepted
+_before_order_sample = sample
+_before_order_selftest = selftest
+
+
+def accepted(value, api, source, run, apk):
+    return _before_order_accepted(value, api, source, run, apk) and order_log_accepted(value["log"])
+
+
+def sample(api=26, source="source", run="run", apk="a"*64):
+    value = _before_order_sample(api, source, run, apk)
+    marker = "NOTE_MANAGEMENT_RESULT "
+    assert value["log"].count(marker) == 1
+    records = "".join("NOTE_ORDER_PASS "+label+"\n" for label in ORDER_LABELS)
+    records += "NOTE_ORDER_RESULT "+str(len(ORDER_LABELS))+" PASS\n"
+    value["log"] = value["log"].replace(marker, records+marker, 1)
+    value["log_sha256"] = hashlib.sha256(value["log"].encode()).hexdigest()
+    return value
+
+
+def order_selftest():
+    good = sample()
+    assert order_log_accepted(good["log"])
+    assert accepted(good, 26, "source", "run", "a"*64)
+    bad = []
+    for label in ORDER_LABELS:
+        marker = "NOTE_ORDER_PASS "+label+"\n"
+        assert good["log"].count(marker) == 1
+        bad.extend((good["log"].replace(marker, ""), good["log"].replace(marker, marker+marker)))
+    bad.extend((
+        good["log"].replace("NOTE_ORDER_RESULT 24 PASS", "NOTE_ORDER_RESULT 23 PASS"),
+        good["log"]+"NOTE_ORDER_FAILED\n",
+        good["log"].replace("NOTE_ORDER_RESULT 24 PASS\n", ""),
+        good["log"].replace("NOTE_ORDER_PASS order_null_id\n", "")+"NOTE_ORDER_PASS order_null_id\n",
+        good["log"].replace("NOTE_ORDER_PASS order_null_id\n", "NOTE_ORDER_PASS order_blank_id\n", 1),
+        good["log"].replace("NOTE_ORDER_RESULT 24 PASS\n", "").replace("NOTE_ORDER_PASS order_null_id\n", "NOTE_ORDER_RESULT 24 PASS\nNOTE_ORDER_PASS order_null_id\n", 1),
+    ))
+    # Regression receipts have to remain positive before each negative edit.
+    def parents(value):
+        batch = {"status":"PASS", "note_management":value, "deletion_ui":report_ui_sample()}
+        return ({"status":"PASS", "api":26, "commit":"source", "run_id":"run",
+                 "release_ready":False, "apk_sha256":"a"*64, "batch_ui":copy.deepcopy(batch)},
+                {"status":"PASS", "batch_ui":copy.deepcopy(batch)})
+    assert aggregate(*parents(good), 26, "source", "run")["status"] == "PASS"
+    for log in bad:
+        assert log != good["log"] and not order_log_accepted(log)
+        value = copy.deepcopy(good);value["log"] = log
+        value["log_sha256"] = hashlib.sha256(log.encode()).hexdigest()
+        assert not accepted(value, 26, "source", "run", "a"*64)
+        assert aggregate(*parents(value), 26, "source", "run")["status"] == "NOT_VERIFIED"
+    import inspect
+    source = inspect.getsource(observe_order)
+    for old in (
+        "assert labels == ORDER_LABELS",
+        'assert results == [str(len(ORDER_LABELS))+" PASS"]',
+        'assert "NOTE_ORDER_FAILED" not in text',
+        'assert text.rindex("NOTE_ORDER_PASS ") < text.index("NOTE_ORDER_RESULT ")',
+    ):
+        assert source.count(old) == 1
+        namespace = dict(globals())
+        exec(compile(source.replace(old, "assert True", 1), "<order-observer-mutant>", "exec"), namespace)
+        checker = namespace["observe_order"];checker(good["log"])
+        escaped = 0
+        for log in bad:
+            try:checker(log)
+            except (AssertionError, ValueError):continue
+            escaped += 1
+        assert escaped > 0, "order observer mutant did not weaken an exercised obligation"
+    result = {"positive":1, "negative":len(bad), "permanent_observer_mutants":4,
+              "scope":"HOST_REPORT_OBSERVERS_NOT_ANDROID_EXECUTION"}
+    print("NOTE_ORDER_HOST "+json.dumps(result), flush=True)
+    return result
+
+
+def selftest():
+    result = _before_order_selftest()
+    result["ordering_backend"] = order_selftest()
+    return result
+
+
+_order_entry = '   verify();deleteVerify();need(count==18,"contract count");'
+assert JAVA.count(_order_entry) == JAVA.count(_declaration) == 1
+JAVA = JAVA.replace(_order_entry, '   verify();deleteVerify();orderVerify();need(count==18,"contract count");', 1)
+JAVA = JAVA.replace(_declaration, ORDER_JAVA+"\n"+_declaration, 1)
+
+
 if __name__ == "__main__":
     import sys
     assert sys.argv[1:] == ["selftest"]

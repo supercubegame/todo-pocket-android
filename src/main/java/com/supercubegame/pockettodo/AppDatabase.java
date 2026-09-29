@@ -82,7 +82,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
     static void migrateSchema1To2(SQLiteDatabase db) {
         // SQLiteOpenHelper wraps DDL and version change in one transaction.
         // No IF NOT EXISTS: a conflicting partial schema must fail, not be hidden.
-        for(String table:Arrays.asList("revision","categories","applications","activities","paths","tags","batches","ledger","checkins","notes","blocks","media")) {
+        for(String table:Arrays.asList("revision","categories","applications","activities","paths","tags","batches","ledger","checkins","media","notes","blocks")) {
             try(Cursor c=db.rawQuery("SELECT * FROM "+table+" LIMIT 0",null)){c.getColumnCount();}
         }
         addV2(db);
@@ -118,7 +118,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
     public synchronized void moveCategory(long id,int to){tx(db->{List<Long> ids=categoryIds(db);int from=ids.indexOf(id);if(from<0||to<0||to>=ids.size())throw new IllegalArgumentException("分类位置无效");ids.add(to,ids.remove(from));for(int i=0;i<ids.size();i++)db.execSQL("UPDATE categories SET position=? WHERE id=?",new Object[]{i,ids.get(i)});bump(db);return null;});}
     public synchronized void addApplication(long id,String name,String packageName){Ledger.positive(id);String clean=text(name);if(packageName==null||(!packageName.isEmpty()&&!packageName.matches("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")))throw new IllegalArgumentException("应用包名无效");tx(db->{db.execSQL("INSERT INTO applications VALUES(?,?,?)",new Object[]{id,clean,packageName});bump(db);return null;});}
     public synchronized void addActivity(long id,long category,long application,String title){Ledger.positive(id);Ledger.positive(category);if(application<0)throw new IllegalArgumentException("应用标识无效");String clean=text(title);tx(db->{exists(db,"categories",category);if(application!=0)exists(db,"applications",application);db.execSQL("INSERT INTO activities(id,category_id,application_id,title) VALUES(?,?,?,?)",new Object[]{id,category,application==0?null:application,clean});bump(db);return null;});}
-    private void orderedStrings(String table,long activity,List<String> values,boolean deduplicate){if(values==null||Ledger.hasNull(values))throw new IllegalArgumentException("缺少有序内容");List<String> clean=new ArrayList<>();for(String value:values){String s=text(value);if(!deduplicate||!clean.contains(s))clean.add(s);}tx(db->{exists(db,"activities",activity);db.delete(table,"activity_id=?",new String[]{Long.toString(activity)});for(int i=0;i<clean.size();i++)db.execSQL("INSERT INTO "+table+" VALUES(?,?,?)",new Object[]{activity,i,clean.get(i)});bump(db);return null;});}
+    private void orderedStrings(String table,long activity,List<String> values,boolean deduplicate){if(values==null)throw new IllegalArgumentException("缺少有序内容");List<String> clean=new ArrayList<>();for(String value:values){String s=text(value);if(!deduplicate||!clean.contains(s))clean.add(s);}tx(db->{exists(db,"activities",activity);db.delete(table,"activity_id=?",new String[]{Long.toString(activity)});for(int i=0;i<clean.size();i++)db.execSQL("INSERT INTO "+table+" VALUES(?,?,?)",new Object[]{activity,i,clean.get(i)});bump(db);return null;});}
     private List<String> orderedStrings(String table,long activity){SQLiteDatabase db=getReadableDatabase();exists(db,"activities",activity);List<String> out=new ArrayList<>();try(Cursor c=db.rawQuery("SELECT text FROM "+table+" WHERE activity_id=? ORDER BY position",new String[]{Long.toString(activity)})){while(c.moveToNext())out.add(c.getString(0));}return Collections.unmodifiableList(out);}
     public synchronized void savePath(long activity,List<String> steps){orderedStrings("paths",activity,steps,false);}
     public synchronized List<String> path(long activity){return orderedStrings("paths",activity);}
@@ -289,7 +289,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
     public synchronized long importLegacy(byte[] bytes){
         LegacyImport.Plan plan=LegacyImport.preview(bytes);
         return tx(db->{try(Cursor c=db.rawQuery("SELECT item_count FROM legacy_imports WHERE source_id=?",new String[]{plan.sourceId()})){if(c.moveToFirst())return 0L;}
-            long position=nextTodoPosition(db);
+            db.execSQL("INSERT INTO legacy_imports VALUES(?,?)",new Object[]{plan.sourceId(),plan.todos().size()});long position=nextTodoPosition(db);
             for(TodoModel.Item item:plan.todos()){String id="legacy-"+plan.sourceId()+"-"+item.id;db.execSQL("INSERT INTO todos VALUES(?,?,?,?)",new Object[]{id,item.title,item.done?1:0,position});position=Math.incrementExact(position);}
             bump(db);return (long)plan.todos().size();});
     }
@@ -324,7 +324,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
             for(String table:SNAPSHOT_TABLES)try(Cursor c=db.rawQuery("SELECT * FROM "+table+" ORDER BY rowid",null)){
                 utf8(out,table);out.writeInt(c.getColumnCount());for(String name:c.getColumnNames())utf8(out,name);out.writeInt(c.getCount());
                 while(c.moveToNext())for(int i=0;i<c.getColumnCount();i++){
-                    Object value=cell(c,i);out.writeByte(c.getType(i));if(value instanceof Long)out.writeLong((Long)value);else if(value instanceof String)utf8(out,value.toString());else if(value instanceof byte[])blob(out,(byte[])value);
+                    Object value=cell(c,i);out.writeByte(c.getType(i));if(value instanceof Long)out.writeLong((Long)value);else if(value instanceof String)utf8(out,(String)value);else if(value instanceof byte[])blob(out,(byte[])value);
                 }
             }out.flush();return bytes.toByteArray();
         }catch(IOException e){throw new IllegalStateException("无法编码备份状态",e);}

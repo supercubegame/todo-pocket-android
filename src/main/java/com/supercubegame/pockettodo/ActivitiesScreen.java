@@ -126,8 +126,11 @@ public final class ActivitiesScreen {
         if(!d.notes.isEmpty())details.addView(host.text("点击笔记标题可改名；同名笔记分开保存。",14,TodayScreen.MUTED));
         for(int i=0;i<d.notes.size();i++){
             NoteSummary summary=d.notes.get(i);
-            TextView heading=host.text((i+1)+". "+summary.title,16,TodayScreen.INK);heading.setContentDescription("note-title-"+summary.id);heading.setMaxLines(2);details.addView(heading);
+            LinearLayout actions=new LinearLayout(host.activity);
+            TextView heading=host.text((i+1)+". "+summary.title,16,TodayScreen.INK);heading.setContentDescription("note-title-"+summary.id);heading.setMaxLines(2);actions.addView(heading,new LinearLayout.LayoutParams(0,-2,1));
             heading.setMinHeight(host.dp(48));heading.setFocusable(true);heading.setOnClickListener(v->renameNote(id,summary));
+            Button delete=host.button("删除",()->deleteNote(id,summary,actions));delete.setContentDescription("note-delete-"+summary.id);
+            actions.addView(delete,new LinearLayout.LayoutParams(host.dp(64),host.dp(48)));details.addView(actions);
             TextView preview=host.text(summary.text,15,TodayScreen.MUTED);
             // Keep the old first-note accessibility identity for existing regression.
             preview.setContentDescription(i==0?"note-activity-"+id:"note-summary-"+summary.id);
@@ -158,6 +161,41 @@ public final class ActivitiesScreen {
             });
         }));
         dialog.show();
+    }
+    /** A detached detail row cannot confirm an old preview. Rotation/process death
+     * never persists this plan; helper close is a second backend invalidation guard.
+     */
+    private void deleteNote(long owner,NoteSummary note,android.view.View anchor){
+        host.work(()->host.db.prepareNoteDeletion(note.id,owner),plan->{
+            if(!anchor.isAttachedToWindow()||host.activity.isFinishing()||host.activity.isDestroyed()){plan.close();return;}
+            LinearLayout body=host.column();body.setPadding(host.dp(20),host.dp(4),host.dp(20),host.dp(8));
+            TextView identity=host.text("活动："+plan.activityTitle()+"\n笔记："+plan.title()+"\n笔记标识："+plan.noteId(),15,TodayScreen.INK);
+            identity.setContentDescription("note-delete-identity");body.addView(identity);
+            TextView counts=host.text("将删除 "+plan.blockCount()+" 个正文块、"+plan.fieldLinkCount()+" 个字段笔记关联。\n字段和值、其他笔记和图片文件均保留。",15,TodayScreen.INK);
+            counts.setContentDescription("note-delete-counts");body.addView(counts);
+            body.addView(host.text("删除后暂不支持撤销。取消不会修改任何内容。",15,TodayScreen.ERROR));
+            CheckBox consent=new CheckBox(host.activity);consent.setText("我明白只删除这一篇，且无法撤销");consent.setTextSize(16);consent.setTextColor(TodayScreen.INK);
+            consent.setContentDescription("note-delete-consent");consent.setChecked(false);body.addView(consent);
+            TextView validation=host.text("",14,TodayScreen.ERROR);validation.setContentDescription("note-delete-validation");body.addView(validation);
+            ScrollView scroll=new ScrollView(host.activity);scroll.addView(body);
+            AlertDialog dialog=new AlertDialog.Builder(host.activity).setTitle("确认删除笔记？").setView(scroll).setNegativeButton("取消",null).setPositiveButton("确认删除",null).create();
+            android.view.View.OnAttachStateChangeListener lifecycle=new android.view.View.OnAttachStateChangeListener(){
+                @Override public void onViewAttachedToWindow(android.view.View v){}
+                @Override public void onViewDetachedFromWindow(android.view.View v){plan.close();dialog.dismiss();}
+            };
+            anchor.addOnAttachStateChangeListener(lifecycle);
+            dialog.setOnDismissListener(unused->{anchor.removeOnAttachStateChangeListener(lifecycle);plan.close();});
+            dialog.setOnShowListener(unused->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+                if(!consent.isChecked()){validation.setText("请先勾选删除确认");return;}
+                if(!anchor.isAttachedToWindow()){plan.close();dialog.dismiss();return;}
+                dialog.setCancelable(false);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);consent.setEnabled(false);
+                host.work(()->{host.db.confirmNoteDeletion(plan);return true;},ignored->{dialog.dismiss();load();},()->{
+                    plan.close();dialog.setCancelable(true);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);
+                    validation.setText("未能删除；内容可能已变化。请取消后重新预览。");
+                });
+            }));
+            dialog.show();
+        },null);
     }
     private void loadHistory(long id){host.work(()->host.db.marks(id),marks->renderHistory(id,marks),null);}
     private void renderHistory(long id,List<CalendarRules.Mark> marks){

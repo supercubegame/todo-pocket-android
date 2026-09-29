@@ -193,7 +193,7 @@ def selftest():
     return count
 
 
-def capture_crash_logs(adb, serial, *, runner=subprocess.run, environment=None):
+def capture_crash_logs(adb, serial, *, runner=subprocess.run, environment=None, snapshot_reader=None):
     """Read only disposable CI logs. Empty/missing tails never prove no crash."""
     import os
     import tempfile
@@ -244,6 +244,14 @@ def capture_crash_logs(adb, serial, *, runner=subprocess.run, environment=None):
         result["status"] = "EMPTY_NOT_PROOF_NO_CRASH"
     else:
         result["status"] = "OBSERVED_NOT_ACCEPTANCE"
+    # The existing failure handler already persists this whole object. Keep
+    # original crash fields/budget intact and name the additional total budget.
+    result["combined_collection_budget_seconds"] = 51
+    try:
+        reader = capture_process_snapshot if snapshot_reader is None else snapshot_reader
+        result["process_snapshot"] = reader(adb, serial, runner=runner, environment=environment)
+    except Exception as diagnostic:
+        result["process_snapshot_error"] = repr(diagnostic)
     return result
 
 
@@ -283,7 +291,18 @@ def crash_contract(capture):
             if code == "oserror":
                 raise FileNotFoundError("synthetic missing adb")
             return subprocess.CompletedProcess(args, code)
-        value = capture("adb", "emulator-5554", runner=runner, environment={"GITHUB_ACTIONS": "true"})
+        snapshot_calls = []
+        sentinel = {"status": "DIAGNOSTIC_ONLY_NOT_IDENTITY_ACCEPTANCE"}
+        def snapshot_reader(adb, serial, **kw):
+            assert adb == "adb" and serial == "emulator-5554"
+            assert kw == {"runner": runner, "environment": {"GITHUB_ACTIONS": "true"}}
+            snapshot_calls.append(True)
+            return sentinel
+        value = capture("adb", "emulator-5554", runner=runner, environment={"GITHUB_ACTIONS": "true"},
+                        snapshot_reader=snapshot_reader)
+        assert len(snapshot_calls) == (0 if len(answers) == 1 else 1)
+        if len(answers) > 1:
+            assert value["process_snapshot"] is sentinel and value["combined_collection_budget_seconds"] == 51
         assert len(calls) == len(answers), name
         assert value["scope"] == "CI_SYNTHETIC_LOG_TAILS_NOT_ACCEPTANCE_OR_NO_CRASH_PROOF"
         assert value["release_ready"] is False
@@ -419,8 +438,221 @@ def crash_selftest(workflow):
           str(wired) + "/4 original failures retained; HOST_INJECTED_NOT_ANDROID", flush=True)
 
 
+def capture_process_snapshot(adb, serial, *, runner=subprocess.run, environment=None):
+    """Post-failure observation only. No retry, signal, root or success inference."""
+    import os
+    import tempfile
+    environment = os.environ if environment is None else environment
+    if environment.get("GITHUB_ACTIONS") != "true" or not re.fullmatch(r"emulator-[0-9]+", serial):
+        raise ValueError("isolated CI emulator required for process diagnostics")
+    package = "com.supercubegame.pockettodo.v12.preview"
+    prefix = [str(adb), "-s", serial]
+    result = {"status": "DIAGNOSTIC_ONLY_NOT_IDENTITY_ACCEPTANCE",
+              "scope": "CURRENT_PROCESS_AFTER_FAILURE_NOT_FAILED_PID_OR_RETRY",
+              "release_ready": False, "collection_budget_seconds": 32,
+              "selected_pid": None, "failed_pid_reconstructed": False, "reads": []}
+    def tail(stream, limit):
+        stream.flush(); size = stream.seek(0, 2); stream.seek(max(0, size-limit))
+        return {"bytes": size, "truncated": size > limit,
+                "tail": stream.read(limit).decode("utf-8", errors="replace")}
+    def read(args, timeout=3):
+        record = {"command": prefix+args, "timeout_seconds": timeout, "returncode": None}
+        result["reads"].append(record)
+        # Spooling bounds report memory, not temporary-file disk usage.
+        with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+            try:
+                p = runner(record["command"], stdin=subprocess.DEVNULL,
+                           stdout=out, stderr=err, timeout=timeout)
+                record.update(returncode=p.returncode, status=(
+                    "OBSERVED_NOT_ACCEPTANCE" if p.returncode == 0 else "COMMAND_FAILED"))
+            except subprocess.TimeoutExpired as exc:
+                record.update(status="TIMEOUT_PARTIAL", error=repr(exc))
+            except OSError as exc:
+                record.update(status="NOT_OBSERVED", error=repr(exc))
+            record.update(stdout=tail(out, 32768), stderr=tail(err, 8192))
+        return record
+    shell = ["shell", "-n", "-T"]
+    qemu = read(shell+["getprop", "ro.kernel.qemu"])
+    if not (qemu["returncode"] == 0 and qemu["stdout"]["tail"].strip() == "1"
+            and not qemu["stdout"]["truncated"] and qemu["stderr"]["bytes"] == 0):
+        return result
+    read(shell+["run-as", package, "id", "-u"])
+    current = read(shell+["pidof", package])
+    pid = current["stdout"]["tail"].strip()
+    if (current["returncode"] == 0 and not current["stdout"]["truncated"]
+            and current["stderr"]["bytes"] == 0 and re.fullmatch(r"[1-9][0-9]*", pid)
+            and int(pid) > 1):
+        result["selected_pid"] = pid
+        # These sequential reads are not an atomic identity proof. The final
+        # pidof may expose a change but cannot rule out PID reuse or later death.
+        read(shell+["cat", "/proc/"+pid+"/status"])
+        read(shell+["run-as", package, "cat", "/proc/"+pid+"/status"])
+        read(["exec-out", "run-as", package, "cat", "/proc/"+pid+"/cmdline"])
+        read(shell+["cat", "/proc/"+pid+"/stat"])
+        read(shell+["pidof", package])
+    read(["logcat", "-b", "events", "-d", "-t", "80", "-v", "threadtime",
+          "am_proc_start:I", "am_proc_died:I", "am_kill:I", "am_crash:I", "*:S"], 8)
+    return result
+
+
+def process_snapshot_contract(capture):
+    package = "com.supercubegame.pockettodo.v12.preview"
+    prefix = ["adb", "-s", "emulator-5554"]
+    base = [
+        ["shell", "-n", "-T", "getprop", "ro.kernel.qemu"],
+        ["shell", "-n", "-T", "run-as", package, "id", "-u"],
+        ["shell", "-n", "-T", "pidof", package],
+    ]
+    detail = [
+        ["shell", "-n", "-T", "cat", "/proc/82/status"],
+        ["shell", "-n", "-T", "run-as", package, "cat", "/proc/82/status"],
+        ["exec-out", "run-as", package, "cat", "/proc/82/cmdline"],
+        ["shell", "-n", "-T", "cat", "/proc/82/stat"],
+        ["shell", "-n", "-T", "pidof", package],
+    ]
+    context = ["logcat", "-b", "events", "-d", "-t", "80", "-v", "threadtime",
+               "am_proc_start:I", "am_proc_died:I", "am_kill:I", "am_crash:I", "*:S"]
+    normal = [(0, b"1\n", b""), (0, b"10077\n", b""), (0, b"82\n", b""),
+              (0, b"Name:\tfixture\nUid:\t10077\t10077\t10077\t10077\n", b""),
+              (0, b"Name:\tfixture\nUid:\t10077\t10077\t10077\t10077\n", b""),
+              (0, package.encode()+b"\0", b""), (0, b"82 (fixture) S 1 2 3\n", b""),
+              (0, b"82\n", b""), (0, b"am_proc_died: synthetic\n", b"")]
+    cases = [("readable", normal)]
+    for name, index, answer in [
+        ("runas_255", 4, (255, b"", b"")),
+        ("status_timeout", 4, ("timeout", b"partial", b"timeout")),
+        ("missing_adb", 4, ("missing", b"", b"")),
+        ("changed_after", 7, (0, b"83\n", b"")),
+        ("absent_after", 7, (1, b"", b"")),
+        ("large_tail", 3, (0, b"x"*40000+b"END", b"e"*9000)),
+        ("invalid_utf8", 3, (0, b"\xff", b"")),
+    ]:
+        values = list(normal); values[index] = answer; cases.append((name, values))
+    for name, answer in [
+        ("absent_before", (1, b"", b"")), ("pidof_255", (255, b"", b"")),
+        ("failed_nonempty_pid", (255, b"82\n", b"")),
+        ("ambiguous_pid", (0, b"82 83\n", b"")), ("pid_one", (0, b"1\n", b"")),
+        ("unicode_pid", (0, "٨٢\n".encode(), b"")), ("pid_stderr", (0, b"82\n", b"denied")),
+    ]:
+        cases.append((name, normal[:2]+[answer, normal[-1]]))
+    for name, answer in [
+        ("not_emulator", (0, b"0\n", b"")), ("qemu_255", (255, b"1\n", b"")),
+        ("qemu_stderr", (0, b"1\n", b"denied")), ("qemu_timeout", ("timeout", b"1\n", b"")),
+    ]:
+        cases.append((name, [answer]))
+    for name, answers in cases:
+        expected = base+detail+[context] if len(answers) == 9 else base+[context] if len(answers) == 4 else base[:1]
+        calls = []
+        def runner(args, **kw):
+            i = len(calls)
+            assert i < len(expected), "extra/retried diagnostic command"
+            assert args == prefix+expected[i], (name, i, args)
+            assert set(kw) == {"stdin", "stdout", "stderr", "timeout"}
+            assert kw["stdin"] == subprocess.DEVNULL and kw["stdout"] is not kw["stderr"]
+            assert kw["timeout"] == (8 if expected[i] == context else 3)
+            calls.append(args)
+            code, out, err = answers[i]
+            kw["stdout"].write(out); kw["stderr"].write(err)
+            if code == "timeout": raise subprocess.TimeoutExpired(args, kw["timeout"])
+            if code == "missing": raise FileNotFoundError("synthetic missing adb")
+            return subprocess.CompletedProcess(args, code)
+        value = capture("adb", "emulator-5554", runner=runner, environment={"GITHUB_ACTIONS": "true"})
+        assert len(calls) == len(answers), name
+        assert value["status"] == "DIAGNOSTIC_ONLY_NOT_IDENTITY_ACCEPTANCE"
+        assert value["scope"] == "CURRENT_PROCESS_AFTER_FAILURE_NOT_FAILED_PID_OR_RETRY"
+        assert value["release_ready"] is False and value["collection_budget_seconds"] == 32
+        assert value["failed_pid_reconstructed"] is False
+        assert value["selected_pid"] == ("82" if len(answers) == 9 else None)
+        assert len(value["reads"]) == len(answers)
+        for record, answer, args in zip(value["reads"], answers, expected):
+            code, out, err = answer
+            assert record["command"] == prefix+args
+            assert record["timeout_seconds"] == (8 if args == context else 3)
+            assert record["returncode"] == (code if type(code) is int else None)
+            expected_status = ("TIMEOUT_PARTIAL" if code == "timeout" else
+                               "NOT_OBSERVED" if code == "missing" else
+                               "OBSERVED_NOT_ACCEPTANCE" if code == 0 else "COMMAND_FAILED")
+            assert record["status"] == expected_status
+            for field, raw, limit in (("stdout", out, 32768), ("stderr", err, 8192)):
+                assert record[field] == {"bytes": len(raw), "truncated": len(raw)>limit,
+                                        "tail": raw[-limit:].decode("utf-8", errors="replace")}
+        if name == "changed_after":
+            assert value["reads"][-2]["stdout"]["tail"] == "83\n"
+        if name == "runas_255":
+            assert value["reads"][4]["returncode"] == 255
+        assert len(json.dumps(value)) < 100000
+    invalid = [("phone", {"GITHUB_ACTIONS": "true"}), ("emulator-5554", {}),
+               ("emulator-5554;bad", {"GITHUB_ACTIONS": "true"})]
+    for serial, environment in invalid:
+        calls = []
+        def forbidden(*args, **kw):
+            calls.append(args); raise AssertionError("out-of-scope read")
+        try: capture("adb", serial, runner=forbidden, environment=environment)
+        except ValueError: pass
+        else: raise AssertionError("scope accepted")
+        assert not calls
+    return len(cases)+len(invalid)
+
+
+def process_snapshot_wiring(capture):
+    """Use the default nested reader, then prove reader failure stays diagnostic."""
+    calls = []
+    def runner(args, **kw):
+        calls.append(args)
+        if args[-2:] == ["getprop", "ro.kernel.qemu"]: raw = b"1\n"
+        elif args[-2:] == ["id", "-u"]: raw = b"10077\n"
+        elif args[-2:] == ["pidof", "com.supercubegame.pockettodo.v12.preview"]: raw = b"82\n"
+        else: raw = b"diagnostic-only\n"
+        kw["stdout"].write(raw)
+        return subprocess.CompletedProcess(args, 0)
+    value = capture("adb", "emulator-5554", runner=runner, environment={"GITHUB_ACTIONS": "true"})
+    assert len(calls) == 12 and value["combined_collection_budget_seconds"] == 51
+    assert len(value["logs"]) == 2
+    nested = value["process_snapshot"]
+    assert nested["selected_pid"] == "82" and len(nested["reads"]) == 9
+    assert nested["status"] == "DIAGNOSTIC_ONLY_NOT_IDENTITY_ACCEPTANCE"
+    assert sum(r["timeout_seconds"] for r in nested["reads"]) == 32
+    assert sum(r["timeout_seconds"] for r in [value["identity"]]+value["logs"]) == 19
+    def broken(*args, **kw): raise OSError("snapshot_write_sentinel")
+    value = capture("adb", "emulator-5554", runner=runner, environment={"GITHUB_ACTIONS": "true"},
+                    snapshot_reader=broken)
+    assert "snapshot_write_sentinel" in value["process_snapshot_error"]
+    assert len(value["logs"]) == 2 and "process_snapshot" not in value
+    return 2
+
+
+def process_snapshot_selftest():
+    import inspect
+    count = process_snapshot_contract(capture_process_snapshot)
+    source = inspect.getsource(capture_process_snapshot)
+    mutants = [
+        ("stdin=subprocess.DEVNULL", "stdin=None"),
+        ("stdout=tail(out, 32768)", "stdout=tail(out, 40000)"),
+        ('current["returncode"] == 0', "True"),
+        ('if environment.get("GITHUB_ACTIONS") != "true" or not re.fullmatch(r"emulator-[0-9]+", serial):', "if False:"),
+    ]
+    for old, new in mutants:
+        assert source.count(old) == 1
+        namespace = dict(globals())
+        exec(compile(source.replace(old, new, 1), "<process-diagnostic-mutant>", "exec"), namespace)
+        try: process_snapshot_contract(namespace["capture_process_snapshot"])
+        except AssertionError: pass
+        else: raise AssertionError("process diagnostic mutant survived "+old)
+    assert process_snapshot_wiring(capture_crash_logs) == 2
+    source = inspect.getsource(capture_crash_logs)
+    old = 'result["process_snapshot"] = reader(adb, serial, runner=runner, environment=environment)'
+    assert source.count(old) == 1
+    namespace = dict(globals())
+    exec(compile(source.replace(old, "pass", 1), "<process-wiring-mutant>", "exec"), namespace)
+    try: process_snapshot_wiring(namespace["capture_crash_logs"])
+    except (AssertionError, KeyError): pass
+    else: raise AssertionError("missing diagnostic wiring accepted")
+    print("PROCESS_SNAPSHOT_CONTROLS "+str(count)+" PASS; mutants=4/4 rejected; wiring=2/2 mutant=1/1; HOST_ONLY", flush=True)
+
+
 if __name__ == "__main__":
     import sys
     assert sys.argv[1:] == ["selftest"], "usage: verify_process_control.py selftest"
     selftest()
     crash_selftest(Path(".github/workflows/android.yml").read_text())
+    process_snapshot_selftest()

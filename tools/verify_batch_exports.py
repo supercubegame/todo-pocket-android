@@ -32,6 +32,102 @@ SUMMARY_LABELS = ["all_same_title_and_empty_notes", "second_activity_isolated",
                   "privacy_fixture_restored", "all_tables_media_unchanged"]
 RENAME_LABELS = ["cancel_readonly", "blank_blocked_readonly", "same_title_noop",
                  "same_title_target_only", "restart_title_persisted", "duplicate_title_allowed"]
+DELETE_UI_LABELS = ["preview_exact_identity_counts", "cancel_readonly", "unchecked_blocked_readonly",
+                    "process_loss_readonly", "fresh_preview_unchecked", "same_title_target_only",
+                    "all_media_preserved", "restart_deletion_and_sibling_persisted"]
+DELETE_UI_SCOPE = "NATIVE_NOTE_DELETE_EXACT_ID_CONSENT_FORCE_STOP_RESTART_NOT_LMK"
+
+
+def deletion_expected(before, note, owner):
+    expected = copy.deepcopy(before)
+    data = expected[0]
+    targets = [row for row in data["notes"] if row[0] == note and row[1] == owner]
+    assert len(targets) == 1 and len(targets[0]) == 3, "delete target identity"
+    assert sum(row[0] == note for row in data["notes"]) == 1
+    for table in ("field_notes", "blocks", "notes"):
+        data[table] = [row for row in data[table] if row[0] != note]
+    rev = data["revision"]
+    assert len(rev) == 1 and rev[0][0] == 1 and type(rev[0][1]) is int
+    assert rev[0][1] < 9223372036854775807
+    data["revision"] = [(1, rev[0][1]+1)]
+    return expected
+
+
+def deletion_readback_check(before, actual, note, owner):
+    assert actual == deletion_expected(before, note, owner), "delete changed wrong note, order, revision, fields or media"
+
+
+def deletion_ui_receipt(value, api, source, run, apk):
+    return isinstance(value, dict) and (
+        value.get("status") == "PASS" and value.get("scope") == DELETE_UI_SCOPE and
+        type(value.get("api")) is int and value["api"] == api and
+        value.get("commit") == source and value.get("run_id") == run and
+        isinstance(apk, str) and re.fullmatch("[0-9a-f]{64}", apk) is not None and
+        value.get("apk_sha256") == apk and value.get("labels") == DELETE_UI_LABELS and
+        type(value.get("checks")) is int and value["checks"] == len(DELETE_UI_LABELS) and
+        value.get("release_ready") is False and
+        isinstance(value.get("note_id"), str) and bool(value["note_id"]) and
+        isinstance(value.get("sibling_id"), str) and bool(value["sibling_id"]) and
+        value["note_id"] != value["sibling_id"] and
+        type(value.get("owner")) is int and value["owner"] > 0 and
+        type(value.get("deleted_blocks")) is int and value["deleted_blocks"] > 0 and
+        value.get("state") == "EXACT_TARGET_ROWS_ONE_REVISION_ALL_MEDIA_PRESERVED")
+
+
+def deletion_ui_sample():
+    return {"status": "PASS", "scope": DELETE_UI_SCOPE, "api": 26, "commit": "source",
+            "run_id": "run", "apk_sha256": "a"*64, "labels": DELETE_UI_LABELS[:],
+            "checks": len(DELETE_UI_LABELS), "release_ready": False,
+            "note_id": "b", "sibling_id": "a", "owner": 1, "deleted_blocks": 2,
+            "state": "EXACT_TARGET_ROWS_ONE_REVISION_ALL_MEDIA_PRESERVED"}
+
+
+def deletion_ui_selftest():
+    before = ({"notes": [("a", 1, "Same"), ("b", 1, "Same"), ("c", 2, "Same")],
+        "blocks": [("a", "image", 0, "IMAGE", None, "asset", "", 0, None),
+                   ("b", "image", 0, "IMAGE", None, "asset", "", 0, None),
+                   ("b", "private", 1, "TEXT", "PRIVATE", None, "", 1, None)],
+        "field_notes": [("b", 8), ("c", 8)], "fields": [(8, "LONG_TEXT")],
+        "field_values": [(8, 1, "keep")], "revision": [(1, 9)], "media": [("asset",)]},
+        {"asset": "bytes"}, {1: "First", 2: "Second"})
+    good = ({"notes": [("a", 1, "Same"), ("c", 2, "Same")],
+        "blocks": [("a", "image", 0, "IMAGE", None, "asset", "", 0, None)],
+        "field_notes": [("c", 8)], "fields": [(8, "LONG_TEXT")],
+        "field_values": [(8, 1, "keep")], "revision": [(1, 10)], "media": [("asset",)]},
+        {"asset": "bytes"}, {1: "First", 2: "Second"})
+    deletion_readback_check(before, good, "b", 1)
+    bads = [copy.deepcopy(before)]
+    for table in good[0]:
+        bad = copy.deepcopy(good); bad[0][table] = []; bads.append(bad)
+    bad = copy.deepcopy(good); bad[1].clear(); bads.append(bad)
+    bad = copy.deepcopy(good); bad[2][1] = "Changed"; bads.append(bad)
+    bad = copy.deepcopy(good); bad[0]["notes"].reverse(); bads.append(bad)
+    bad = copy.deepcopy(good); bad[0]["revision"] = [(1, 11)]; bads.append(bad)
+    for bad in bads:
+        try: deletion_readback_check(before, bad, "b", 1)
+        except AssertionError: continue
+        raise AssertionError("delete readback negative survived")
+    for note, owner in (("missing", 1), ("b", 2)):
+        try: deletion_expected(before, note, owner)
+        except AssertionError: continue
+        raise AssertionError("delete wrong identity accepted")
+    receipt_good = deletion_ui_sample()
+    assert deletion_ui_receipt(receipt_good, 26, "source", "run", "a"*64)
+    invalid = [None, {}]
+    for key in receipt_good:
+        bad = copy.deepcopy(receipt_good); del bad[key]; invalid.append(bad)
+    for key, value in (("status", "FAIL"), ("api", True), ("api", 34), ("commit", "old"),
+            ("run_id", "old"), ("apk_sha256", "b"*64), ("labels", DELETE_UI_LABELS[::-1]),
+            ("checks", True), ("scope", "HOST_ONLY"), ("release_ready", True),
+            ("note_id", ""), ("sibling_id", "b"), ("owner", True), ("owner", 0),
+            ("deleted_blocks", True), ("deleted_blocks", 0), ("state", "NOT_VERIFIED")):
+        bad = copy.deepcopy(receipt_good); bad[key] = value; invalid.append(bad)
+    for index in range(len(DELETE_UI_LABELS)):
+        bad = copy.deepcopy(receipt_good); bad["labels"].pop(index); bad["checks"] -= 1; invalid.append(bad)
+    for bad in invalid:
+        assert not deletion_ui_receipt(bad, 26, "source", "run", "a"*64), "delete receipt negative survived"
+    print("DELETE_UI_HOST_CONTROLS readback=1_positive_"+str(len(bads)+2)+
+          "_negative receipt=1_positive_"+str(len(invalid))+"_negative HOST_ONLY", flush=True)
 
 
 def rename_expected(before, note, owner, title):
@@ -174,6 +270,8 @@ def receipt(value, api, source, run, apk):
         return False
     if not note_management.accepted(value.get("note_management"), api, source, run, apk):
         return False
+    if not deletion_ui_receipt(value.get("deletion_ui"), api, source, run, apk):
+        return False
     if not (value.get("status") == "PASS" and value.get("scope") == SCOPE and
             type(value.get("api")) is int and value["api"] == api and
             value.get("commit") == source and value.get("run_id") == run and
@@ -276,6 +374,7 @@ public class BatchPageCheck {
 
 def selftest():
     note_management.selftest()
+    deletion_ui_selftest()
     rename_selftest()
     summary_selftest()
     assert len(LABELS) == 34 and all("picker_cancel_preserves_state_"+kind in LABELS
@@ -383,6 +482,7 @@ def selftest():
             "apk_sha256": "a"*64, "labels": LABELS[:], "checks": len(LABELS),
             "release_ready": False, "outputs": {}, "stale_privacy": {}}
     good["note_management"] = note_management.sample()
+    good["deletion_ui"] = deletion_ui_sample()
     good["summary_ui"] = {"status": "PASS", "labels": SUMMARY_LABELS[:], "checks": len(SUMMARY_LABELS),
         "api": 26, "commit": "source", "run_id": "run", "apk_sha256": "a"*64,
         "scope": "NATIVE_ACTIVITY_SUMMARIES_SYNTHETIC_RESTART_NOT_LMK", "release_ready": False}
@@ -407,6 +507,7 @@ def selftest():
     bads.extend([dict(good, summary_ui=None), dict(good, summary_ui={})])
     bads.extend([dict(good, rename_ui=None), dict(good, rename_ui={})])
     bads.extend([dict(good, note_management=None), dict(good, note_management={})])
+    bads.extend([dict(good, deletion_ui=None), dict(good, deletion_ui={})])
     for key, value in (("status", "FAIL"), ("checks", True), ("api", 34), ("api", True),
                        ("commit", "old"), ("run_id", "old"), ("apk_sha256", "d"*64),
                        ("scope", "HOST_ONLY"), ("release_ready", True)):
@@ -689,6 +790,93 @@ def native(adb, gate):
         passed("duplicate_title_allowed")
         assert proof["labels"] == RENAME_LABELS
         proof.update(status="PASS", state="ONLY_TARGET_TITLE_AND_TWO_REVISION_INCREMENTS_TITLE_RESTORED")
+    def deletion_ui():
+        # Run last: only synthetic emulator fixtures, after every old suite has finished.
+        # Backend field-link/shared-reference/stale-write contracts remain separate.
+        proof = {"status": "FAIL", "api": gate.API, "commit": source, "run_id": run_id,
+                 "apk_sha256": result["apk_sha256"], "labels": [], "checks": 0,
+                 "scope": DELETE_UI_SCOPE, "release_ready": False}
+        result["deletion_ui"] = proof
+        stop(); initial = state()
+        pairs = [(a, b) for a in initial[0]["notes"] for b in initial[0]["notes"]
+                 if a[0] != b[0] and a[1:] == b[1:] and
+                 any(row[0] == b[0] and row[3] == "IMAGE" for row in initial[0]["blocks"])]
+        assert pairs, "same-title image-note deletion fixture missing"
+        sibling, target = pairs[0]
+        note, owner, title = target
+        blocks = [row for row in initial[0]["blocks"] if row[0] == note]
+        links = [row for row in initial[0]["field_notes"] if row[0] == note]
+        assert blocks and initial[1], "nonempty note and immutable media required"
+        proof.update(note_id=note, sibling_id=sibling[0], owner=owner, deleted_blocks=len(blocks),
+                     deleted_field_links=len(links), preserved_media_files=len(initial[1]))
+        def passed(label):
+            assert DELETE_UI_LABELS[len(proof["labels"])] == label
+            proof["labels"].append(label); proof["checks"] = len(proof["labels"])
+        def locate(desc):
+            for _ in range(25):
+                found = [n for n in nodes() if n.get("content-desc") == desc]
+                assert len(found) <= 1, "duplicate delete control "+desc
+                if found:
+                    assert found[0].get("package") == gate.PKG
+                    return found[0]
+                shell("input", "swipe", "160", "440", "160", "190", "350")
+            raise AssertionError("delete identity unreachable "+desc)
+        def detail():
+            start(); tap("活动"); ready()
+            click(locate("activity-"+str(owner))); ready()
+        def preview():
+            detail(); click(locate("note-delete-"+note)); find(text="确认删除笔记？")
+            identity = find(**{"content-desc": "note-delete-identity"})
+            assert identity.get("text") == "活动："+initial[2][owner]+"\n笔记："+title+"\n笔记标识："+note
+            counts = find(**{"content-desc": "note-delete-counts"})
+            assert counts.get("text") == "将删除 "+str(len(blocks))+" 个正文块、"+str(len(links))+" 个字段笔记关联。\n字段和值、其他笔记和图片文件均保留。"
+            consent = locate("note-delete-consent")
+            assert consent.get("checked") == "false" and consent.get("enabled") == "true"
+            assert consent.get("text") == "我明白只删除这一篇，且无法撤销"
+            return consent
+        preview(); passed("preview_exact_identity_counts")
+        tap("取消"); stop(); assert state() == initial; passed("cancel_readonly")
+        preview(); tap("确认删除")
+        find(**{"content-desc": "note-delete-validation", "text": "请先勾选删除确认"})
+        assert find(**{"content-desc": "note-delete-consent"}).get("checked") == "false"
+        assert state() == initial; passed("unchecked_blocked_readonly")
+        # Kill a checked, still-open dialog. No saved token/consent may reappear.
+        touch("note-delete-consent")
+        assert find(**{"content-desc": "note-delete-consent"}).get("checked") == "true"
+        stop(); assert state() == initial; passed("process_loss_readonly")
+        start()
+        assert not any(n.get("text") == "确认删除笔记？" or
+                       n.get("content-desc") == "note-delete-consent" for n in nodes())
+        # start() above only establishes the post-restart root; detail() can reuse it.
+        consent = preview(); passed("fresh_preview_unchecked")
+        click(consent); assert find(**{"content-desc": "note-delete-consent"}).get("checked") == "true"
+        tap("确认删除"); ready()
+        stop(); deleted = state()
+        deletion_readback_check(initial, deleted, note, owner)
+        assert sibling in deleted[0]["notes"]
+        passed("same_title_target_only")
+        assert deleted[1] == initial[1] and deleted[0]["media"] == initial[0]["media"]
+        passed("all_media_preserved")
+        detail()
+        expected = summary_expected(deleted[0], owner)
+        actual, order = {}, []
+        for _ in range(25):
+            for node in nodes():
+                key = node.get("content-desc", "")
+                assert key not in ("note-title-"+note, "note-delete-"+note, "note-summary-"+note)
+                if key.startswith(("note-count-", "note-title-", "note-activity-", "note-summary-")):
+                    assert node.get("package") == gate.PKG
+                    value = node.get("text", "")
+                    assert key not in actual or actual[key] == value
+                    if key.startswith("note-title-") and key not in actual: order.append(key)
+                    actual[key] = value
+            if set(expected) <= set(actual):
+                summary_ui_check(expected, actual, order); break
+            shell("input", "swipe", "160", "440", "160", "190", "350")
+        else: raise AssertionError("surviving delete summary rows unreachable")
+        stop(); assert state() == deleted; passed("restart_deletion_and_sibling_persisted")
+        assert proof["labels"] == DELETE_UI_LABELS
+        proof.update(status="PASS", state="EXACT_TARGET_ROWS_ONE_REVISION_ALL_MEDIA_PRESERVED")
     try:
         assert os.environ.get("GITHUB_ACTIONS") == "true" and shell("getprop", "ro.kernel.qemu").strip() == "1"
         prior = json.loads((out/"native-result.json").read_text())
@@ -828,6 +1016,7 @@ def native(adb, gate):
         summary_ui()
         rename_ui()
         result["note_management"] = note_management.native(adb, gate, state)
+        deletion_ui()
         assert command("exec-out", "cat", installed[8:], binary=True) == product
         result.update(status="PASS", checks=len(result["labels"]))
         assert receipt(result, gate.API, source, run_id, result["apk_sha256"])

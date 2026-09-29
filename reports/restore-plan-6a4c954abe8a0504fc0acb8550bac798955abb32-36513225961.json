@@ -1,0 +1,149 @@
+{
+  "commit": "6a4c954abe8a0504fc0acb8550bac798955abb32",
+  "run_id": "36513225961",
+  "status": "NOT_VERIFIED",
+  "scope": "GUARDED_RESTORE_BACKEND_NOT_SAF_UI",
+  "devices": {
+    "26": {
+      "status": "NOT_VERIFIED",
+      "phases": {
+        "seed": {
+          "status": "NOT_VERIFIED",
+          "required_checks": [
+            "restore preview does not mutate any live table or publish media",
+            "preview shows independent exact current and incoming counts for every table",
+            "restore preview summary cannot be modified by caller",
+            "cancel twice clears private staging without altering live state",
+            "canceled restore plan cannot be confirmed",
+            "semantic-invalid preview refuses and cleans staging without touching live data",
+            "restore preview is bound to its exact database helper owner",
+            "ordinary write after preview rejects stale restore",
+            "stale rejection preserves every new row and revision and clears stage",
+            "failed stale plan is single use and requires a new preview",
+            "full snapshot guard rejects another connection write even without revision bump",
+            "same-revision stale rejection retains exact externally changed state",
+            "changed staged media is rejected on confirmation with complete old state intact",
+            "guarded confirmation late injected failure rolls back every replaced table",
+            "failed commit plan cannot be reused after removing the fault",
+            "confirmation uses the exact validated preview not a subsequently replaced source file",
+            "confirmed snapshot publishes exact media and cleans staging before commit",
+            "successful confirmation cannot be replayed",
+            "exact idempotent retry remains a genuine no-op while preview is open",
+            "unchanged state after no-op can still confirm the reviewed snapshot"
+          ],
+          "observed_required": [],
+          "missing": [
+            "restore preview does not mutate any live table or publish media",
+            "preview shows independent exact current and incoming counts for every table",
+            "restore preview summary cannot be modified by caller",
+            "cancel twice clears private staging without altering live state",
+            "canceled restore plan cannot be confirmed",
+            "semantic-invalid preview refuses and cleans staging without touching live data",
+            "restore preview is bound to its exact database helper owner",
+            "ordinary write after preview rejects stale restore",
+            "stale rejection preserves every new row and revision and clears stage",
+            "failed stale plan is single use and requires a new preview",
+            "full snapshot guard rejects another connection write even without revision bump",
+            "same-revision stale rejection retains exact externally changed state",
+            "changed staged media is rejected on confirmation with complete old state intact",
+            "guarded confirmation late injected failure rolls back every replaced table",
+            "failed commit plan cannot be reused after removing the fault",
+            "confirmation uses the exact validated preview not a subsequently replaced source file",
+            "confirmed snapshot publishes exact media and cleans staging before commit",
+            "successful confirmation cannot be replayed",
+            "exact idempotent retry remains a genuine no-op while preview is open",
+            "unchanged state after no-op can still confirm the reviewed snapshot"
+          ],
+          "total_device_pass_records": 62,
+          "failure_tail": "INSTRUMENTATION_RESULT: stream=PASS tests target isolated v1.2 package\nPASS actual emulator API equals requested test matrix\nPASS new database empty, no demo user data\nPASS category rename committed\nPASS category order persisted by stable IDs\nPASS bad reorder rejected\nPASS bad reorder retains exact order\nPASS unknown category rejected by DB adapter\nPASS invalid activity has no partial row\nPASS ordered in-app path persisted\nPASS invalid later path step rejected\nPASS failed path replacement leaves all old steps\nPASS tags deduplicate without losing order\nPASS multi-date money batch inserted\nPASS persistent selected-date total is 80 yuan\nPASS identical retry no duplicate money\nPASS conflicting batch key rejected\nPASS late unknown activity rolls back whole money batch\nPASS failed batch leaves no rows or idempotency key\nPASS late duplicate entry rolls back whole transaction\nPASS duplicate entry leaves ledger and journal unchanged\nPASS planned isolated from actual after SQL persistence\nPASS latest batch undo removes own rows\nPASS undo tombstone prevents old retry resurrection\nPASS duplicate check-in single persistent day\nPASS persistent mark requires actual entry timestamp\nPASS ordered private/public text blocks committed\nPASS note cannot reference missing stored media\nPASS failed note replace retains all prior blocks\nPASS Android locked atomic publication and digest verified\nPASS Android duplicate media does not replace existing file\nPASS parallel media imports retain exact bytes without overlapping JVM locks\nPASS note image reference requires registered media\nPASS Android archive byte transport round-trips\nPASS Android export refuses overwrite and preserves exact existing ZIP\nPASS database helper reopen retains money\nPASS future schema refused without destructive downgrade\nPASS future database remains byte-semantically intact\nPASS persistent field rename preserves typed value\nPASS field note stays attached by ID after rename\nPASS persistent numeric field rejects non-number\nPASS bad field edit retains exact previous value\nPASS field value cannot refer to unknown activity\nPASS persistent multi-select deduplicates in order\nPASS late invalid option rejects whole replacement\nPASS invalid option leaves all old choices\nPASS persistent impossible date rejected\nPASS persistent executable link rejected\nPASS false field value differs from unset\nPASS explicit empty field clears value\nPASS new long field does not inherit legacy200-char cap\nPASS archiving field retains persistent value\nPASS archived persistent field rejects new value\nPASS archived field rejects new attached note\nPASS archive preserves existing field note and text\nPASS unknown field note rejected atomically\nPASS failed field note does not create orphan note\nPASS new ordinary todo does not inherit legacy title cap\nPASS ordinary todo edit and completion persist\nPASS blank ordinary todo edit rejected\nPASS invalid todo edit does not change completion\nPASS legacy import appends ordinary todos without replacing existing\nDEVICE_DATABASE_FAILED\njava.lang.IllegalArgumentException: 数据重复或关联不存在，本次修改已回滚\n\tat com.supercubegame.pockettodo.AppDatabase.tx(AppDatabase.java:97)\n\tat com.supercubegame.pockettodo.AppDatabase.importLegacy(AppDatabase.java:291)\n\tat java.lang.reflect.Method.invoke(Native Method)\n\tat com.supercubegame.pockettodo.V12DeviceTest.call(V12DeviceTest.java:22)\n\tat com.supercubegame.pockettodo.V12DeviceTest.importLegacy(V12DeviceTest.java:116)\n\tat com.supercubegame.pockettodo.V12DeviceTest.fieldsSeed(V12DeviceTest.java:150)\n\tat com.supercubegame.pockettodo.V12DeviceTest.onStart(V12DeviceTest.java:435)\n\tat android.app.Instrumentation$InstrumentationThread.run(Instrumentation.java:2074)\nCaused by: android.database.sqlite.SQLiteConstraintException: UNIQUE constraint failed: todos.id (code 1555)\n\tat android.database.sqlite.SQLiteConnection.nativeExecuteForChangedRowCount(Native Method)\n\tat android.database.sqlite.SQLiteConnection.executeForChangedRowCount(SQLiteConnection.java:734)\n\tat android.database.sqlite.SQLiteSession.executeForChangedRowCount(SQLiteSession.java:754)\n\tat android.database.sqlite.SQLiteStatement.executeUpdateDelete(SQLiteStatement.java:64)\n\tat android.database.sqlite.SQLiteDatabase.executeSql(SQLiteDatabase.java:1679)\n\tat android.database.sqlite.SQLiteDatabase.execSQL(SQLiteDatabase.java:1658)\n\tat com.supercubegame.pockettodo.AppDatabase.lambda$importLegacy$21(AppDatabase.java:293)\n\tat com.supercubegame.pockettodo.AppDatabase$$ExternalSyntheticLambda24.run(D8$$SyntheticClass:0)\n\tat com.supercubegame.pockettodo.AppDatabase.tx(AppDatabase.java:96)\n\t... 7 more\n\nINSTRUMENTATION_CODE: 0\n"
+        },
+        "reopen": {
+          "status": "NOT_VERIFIED",
+          "required_checks": [
+            "guarded restore survives a separate Android process with all tables exact",
+            "guarded restore retains usable import journal and exact-cent totals after restart"
+          ],
+          "observed_required": [],
+          "missing": [
+            "guarded restore survives a separate Android process with all tables exact",
+            "guarded restore retains usable import journal and exact-cent totals after restart"
+          ],
+          "total_device_pass_records": 0,
+          "failure_tail": ""
+        }
+      }
+    },
+    "34": {
+      "status": "NOT_VERIFIED",
+      "phases": {
+        "seed": {
+          "status": "NOT_VERIFIED",
+          "required_checks": [
+            "restore preview does not mutate any live table or publish media",
+            "preview shows independent exact current and incoming counts for every table",
+            "restore preview summary cannot be modified by caller",
+            "cancel twice clears private staging without altering live state",
+            "canceled restore plan cannot be confirmed",
+            "semantic-invalid preview refuses and cleans staging without touching live data",
+            "restore preview is bound to its exact database helper owner",
+            "ordinary write after preview rejects stale restore",
+            "stale rejection preserves every new row and revision and clears stage",
+            "failed stale plan is single use and requires a new preview",
+            "full snapshot guard rejects another connection write even without revision bump",
+            "same-revision stale rejection retains exact externally changed state",
+            "changed staged media is rejected on confirmation with complete old state intact",
+            "guarded confirmation late injected failure rolls back every replaced table",
+            "failed commit plan cannot be reused after removing the fault",
+            "confirmation uses the exact validated preview not a subsequently replaced source file",
+            "confirmed snapshot publishes exact media and cleans staging before commit",
+            "successful confirmation cannot be replayed",
+            "exact idempotent retry remains a genuine no-op while preview is open",
+            "unchanged state after no-op can still confirm the reviewed snapshot"
+          ],
+          "observed_required": [],
+          "missing": [
+            "restore preview does not mutate any live table or publish media",
+            "preview shows independent exact current and incoming counts for every table",
+            "restore preview summary cannot be modified by caller",
+            "cancel twice clears private staging without altering live state",
+            "canceled restore plan cannot be confirmed",
+            "semantic-invalid preview refuses and cleans staging without touching live data",
+            "restore preview is bound to its exact database helper owner",
+            "ordinary write after preview rejects stale restore",
+            "stale rejection preserves every new row and revision and clears stage",
+            "failed stale plan is single use and requires a new preview",
+            "full snapshot guard rejects another connection write even without revision bump",
+            "same-revision stale rejection retains exact externally changed state",
+            "changed staged media is rejected on confirmation with complete old state intact",
+            "guarded confirmation late injected failure rolls back every replaced table",
+            "failed commit plan cannot be reused after removing the fault",
+            "confirmation uses the exact validated preview not a subsequently replaced source file",
+            "confirmed snapshot publishes exact media and cleans staging before commit",
+            "successful confirmation cannot be replayed",
+            "exact idempotent retry remains a genuine no-op while preview is open",
+            "unchanged state after no-op can still confirm the reviewed snapshot"
+          ],
+          "total_device_pass_records": 62,
+          "failure_tail": "INSTRUMENTATION_RESULT: stream=PASS tests target isolated v1.2 package\nPASS actual emulator API equals requested test matrix\nPASS new database empty, no demo user data\nPASS category rename committed\nPASS category order persisted by stable IDs\nPASS bad reorder rejected\nPASS bad reorder retains exact order\nPASS unknown category rejected by DB adapter\nPASS invalid activity has no partial row\nPASS ordered in-app path persisted\nPASS invalid later path step rejected\nPASS failed path replacement leaves all old steps\nPASS tags deduplicate without losing order\nPASS multi-date money batch inserted\nPASS persistent selected-date total is 80 yuan\nPASS identical retry no duplicate money\nPASS conflicting batch key rejected\nPASS late unknown activity rolls back whole money batch\nPASS failed batch leaves no rows or idempotency key\nPASS late duplicate entry rolls back whole transaction\nPASS duplicate entry leaves ledger and journal unchanged\nPASS planned isolated from actual after SQL persistence\nPASS latest batch undo removes own rows\nPASS undo tombstone prevents old retry resurrection\nPASS duplicate check-in single persistent day\nPASS persistent mark requires actual entry timestamp\nPASS ordered private/public text blocks committed\nPASS note cannot reference missing stored media\nPASS failed note replace retains all prior blocks\nPASS Android locked atomic publication and digest verified\nPASS Android duplicate media does not replace existing file\nPASS parallel media imports retain exact bytes without overlapping JVM locks\nPASS note image reference requires registered media\nPASS Android archive byte transport round-trips\nPASS Android export refuses overwrite and preserves exact existing ZIP\nPASS database helper reopen retains money\nPASS future schema refused without destructive downgrade\nPASS future database remains byte-semantically intact\nPASS persistent field rename preserves typed value\nPASS field note stays attached by ID after rename\nPASS persistent numeric field rejects non-number\nPASS bad field edit retains exact previous value\nPASS field value cannot refer to unknown activity\nPASS persistent multi-select deduplicates in order\nPASS late invalid option rejects whole replacement\nPASS invalid option leaves all old choices\nPASS persistent impossible date rejected\nPASS persistent executable link rejected\nPASS false field value differs from unset\nPASS explicit empty field clears value\nPASS new long field does not inherit legacy200-char cap\nPASS archiving field retains persistent value\nPASS archived persistent field rejects new value\nPASS archived field rejects new attached note\nPASS archive preserves existing field note and text\nPASS unknown field note rejected atomically\nPASS failed field note does not create orphan note\nPASS new ordinary todo does not inherit legacy title cap\nPASS ordinary todo edit and completion persist\nPASS blank ordinary todo edit rejected\nPASS invalid todo edit does not change completion\nPASS legacy import appends ordinary todos without replacing existing\nDEVICE_DATABASE_FAILED\njava.lang.IllegalArgumentException: 数据重复或关联不存在，本次修改已回滚\n\tat com.supercubegame.pockettodo.AppDatabase.tx(AppDatabase.java:97)\n\tat com.supercubegame.pockettodo.AppDatabase.importLegacy(AppDatabase.java:291)\n\tat java.lang.reflect.Method.invoke(Native Method)\n\tat com.supercubegame.pockettodo.V12DeviceTest.call(V12DeviceTest.java:22)\n\tat com.supercubegame.pockettodo.V12DeviceTest.importLegacy(V12DeviceTest.java:116)\n\tat com.supercubegame.pockettodo.V12DeviceTest.fieldsSeed(V12DeviceTest.java:150)\n\tat com.supercubegame.pockettodo.V12DeviceTest.onStart(V12DeviceTest.java:435)\n\tat android.app.Instrumentation$InstrumentationThread.run(Instrumentation.java:2402)\nCaused by: android.database.sqlite.SQLiteConstraintException: UNIQUE constraint failed: todos.id (code 1555 SQLITE_CONSTRAINT_PRIMARYKEY)\n\tat android.database.sqlite.SQLiteConnection.nativeExecuteForChangedRowCount(Native Method)\n\tat android.database.sqlite.SQLiteConnection.executeForChangedRowCount(SQLiteConnection.java:913)\n\tat android.database.sqlite.SQLiteSession.executeForChangedRowCount(SQLiteSession.java:756)\n\tat android.database.sqlite.SQLiteStatement.executeUpdateDelete(SQLiteStatement.java:67)\n\tat android.database.sqlite.SQLiteDatabase.executeSql(SQLiteDatabase.java:2089)\n\tat android.database.sqlite.SQLiteDatabase.execSQL(SQLiteDatabase.java:2066)\n\tat com.supercubegame.pockettodo.AppDatabase.lambda$importLegacy$21(AppDatabase.java:293)\n\tat com.supercubegame.pockettodo.AppDatabase$$ExternalSyntheticLambda24.run(D8$$SyntheticClass:0)\n\tat com.supercubegame.pockettodo.AppDatabase.tx(AppDatabase.java:96)\n\t... 7 more\n\nINSTRUMENTATION_CODE: 0\n"
+        },
+        "reopen": {
+          "status": "NOT_VERIFIED",
+          "required_checks": [
+            "guarded restore survives a separate Android process with all tables exact",
+            "guarded restore retains usable import journal and exact-cent totals after restart"
+          ],
+          "observed_required": [],
+          "missing": [
+            "guarded restore survives a separate Android process with all tables exact",
+            "guarded restore retains usable import journal and exact-cent totals after restart"
+          ],
+          "total_device_pass_records": 0,
+          "failure_tail": ""
+        }
+      }
+    }
+  },
+  "saf_restore_ui": "SEE_NATIVE_INDEX",
+  "undo_restore": "NOT_IMPLEMENTED",
+  "release_ready": false
+}

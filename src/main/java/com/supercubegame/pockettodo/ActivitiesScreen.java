@@ -124,6 +124,7 @@ public final class ActivitiesScreen {
         details.addView(host.button("笔记",()->new NoteEditorScreen(host,id,d.title,this::load).load()));
         TextView count=host.text("笔记 · "+d.notes.size()+" 篇",16,TodayScreen.INK);count.setContentDescription("note-count-"+id);details.addView(count);
         if(!d.notes.isEmpty())details.addView(host.text("点击笔记标题可改名；同名笔记分开保存。",14,TodayScreen.MUTED));
+        List<String> shown=new ArrayList<>();for(NoteSummary item:d.notes)shown.add(item.id);
         for(int i=0;i<d.notes.size();i++){
             NoteSummary summary=d.notes.get(i);
             LinearLayout actions=new LinearLayout(host.activity);
@@ -135,6 +136,7 @@ public final class ActivitiesScreen {
             // Keep the old first-note accessibility identity for existing regression.
             preview.setContentDescription(i==0?"note-activity-"+id:"note-summary-"+summary.id);
             preview.setMaxLines(2);preview.setPadding(0,0,0,host.dp(8));details.addView(preview);
+            details.addView(noteOrderActions(id,shown,summary,i,actions));
         }
         TextView pathTitle=host.text("去哪里操作",20,TodayScreen.INK);pathTitle.setPadding(0,host.dp(18),0,host.dp(8));details.addView(pathTitle);
         if(d.path.isEmpty())details.addView(host.text("把入口一行行记下来，下次不用找。",16,TodayScreen.MUTED));
@@ -143,6 +145,26 @@ public final class ActivitiesScreen {
             List<String> steps=new ArrayList<>();if(!value.isEmpty())for(String step:value.split("\\r?\\n",-1)){if(step.trim().isEmpty())throw new IllegalArgumentException("步骤不能为空");steps.add(step.trim());}
             host.db.savePath(id,steps);
         },this::load)));
+    }
+    /** Buttons retain the displayed stable-ID sequence, never a title lookup.
+     * The backend rejects stale membership/order and owns the single transaction.
+     */
+    private LinearLayout noteOrderActions(long owner,List<String> shown,NoteSummary note,int index,android.view.View anchor){
+        final List<String> displayed=new ArrayList<>(shown);
+        LinearLayout row=new LinearLayout(host.activity);
+        Button up=host.button("上移",()->moveNote(owner,note.id,displayed,index-1,anchor));
+        up.setContentDescription("note-up-"+note.id);up.setEnabled(index>0);
+        Button down=host.button("下移",()->moveNote(owner,note.id,displayed,index+1,anchor));
+        down.setContentDescription("note-down-"+note.id);down.setEnabled(index<displayed.size()-1);
+        row.addView(up,new LinearLayout.LayoutParams(0,host.dp(48),1));
+        row.addView(down,new LinearLayout.LayoutParams(0,host.dp(48),1));
+        return row;
+    }
+    private void moveNote(long owner,String note,List<String> displayed,int destination,android.view.View anchor){
+        if(selected!=owner||!anchor.isAttachedToWindow()||host.activity.isFinishing()||host.activity.isDestroyed())return;
+        host.work(()->host.db.moveNote(note,owner,displayed,destination),changed->load(),()->{
+            host.message("未能调整顺序；请返回分类后重新进入，避免使用已变化的列表。",true);
+        });
     }
     /** A title-only edit. Opening/cancelling never writes; the captured ID and owner
      * remain fixed even when another note has exactly the same displayed title. */
@@ -239,7 +261,7 @@ public final class ActivitiesScreen {
             catch(Exception e){validation.setText("日期格式应为 2026-09-21");return;}
             dialog.setCancelable(false);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);field.setEnabled(false);
             host.work(()->{host.db.putMark(new CalendarRules.Mark(id,date,picked[0],"",Instant.now()));return true;},ignored->{dialog.dismiss();load();},()->{
-                dialog.setCancelable(true);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);field.setEnabled(true);validation.setText("未能保存，请检查内容后重试");
+                dialog.setCancelable(true);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);field.setEnabled(true);validation.setText("未能保存，请检查内容后重试");validation.setTextColor(TodayScreen.ERROR);
             });
         }));
         dialog.show();

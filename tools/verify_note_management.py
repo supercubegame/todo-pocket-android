@@ -401,6 +401,269 @@ def native(adb, gate, snapshot):
         print("NOTE_MANAGEMENT_NATIVE "+json.dumps(result, ensure_ascii=False), flush=True)
 
 
+DELETE_LABELS = [
+    "delete_null_id", "delete_blank_id", "delete_missing", "delete_wrong_owner",
+    "delete_zero_owner", "delete_negative_owner", "delete_preview_readonly",
+    "delete_cancel_readonly", "delete_cancel_consumed", "delete_null_plan",
+    "delete_foreign_helper", "delete_stale_title", "delete_stale_body",
+    "delete_stale_privacy", "delete_stale_unrelated", "delete_stale_consumed",
+    "delete_late_rollback", "delete_failure_consumed", "delete_exact_target",
+    "delete_success_consumed", "delete_field_link_only", "delete_close_invalid",
+    "delete_reopen",
+]
+
+
+def observe_deletion(text):
+    text = text.replace("\r\n", "\n")
+    labels = re.findall(r"^NOTE_DELETE_PASS ([^\r\n]+)$", text, re.M)
+    results = re.findall(r"^NOTE_DELETE_RESULT ([^\r\n]+)$", text, re.M)
+    assert labels == DELETE_LABELS
+    assert results == [str(len(DELETE_LABELS))+" PASS"]
+    assert "NOTE_DELETE_FAILED" not in text
+    assert text.index("NOTE_MANAGEMENT_PASS reopen") < text.index("NOTE_DELETE_PASS ")
+    assert text.rindex("NOTE_DELETE_PASS ") < text.index("NOTE_DELETE_RESULT ")
+    assert text.index("NOTE_DELETE_RESULT ") < text.index("NOTE_MANAGEMENT_RESULT ")
+    return labels
+
+
+def deletion_log_accepted(text):
+    try:
+        observe_deletion(text)
+        return True
+    except (AssertionError, ValueError, TypeError, AttributeError):
+        return False
+
+
+DELETE_JAVA = r'''
+ private int deleteCount;
+ private static Object invoke(Object target,String name,Class<?>[] types,Object... values){
+  try{return target.getClass().getMethod(name,types).invoke(target,values);}
+  catch(java.lang.reflect.InvocationTargetException e){
+   Throwable cause=e.getCause();if(cause instanceof RuntimeException)throw (RuntimeException)cause;
+   if(cause instanceof Error)throw (Error)cause;throw new AssertionError("unexpected checked API failure",cause);
+  }catch(ReflectiveOperationException e){throw new AssertionError("guarded deletion API missing: "+name,e);}
+ }
+ private static Object preview(AppDatabase h,String id,long owner){
+  return invoke(h,"prepareNoteDeletion",new Class<?>[]{String.class,long.class},id,owner);
+ }
+ private static void confirm(AppDatabase h,Object plan){
+  try{
+   Class<?> type=Class.forName("com.supercubegame.pockettodo.AppDatabase$NoteDeletionPlan");
+   invoke(h,"confirmNoteDeletion",new Class<?>[]{type},plan);
+  }catch(ClassNotFoundException e){throw new AssertionError("guarded deletion plan API missing",e);}
+ }
+ private static void cancel(Object plan)throws Exception{((AutoCloseable)plan).close();}
+ private void deletePass(String label){deleteCount++;System.out.println("NOTE_DELETE_PASS "+label);}
+ private void deleteRefused(AppDatabase h,Class<? extends Throwable> type,Action action,String label)throws Exception{
+  Map<String,List<List<String>>> before=state(h);Throwable caught=null;
+  try{action.run();}catch(Throwable failure){caught=failure;}
+  need(caught!=null&&caught.getClass()==type,"wrong deletion refusal "+label+" actual="+caught);
+  need(state(h).equals(before),"deletion refusal changed all-table state "+label);media();deletePass(label);
+ }
+ private static Map<String,List<List<String>>> copyState(Map<String,List<List<String>>> before){
+  Map<String,List<List<String>>> out=new TreeMap<>();
+  for(Map.Entry<String,List<List<String>>> e:before.entrySet()){
+   List<List<String>> rows=new ArrayList<>();for(List<String> row:e.getValue())rows.add(new ArrayList<>(row));out.put(e.getKey(),rows);
+  }return out;
+ }
+ private static Map<String,List<List<String>>> cellExpected(Map<String,List<List<String>>> before,String table,String keyColumn,String id,String column,String value){
+  Map<String,List<List<String>>> out=copyState(before);List<List<String>> rows=out.get(table);
+  int key=rows.get(0).indexOf(keyColumn),at=rows.get(0).indexOf(column),matches=0;
+  need(key>=0&&at>=0,"external fixture columns");
+  for(int i=1;i<rows.size();i++)if(rows.get(i).get(key).equals("3:"+id)){rows.get(i).set(at,value);matches++;}
+  need(matches==1,"external fixture exact row");return out;
+ }
+ private static Map<String,List<List<String>>> deletionExpected(Map<String,List<List<String>>> before,String id){
+  Map<String,List<List<String>>> out=copyState(before);
+  for(String table:new String[]{"notes","blocks","field_notes"}){
+   List<List<String>> rows=out.get(table);int at=rows.get(0).indexOf(table.equals("notes")?"id":"note_id");
+   need(at>0,"deletion expected columns");int removed=0;
+   for(int i=rows.size()-1;i>0;i--)if(rows.get(i).get(at).equals("3:"+id)){rows.remove(i);removed++;}
+   if(table.equals("notes"))need(removed==1,"deletion expected exact identity");
+  }
+  List<List<String>> rows=out.get("revision");int at=rows.get(0).indexOf("value");
+  need(rows.size()==2&&at>0,"deletion revision layout");
+  rows.get(1).set(at,"1:"+Math.incrementExact(Long.parseLong(rows.get(1).get(at).substring(2))));
+  return out;
+ }
+ private void deleteVerify()throws Exception{
+  Context context=getTargetContext();String name="ci-note-management-"+args.getString("nonce")+".db";
+  Map<String,List<List<String>>> finalState;
+  try(AppDatabase h=AppDatabase.openSchema3(context,name)){
+   deleteRefused(h,IllegalArgumentException.class,()->preview(h,null,1),"delete_null_id");
+   deleteRefused(h,IllegalArgumentException.class,()->preview(h,"",1),"delete_blank_id");
+   deleteRefused(h,IllegalArgumentException.class,()->preview(h,"missing",1),"delete_missing");
+   deleteRefused(h,IllegalArgumentException.class,()->preview(h,"second",2),"delete_wrong_owner");
+   deleteRefused(h,IllegalArgumentException.class,()->preview(h,"second",0),"delete_zero_owner");
+   deleteRefused(h,IllegalArgumentException.class,()->preview(h,"second",-1),"delete_negative_owner");
+   // Rename suite has already proved identity and field associations. Deliberately
+   // make the target and sibling have the same title before deletion acceptance.
+   h.renameNote("second",1,"External","Same");
+   Map<String,List<List<String>>> before=state(h);Object cancelled=preview(h,"second",1);
+   need(invoke(cancelled,"noteId",new Class<?>[]{}).equals("second"),"preview note identity");
+   need(invoke(cancelled,"activityId",new Class<?>[]{}).equals(1L),"preview owner identity");
+   need(invoke(cancelled,"title",new Class<?>[]{}).equals("Same"),"preview title");
+   need(invoke(cancelled,"blockCount",new Class<?>[]{}).equals(2L),"preview affected block count");
+   need(invoke(cancelled,"fieldLinkCount",new Class<?>[]{}).equals(0L),"preview affected link count");
+   need(state(h).equals(before),"preview wrote data");media();deletePass("delete_preview_readonly");
+   cancel(cancelled);cancel(cancelled);need(state(h).equals(before),"cancel wrote data");media();deletePass("delete_cancel_readonly");
+   deleteRefused(h,IllegalStateException.class,()->confirm(h,cancelled),"delete_cancel_consumed");
+   deleteRefused(h,IllegalArgumentException.class,()->confirm(h,null),"delete_null_plan");
+   Object foreign=preview(h,"second",1);
+   try(AppDatabase other=AppDatabase.openSchema3(context,name)){
+    deleteRefused(other,IllegalArgumentException.class,()->confirm(other,foreign),"delete_foreign_helper");
+   }finally{cancel(foreign);}
+   String[][] edits={
+    {"notes","id","second","title","Same","Changed","3:Changed","delete_stale_title"},
+    {"blocks","id","text","text","Private sentinel","Changed body","3:Changed body","delete_stale_body"},
+    {"blocks","id","text","private","1","0","1:0","delete_stale_privacy"},
+    {"todos","id","todo","title","Unrelated","Changed todo","3:Changed todo","delete_stale_unrelated"}
+   };
+   Object lastStale=null;
+   for(String[] edit:edits){
+    before=state(h);Object stale=preview(h,"second",1);
+    try(SQLiteDatabase external=SQLiteDatabase.openDatabase(context.getDatabasePath(name).getPath(),null,SQLiteDatabase.OPEN_READWRITE)){
+     String sql="UPDATE "+edit[0]+" SET "+edit[3]+"=? WHERE "+edit[1]+"=?";
+     external.execSQL(sql,new Object[]{edit[5],edit[2]});
+     need(state(h).equals(cellExpected(before,edit[0],edit[1],edit[2],edit[3],edit[6])),"not exact same-revision external fixture");
+     deleteRefused(h,IllegalStateException.class,()->confirm(h,stale),edit[7]);
+     external.execSQL(sql,new Object[]{edit[4],edit[2]});
+    }
+    need(state(h).equals(before),"external fixture not exactly restored");media();lastStale=stale;
+   }
+   final Object usedStale=lastStale;
+   deleteRefused(h,IllegalStateException.class,()->confirm(h,usedStale),"delete_stale_consumed");
+   SQLiteDatabase db=h.getWritableDatabase();
+   db.execSQL("CREATE TRIGGER ci_delete_late BEFORE UPDATE OF value ON revision WHEN NOT EXISTS(SELECT 1 FROM notes WHERE id='second') AND NOT EXISTS(SELECT 1 FROM blocks WHERE note_id='second') BEGIN SELECT RAISE(ABORT,'note_delete_late_fault'); END");
+   Object failed=preview(h,"second",1);before=state(h);Throwable caught=null;
+   try{confirm(h,failed);}catch(Throwable failure){caught=failure;}
+   finally{db.execSQL("DROP TRIGGER ci_delete_late");}
+   need(caught instanceof IllegalArgumentException&&caught.getCause() instanceof SQLiteConstraintException&&caught.getCause().getMessage().contains("note_delete_late_fault"),"late delete barrier not reached "+caught);
+   need(state(h).equals(before),"late delete rollback incomplete");media();deletePass("delete_late_rollback");
+   deleteRefused(h,IllegalStateException.class,()->confirm(h,failed),"delete_failure_consumed");
+   before=state(h);Object plan=preview(h,"second",1);confirm(h,plan);
+   need(state(h).equals(deletionExpected(before,"second")),"delete touched sibling, media registry, order or wrong revision");media();deletePass("delete_exact_target");
+   deleteRefused(h,IllegalStateException.class,()->confirm(h,plan),"delete_success_consumed");
+   before=state(h);Object linked=preview(h,"linked",1);
+   need(invoke(linked,"fieldLinkCount",new Class<?>[]{}).equals(1L),"linked preview count");
+   need(invoke(linked,"blockCount",new Class<?>[]{}).equals(1L),"linked block count");confirm(h,linked);
+   need(state(h).equals(deletionExpected(before,"linked"))&&h.fieldNoteIds(1,"field").isEmpty(),"field values/definition or unrelated data removed");media();deletePass("delete_field_link_only");
+   Object closed=preview(h,"first",1);before=state(h);h.close();
+   deleteRefused(h,IllegalStateException.class,()->confirm(h,closed),"delete_close_invalid");
+   need(state(h).equals(before),"close changed deletion state");h.exportState();finalState=state(h);
+  }
+  try(AppDatabase reopened=AppDatabase.openSchema3(context,name)){
+   need(state(reopened).equals(finalState),"deleted notes reappeared on helper reopen");media();deletePass("delete_reopen");
+  }
+  need(deleteCount==23,"delete contract count");System.out.println("NOTE_DELETE_RESULT "+deleteCount+" PASS");
+ }
+'''
+
+
+def deletion_selftest():
+    good = sample()
+    assert deletion_log_accepted(good["log"])
+    assert accepted(good, 26, "source", "run", "a"*64)
+    bad = []
+    for label in DELETE_LABELS:
+        marker = "NOTE_DELETE_PASS "+label+"\n"
+        assert good["log"].count(marker) == 1
+        bad.extend((good["log"].replace(marker, ""), good["log"].replace(marker, marker+marker)))
+    bad.extend((
+        good["log"].replace("NOTE_DELETE_RESULT 23 PASS", "NOTE_DELETE_RESULT 22 PASS"),
+        good["log"]+"NOTE_DELETE_FAILED\n",
+        good["log"].replace("NOTE_DELETE_RESULT 23 PASS\n", ""),
+        good["log"].replace("NOTE_DELETE_PASS delete_null_id\n", "")+"NOTE_DELETE_PASS delete_null_id\n",
+        good["log"].replace("NOTE_DELETE_PASS delete_null_id\n", "NOTE_DELETE_PASS delete_blank_id\n", 1),
+        good["log"].replace("NOTE_DELETE_RESULT 23 PASS\n", "").replace("NOTE_DELETE_PASS delete_null_id\n", "NOTE_DELETE_RESULT 23 PASS\nNOTE_DELETE_PASS delete_null_id\n", 1),
+    ))
+    for log in bad:
+        assert log != good["log"]
+        assert not deletion_log_accepted(log)
+        value = copy.deepcopy(good);value["log"] = log
+        value["log_sha256"] = hashlib.sha256(log.encode()).hexdigest()
+        assert not accepted(value, 26, "source", "run", "a"*64)
+        batch = {"status":"PASS", "note_management":value}
+        codec = {"status":"PASS", "api":26, "commit":"source", "run_id":"run",
+                 "release_ready":False, "apk_sha256":"a"*64, "batch_ui":batch}
+        assert aggregate(codec, {"status":"PASS","batch_ui":copy.deepcopy(batch)}, 26, "source", "run")["status"] != "PASS"
+    # Permanent observer mutants: unchanged valid input first, then the same negative
+    # corpus must reject a mutant through the exact checker used above.
+    import inspect
+    source = inspect.getsource(observe_deletion)
+    mutants = [
+        ("assert labels == DELETE_LABELS", "assert True"),
+        ('assert results == [str(len(DELETE_LABELS))+" PASS"]', "assert True"),
+        ('assert "NOTE_DELETE_FAILED" not in text', "assert True"),
+        ('assert text.rindex("NOTE_DELETE_PASS ") < text.index("NOTE_DELETE_RESULT ")', "assert True"),
+    ]
+    killed = 0
+    for old, new in mutants:
+        assert source.count(old) == 1
+        modified = source.replace(old, new, 1);assert modified != source
+        namespace = dict(globals());exec(compile(modified, "<delete-observer-mutant>", "exec"), namespace)
+        checker = namespace["observe_deletion"]
+        checker(good["log"])
+        escaped = 0
+        for log in bad:
+            try:checker(log)
+            except (AssertionError, ValueError):continue
+            escaped += 1
+        assert escaped > 0, "mutation did not weaken a exercised obligation"
+        killed += 1
+    result = {"positive":1,"negative":len(bad),"permanent_observer_mutants":killed,
+              "scope":"HOST_RECEIPT_OBSERVERS_NOT_ANDROID_EXECUTION"}
+    print("NOTE_DELETE_HOST "+json.dumps(result), flush=True)
+    return result
+
+
+# Retain every existing rename check and use the existing mandatory report path.
+SCOPE = "APK_NOTE_RENAME_AND_GUARDED_DELETE_BACKEND_SYNTHETIC_NOT_UI_OR_LMK"
+_rename_accepted = accepted
+_rename_sample = sample
+_rename_selftest = selftest
+_rename_aggregate = aggregate
+
+
+def accepted(value, api, source, run, apk):
+    return _rename_accepted(value, api, source, run, apk) and deletion_log_accepted(value["log"])
+
+
+def sample(api=26, source="source", run="run", apk="a"*64):
+    value = _rename_sample(api, source, run, apk)
+    marker = "NOTE_MANAGEMENT_RESULT "
+    assert value["log"].count(marker) == 1
+    evidence = "".join("NOTE_DELETE_PASS "+label+"\n" for label in DELETE_LABELS)
+    evidence += "NOTE_DELETE_RESULT "+str(len(DELETE_LABELS))+" PASS\n"
+    value["log"] = value["log"].replace(marker, evidence+marker, 1)
+    value["log_sha256"] = hashlib.sha256(value["log"].encode()).hexdigest()
+    return value
+
+
+def aggregate(codec, native, api, source, run):
+    result = _rename_aggregate(codec, native, api, source, run)
+    result["deletion_backend"] = {
+        "status":result["status"],
+        "checks":len(DELETE_LABELS) if result["status"] == "PASS" else 0,
+        "labels":DELETE_LABELS[:] if result["status"] == "PASS" else [],
+        "scope":"ACTUAL_INSTALLED_APK_ISOLATED_DB_NOT_NATIVE_CONFIRMATION_UI",
+    }
+    return result
+
+
+def selftest():
+    result = _rename_selftest()
+    result["deletion_backend"] = deletion_selftest()
+    return result
+
+
+_entry = '   verify();need(count==18,"contract count");'
+_declaration = " @Override public void onCreate(Bundle value)"
+assert JAVA.count(_entry) == JAVA.count(_declaration) == 1
+JAVA = JAVA.replace(_entry, '   verify();deleteVerify();need(count==18,"contract count");', 1)
+JAVA = JAVA.replace(_declaration, DELETE_JAVA+"\n"+_declaration, 1)
+
+
 if __name__ == "__main__":
     import sys
     assert sys.argv[1:] == ["selftest"]

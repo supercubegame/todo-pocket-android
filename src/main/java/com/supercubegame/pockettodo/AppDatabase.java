@@ -152,6 +152,63 @@ public final class AppDatabase extends SQLiteOpenHelper {
             bump(db);return true;
         });
     }
+    /** Move one stable note ID within the exact activity order the user saw.
+     * Ordering uses the existing rowid slots, not a new schema or delete/reinsert.
+     * IDs, ownership, title, block order, field links and media are untouched.
+     * This compares membership/order, not full content or an ABA/session token.
+     */
+    public synchronized boolean moveNote(String id,long activity,List<String> expectedOrder,int to){
+        Ledger.identifier(id);Ledger.positive(activity);
+        if(expectedOrder==null||expectedOrder.isEmpty())throw new IllegalArgumentException("缺少当前笔记顺序");
+        List<String> seen=new ArrayList<>(expectedOrder);Set<String> unique=new HashSet<>();
+        for(String note:seen)if(!unique.add(Ledger.identifier(note)))throw new IllegalArgumentException("笔记顺序含重复标识");
+        if(to<0||to>=seen.size())throw new IllegalArgumentException("笔记位置无效");
+        SQLiteDatabase connection=getWritableDatabase();
+        if(connection.inTransaction())throw new IllegalStateException("请在当前操作完成后重新排序");
+        return tx(db->{
+            List<String> ids=new ArrayList<>();List<Long> slots=new ArrayList<>();
+            try(Cursor c=db.rawQuery("SELECT id,rowid FROM notes WHERE activity_id=? ORDER BY rowid",new String[]{Long.toString(activity)})){
+                while(c.moveToNext()){ids.add(c.getString(0));slots.add(c.getLong(1));}
+            }
+            int from=ids.indexOf(id);
+            if(from<0)throw new IllegalArgumentException("所选笔记不存在或不属于当前活动");
+            if(!ids.equals(seen))throw new IllegalStateException("笔记顺序已变化，请刷新后重新排序");
+            if(from==to)return false;
+            // Find a free slot across ALL owners. No MAX+1 overflow and no
+            // assumptions about old backups having positive or contiguous rowids.
+            long spare=0;
+            try(Cursor c=db.rawQuery("SELECT rowid FROM notes WHERE rowid>=0 ORDER BY rowid",null)){
+                while(c.moveToNext()){
+                    long occupied=c.getLong(0);
+                    if(occupied>spare)break;
+                    if(occupied==spare)spare=Math.incrementExact(spare);
+                }
+            }
+            moveNoteSlot(db,id,activity,spare);
+            if(from<to){
+                for(int i=from+1;i<=to;i++)moveNoteSlot(db,ids.get(i),activity,slots.get(i-1));
+            }else{
+                for(int i=from-1;i>=to;i--)moveNoteSlot(db,ids.get(i),activity,slots.get(i+1));
+            }
+            moveNoteSlot(db,id,activity,slots.get(to));
+            List<String> wanted=new ArrayList<>(ids);wanted.add(to,wanted.remove(from));
+            int index=0;
+            try(Cursor c=db.rawQuery("SELECT id,rowid FROM notes WHERE activity_id=? ORDER BY rowid",new String[]{Long.toString(activity)})){
+                while(c.moveToNext()){
+                    if(index>=wanted.size()||!wanted.get(index).equals(c.getString(0))||slots.get(index)!=c.getLong(1))
+                        throw new IllegalStateException("笔记排序回读不一致，本次修改已回滚");
+                    index++;
+                }
+            }
+            if(index!=wanted.size())throw new IllegalStateException("笔记数量已变化，本次修改已回滚");
+            bump(db);return true;
+        });
+    }
+    private static void moveNoteSlot(SQLiteDatabase db,String id,long activity,long slot){
+        android.content.ContentValues values=new android.content.ContentValues();values.put("rowid",slot);
+        if(db.update("notes",values,"id=? AND activity_id=?",new String[]{id,Long.toString(activity)})!=1)
+            throw new IllegalStateException("笔记排序目标已变化，本次修改已回滚");
+    }
     /** Read-only, exact-helper/session/connection-bound deletion preview.
      * No body text, image paths or mutable snapshot bytes are exposed.
      * Caller must close on cancellation and obtain explicit UI consent.

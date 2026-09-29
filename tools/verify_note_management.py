@@ -195,7 +195,7 @@ public final class NoteManagementInstrumentation extends Instrumentation {
    while(tables.moveToNext()){
     String name=tables.getString(0);need(name.matches("[A-Za-z0-9_]+"),"table identity");
     List<List<String>> rows=new ArrayList<>();
-    try(Cursor c=db.rawQuery("SELECT rowid,* FROM \""+name+"\" ORDER BY rowid",null)){
+    try(Cursor c=db.rawQuery("SELECT rowid AS rowid,* FROM \""+name+"\" ORDER BY rowid",null)){
      rows.add(new ArrayList<>(Arrays.asList(c.getColumnNames())));
      while(c.moveToNext()){
       List<String> row=new ArrayList<>();
@@ -877,7 +877,7 @@ ORDER_JAVA = r'''
    List<String> row=new ArrayList<>(byId.get(wanted.get(i)));row.set(0,rowids.get(i));rows.set(slots.get(i),row);
   }
   List<List<String>> revision=out.get("revision");
-  need(revision.size()==2&&revision.get(0).equals(Arrays.asList("rowid","id","value")),"order revision fixture");
+  need(revision.size()==2&&revision.get(0).equals(Arrays.asList("rowid","id","value")),"order revision fixture actual="+revision);
   revision.get(1).set(2,"1:"+Math.incrementExact(Long.parseLong(revision.get(1).get(2).substring(2))));
   return out;
  }
@@ -1046,9 +1046,59 @@ def order_selftest():
     return result
 
 
+def order_projection_selftest():
+    """Real host SQLite metadata from product DDL and instrumentation SQL.
+    This checks the fixture's SQL shape, not Android Cursor or moveNote behavior.
+    """
+    import sqlite3
+    root = Path(__file__).resolve().parents[1]
+    product = (root/"src/main/java/com/supercubegame/pockettodo/AppDatabase.java").read_text()
+    begin = JAVA.index(" static Map<String,List<List<String>>> state(")
+    end = JAVA.index(" static Map<String,List<List<String>>> expected(", begin)
+    projection = re.findall(r'db.rawQuery\("(SELECT [^"\n]+) FROM \\"', JAVA[begin:end])
+    assert len(projection) == 1, "snapshot projection missing or ambiguous"
+    expected = {"revision": ["rowid", "id", "value"],
+                "notes": ["rowid", "id", "activity_id", "title"]}
+    with sqlite3.connect(":memory:") as db:
+        for table in expected:
+            declarations = re.findall(r'db\.execSQL\("(CREATE TABLE '+table+r'\([^"\n]+)"\);', product)
+            assert len(declarations) == 1, "missing actual product DDL "+table
+            db.execute(declarations[0])
+        db.execute("INSERT INTO revision VALUES(1,7)")
+        db.execute("INSERT INTO notes VALUES('same-a',1,'Same')")
+        db.execute("INSERT INTO notes VALUES('same-b',1,'Same')")
+        def check(query):
+            for table, columns in expected.items():
+                cursor = db.execute(query+' FROM "'+table+'" ORDER BY rowid')
+                actual = [column[0] for column in cursor.description]
+                assert actual == columns, (table, actual, columns)
+                rows = cursor.fetchall()
+                plain = db.execute('SELECT * FROM "'+table+'" ORDER BY rowid').fetchall()
+                assert [row[1:] for row in rows] == plain, "projection lost typed cells"
+                assert [row[0] for row in rows] == list(range(1, len(rows)+1))
+        check(projection[0])
+        # The historical unaliased query must fail on the INTEGER PRIMARY KEY
+        # table, rather than being declared equivalent by a string-only guard.
+        assert projection[0] != "SELECT rowid,*"
+        killed = 0
+        for query in ("SELECT rowid,*", "SELECT *", "SELECT 0 AS rowid,*"):
+            try:
+                check(query)
+            except AssertionError:
+                killed += 1
+            else:
+                raise AssertionError("projection mutant escaped "+query)
+        assert killed == 3
+    result = {"tables": 2, "sql_mutants_rejected": killed,
+              "scope": "HOST_SQLITE_ACTUAL_DDL_AND_TEST_QUERY_NOT_ANDROID"}
+    print("NOTE_ORDER_PROJECTION_HOST "+json.dumps(result), flush=True)
+    return result
+
+
 def selftest():
     result = _before_order_selftest()
     result["ordering_backend"] = order_selftest()
+    result["ordering_projection"] = order_projection_selftest()
     return result
 
 

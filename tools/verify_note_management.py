@@ -720,7 +720,8 @@ def aggregate(codec, native, api, source, run):
     apk = codec.get("apk_sha256") if isinstance(codec, dict) else None
     passed = (
         result["status"] == "PASS" and value == n.get("deletion_ui") and
-        report_deletion_ui(value, api, source, run, apk)
+        report_deletion_ui(value, api, source, run, apk) and
+        report_deletion_ui(n.get("deletion_ui"), api, source, run, apk)
     )
     result["deletion_ui"] = {
         "status": "PASS" if passed else "NOT_VERIFIED",
@@ -777,6 +778,11 @@ def report_deletion_selftest():
             pairs.append(pair)
         pair = list(parents(good)); del pair[side]["batch_ui"]["note_management"]; pairs.append(pair)
         pair = list(parents(good)); pair[side]["batch_ui"]["status"] = "FAIL"; pairs.append(pair)
+        for key, value in (("owner", True), ("deleted_field_links", False)):
+            pair = list(parents(good)); pair[side]["batch_ui"]["deletion_ui"][key] = value
+            # Python dict equality treats True==1 and False==0. Validate both sides.
+            assert pair[0]["batch_ui"]["deletion_ui"] == pair[1]["batch_ui"]["deletion_ui"]
+            pairs.append(pair)
     for pair in pairs:
         assert not passes(pair), "independent deletion report accepted missing, stale or divergent evidence"
     # Execute weakened report implementations against this exact corpus.
@@ -786,6 +792,7 @@ def report_deletion_selftest():
     for old, new in (
         ('value == n.get("deletion_ui")', "True"),
         ("report_deletion_ui(value, api, source, run, apk)", "True"),
+        ('report_deletion_ui(n.get("deletion_ui"), api, source, run, apk)', "True"),
         ('result["status"] == "PASS"', "True"),
     ):
         assert source.count(old) == 1

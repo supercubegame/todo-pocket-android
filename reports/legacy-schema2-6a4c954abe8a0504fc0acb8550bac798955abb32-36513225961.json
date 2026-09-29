@@ -1,0 +1,131 @@
+{
+  "commit": "6a4c954abe8a0504fc0acb8550bac798955abb32",
+  "run_id": "36513225961",
+  "status": "NOT_VERIFIED",
+  "scope": "FROZEN_SCHEMA2_DB_BACKUP_COMPATIBILITY_NOT_SCHEMA3_IMPLEMENTATION",
+  "devices": {
+    "26": {
+      "status": "NOT_VERIFIED",
+      "phases": {
+        "seed": {
+          "status": "NOT_VERIFIED",
+          "checks": 0,
+          "expected_checks": 14,
+          "labels": [],
+          "required_labels": [
+            "frozen fixture really uses schema2 and eight block columns",
+            "frozen serializer detects a real changed row and rollback restores fixture",
+            "archive wraps frozen old bytes without current database encoder",
+            "opening frozen old database preserves all historical cells and ordering",
+            "cancel old-backup preview preserves live state and publishes no media",
+            "guarded old-backup restore preserves complete old-format projection",
+            "guarded old-backup restore publishes exact original bytes",
+            "old archived field and note attachment survive restore",
+            "duplicate titles and shared image retain separate block privacy and ownership",
+            "truncated frozen state cannot replace current live data",
+            "missing frozen original refuses restore without data loss",
+            "late old-backup restore failure rolls back every deleted and inserted table",
+            "lower-level old restore stays deterministic and retains original bytes",
+            "current-format export and restore retain historical semantic content"
+          ],
+          "decoded_log_text_sha256": "ac9b3bc77048669f486cec70844537dbac2b42a98f5150006af17e70e06b2bb9",
+          "failure_tail": "INSTRUMENTATION_RESULT: stream=PASS tests target isolated v1.2 package\nPASS actual emulator API equals requested test matrix\nPASS new database empty, no demo user data\nPASS category rename committed\nPASS category order persisted by stable IDs\nPASS bad reorder rejected\nPASS bad reorder retains exact order\nPASS unknown category rejected by DB adapter\nPASS invalid activity has no partial row\nPASS ordered in-app path persisted\nPASS invalid later path step rejected\nPASS failed path replacement leaves all old steps\nPASS tags deduplicate without losing order\nPASS multi-date money batch inserted\nPASS persistent selected-date total is 80 yuan\nPASS identical retry no duplicate money\nPASS conflicting batch key rejected\nPASS late unknown activity rolls back whole money batch\nPASS failed batch leaves no rows or idempotency key\nPASS late duplicate entry rolls back whole transaction\nPASS duplicate entry leaves ledger and journal unchanged\nPASS planned isolated from actual after SQL persistence\nPASS latest batch undo removes own rows\nPASS undo tombstone prevents old retry resurrection\nPASS duplicate check-in single persistent day\nPASS persistent mark requires actual entry timestamp\nPASS ordered private/public text blocks committed\nPASS note cannot reference missing stored media\nPASS failed note replace retains all prior blocks\nPASS Android locked atomic publication and digest verified\nPASS Android duplicate media does not replace existing file\nPASS parallel media imports retain exact bytes without overlapping JVM locks\nPASS note image reference requires registered media\nPASS Android archive byte transport round-trips\nPASS Android export refuses overwrite and preserves exact existing ZIP\nPASS database helper reopen retains money\nPASS future schema refused without destructive downgrade\nPASS future database remains byte-semantically intact\nPASS persistent field rename preserves typed value\nPASS field note stays attached by ID after rename\nPASS persistent numeric field rejects non-number\nPASS bad field edit retains exact previous value\nPASS field value cannot refer to unknown activity\nPASS persistent multi-select deduplicates in order\nPASS late invalid option rejects whole replacement\nPASS invalid option leaves all old choices\nPASS persistent impossible date rejected\nPASS persistent executable link rejected\nPASS false field value differs from unset\nPASS explicit empty field clears value\nPASS new long field does not inherit legacy200-char cap\nPASS archiving field retains persistent value\nPASS archived persistent field rejects new value\nPASS archived field rejects new attached note\nPASS archive preserves existing field note and text\nPASS unknown field note rejected atomically\nPASS failed field note does not create orphan note\nPASS new ordinary todo does not inherit legacy title cap\nPASS ordinary todo edit and completion persist\nPASS blank ordinary todo edit rejected\nPASS invalid todo edit does not change completion\nPASS legacy import appends ordinary todos without replacing existing\nDEVICE_DATABASE_FAILED\njava.lang.IllegalArgumentException: 数据重复或关联不存在，本次修改已回滚\n\tat com.supercubegame.pockettodo.AppDatabase.tx(AppDatabase.java:97)\n\tat com.supercubegame.pockettodo.AppDatabase.importLegacy(AppDatabase.java:291)\n\tat java.lang.reflect.Method.invoke(Native Method)\n\tat com.supercubegame.pockettodo.V12DeviceTest.call(V12DeviceTest.java:22)\n\tat com.supercubegame.pockettodo.V12DeviceTest.importLegacy(V12DeviceTest.java:116)\n\tat com.supercubegame.pockettodo.V12DeviceTest.fieldsSeed(V12DeviceTest.java:150)\n\tat com.supercubegame.pockettodo.V12DeviceTest.onStart(V12DeviceTest.java:435)\n\tat android.app.Instrumentation$InstrumentationThread.run(Instrumentation.java:2074)\nCaused by: android.database.sqlite.SQLiteConstraintException: UNIQUE constraint failed: todos.id (code 1555)\n\tat android.database.sqlite.SQLiteConnection.nativeExecuteForChangedRowCount(Native Method)\n\tat android.database.sqlite.SQLiteConnection.executeForChangedRowCount(SQLiteConnection.java:734)\n\tat android.database.sqlite.SQLiteSession.executeForChangedRowCount(SQLiteSession.java:754)\n\tat android.database.sqlite.SQLiteStatement.executeUpdateDelete(SQLiteStatement.java:64)\n\tat android.database.sqlite.SQLiteDatabase.executeSql(SQLiteDatabase.java:1679)\n\tat android.database.sqlite.SQLiteDatabase.execSQL(SQLiteDatabase.java:1658)\n\tat com.supercubegame.pockettodo.AppDatabase.lambda$importLegacy$21(AppDatabase.java:293)\n\tat com.supercubegame.pockettodo.AppDatabase$$ExternalSyntheticLambda24.run(D8$$SyntheticClass:0)\n\tat com.supercubegame.pockettodo.AppDatabase.tx(AppDatabase.java:96)\n\t... 7 more\n\nINSTRUMENTATION_CODE: 0\n"
+        },
+        "reopen": {
+          "status": "NOT_VERIFIED",
+          "checks": 0,
+          "expected_checks": 3,
+          "labels": [],
+          "required_labels": [
+            "separate process retains complete frozen old-backup content",
+            "separate process retains exact shared original",
+            "restored todo and archived field remain usable after process restart"
+          ],
+          "decoded_log_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "failure_tail": ""
+        }
+      }
+    },
+    "34": {
+      "status": "NOT_VERIFIED",
+      "phases": {
+        "seed": {
+          "status": "NOT_VERIFIED",
+          "checks": 0,
+          "expected_checks": 14,
+          "labels": [],
+          "required_labels": [
+            "frozen fixture really uses schema2 and eight block columns",
+            "frozen serializer detects a real changed row and rollback restores fixture",
+            "archive wraps frozen old bytes without current database encoder",
+            "opening frozen old database preserves all historical cells and ordering",
+            "cancel old-backup preview preserves live state and publishes no media",
+            "guarded old-backup restore preserves complete old-format projection",
+            "guarded old-backup restore publishes exact original bytes",
+            "old archived field and note attachment survive restore",
+            "duplicate titles and shared image retain separate block privacy and ownership",
+            "truncated frozen state cannot replace current live data",
+            "missing frozen original refuses restore without data loss",
+            "late old-backup restore failure rolls back every deleted and inserted table",
+            "lower-level old restore stays deterministic and retains original bytes",
+            "current-format export and restore retain historical semantic content"
+          ],
+          "decoded_log_text_sha256": "b01e503758da036aa95af8dc1635a7273072a79527989bdc262fc11531c2b49b",
+          "failure_tail": "INSTRUMENTATION_RESULT: stream=PASS tests target isolated v1.2 package\nPASS actual emulator API equals requested test matrix\nPASS new database empty, no demo user data\nPASS category rename committed\nPASS category order persisted by stable IDs\nPASS bad reorder rejected\nPASS bad reorder retains exact order\nPASS unknown category rejected by DB adapter\nPASS invalid activity has no partial row\nPASS ordered in-app path persisted\nPASS invalid later path step rejected\nPASS failed path replacement leaves all old steps\nPASS tags deduplicate without losing order\nPASS multi-date money batch inserted\nPASS persistent selected-date total is 80 yuan\nPASS identical retry no duplicate money\nPASS conflicting batch key rejected\nPASS late unknown activity rolls back whole money batch\nPASS failed batch leaves no rows or idempotency key\nPASS late duplicate entry rolls back whole transaction\nPASS duplicate entry leaves ledger and journal unchanged\nPASS planned isolated from actual after SQL persistence\nPASS latest batch undo removes own rows\nPASS undo tombstone prevents old retry resurrection\nPASS duplicate check-in single persistent day\nPASS persistent mark requires actual entry timestamp\nPASS ordered private/public text blocks committed\nPASS note cannot reference missing stored media\nPASS failed note replace retains all prior blocks\nPASS Android locked atomic publication and digest verified\nPASS Android duplicate media does not replace existing file\nPASS parallel media imports retain exact bytes without overlapping JVM locks\nPASS note image reference requires registered media\nPASS Android archive byte transport round-trips\nPASS Android export refuses overwrite and preserves exact existing ZIP\nPASS database helper reopen retains money\nPASS future schema refused without destructive downgrade\nPASS future database remains byte-semantically intact\nPASS persistent field rename preserves typed value\nPASS field note stays attached by ID after rename\nPASS persistent numeric field rejects non-number\nPASS bad field edit retains exact previous value\nPASS field value cannot refer to unknown activity\nPASS persistent multi-select deduplicates in order\nPASS late invalid option rejects whole replacement\nPASS invalid option leaves all old choices\nPASS persistent impossible date rejected\nPASS persistent executable link rejected\nPASS false field value differs from unset\nPASS explicit empty field clears value\nPASS new long field does not inherit legacy200-char cap\nPASS archiving field retains persistent value\nPASS archived persistent field rejects new value\nPASS archived field rejects new attached note\nPASS archive preserves existing field note and text\nPASS unknown field note rejected atomically\nPASS failed field note does not create orphan note\nPASS new ordinary todo does not inherit legacy title cap\nPASS ordinary todo edit and completion persist\nPASS blank ordinary todo edit rejected\nPASS invalid todo edit does not change completion\nPASS legacy import appends ordinary todos without replacing existing\nDEVICE_DATABASE_FAILED\njava.lang.IllegalArgumentException: 数据重复或关联不存在，本次修改已回滚\n\tat com.supercubegame.pockettodo.AppDatabase.tx(AppDatabase.java:97)\n\tat com.supercubegame.pockettodo.AppDatabase.importLegacy(AppDatabase.java:291)\n\tat java.lang.reflect.Method.invoke(Native Method)\n\tat com.supercubegame.pockettodo.V12DeviceTest.call(V12DeviceTest.java:22)\n\tat com.supercubegame.pockettodo.V12DeviceTest.importLegacy(V12DeviceTest.java:116)\n\tat com.supercubegame.pockettodo.V12DeviceTest.fieldsSeed(V12DeviceTest.java:150)\n\tat com.supercubegame.pockettodo.V12DeviceTest.onStart(V12DeviceTest.java:435)\n\tat android.app.Instrumentation$InstrumentationThread.run(Instrumentation.java:2402)\nCaused by: android.database.sqlite.SQLiteConstraintException: UNIQUE constraint failed: todos.id (code 1555 SQLITE_CONSTRAINT_PRIMARYKEY)\n\tat android.database.sqlite.SQLiteConnection.nativeExecuteForChangedRowCount(Native Method)\n\tat android.database.sqlite.SQLiteConnection.executeForChangedRowCount(SQLiteConnection.java:913)\n\tat android.database.sqlite.SQLiteSession.executeForChangedRowCount(SQLiteSession.java:756)\n\tat android.database.sqlite.SQLiteStatement.executeUpdateDelete(SQLiteStatement.java:67)\n\tat android.database.sqlite.SQLiteDatabase.executeSql(SQLiteDatabase.java:2089)\n\tat android.database.sqlite.SQLiteDatabase.execSQL(SQLiteDatabase.java:2066)\n\tat com.supercubegame.pockettodo.AppDatabase.lambda$importLegacy$21(AppDatabase.java:293)\n\tat com.supercubegame.pockettodo.AppDatabase$$ExternalSyntheticLambda24.run(D8$$SyntheticClass:0)\n\tat com.supercubegame.pockettodo.AppDatabase.tx(AppDatabase.java:96)\n\t... 7 more\n\nINSTRUMENTATION_CODE: 0\n"
+        },
+        "reopen": {
+          "status": "NOT_VERIFIED",
+          "checks": 0,
+          "expected_checks": 3,
+          "labels": [],
+          "required_labels": [
+            "separate process retains complete frozen old-backup content",
+            "separate process retains exact shared original",
+            "restored todo and archived field remain usable after process restart"
+          ],
+          "decoded_log_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "failure_tail": ""
+        }
+      }
+    }
+  },
+  "observer_selftests": {
+    "seed": {
+      "positive_controls": 2,
+      "negative_controls": 12,
+      "mutants": [
+        "missing_entire_suite",
+        "missing_result",
+        "wrong_count",
+        "duplicate_result",
+        "wrong_phase",
+        "missing_named_check",
+        "self_consistent_missing_check",
+        "duplicate_named_check",
+        "substituted_named_check",
+        "failed_suite",
+        "failed_instrumentation",
+        "missing_instrumentation_finish"
+      ]
+    },
+    "reopen": {
+      "positive_controls": 2,
+      "negative_controls": 12,
+      "mutants": [
+        "missing_entire_suite",
+        "missing_result",
+        "wrong_count",
+        "duplicate_result",
+        "wrong_phase",
+        "missing_named_check",
+        "self_consistent_missing_check",
+        "duplicate_named_check",
+        "substituted_named_check",
+        "failed_suite",
+        "failed_instrumentation",
+        "missing_instrumentation_finish"
+      ]
+    }
+  },
+  "release_ready": false
+}

@@ -107,7 +107,7 @@ def sample(api=26, source="source", run="run", apk="a"*64):
 def selftest():
     good = sample()
     def parents(value):
-        batch = {"status": "PASS", "note_management": value}
+        batch = {"status": "PASS", "note_management": value, "deletion_ui": report_ui_sample()}
         return ({"status": "PASS", "api": 26, "commit": "source", "run_id": "run",
                  "release_ready": False, "apk_sha256": "a"*64, "batch_ui": copy.deepcopy(batch)},
                 {"status": "PASS", "batch_ui": copy.deepcopy(batch)})
@@ -583,7 +583,7 @@ def deletion_selftest():
         value = copy.deepcopy(good);value["log"] = log
         value["log_sha256"] = hashlib.sha256(log.encode()).hexdigest()
         assert not accepted(value, 26, "source", "run", "a"*64)
-        batch = {"status":"PASS", "note_management":value}
+        batch = {"status":"PASS", "note_management":value, "deletion_ui":report_ui_sample()}
         codec = {"status":"PASS", "api":26, "commit":"source", "run_id":"run",
                  "release_ready":False, "apk_sha256":"a"*64, "batch_ui":batch}
         assert aggregate(codec, {"status":"PASS","batch_ui":copy.deepcopy(batch)}, 26, "source", "run")["status"] != "PASS"
@@ -662,6 +662,149 @@ _declaration = " @Override public void onCreate(Bundle value)"
 assert JAVA.count(_entry) == JAVA.count(_declaration) == 1
 JAVA = JAVA.replace(_entry, '   verify();deleteVerify();need(count==18,"contract count");', 1)
 JAVA = JAVA.replace(_declaration, DELETE_JAVA+"\n"+_declaration, 1)
+
+
+# Independently require native deletion evidence in the report, not just in the
+# emitter's own receipt. Keep this expectation separate from verify_batch_exports.
+REPORT_DELETE_UI_LABELS = [
+    "preview_exact_identity_counts", "cancel_readonly", "unchecked_blocked_readonly",
+    "process_loss_readonly", "fresh_preview_unchecked", "same_title_target_only",
+    "all_media_preserved", "restart_deletion_and_sibling_persisted",
+]
+
+
+def report_deletion_ui(value, api, source, run, apk):
+    if not isinstance(value, dict):
+        return False
+    return (
+        value.get("status") == "PASS" and
+        value.get("scope") == "NATIVE_NOTE_DELETE_EXACT_ID_CONSENT_FORCE_STOP_RESTART_NOT_LMK" and
+        type(value.get("api")) is int and value["api"] == api and
+        value.get("commit") == source and value.get("run_id") == run and
+        isinstance(apk, str) and re.fullmatch("[0-9a-f]{64}", apk) is not None and
+        value.get("apk_sha256") == apk and value.get("release_ready") is False and
+        value.get("labels") == REPORT_DELETE_UI_LABELS and
+        type(value.get("checks")) is int and value["checks"] == 8 and
+        isinstance(value.get("note_id"), str) and bool(value["note_id"].strip()) and
+        isinstance(value.get("sibling_id"), str) and bool(value["sibling_id"].strip()) and
+        value["note_id"] != value["sibling_id"] and
+        type(value.get("owner")) is int and value["owner"] > 0 and
+        type(value.get("deleted_blocks")) is int and value["deleted_blocks"] > 0 and
+        type(value.get("deleted_field_links")) is int and value["deleted_field_links"] >= 0 and
+        type(value.get("preserved_media_files")) is int and value["preserved_media_files"] > 0 and
+        value.get("state") == "EXACT_TARGET_ROWS_ONE_REVISION_ALL_MEDIA_PRESERVED"
+    )
+
+
+def report_ui_sample(api=26, source="source", run="run", apk="a"*64):
+    # Host-only report fixture. Device results are never constructed here.
+    return {"status": "PASS", "scope": "NATIVE_NOTE_DELETE_EXACT_ID_CONSENT_FORCE_STOP_RESTART_NOT_LMK",
+            "api": api, "commit": source, "run_id": run, "apk_sha256": apk,
+            "release_ready": False, "labels": REPORT_DELETE_UI_LABELS[:], "checks": 8,
+            "note_id": "second", "sibling_id": "third", "owner": 1,
+            "deleted_blocks": 3, "deleted_field_links": 0, "preserved_media_files": 6,
+            "state": "EXACT_TARGET_ROWS_ONE_REVISION_ALL_MEDIA_PRESERVED"}
+
+
+_backend_aggregate = aggregate
+_backend_selftest = selftest
+
+
+def aggregate(codec, native, api, source, run):
+    result = _backend_aggregate(codec, native, api, source, run)
+    c = codec.get("batch_ui") if isinstance(codec, dict) else None
+    n = native.get("batch_ui") if isinstance(native, dict) else None
+    c = c if isinstance(c, dict) else {}
+    n = n if isinstance(n, dict) else {}
+    value = c.get("deletion_ui")
+    apk = codec.get("apk_sha256") if isinstance(codec, dict) else None
+    passed = (
+        result["status"] == "PASS" and value == n.get("deletion_ui") and
+        report_deletion_ui(value, api, source, run, apk)
+    )
+    result["deletion_ui"] = {
+        "status": "PASS" if passed else "NOT_VERIFIED",
+        "evidence": value,
+        "checks": 8 if passed else 0,
+        "scope": "INDEPENDENT_NATIVE_DELETE_RECEIPT_NOT_NEW_DEVICE_EXECUTION",
+        "release_ready": False,
+    }
+    result["status"] = "PASS" if passed else "NOT_VERIFIED"
+    return result
+
+
+def report_deletion_selftest():
+    def parents(value, api=26):
+        batch = {"status": "PASS", "note_management": sample(api), "deletion_ui": value}
+        return ({"status": "PASS", "api": api, "commit": "source", "run_id": "run",
+                 "release_ready": False, "apk_sha256": "a"*64, "batch_ui": copy.deepcopy(batch)},
+                {"status": "PASS", "batch_ui": copy.deepcopy(batch)})
+    def passes(pair, api=26):
+        result = aggregate(*pair, api, "source", "run")
+        return result["status"] == result["deletion_ui"]["status"] == "PASS"
+    for api in (26, 34):
+        assert passes(parents(report_ui_sample(api), api), api)
+    good = report_ui_sample()
+    bad = [None, {}, []]
+    for key in good:
+        value = copy.deepcopy(good); del value[key]; bad.append(value)
+    for key, value in (("status", "FAIL"), ("scope", "BACKEND_ONLY"), ("api", 34), ("api", True),
+            ("commit", "old"), ("run_id", "old"), ("apk_sha256", "b"*64),
+            ("release_ready", True), ("checks", True), ("checks", 7),
+            ("note_id", ""), ("note_id", " "), ("sibling_id", "second"), ("sibling_id", None),
+            ("owner", True), ("owner", 0), ("deleted_blocks", True), ("deleted_blocks", 0),
+            ("deleted_field_links", True), ("deleted_field_links", -1),
+            ("preserved_media_files", True), ("preserved_media_files", 0),
+            ("state", "NOT_VERIFIED"), ("labels", REPORT_DELETE_UI_LABELS[::-1])):
+        item = copy.deepcopy(good); item[key] = value; bad.append(item)
+    for index in range(8):
+        for duplicate in (False, True):
+            item = copy.deepcopy(good)
+            if duplicate: item["labels"].insert(index, item["labels"][index])
+            else: item["labels"].pop(index)
+            item["checks"] = len(item["labels"]); bad.append(item)
+    pairs = []
+    for value in bad:
+        assert not report_deletion_ui(value, 26, "source", "run", "a"*64)
+        # Both parents carry the same malformed value: equality alone cannot pass.
+        pairs.append(parents(value))
+    for side in (0, 1):
+        pair = list(parents(good)); del pair[side]["batch_ui"]["deletion_ui"]; pairs.append(pair)
+        for key, value in (("note_id", "different"), ("sibling_id", "different"),
+                           ("owner", 2), ("deleted_blocks", 4), ("preserved_media_files", 7)):
+            pair = list(parents(good)); pair[side]["batch_ui"]["deletion_ui"][key] = value
+            assert report_deletion_ui(pair[side]["batch_ui"]["deletion_ui"], 26, "source", "run", "a"*64)
+            pairs.append(pair)
+        pair = list(parents(good)); del pair[side]["batch_ui"]["note_management"]; pairs.append(pair)
+        pair = list(parents(good)); pair[side]["batch_ui"]["status"] = "FAIL"; pairs.append(pair)
+    for pair in pairs:
+        assert not passes(pair), "independent deletion report accepted missing, stale or divergent evidence"
+    # Execute weakened report implementations against this exact corpus.
+    import inspect
+    source = inspect.getsource(aggregate)
+    killed = 0
+    for old, new in (
+        ('value == n.get("deletion_ui")', "True"),
+        ("report_deletion_ui(value, api, source, run, apk)", "True"),
+        ('result["status"] == "PASS"', "True"),
+    ):
+        assert source.count(old) == 1
+        namespace = dict(globals())
+        exec(compile(source.replace(old, new, 1), "<delete-report-mutant>", "exec"), namespace)
+        checker = namespace["aggregate"]
+        assert checker(*parents(good), 26, "source", "run")["status"] == "PASS"
+        assert any(checker(*pair, 26, "source", "run")["status"] == "PASS" for pair in pairs)
+        killed += 1
+    result = {"positive": 2, "receipt_negative": len(bad), "aggregate_negative": len(pairs),
+              "permanent_report_mutants": killed, "scope": "HOST_REPORT_OBSERVERS_NOT_ANDROID_EXECUTION"}
+    print("NOTE_DELETE_REPORT_HOST "+json.dumps(result), flush=True)
+    return result
+
+
+def selftest():
+    result = _backend_selftest()
+    result["deletion_ui_report"] = report_deletion_selftest()
+    return result
 
 
 if __name__ == "__main__":

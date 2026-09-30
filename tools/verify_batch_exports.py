@@ -36,6 +36,120 @@ DELETE_UI_LABELS = ["preview_exact_identity_counts", "cancel_readonly", "uncheck
                     "process_loss_readonly", "fresh_preview_unchecked", "same_title_target_only",
                     "all_media_preserved", "restart_deletion_and_sibling_persisted"]
 DELETE_UI_SCOPE = "NATIVE_NOTE_DELETE_EXACT_ID_CONSENT_FORCE_STOP_RESTART_NOT_LMK"
+ORDER_UI_LABELS = ["boundary_controls", "singleton_disabled_readonly",
+                   "same_title_up_exact_state", "restart_up_summary_order",
+                   "same_title_down_exact_state", "restart_down_summary_order",
+                   "original_order_restored_two_revisions", "all_media_preserved"]
+ORDER_UI_SCOPE = "NATIVE_NOTE_ORDER_STABLE_ID_FORCE_STOP_RESTART_NOT_LMK"
+
+
+def order_expected(before, note, owner, direction):
+    assert type(owner) is int and owner > 0 and type(direction) is int and direction in (-1, 1)
+    expected = copy.deepcopy(before)
+    rows = expected[0]["notes"]
+    assert all(len(row) == 3 for row in rows) and len({row[0] for row in rows}) == len(rows)
+    slots = [i for i, row in enumerate(rows) if row[1] == owner]
+    ids = [rows[i][0] for i in slots]
+    assert note in ids
+    at = ids.index(note); to = at + direction
+    assert 0 <= to < len(slots)
+    rows[slots[at]], rows[slots[to]] = rows[slots[to]], rows[slots[at]]
+    revision = expected[0]["revision"]
+    assert len(revision) == 1 and revision[0][0] == 1 and type(revision[0][1]) is int
+    assert revision[0][1] < 9223372036854775807
+    expected[0]["revision"] = [(1, revision[0][1] + 1)]
+    return expected
+
+
+def order_readback(before, actual, note, owner, direction):
+    assert actual == order_expected(before, note, owner, direction), "order changed wrong IDs, owner slots, revision, tables or media"
+
+
+def order_ui_receipt(value, api, source, run, apk):
+    return isinstance(value, dict) and (
+        value.get("status") == "PASS" and value.get("scope") == ORDER_UI_SCOPE and
+        type(value.get("api")) is int and value["api"] == api and
+        value.get("commit") == source and value.get("run_id") == run and
+        isinstance(apk, str) and re.fullmatch("[0-9a-f]{64}", apk) is not None and value.get("apk_sha256") == apk and
+        value.get("labels") == ORDER_UI_LABELS and type(value.get("checks")) is int and
+        value["checks"] == 8 and value.get("release_ready") is False and
+        type(value.get("owner")) is int and value["owner"] > 0 and
+        isinstance(value.get("note_id"), str) and bool(value["note_id"].strip()) and
+        isinstance(value.get("sibling_id"), str) and bool(value["sibling_id"].strip()) and
+        value["note_id"] != value["sibling_id"] and
+        value.get("state") == "EXACT_OWNER_SLOT_SWAP_PER_MOVE_TWO_REVISIONS_ALL_OTHER_TABLES_MEDIA_UNCHANGED")
+
+
+def order_ui_sample():
+    return {"status": "PASS", "scope": ORDER_UI_SCOPE, "api": 26, "commit": "source", "run_id": "run",
+            "apk_sha256": "a"*64, "labels": ORDER_UI_LABELS[:], "checks": 8, "release_ready": False,
+            "owner": 1, "note_id": "b", "sibling_id": "a",
+            "state": "EXACT_OWNER_SLOT_SWAP_PER_MOVE_TWO_REVISIONS_ALL_OTHER_TABLES_MEDIA_UNCHANGED"}
+
+
+def order_ui_selftest():
+    before = ({"notes": [("a", 1, "Same"), ("x", 2, "Other"),
+                         ("b", 1, "Same"), ("c", 1, "Empty")],
+               "revision": [(1, 10)], "blocks": [("a", "image", "private")],
+               "field_notes": [("b", 3)], "media": [("asset", 8)]},
+              {"asset": "digest"}, {1: "Owner", 2: "Other"})
+    expected = copy.deepcopy(before)
+    expected[0]["notes"] = [("b", 1, "Same"), ("x", 2, "Other"),
+                             ("a", 1, "Same"), ("c", 1, "Empty")]
+    expected[0]["revision"] = [(1, 11)]
+    assert order_expected(before, "b", 1, -1) == expected
+    order_readback(before, expected, "b", 1, -1)
+    restored = copy.deepcopy(before); restored[0]["revision"] = [(1, 12)]
+    assert order_expected(expected, "b", 1, 1) == restored
+    bads = [copy.deepcopy(before)]
+    for table in expected[0]:
+        bad = copy.deepcopy(expected); bad[0][table] = []; bads.append(bad)
+    for table, value in (("revision", [(1, 12)]),
+                          ("notes", [("b", 1, "Same"), ("a", 1, "Same"), ("x", 2, "Other"), ("c", 1, "Empty")])):
+        bad = copy.deepcopy(expected); bad[0][table] = value; bads.append(bad)
+    for side in (1, 2):
+        bad = copy.deepcopy(expected); bad[side].clear(); bads.append(bad)
+    for bad in bads:
+        try: order_readback(before, bad, "b", 1, -1)
+        except AssertionError: pass
+        else: raise AssertionError("order readback negative survived")
+    for note, owner, direction in (("a", 1, -1), ("c", 1, 1), ("b", 2, -1),
+                                   ("missing", 1, 1), ("b", True, 1), ("b", 1, True), ("b", 1, 0)):
+        try: order_expected(before, note, owner, direction)
+        except AssertionError: pass
+        else: raise AssertionError("order identity or boundary negative survived")
+    sample = order_ui_sample()
+    assert order_ui_receipt(sample, 26, "source", "run", "a"*64)
+    invalid = [None, {}]
+    for key in sample:
+        bad = copy.deepcopy(sample); del bad[key]; invalid.append(bad)
+    for key, value in (("status", "FAIL"), ("api", True), ("api", 34),
+                       ("commit", "old"), ("run_id", "old"), ("apk_sha256", "b"*64),
+                       ("checks", True), ("labels", ORDER_UI_LABELS[::-1]),
+                       ("scope", "HOST_ONLY"), ("owner", True), ("note_id", ""),
+                       ("sibling_id", "b"), ("release_ready", True), ("state", "NOT_VERIFIED")):
+        bad = copy.deepcopy(sample); bad[key] = value; invalid.append(bad)
+    for index in range(len(ORDER_UI_LABELS)):
+        bad = copy.deepcopy(sample); bad["labels"].pop(index); bad["checks"] -= 1; invalid.append(bad)
+    for bad in invalid:
+        assert not order_ui_receipt(bad, 26, "source", "run", "a"*64)
+    import inspect
+    for function, mutations in (
+        (order_expected, [("revision[0][1] + 1", "revision[0][1] + 2"),
+                          ("if row[1] == owner", "if True")]),
+        (order_ui_receipt, [("value.get(\"labels\") == ORDER_UI_LABELS", "True"),
+                            ("value.get(\"apk_sha256\") == apk", "True")])):
+        source = inspect.getsource(function)
+        for old, new in mutations:
+            assert source.count(old) == 1
+            namespace = dict(globals())
+            exec(source.replace(old, new), namespace)
+            if function is order_expected:
+                assert namespace["order_expected"](before, "b", 1, -1) != expected
+            else:
+                assert any(namespace["order_ui_receipt"](bad, 26, "source", "run", "a"*64) for bad in invalid)
+    print("ORDER_UI_HOST readback=2_positive_"+str(len(bads)+7)+
+          "_negative receipt=1_positive_"+str(len(invalid))+"_negative 4_mutations_exposed HOST_ONLY", flush=True)
 
 
 def deletion_expected(before, note, owner):
@@ -268,6 +382,8 @@ def stale_output_check(paths, filename, raw):
 def receipt(value, api, source, run, apk):
     if not isinstance(value, dict):
         return False
+    if not order_ui_receipt(value.get("order_ui"), api, source, run, apk):
+        return False
     if not note_management.accepted(value.get("note_management"), api, source, run, apk):
         return False
     if not deletion_ui_receipt(value.get("deletion_ui"), api, source, run, apk):
@@ -374,6 +490,7 @@ public class BatchPageCheck {
 
 def selftest():
     note_management.selftest()
+    order_ui_selftest()
     deletion_ui_selftest()
     rename_selftest()
     summary_selftest()
@@ -483,6 +600,7 @@ def selftest():
             "release_ready": False, "outputs": {}, "stale_privacy": {}}
     good["note_management"] = note_management.sample()
     good["deletion_ui"] = deletion_ui_sample()
+    good["order_ui"] = order_ui_sample()
     good["summary_ui"] = {"status": "PASS", "labels": SUMMARY_LABELS[:], "checks": len(SUMMARY_LABELS),
         "api": 26, "commit": "source", "run_id": "run", "apk_sha256": "a"*64,
         "scope": "NATIVE_ACTIVITY_SUMMARIES_SYNTHETIC_RESTART_NOT_LMK", "release_ready": False}
@@ -508,6 +626,7 @@ def selftest():
     bads.extend([dict(good, rename_ui=None), dict(good, rename_ui={})])
     bads.extend([dict(good, note_management=None), dict(good, note_management={})])
     bads.extend([dict(good, deletion_ui=None), dict(good, deletion_ui={})])
+    bads.extend([dict(good, order_ui=None), dict(good, order_ui={})])
     for key, value in (("status", "FAIL"), ("checks", True), ("api", 34), ("api", True),
                        ("commit", "old"), ("run_id", "old"), ("apk_sha256", "d"*64),
                        ("scope", "HOST_ONLY"), ("release_ready", True)):
@@ -790,6 +909,78 @@ def native(adb, gate):
         passed("duplicate_title_allowed")
         assert proof["labels"] == RENAME_LABELS
         proof.update(status="PASS", state="ONLY_TARGET_TITLE_AND_TWO_REVISION_INCREMENTS_TITLE_RESTORED")
+    def order_ui():
+        # Only existing visible-UI-created synthetic notes. Never seed the live DB.
+        stop(); initial = state()
+        pairs = [(a, b) for i, a in enumerate(initial[0]["notes"]) for b in initial[0]["notes"][i+1:]
+                 if a[1:] == b[1:]]
+        assert pairs, "same-title order fixture missing"
+        sibling, target = pairs[0]; note, owner, title = target
+        owner_rows = [r for r in initial[0]["notes"] if r[1] == owner]
+        assert owner_rows.index(target) > 0 and owner_rows[owner_rows.index(target)-1] == sibling, "adjacent same-title order fixture required"
+        proof = {"status": "FAIL", "scope": ORDER_UI_SCOPE, "api": gate.API, "commit": source,
+                 "run_id": run_id, "apk_sha256": result["apk_sha256"], "labels": [], "checks": 0,
+                 "release_ready": False, "note_id": note, "sibling_id": sibling[0], "owner": owner}
+        result["order_ui"] = proof
+        def passed(label):
+            assert ORDER_UI_LABELS[len(proof["labels"])] == label
+            proof["labels"].append(label); proof["checks"] = len(proof["labels"])
+        def locate(desc):
+            for _ in range(25):
+                found = [n for n in nodes() if n.get("content-desc") == desc]
+                assert len(found) <= 1, "duplicate order control " + desc
+                if found:
+                    assert found[0].get("package") == gate.PKG
+                    return found[0]
+                shell("input", "swipe", "160", "440", "160", "190", "350")
+            raise AssertionError("order control unreachable " + desc)
+        def detail(activity):
+            start(); tap("活动"); ready()
+            click(locate("activity-"+str(activity))); ready()
+        def observe(snapshot, activity):
+            detail(activity)
+            rows = [r for r in snapshot[0]["notes"] if r[1] == activity]
+            expected = summary_expected(snapshot[0], activity)
+            buttons = {prefix+r[0]: "true" if enabled else "false"
+                       for i, r in enumerate(rows) for prefix, enabled in
+                       (("note-up-", i > 0), ("note-down-", i < len(rows)-1))}
+            actual, order, controls = {}, [], {}
+            for _ in range(25):
+                for n in nodes():
+                    key = n.get("content-desc", "")
+                    if key in expected:
+                        assert n.get("package") == gate.PKG
+                        text = n.get("text", "")
+                        assert key not in actual or actual[key] == text
+                        if key.startswith("note-title-") and key not in actual: order.append(key)
+                        actual[key] = text
+                    if key in buttons:
+                        assert n.get("package") == gate.PKG and n.get("class") == "android.widget.Button"
+                        assert n.get("enabled") == buttons[key], "wrong order boundary " + key
+                        controls[key] = n.get("enabled")
+                if set(expected) <= set(actual) and set(buttons) <= set(controls):
+                    summary_ui_check(expected, actual, order); break
+                shell("input", "swipe", "160", "440", "160", "190", "350")
+            else: raise AssertionError("order summary/control coverage incomplete")
+            stop(); assert state() == snapshot, "order browsing wrote database or media"
+        observe(initial, owner); passed("boundary_controls")
+        singles = [a for a in initial[2] if sum(r[1] == a for r in initial[0]["notes"]) == 1]
+        assert singles, "singleton order fixture missing"
+        observe(initial, singles[0]); passed("singleton_disabled_readonly")
+        detail(owner); click(locate("note-up-"+note)); ready()
+        stop(); moved = state(); order_readback(initial, moved, note, owner, -1)
+        passed("same_title_up_exact_state")
+        observe(moved, owner); passed("restart_up_summary_order")
+        detail(owner); click(locate("note-down-"+note)); ready()
+        stop(); restored = state(); order_readback(moved, restored, note, owner, 1)
+        passed("same_title_down_exact_state")
+        observe(restored, owner); passed("restart_down_summary_order")
+        expected = copy.deepcopy(initial)
+        expected[0]["revision"] = [(1, initial[0]["revision"][0][1]+2)]
+        assert restored == expected; passed("original_order_restored_two_revisions")
+        assert initial[1] and state()[1] == initial[1]; passed("all_media_preserved")
+        proof.update(status="PASS", state="EXACT_OWNER_SLOT_SWAP_PER_MOVE_TWO_REVISIONS_ALL_OTHER_TABLES_MEDIA_UNCHANGED")
+        assert order_ui_receipt(proof, gate.API, source, run_id, result["apk_sha256"])
     def deletion_ui():
         # Run last: only synthetic emulator fixtures, after every old suite has finished.
         # Backend field-link/shared-reference/stale-write contracts remain separate.
@@ -1016,6 +1207,7 @@ def native(adb, gate):
         summary_ui()
         rename_ui()
         result["note_management"] = note_management.native(adb, gate, state)
+        order_ui()
         deletion_ui()
         assert command("exec-out", "cat", installed[8:], binary=True) == product
         result.update(status="PASS", checks=len(result["labels"]))

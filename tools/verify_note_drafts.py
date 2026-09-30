@@ -744,9 +744,398 @@ def ui_model_selftest():
         return result
 
 
+DEVICE_SCOPE = "ACTUAL_ANDROID_DRAFT_SESSION_SQLITE_FILES_FORCE_STOP_NOT_NATIVE_BUTTONS_OR_LMK"
+DEVICE_LABELS = {
+    "seed": """initial_body exact_draft_save draft_all_tables_readonly explicit_recover
+recover_all_tables_readonly cancel_keeps_draft empty_draft_exact empty_draft_readonly
+discard_tombstone discard_readonly same_title_note_isolation owner_slot_isolation
+new_text_slot_isolation media_unchanged restart_fixture_saved""".split(),
+    "reopen": """restart_exact_draft restart_full_state restart_media
+wrong_owner missing_note missing_block stale_shown_blocks
+same_revision_mutation stale_recover stale_commit stale_save stale_refusal_readonly
+stale_draft_retained new_session_stale_base cas_save cas_recover cas_discard
+cas_newer_draft_retained late_sql_failure late_sql_rollback late_sql_draft_retained
+commit_cleanup commit_exact_body commit_one_revision commit_preserves_siblings
+commit_terminal new_block_append new_block_preserves_existing final_media""".split(),
+}
+
+# Test-only instrumentation. Reflection crosses the instrumentation class loader
+# boundary; the session and store come from the installed product, not a clone.
+DEVICE_JAVA = r'''
+package ci.drafts;
+import android.app.Instrumentation;
+import android.os.Bundle;
+import android.content.Context;
+import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
+import com.supercubegame.pockettodo.AppDatabase;
+import com.supercubegame.pockettodo.NoteDocument;
+import com.supercubegame.pockettodo.NoteDraftStore;
+import java.io.*;
+import java.nio.file.*;
+import java.lang.reflect.*;
+import java.util.*;
+
+public final class DraftInstrumentation extends Instrumentation {
+ private Bundle args; private int count; private Path folder,asset; private String name;
+ private static final String EXACT="  草稿😀\nline\t\n";
+ private static final byte[] MEDIA={0,1,2,3,4,5,6,7};
+ interface Action {void run()throws Exception;}
+ static void need(boolean b,String label){if(!b)throw new AssertionError(label);}
+ void pass(boolean b,String label){need(b,label);count++;System.out.println("DRAFT_DEVICE_PASS "+label);}
+ void reject(Class<? extends Throwable> type,Action action,String label)throws Exception{
+  Throwable caught=null;try{action.run();}catch(Throwable e){caught=e;}
+  pass(caught!=null&&type.isInstance(caught),label);
+ }
+ static Object invoke(Object target,String method,Class<?>[] types,Object...args)throws Exception{
+  Method m=target.getClass().getDeclaredMethod(method,types);m.setAccessible(true);
+  try{return m.invoke(target,args);}catch(InvocationTargetException e){
+   Throwable c=e.getCause();if(c instanceof Exception)throw (Exception)c;
+   if(c instanceof Error)throw (Error)c;throw new AssertionError(c);
+  }
+ }
+ Object session(AppDatabase h,NoteDraftStore s,long owner,String note,String block,List<NoteDocument.Block> shown)throws Exception{
+  Class<?> c=Class.forName("com.supercubegame.pockettodo.NoteEditorScreen$TextDraftSession",true,getTargetContext().getClassLoader());
+  Constructor<?> ctor=c.getDeclaredConstructor(AppDatabase.class,NoteDraftStore.class,long.class,String.class,String.class,List.class);
+  ctor.setAccessible(true);
+  try{return ctor.newInstance(h,s,owner,note,block,shown);}
+  catch(InvocationTargetException e){Throwable t=e.getCause();if(t instanceof Exception)throw (Exception)t;throw new AssertionError(t);}
+ }
+ Object session(AppDatabase h,NoteDraftStore s)throws Exception{return session(h,s,1,"first","text",h.noteBlocks("first"));}
+ void save(Object s,String text)throws Exception{invoke(s,"saveDraft",new Class<?>[]{String.class},text);}
+ String recover(Object s)throws Exception{return (String)invoke(s,"recover",new Class<?>[]{});}
+ void close(Object s)throws Exception{invoke(s,"close",new Class<?>[]{});}
+ void discard(Object s)throws Exception{invoke(s,"discard",new Class<?>[]{});}
+ boolean commit(Object s,String text)throws Exception{return (Boolean)invoke(s,"commit",new Class<?>[]{String.class},text);}
+ static String state(AppDatabase h){
+  SQLiteDatabase db=h.getReadableDatabase();StringBuilder out=new StringBuilder();
+  try(Cursor tables=db.rawQuery("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",null)){
+   while(tables.moveToNext()){
+    String table=tables.getString(0);need(table.matches("[A-Za-z0-9_]+"),"table name");out.append(table).append('\n');
+    try(Cursor c=db.rawQuery("SELECT rowid AS rowid,* FROM \""+table+"\" ORDER BY rowid",null)){
+     out.append(Arrays.toString(c.getColumnNames())).append('\n');
+     while(c.moveToNext()){for(int i=0;i<c.getColumnCount();i++){
+      int type=c.getType(i);String v=type==0?"":type==4?android.util.Base64.encodeToString(c.getBlob(i),2):c.getString(i);
+      out.append(type).append(':').append(v.length()).append(':').append(v).append(';');
+     }out.append('\n');}
+    }
+   }
+  }return out.toString();
+ }
+ static long revision(AppDatabase h){
+  try(Cursor c=h.getReadableDatabase().rawQuery("SELECT value FROM revision",null)){
+   need(c.moveToFirst(),"revision exists");long v=c.getLong(0);need(!c.moveToNext(),"single revision");return v;
+  }
+ }
+ void media(String label)throws Exception{pass(Arrays.equals(MEDIA,Files.readAllBytes(asset)),label);}
+ NoteDraftStore.Slot slot(){return new NoteDraftStore.Slot(1,"first","text");}
+ void seed()throws Exception{
+  need(!getTargetContext().getDatabasePath(name).exists()&&!Files.exists(folder),"fresh synthetic fixture required");
+  Files.createDirectory(folder);Files.write(asset,MEDIA,StandardOpenOption.CREATE_NEW);
+  try(AppDatabase h=AppDatabase.openSchema3(getTargetContext(),name)){
+   h.addCategory(1,"Draft test");h.addActivity(1,1,0,"First");h.addActivity(2,1,0,"Other");
+   h.createNote("first",1,"Same");h.createNote("second",1,"Same");h.createNote("other",2,"Same");
+   h.saveNote("first",Arrays.asList(NoteDocument.Block.text("text","Original",true),NoteDocument.Block.text("sibling","Keep",false)));
+   h.saveNote("second",Collections.singletonList(NoteDocument.Block.text("text","Second",false)));
+   h.saveNote("other",Collections.singletonList(NoteDocument.Block.text("text","Other",false)));
+   NoteDraftStore store=new NoteDraftStore(folder.resolve("drafts"));
+   Object s=session(h,store);String before=state(h);
+   pass(h.noteBlocks("first").get(0).text.equals("Original"),"initial_body");
+   save(s,EXACT);pass(store.read(slot()).text.equals(EXACT),"exact_draft_save");
+   pass(state(h).equals(before),"draft_all_tables_readonly");
+   pass(recover(s).equals(EXACT),"explicit_recover");pass(state(h).equals(before),"recover_all_tables_readonly");
+   String token=store.read(slot()).token;close(s);
+   pass(store.read(slot()).token.equals(token)&&store.read(slot()).text.equals(EXACT),"cancel_keeps_draft");
+   s=session(h,store);save(s,"");pass(recover(s).equals(""),"empty_draft_exact");
+   pass(state(h).equals(before),"empty_draft_readonly");discard(s);
+   pass(store.read(slot()).text==null&&!store.read(slot()).token.equals(token),"discard_tombstone");
+   pass(state(h).equals(before),"discard_readonly");save(s,EXACT);
+   String base=store.read(slot()).base;
+   NoteDraftStore.Slot same=new NoteDraftStore.Slot(1,"second","text");
+   store.save(same,"",base,"second draft");
+   pass(store.read(same).text.equals("second draft")&&store.read(slot()).text.equals(EXACT),"same_title_note_isolation");
+   NoteDraftStore.Slot other=new NoteDraftStore.Slot(2,"other","text");
+   store.save(other,"",base,"other draft");
+   pass(store.read(other).text.equals("other draft")&&store.read(slot()).text.equals(EXACT),"owner_slot_isolation");
+   Object empty=session(h,store,1,"first",null,h.noteBlocks("first"));save(empty,"new draft");
+   pass(store.read(new NoteDraftStore.Slot(1,"first",null)).text.equals("new draft")&&store.read(slot()).text.equals(EXACT),"new_text_slot_isolation");
+   close(empty);close(s);media("media_unchanged");
+   Files.write(folder.resolve("state.txt"),before.getBytes("UTF-8"),StandardOpenOption.CREATE_NEW);
+   Files.write(folder.resolve("draft-token.txt"),store.read(slot()).token.getBytes("UTF-8"),StandardOpenOption.CREATE_NEW);
+   pass(state(h).equals(before),"restart_fixture_saved");
+  }
+ }
+ void reopen()throws Exception{
+  need(getTargetContext().getDatabasePath(name).isFile()&&Files.isDirectory(folder),"persisted fixture required");
+  try(AppDatabase h=AppDatabase.openSchema3(getTargetContext(),name)){
+   NoteDraftStore store=new NoteDraftStore(folder.resolve("drafts"));Object s=session(h,store);
+   pass(recover(s).equals(EXACT)&&store.read(slot()).token.equals(new String(Files.readAllBytes(folder.resolve("draft-token.txt")),"UTF-8")),"restart_exact_draft");
+   pass(state(h).equals(new String(Files.readAllBytes(folder.resolve("state.txt")),"UTF-8")),"restart_full_state");
+   media("restart_media");
+   reject(IllegalStateException.class,()->session(h,store,2,"first","text",h.noteBlocks("first")),"wrong_owner");
+   reject(IllegalStateException.class,()->session(h,store,1,"missing","text",h.noteBlocks("first")),"missing_note");
+   reject(IllegalStateException.class,()->session(h,store,1,"first","missing",h.noteBlocks("first")),"missing_block");
+   reject(IllegalStateException.class,()->session(h,store,1,"first","text",Collections.emptyList()),"stale_shown_blocks");
+   SQLiteDatabase db=h.getWritableDatabase();long rev=revision(h);
+   db.execSQL("UPDATE notes SET title='External' WHERE id='first'");
+   pass(revision(h)==rev&&h.noteBlocks("first").get(0).text.equals("Original"),"same_revision_mutation");
+   String changed=state(h);
+   reject(IllegalStateException.class,()->recover(s),"stale_recover");
+   reject(IllegalStateException.class,()->commit(s,"Overwrite"),"stale_commit");
+   reject(IllegalStateException.class,()->save(s,"Overwrite"),"stale_save");
+   pass(state(h).equals(changed),"stale_refusal_readonly");
+   pass(store.read(slot()).text.equals(EXACT),"stale_draft_retained");
+   Object fresh=session(h,store);
+   reject(IllegalStateException.class,()->recover(fresh),"new_session_stale_base");
+   discard(fresh);save(fresh,"before race");
+   Object race=session(h,store);save(fresh,"winner");
+   reject(IllegalStateException.class,()->save(race,"loser"),"cas_save");
+   reject(IOException.class,()->recover(race),"cas_recover");
+   reject(IllegalStateException.class,()->discard(race),"cas_discard");
+   pass(store.read(slot()).text.equals("winner")&&state(h).equals(changed),"cas_newer_draft_retained");
+   close(race);close(fresh);close(s);
+   Object late=session(h,store);save(late,"commit body");
+   String before=state(h),token=store.read(slot()).token;
+   db.execSQL("CREATE TRIGGER ci_draft_late BEFORE UPDATE OF value ON revision BEGIN SELECT RAISE(ABORT,'draft_late_sql_fault'); END");
+   Throwable failure=null;try{commit(late,"commit body");}catch(Throwable t){failure=t;}
+   pass(failure instanceof android.database.sqlite.SQLiteException&&failure.getMessage().contains("draft_late_sql_fault"),"late_sql_failure");
+   pass(state(h).equals(before),"late_sql_rollback");
+   pass(store.read(slot()).token.equals(token)&&store.read(slot()).text.equals("commit body"),"late_sql_draft_retained");
+   db.execSQL("DROP TRIGGER ci_draft_late");rev=revision(h);
+   pass(commit(late,"  commit body  ")&&store.read(slot()).text==null,"commit_cleanup");
+   List<NoteDocument.Block> blocks=h.noteBlocks("first");
+   pass(blocks.size()==2&&blocks.get(0).id.equals("text")&&blocks.get(0).text.equals("commit body")&&blocks.get(0).privateContent,"commit_exact_body");
+   pass(revision(h)==rev+1,"commit_one_revision");
+   pass(blocks.get(1).id.equals("sibling")&&blocks.get(1).text.equals("Keep")&&h.noteBlocks("second").get(0).text.equals("Second")&&h.noteBlocks("other").get(0).text.equals("Other"),"commit_preserves_siblings");
+   reject(IllegalStateException.class,()->commit(late,"again"),"commit_terminal");
+   Object append=session(h,store,1,"first",null,h.noteBlocks("first"));save(append,"appended");
+   need(commit(append,"appended"),"append cleanup");
+   List<NoteDocument.Block> after=h.noteBlocks("first");
+   pass(after.size()==3&&after.get(2).text.equals("appended")&&!after.get(2).id.equals("text")&&!after.get(2).id.equals("sibling"),"new_block_append");
+   pass(after.get(0).id.equals("text")&&after.get(0).text.equals("commit body")&&after.get(0).privateContent&&after.get(1).id.equals("sibling")&&after.get(1).text.equals("Keep"),"new_block_preserves_existing");
+   media("final_media");
+  }
+ }
+ @Override public void onCreate(Bundle value){super.onCreate(value);args=value;start();}
+ @Override public void onStart(){
+  ByteArrayOutputStream bytes=new ByteArrayOutputStream();PrintStream oldOut=System.out,oldErr=System.err;int code=0;
+  try{
+   PrintStream log=new PrintStream(bytes,true,"UTF-8");System.setOut(log);System.setErr(log);
+   Context c=getTargetContext();String nonce=args.getString("nonce"),phase=args.getString("phase");
+   need(nonce!=null&&nonce.matches("[0-9]+-[0-9]+-(26|34)"),"synthetic nonce");
+   need(c.getPackageName().equals(args.getString("expectedPackage"))&&android.os.Process.myUid()==c.getApplicationInfo().uid,"target identity");
+   need(android.os.Build.VERSION.SDK_INT==Integer.parseInt(args.getString("expectedApi")),"actual API");
+   need(android.os.Build.HARDWARE.equals("ranchu")||android.os.Build.HARDWARE.equals("goldfish"),"CI emulator only");
+   System.out.println("DRAFT_DEVICE_TARGET "+c.getPackageName()+" "+android.os.Process.myUid()+" "+android.os.Build.VERSION.SDK_INT+" "+nonce+" "+phase);
+   if("diagnostic".equals(phase))throw new AssertionError("draft_device_diagnostic_sentinel");
+   folder=new File(c.getCacheDir(),"draft-device-"+nonce).toPath();asset=folder.resolve("synthetic.bin");name="draft-device-"+nonce+".db";
+   if("seed".equals(phase)){seed();need(count==15,"seed count");}
+   else if("reopen".equals(phase)){reopen();need(count==29,"reopen count");}
+   else throw new AssertionError("unknown phase");
+   System.out.println("DRAFT_DEVICE_RESULT "+phase+" "+count+" PASS");code=-1;
+  }catch(Throwable t){System.err.println("DRAFT_DEVICE_FAILED");t.printStackTrace(System.err);}
+  finally{
+   System.out.flush();System.err.flush();System.setOut(oldOut);System.setErr(oldErr);Bundle result=new Bundle();
+   try{result.putString("stream",bytes.toString("UTF-8"));}catch(Exception t){throw new RuntimeException(t);}
+   finish(code,result);
+  }
+ }
+}
+'''
+
+
+def device_observe(text, package, api, nonce, phase):
+    """Validate transport finish plus exact ordered coverage, never a substring PASS."""
+    import re
+    assert type(api) is int and api in (26, 34)
+    assert re.fullmatch(r"[0-9]+-[0-9]+-"+str(api), nonce)
+    assert phase in DEVICE_LABELS and isinstance(text, str)
+    lines = text.replace("\r\n", "\n").splitlines()
+    targets = re.findall(r"(?:^|\n)(?:INSTRUMENTATION_RESULT: stream=)?DRAFT_DEVICE_TARGET (\S+) ([0-9]+) ([0-9]+) (\S+) (\S+)(?:\n|$)", text)
+    assert len(targets) == 1
+    pkg, uid, actual_api, actual_nonce, actual_phase = targets[0]
+    assert (pkg, actual_api, actual_nonce, actual_phase) == (package, str(api), nonce, phase)
+    assert int(uid) >= 10000
+    labels = [line[len("DRAFT_DEVICE_PASS "):] for line in lines if line.startswith("DRAFT_DEVICE_PASS ")]
+    assert labels == DEVICE_LABELS[phase]
+    results = [line for line in lines if line.startswith("DRAFT_DEVICE_RESULT ")]
+    assert results == ["DRAFT_DEVICE_RESULT "+phase+" "+str(len(labels))+" PASS"]
+    assert [line for line in lines if line.startswith("INSTRUMENTATION_CODE:")] == ["INSTRUMENTATION_CODE: -1"]
+    assert not any(marker in text for marker in ("DRAFT_DEVICE_FAILED", "INSTRUMENTATION_FAILED", "INSTRUMENTATION_ABORTED", "FATAL EXCEPTION", "Process crashed."))
+    return labels
+
+
+def device_observer_selftest():
+    import inspect
+    total = 0
+    for api in (26, 34):
+        for phase, labels in DEVICE_LABELS.items():
+            nonce = "123-1-"+str(api)
+            good = "INSTRUMENTATION_RESULT: stream=DRAFT_DEVICE_TARGET test.package 10123 "+str(api)+" "+nonce+" "+phase+"\n"
+            good += "".join("DRAFT_DEVICE_PASS "+label+"\n" for label in labels)
+            good += "DRAFT_DEVICE_RESULT "+phase+" "+str(len(labels))+" PASS\nINSTRUMENTATION_CODE: -1\n"
+            assert device_observe(good, "test.package", api, nonce, phase) == labels
+            bad = [good.replace("DRAFT_DEVICE_PASS "+label+"\n", "", 1) for label in labels]
+            bad += [good+"DRAFT_DEVICE_PASS "+labels[0]+"\n",
+                    good.replace("INSTRUMENTATION_CODE: -1", "INSTRUMENTATION_CODE: 0"),
+                    good+"\nINSTRUMENTATION_CODE: -1\n",
+                    good.replace("test.package", "wrong.package"),
+                    good.replace(nonce, "999-1-"+str(api)),
+                    good.replace("10123", "999"),
+                    good.replace("DRAFT_DEVICE_RESULT "+phase, "DRAFT_DEVICE_RESULT diagnostic"),
+                    good.replace("DRAFT_DEVICE_PASS "+labels[0], "DRAFT_DEVICE_PASS unknown"),
+                    good+"DRAFT_DEVICE_FAILED\n", good+"INSTRUMENTATION_FAILED\n",
+                    good.replace(" "+str(api)+" "+nonce, " "+str(60-api)+" "+nonce),
+                    good.replace("DRAFT_DEVICE_RESULT "+phase+" "+str(len(labels)), "DRAFT_DEVICE_RESULT "+phase+" 0")]
+            for text in bad:
+                assert text != good
+                try:
+                    device_observe(text, "test.package", api, nonce, phase)
+                except AssertionError:
+                    total += 1
+                else:
+                    raise AssertionError("Draft device observer accepted incomplete or mismatched evidence")
+    # Prove three independently disabled checks make specific negative fixtures pass.
+    source = inspect.getsource(device_observe)
+    mutations = [
+        ("assert labels == DEVICE_LABELS[phase]", "assert True", "missing"),
+        ('assert [line for line in lines if line.startswith("INSTRUMENTATION_CODE:")] == ["INSTRUMENTATION_CODE: -1"]', "assert True", "finish"),
+        ('assert (pkg, actual_api, actual_nonce, actual_phase) == (package, str(api), nonce, phase)', "assert True", "identity"),
+    ]
+    for old, new, kind in mutations:
+        assert source.count(old) == 1
+        scope = {"DEVICE_LABELS": DEVICE_LABELS};exec(compile(source.replace(old, new, 1), "<draft-observer-mutant>", "exec"), scope)
+        bad = good.replace("DRAFT_DEVICE_PASS "+labels[0]+"\n", "", 1) if kind == "missing" else good.replace("INSTRUMENTATION_CODE: -1", "INSTRUMENTATION_CODE: 0") if kind == "finish" else good.replace("test.package", "wrong.package")
+        if kind == "missing":
+            # Keep count/result coherent so only exact coverage can reject this mutant.
+            bad = bad.replace("DRAFT_DEVICE_RESULT "+phase+" "+str(len(labels)), "DRAFT_DEVICE_RESULT "+phase+" "+str(len(labels)-1))
+            try:device_observe(bad, "test.package", api, nonce, phase)
+            except AssertionError:pass
+            else:raise AssertionError("coverage negative did not fail")
+        scope["device_observe"](bad, "test.package", api, nonce, phase)
+    print("NOTE_DRAFT_DEVICE_OBSERVER "+json.dumps({"status":"PASS","positive":4,"negative":total,"compiled_parser_mutants":3,"scope":"HOST_RECEIPT_PARSER_NOT_DEVICE_EXECUTION","release_ready":False}), flush=True)
+
+
+def device_android():
+    """Independent command, never attached to the existing full regression.
+
+    Existing emulator startup is reused by substituting callbacks only in this
+    process. This backend receipt explicitly does NOT certify native buttons.
+    """
+    import hashlib
+    import re
+    import traceback
+    assert os.environ.get("GITHUB_ACTIONS") == "true", "Disposable Actions emulator only"
+    import emulator_gate as gate
+    from verify_schema3 import certificate, require_registration
+    from verify_paged_exports import debug_key
+    from verify_process_control import stop_verified
+    out = ROOT/"draft-device";out.mkdir(exist_ok=True)
+    result = {"status":"FAIL","scope":DEVICE_SCOPE,"api":gate.API,
+              "commit":os.environ["GITHUB_SHA"],"run_id":os.environ["GITHUB_RUN_ID"],
+              "run_attempt":os.environ.get("GITHUB_RUN_ATTEMPT","1"),
+              "labels":[],"checks":0,"release_ready":False,
+              "native_buttons":"NOT_TESTED","cleanup_failure_race":"NOT_TESTED",
+              "media_scope":"UNREFERENCED_SYNTHETIC_FILE_NOT_IMAGE_NOTE_COVERAGE"}
+    def run(args, timeout=60, binary=False):
+        args = list(map(str, args))
+        try:
+            p = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=not binary, timeout=timeout)
+        except subprocess.TimeoutExpired as e:
+            def decoded(value):return value.decode("utf-8","replace") if isinstance(value,bytes) else value or ""
+            result["command_failure"] = {"args":args,"timeout":timeout,"stdout_tail":decoded(e.stdout)[-6000:],"stderr_tail":decoded(e.stderr)[-6000:]}
+            raise
+        if p.returncode:
+            result["command_failure"] = {"args":args,"returncode":p.returncode,
+                "stdout_tail":str(p.stdout)[-6000:],"stderr_tail":str(p.stderr)[-6000:]}
+            raise RuntimeError("Draft device command failed: "+repr(args))
+        return p.stdout if binary else p.stdout+"\n"+p.stderr
+    def verify(adb):
+        prefix=[str(adb),"-s",gate.SERIAL]
+        apps=list((ROOT/"build/outputs/apk/debug").glob("*.apk"))
+        tests=list((ROOT/"build/outputs/apk/androidTest/debug").glob("*.apk"))
+        assert len(apps)==len(tests)==1
+        app,test=apps[0],tests[0];product,saved=app.read_bytes(),test.read_bytes()
+        cert=certificate(app,gate);assert certificate(test,gate)==cert
+        result.update(apk_sha256=hashlib.sha256(product).hexdigest(),apk_bytes=len(product),certificate=cert)
+        for path in (app,test):run(prefix+["install","-r","-t",path],120)
+        require_registration(adb,gate,"draft-before","V12DeviceTest")
+        def installed():
+            rows=re.findall(r"^package:(\S+)\s*$",run(prefix+["shell","pm","path",gate.PKG]),re.M)
+            assert len(rows)==1
+            return run(prefix+["exec-out","cat",rows[0]],30,True)
+        assert installed()==product
+        key=debug_key(cert)
+        nonce=result["run_id"]+"-"+result["run_attempt"]+"-"+str(gate.API)
+        assert re.fullmatch(r"[0-9]+-[0-9]+-(26|34)",nonce)
+        with tempfile.TemporaryDirectory(prefix="draft-runner-",dir=ROOT/"build") as temporary:
+            work=Path(temporary);src=work/"src";src.mkdir()
+            (src/"DraftInstrumentation.java").write_text(DEVICE_JAVA,encoding="utf-8")
+            init=work/"runner.gradle"
+            init.write_text("gradle.beforeProject { p ->\n p.plugins.withId('com.android.application') {\n"
+                " p.androidComponents.finalizeDsl { dsl ->\n"
+                " dsl.defaultConfig.testInstrumentationRunner = 'ci.drafts.DraftInstrumentation'\n"
+                " dsl.sourceSets.getByName('androidTest').java.srcDir "+json.dumps(str(src))+"\n"
+                " dsl.signingConfigs.getByName('debug').storeFile = new File("+json.dumps(str(key))+")\n"
+                " }\n }\n}\n")
+            backup=work/"default-test.apk";backup.write_bytes(saved)
+            try:
+                text=run(["gradle","--no-daemon","--console=plain","-I",init,"assembleDebugAndroidTest"],300)
+                (out/"build.log").write_text(text)
+                assert app.read_bytes()==product and certificate(test,gate)==cert
+                run(prefix+["install","-r","-t",test],120)
+                component=gate.PKG+".test/ci.drafts.DraftInstrumentation"
+                rows=re.findall(r"^instrumentation:(\S+) \(target=([^)]+)\)\s*$",run(prefix+["shell","pm","list","instrumentation"]),re.M)
+                assert [r for r in rows if r[0].startswith(gate.PKG+".test/")]==[(component,gate.PKG)]
+                args=prefix+["shell","-n","-T","am","instrument","-w","-r","-e","expectedPackage",gate.PKG,"-e","expectedApi",str(gate.API),"-e","nonce",nonce]
+                diagnostic=run(args+["-e","phase","diagnostic",component],60)
+                (out/"diagnostic.log").write_text(diagnostic)
+                assert "java.lang.AssertionError: draft_device_diagnostic_sentinel" in diagnostic
+                assert "DRAFT_DEVICE_FAILED" in diagnostic and "INSTRUMENTATION_CODE: 0" in diagnostic
+                try:device_observe(diagnostic,gate.PKG,gate.API,nonce,"seed")
+                except AssertionError:pass
+                else:raise AssertionError("Diagnostic failure accepted")
+                for phase in ("seed","reopen"):
+                    if phase=="reopen":
+                        result["force_stop"]=stop_verified(adb,gate.SERIAL,gate.PKG)
+                    text=run(args+["-e","phase",phase,component],180)
+                    (out/(phase+".log")).write_text(text)
+                    labels=device_observe(text,gate.PKG,gate.API,nonce,phase)
+                    result["labels"].extend(labels)
+                    result[phase]={"labels":labels,"log_sha256":hashlib.sha256(text.encode()).hexdigest(),"log":text}
+                assert installed()==product
+            finally:
+                assert backup.read_bytes()==saved
+                run(prefix+["install","-r","-t",backup],120);test.write_bytes(saved)
+                require_registration(adb,gate,"draft-restored","V12DeviceTest")
+                assert app.read_bytes()==product and test.read_bytes()==saved and installed()==product
+        result.update(product_readback="EXACT_BEFORE_AND_AFTER",default_test_restored=True,diagnostic_failure_rejected=True)
+    old_database,old_native=gate.verify_database,gate.verify_native_ui
+    try:
+        gate.verify_database=verify
+        gate.verify_native_ui=lambda adb:None
+        gate.main()
+        assert result["labels"]==DEVICE_LABELS["seed"]+DEVICE_LABELS["reopen"]
+        result["status"]="PASS"
+    except BaseException as e:
+        result.update(status="FAIL",error=repr(e),traceback=traceback.format_exc()[-12000:])
+        raise
+    finally:
+        gate.verify_database,gate.verify_native_ui=old_database,old_native
+        result["checks"]=len(result["labels"])
+        (out/"result.json").write_text(json.dumps(result,ensure_ascii=False,indent=2)+"\n")
+        print("NOTE_DRAFT_DEVICE "+json.dumps(result,ensure_ascii=False),flush=True)
+
+
 if __name__ == "__main__":
     import sys
-    assert sys.argv[1:] == ["selftest"]
-    selftest()
-    session_selftest()
-    ui_model_selftest()
+    if sys.argv[1:] == ["selftest"]:
+        selftest()
+        session_selftest()
+        ui_model_selftest()
+        device_observer_selftest()
+    elif sys.argv[1:] == ["android"]:
+        device_android()
+    else:
+        raise SystemExit("Usage: verify_note_drafts.py selftest|android")

@@ -252,7 +252,260 @@ def selftest():
         return result
 
 
+
+SESSION_STUBS = r'''
+@@ android/database/Cursor.java
+package android.database;
+public class Cursor implements AutoCloseable {
+ private final boolean found; private final long owner;
+ public Cursor(boolean f,long o){found=f;owner=o;}
+ public boolean moveToFirst(){return found;}
+ public long getLong(int i){return owner;}
+ public void close(){}
+}
+@@ android/database/sqlite/SQLiteDatabase.java
+package android.database.sqlite;
+import android.database.Cursor;
+import com.supercubegame.pockettodo.AppDatabase;
+public class SQLiteDatabase {
+ public final AppDatabase app;public boolean outer,tx,success,open=true;
+ public SQLiteDatabase(AppDatabase a){app=a;}
+ public boolean inTransaction(){return outer||tx;}
+ public boolean isOpen(){return open;}
+ public void beginTransaction(){if(inTransaction())throw new IllegalStateException("nested");tx=true;success=false;app.backup();}
+ public void setTransactionSuccessful(){success=true;}
+ public void endTransaction(){boolean committed=success;tx=false;if(!success)app.rollback();
+  if(committed&&app.wrote){app.wrote=false;Runnable r=app.afterCommit;app.afterCommit=null;if(r!=null)r.run();}}
+ public Cursor rawQuery(String sql,String[] args){
+  if(!sql.equals("SELECT activity_id FROM notes WHERE id=?"))throw new AssertionError("unexpected query "+sql);
+  return new Cursor("note".equals(args[0]),1);
+ }
+}
+@@ com/supercubegame/pockettodo/AppDatabase.java
+package com.supercubegame.pockettodo;
+import java.util.*;
+public class AppDatabase {
+ public final android.database.sqlite.SQLiteDatabase sql=new android.database.sqlite.SQLiteDatabase(this);
+ public List<NoteDocument.Block> blocks=new ArrayList<>(Arrays.asList(NoteDocument.Block.text("block","original",true)));
+ public long revision;public int writes;public boolean failSave,wrote,guardInside,saveInside;
+ public Runnable afterCommit;private List<NoteDocument.Block> prior;private long oldRevision;private int oldWrites;
+ public android.database.sqlite.SQLiteDatabase getWritableDatabase(){return sql;}
+ public List<NoteDocument.Block> noteBlocks(String id){return new ArrayList<>(blocks);}
+ public byte[] exportState(){guardInside|=sql.tx;String s=revision+"";
+  for(NoteDocument.Block b:blocks)s+="|"+b.id+"|"+b.text+"|"+b.privateContent;
+  return s.getBytes(java.nio.charset.StandardCharsets.UTF_8);}
+ public void saveNote(String id,List<NoteDocument.Block> b){if(!sql.tx)throw new AssertionError("save outside transaction");
+  saveInside=true;blocks=new ArrayList<>(b);revision++;writes++;wrote=true;if(failSave)throw new IllegalStateException("injected late write failure");}
+ public void external(String text){blocks.set(0,NoteDocument.Block.text("block",text,true));}
+ public void backup(){prior=new ArrayList<>(blocks);oldRevision=revision;oldWrites=writes;}
+ public void rollback(){blocks=prior;revision=oldRevision;writes=oldWrites;wrote=false;}
+}
+@@ com/supercubegame/pockettodo/NoteDocument.java
+package com.supercubegame.pockettodo;
+public class NoteDocument {
+ public enum Kind {TEXT,IMAGE}
+ public static class Block {
+  public String id,text,assetId,caption="";public boolean privateContent;public Kind kind;
+  public static Block text(String id,String text,boolean privacy){Block b=new Block();b.id=id;b.text=text;b.kind=Kind.TEXT;b.privateContent=privacy;return b;}
+ }
+}
+@@ com/supercubegame/pockettodo/MediaRepository.java
+package com.supercubegame.pockettodo;
+public class MediaRepository {
+ public static String digest(byte[] b){try{StringBuilder s=new StringBuilder();for(byte v:java.security.MessageDigest.getInstance("SHA-256").digest(b))s.append(String.format("%02x",v));return s.toString();}catch(Exception e){throw new RuntimeException(e);}}
+}
+'''
+SESSION_TEST = r'''
+package com.supercubegame.pockettodo;
+import java.nio.file.*;
+import java.util.*;
+public class SessionContract {
+ interface Action {void run()throws Exception;}
+ static int checks;
+ static void ok(boolean b,String name){if(!b)throw new AssertionError(name);checks++;System.out.println("SESSION_PASS "+name);}
+ static void reject(Action a,String name)throws Exception{
+  boolean failed=false;try{a.run();}catch(IllegalStateException|java.io.IOException e){failed=true;}ok(failed,name);
+ }
+ public static void main(String[] args)throws Exception{
+  Path root=Paths.get(args[0]); NoteDraftStore store=new NoteDraftStore(root);
+  AppDatabase db=new AppDatabase();
+  NoteEditorScreen.TextDraftSession s=new NoteEditorScreen.TextDraftSession(db,store,1,"note","block",db.noteBlocks("note"));
+  ok(s.initial.equals("original"),"initial");
+  byte[] before=db.exportState();
+  s.saveDraft("  草稿😀\nline\n");
+  ok(Arrays.equals(before,db.exportState()),"draft_db_readonly");
+  ok(s.recover().equals("  草稿😀\nline\n"),"recover_exact");
+  ok(Arrays.equals(before,db.exportState()),"recover_db_readonly");
+  s.close();
+  reject(()->s.saveDraft("closed"),"closed_refused");
+  NoteEditorScreen.TextDraftSession reopened=new NoteEditorScreen.TextDraftSession(db,store,1,"note","block",db.noteBlocks("note"));
+  ok(reopened.recover().equals("  草稿😀\nline\n"),"new_session_recovery");
+  reopened.discard();
+  ok(reopened.record.text==null&&Arrays.equals(before,db.exportState()),"discard_db_readonly");
+  reopened.saveDraft("");
+  ok(reopened.recover().equals(""),"empty_draft");
+  reject(()->reopened.commit(" "),"blank_commit");
+  reopened.saveDraft("saved");
+  ok(reopened.commit("saved"),"commit_cleanup");
+  ok(db.blocks.get(0).text.equals("saved")&&db.revision==1&&db.writes==1,"commit_once");
+  ok(store.read(new NoteDraftStore.Slot(1,"note","block")).text==null,"committed_draft_cleared");
+  reject(()->reopened.commit("twice"),"commit_terminal");
+  NoteEditorScreen.TextDraftSession stale=new NoteEditorScreen.TextDraftSession(db,store,1,"note","block",db.noteBlocks("note"));
+  stale.saveDraft("keep");
+  db.external("newer");
+  byte[] changed=db.exportState();
+  reject(()->stale.commit("overwrite"),"canonical_stale_commit");
+  reject(stale::recover,"canonical_stale_recovery");
+  reject(()->stale.saveDraft("overwrite draft"),"canonical_stale_draft");
+  ok(Arrays.equals(changed,db.exportState()),"stale_db_preserved");
+  NoteEditorScreen.TextDraftSession afterChange=new NoteEditorScreen.TextDraftSession(db,store,1,"note","block",db.noteBlocks("note"));
+  reject(afterChange::recover,"stored_base_stale");
+  ok(store.read(new NoteDraftStore.Slot(1,"note","block")).text.equals("keep"),"stale_draft_retained");
+  afterChange.discard();
+  afterChange.saveDraft("before race");
+  NoteEditorScreen.TextDraftSession raceA=new NoteEditorScreen.TextDraftSession(db,store,1,"note","block",db.noteBlocks("note"));
+  NoteEditorScreen.TextDraftSession raceB=new NoteEditorScreen.TextDraftSession(db,store,1,"note","block",db.noteBlocks("note"));
+  raceA.saveDraft("winner");
+  reject(()->raceB.saveDraft("loser"),"draft_cas_save");
+  reject(raceB::discard,"draft_cas_discard");
+  reject(raceB::recover,"draft_cas_recover");
+  ok(store.read(new NoteDraftStore.Slot(1,"note","block")).text.equals("winner"),"newer_draft_retained");
+  raceA.recover();
+  db.failSave=true; byte[] preFailure=db.exportState();
+  reject(()->raceA.commit("failure"),"late_failure");
+  ok(Arrays.equals(preFailure,db.exportState()),"late_failure_model_rollback");
+  ok(store.read(new NoteDraftStore.Slot(1,"note","block")).text.equals("winner"),"late_failure_keeps_draft");
+  db.failSave=false;
+  // A cooperating writer can publish after the draft read, before DB commit ends.
+  db.afterCommit=()->{try{NoteDraftStore.Record r=store.read(new NoteDraftStore.Slot(1,"note","block"));
+    store.save(new NoteDraftStore.Slot(1,"note","block"),r.token,r.base,"concurrent");}catch(Exception e){throw new RuntimeException(e);}};
+  ok(!raceA.commit("accepted"),"cleanup_conflict_reported");
+  ok(db.blocks.get(0).text.equals("accepted"),"cleanup_failure_not_db_failure");
+  ok(store.read(new NoteDraftStore.Slot(1,"note","block")).text.equals("concurrent"),"cleanup_keeps_newer_draft");
+  List<NoteDocument.Block> shown=db.noteBlocks("note");db.external("moved");
+  reject(()->new NoteEditorScreen.TextDraftSession(db,store,1,"note","block",shown),"stale_shown_blocks");
+  reject(()->new NoteEditorScreen.TextDraftSession(db,store,2,"note","block",db.noteBlocks("note")),"wrong_owner");
+  reject(()->new NoteEditorScreen.TextDraftSession(db,store,1,"missing","block",db.noteBlocks("note")),"missing_note");
+  reject(()->new NoteEditorScreen.TextDraftSession(db,store,1,"note","missing",db.noteBlocks("note")),"missing_block");
+  db.sql.outer=true;
+  reject(()->new NoteEditorScreen.TextDraftSession(db,store,1,"note","block",db.noteBlocks("note")),"outer_transaction");
+  db.sql.outer=false;
+  NoteEditorScreen.TextDraftSession adding=new NoteEditorScreen.TextDraftSession(db,store,1,"note",null,db.noteBlocks("note"));
+  adding.saveDraft("new block");
+  ok(adding.commit("new block"),"new_block_commit");
+  ok(db.blocks.size()==2&&db.blocks.get(0).text.equals("moved")&&db.blocks.get(1).text.equals("new block"),"append_preserves_existing");
+  ok(db.guardInside&&db.saveInside,"comparison_and_save_model_transaction");
+  System.out.println("SESSION_RESULT "+checks+" PASS");
+ }
+}
+'''
+
+# This gate compiles the actual nested Java session, but substitutes Android/DB
+# collaborators. Its rollback result is a model check, NOT Android SQLite proof.
+SESSION_LABELS = """initial draft_db_readonly recover_exact recover_db_readonly
+closed_refused new_session_recovery discard_db_readonly empty_draft blank_commit
+commit_cleanup commit_once committed_draft_cleared commit_terminal canonical_stale_commit
+canonical_stale_recovery canonical_stale_draft stale_db_preserved stored_base_stale
+stale_draft_retained draft_cas_save draft_cas_discard draft_cas_recover newer_draft_retained
+late_failure late_failure_model_rollback late_failure_keeps_draft cleanup_conflict_reported
+cleanup_failure_not_db_failure cleanup_keeps_newer_draft stale_shown_blocks wrong_owner
+missing_note missing_block outer_transaction new_block_commit append_preserves_existing
+comparison_and_save_model_transaction""".split()
+
+SESSION_EXTRACT = r'''
+import java.nio.file.*;
+import java.util.*;
+import javax.tools.*;
+import com.sun.source.tree.*;
+import com.sun.source.util.*;
+class ExtractSession {
+ public static void main(String[] args)throws Exception{
+  String source=Files.readString(Path.of(args[0]));
+  JavaCompiler compiler=ToolProvider.getSystemJavaCompiler();
+  DiagnosticCollector<JavaFileObject> errors=new DiagnosticCollector<>();
+  try(StandardJavaFileManager files=compiler.getStandardFileManager(errors,null,null)){
+   JavacTask task=(JavacTask)compiler.getTask(null,files,errors,Arrays.asList("-proc:none"),null,
+    files.getJavaFileObjects(args[0]));
+   List<String> matches=new ArrayList<>();
+   for(CompilationUnitTree tree:task.parse()){
+    SourcePositions pos=Trees.instance(task).getSourcePositions();
+    new TreeScanner<Void,Void>(){
+     public Void visitClass(ClassTree node,Void unused){
+      if(node.getSimpleName().contentEquals("TextDraftSession")){
+       int start=(int)pos.getStartPosition(tree,node),end=(int)pos.getEndPosition(tree,node);
+       if(start<0||end<=start)throw new AssertionError("Incomplete session syntax");
+       matches.add(source.substring(start,end));
+      }return super.visitClass(node,unused);
+     }
+    }.scan(tree,null);
+   }
+   for(Diagnostic<?> d:errors.getDiagnostics())if(d.getKind()==Diagnostic.Kind.ERROR)throw new AssertionError(d.toString());
+   if(matches.size()!=1)throw new AssertionError("Exactly one actual TextDraftSession required; found "+matches.size());
+   System.out.print(matches.get(0));
+  }
+ }
+}
+'''
+
+def session_selftest():
+    java = shutil.which("java") or str(Path(os.environ["JAVA_HOME"])/"bin/java")
+    source = ROOT/"src/main/java/com/supercubegame/pockettodo/NoteEditorScreen.java"
+    if not source.is_file():
+        raise RuntimeError("Editor source missing; no draft session integration verified")
+    with tempfile.TemporaryDirectory(prefix="draft-session-contract-") as tmp:
+        folder = Path(tmp)
+        extractor = folder/"ExtractSession.java"; extractor.write_text(SESSION_EXTRACT)
+        parsed = subprocess.run([java, str(extractor), str(source)], text=True,
+                                capture_output=True, timeout=30)
+        if parsed.returncode:
+            raise RuntimeError("Draft session not implemented or invalid:\n"+parsed.stderr[-6000:])
+        actual = parsed.stdout
+        assert actual.strip() and "TextDraftSession" in actual
+        boot = folder/"CompileDrafts.java"; boot.write_text(BOOT)
+        for part in SESSION_STUBS.split("@@ ")[1:]:
+            name, text = part.split("\n", 1)
+            target = folder/name; target.parent.mkdir(parents=True, exist_ok=True); target.write_text(text)
+        package = folder/"com/supercubegame/pockettodo"
+        product = package/"NoteEditorScreen.java"
+        prefix = "package com.supercubegame.pockettodo;import java.util.*;import java.io.*;import android.database.Cursor;\npublic class NoteEditorScreen {\n"
+        product.write_text(prefix+actual+"\n}\n")
+        (package/"NoteDraftStore.java").write_bytes((ROOT/PRODUCT).read_bytes())
+        (package/"SessionContract.java").write_text(SESSION_TEST)
+        classes = folder/"classes"; classes.mkdir()
+        sources = [p for p in folder.rglob("*.java") if p not in (boot, extractor)]
+        command([java, boot, "--release", "8", "-encoding", "UTF-8", "-d", classes, *sources])
+        def execute(cp, data):
+            return subprocess.run([java, "-cp", str(cp), "com.supercubegame.pockettodo.SessionContract", str(data)],
+                                  text=True, capture_output=True, timeout=60)
+        run = execute(classes, folder/"positive")
+        labels = [line.removeprefix("SESSION_PASS ") for line in run.stdout.splitlines()
+                  if line.startswith("SESSION_PASS ")]
+        assert run.returncode == 0 and labels == SESSION_LABELS, (run.stdout, run.stderr)
+        assert run.stdout.splitlines()[-1] == "SESSION_RESULT 37 PASS"
+        mutations = (
+            ("if(!base.equals(MediaRepository.digest(app.exportState())))", "if(false)", "canonical_stale_commit"),
+            ("if(!record.token.equals(store.read(slot).token))", "if(false)", "draft_cas_recover"),
+            ("if(!sameBlocks(blocks,shown))", "if(false)", "stale_shown_blocks"),
+            ("if(!c.moveToFirst()||c.getLong(0)!=owner)", "if(!c.moveToFirst())", "wrong_owner"),
+        )
+        for index, (before, after, expected) in enumerate(mutations):
+            assert actual.count(before) == 1, "Session mutation anchor changed"
+            product.write_text(prefix+actual.replace(before, after, 1)+"\n}\n")
+            mutant = folder/("mutant-"+str(index)); mutant.mkdir()
+            # Require compilation success; syntax errors never count as caught faults.
+            command([java, boot, "--release", "8", "-encoding", "UTF-8", "-cp", classes, "-d", mutant, product])
+            result = execute(os.pathsep.join((str(mutant), str(classes))), folder/("negative-"+str(index)))
+            assert result.returncode != 0 and "AssertionError: "+expected in result.stderr, (
+                "Session mutant survived or wrong failure", expected, result.stdout, result.stderr)
+        result = {"status": "PASS", "checks": len(labels), "labels": labels,
+                  "compiled_session_mutants": len(mutations),
+                  "scope": "ACTUAL_JAVA_SESSION_WITH_MODELED_DB_NOT_ANDROID_SQLITE_UI_OR_RESTART",
+                  "release_ready": False}
+        print("NOTE_DRAFT_SESSION_HOST "+json.dumps(result), flush=True)
+        return result
+
 if __name__ == "__main__":
     import sys
     assert sys.argv[1:] == ["selftest"]
     selftest()
+    session_selftest()

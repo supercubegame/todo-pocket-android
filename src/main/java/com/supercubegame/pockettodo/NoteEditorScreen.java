@@ -258,9 +258,100 @@ public final class NoteEditorScreen {
         }));
         dialog.show();
     }
+    private void editText(State s,String existingId){
+        // An unnamed first note keeps the existing creation flow. Draft slots need
+        // an already persisted note identity; never invent one merely to cancel.
+        if(s.noteId==null){editFirstText(s,existingId);return;}
+        host.work(()->new TextDraftSession(host.db,
+            new NoteDraftStore(host.activity.getFilesDir().toPath().resolve("note-drafts")),
+            activityId,s.noteId,existingId,s.blocks),session->{
+                if(host.activity.isFinishing()||host.activity.isDestroyed()||!s.noteId.equals(selectedNote)){
+                    session.close();return;
+                }
+                showTextDraft(session);
+            },()->host.message("文字或草稿读取失败，请重新打开；未覆盖正文或草稿",true));
+    }
+    private void showTextDraft(TextDraftSession session){
+        LinearLayout body=host.column();body.setPadding(host.dp(20),host.dp(4),host.dp(20),host.dp(8));
+        EditText field=host.field("文字内容",true);field.setText(session.initial);
+        body.addView(field,new LinearLayout.LayoutParams(-1,-2));
+        TextView hint=host.text("草稿仅在点击「存草稿」后保留在本机，不进入完整备份，卸载会丢失。取消不会自动保存或丢弃草稿。",14,TodayScreen.MUTED);
+        hint.setContentDescription("note-draft-help");body.addView(hint);
+        TextView validation=host.text("",14,TodayScreen.MUTED);
+        validation.setContentDescription("note-draft-status");
+        Button save=host.button("存草稿",()->{}),recover=host.button("恢复草稿",()->{}),discard=host.button("丢弃草稿",()->{});
+        save.setContentDescription("note-draft-save");recover.setContentDescription("note-draft-recover");discard.setContentDescription("note-draft-discard");
+        for(Button b:new Button[]{save,recover,discard})body.addView(b,new LinearLayout.LayoutParams(-1,host.dp(48)));
+        body.addView(validation);
+        ScrollView scroll=new ScrollView(host.activity);scroll.addView(body);
+        AlertDialog dialog=new AlertDialog.Builder(host.activity).setTitle(session.block==null?"加入文字":"修改文字")
+            .setView(scroll).setNegativeButton("取消",null).setPositiveButton("保存",null).create();
+        final boolean[] busy={false};
+        Runnable update=()->{
+            boolean present=session.record.text!=null;
+            recover.setEnabled(!busy[0]&&present);discard.setEnabled(!busy[0]&&present);
+            save.setEnabled(!busy[0]);field.setEnabled(!busy[0]);dialog.setCancelable(!busy[0]);
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(!busy[0]);
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(!busy[0]);
+        };
+        java.util.function.Consumer<Boolean> lock=value->{busy[0]=value;update.run();};
+        Runnable failed=()->{
+            lock.accept(false);validation.setTextColor(TodayScreen.ERROR);
+            validation.setText("操作未完成：正文或草稿可能已变化，请保留输入并重新打开。");
+        };
+        dialog.setOnDismissListener(unused->session.close());
+        dialog.setOnShowListener(unused->{
+            validation.setText(session.record.text==null?"暂无已保存草稿；正文不能为空。":"发现本机草稿，请明确恢复；当前仍显示正文。");
+            update.run();
+            save.setOnClickListener(v->{
+                if(busy[0])return;
+                String exact=field.getText().toString();lock.accept(true);
+                host.work(()->{session.saveDraft(exact);return true;},ignored->{
+                    lock.accept(false);validation.setTextColor(TodayScreen.MUTED);
+                    validation.setText("草稿已保存，正文未修改。");
+                },failed);
+            });
+            recover.setOnClickListener(v->{
+                if(busy[0])return;
+                // Replacing current input is explicit and cancelable.
+                new AlertDialog.Builder(host.activity).setTitle("恢复草稿？")
+                    .setMessage("会替换当前输入，尚未存草稿的输入将丢失；正文不变。")
+                    .setNegativeButton("取消",null).setPositiveButton("恢复",(confirm,which)->{
+                        if(!dialog.isShowing()||busy[0])return;lock.accept(true);
+                        host.work(session::recover,exact->{
+                            field.setText(exact);lock.accept(false);validation.setTextColor(TodayScreen.MUTED);
+                            validation.setText("已恢复到输入框；点击保存才会修改正文。");
+                        },failed);
+                    }).show();
+            });
+            discard.setOnClickListener(v->{
+                if(busy[0])return;
+                new AlertDialog.Builder(host.activity).setTitle("丢弃本机草稿？")
+                    .setMessage("仅丢弃这篇笔记当前文字位置的已保存草稿，不能撤销。正文和当前输入不变。")
+                    .setNegativeButton("取消",null).setPositiveButton("丢弃",(confirm,which)->{
+                        if(!dialog.isShowing()||busy[0])return;lock.accept(true);
+                        host.work(()->{session.discard();return true;},ignored->{
+                            lock.accept(false);validation.setTextColor(TodayScreen.MUTED);
+                            validation.setText("草稿已丢弃，正文和当前输入未修改。");
+                        },failed);
+                    }).show();
+            });
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+                if(busy[0])return;
+                String value=field.getText().toString();
+                if(value.trim().isEmpty()){validation.setText("内容不能为空");validation.setTextColor(TodayScreen.ERROR);return;}
+                lock.accept(true);
+                host.work(()->session.commit(value),clean->{
+                    dialog.dismiss();load();
+                    if(!clean)host.message("正文已保存，但草稿未能清理；请勿重复保存正文，重新打开核对草稿。",true);
+                },failed);
+            });
+        });
+        dialog.show();
+    }
     /** Own dialog, not the shared editor helper: that one intentionally accepts blank
      * multiline input for path clearing, while a note text block must never be blank. */
-    private void editText(State s,String existingId){
+    private void editFirstText(State s,String existingId){
         NoteDocument.Block existing=null;
         if(existingId!=null)for(NoteDocument.Block b:s.blocks)if(b.id.equals(existingId)&&b.kind==NoteDocument.Kind.TEXT)existing=b;
         if(existingId!=null&&existing==null)throw new IllegalArgumentException("文字块不存在");
@@ -548,6 +639,115 @@ public final class NoteEditorScreen {
             },ignored->{pick.dismiss();load();},()->pick.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true));
         }));
         pick.show();
+    }
+    /** One explicit text dialog. DB comparisons and the canonical write share a
+     * transaction; draft-file cleanup is deliberately AFTER a successful DB commit.
+     * Lock order: session, AppDatabase, draft store. No autosave, LMK or power-loss claim.
+     */
+    static final class TextDraftSession implements AutoCloseable {
+        final AppDatabase app;
+        final NoteDraftStore store;
+        final NoteDraftStore.Slot slot;
+        final android.database.sqlite.SQLiteDatabase connection;
+        final String note,block,base,initial;
+        final List<NoteDocument.Block> blocks;
+        NoteDraftStore.Record record;
+        private boolean terminal,usingDraft;
+        TextDraftSession(AppDatabase app,NoteDraftStore store,long owner,String note,String block,List<NoteDocument.Block> shown)throws IOException{
+            this.app=app;this.store=store;this.note=note;this.block=block;
+            slot=new NoteDraftStore.Slot(owner,note,block);
+            synchronized(app){
+                connection=app.getWritableDatabase();noOuter();connection.beginTransaction();
+                try{
+                    try(Cursor c=connection.rawQuery("SELECT activity_id FROM notes WHERE id=?",new String[]{note})){
+                        if(!c.moveToFirst()||c.getLong(0)!=owner)throw new IllegalStateException("笔记已不存在或所属活动已变化");
+                    }
+                    blocks=new ArrayList<>(app.noteBlocks(note));
+                    if(!sameBlocks(blocks,shown))throw new IllegalStateException("笔记内容已变化，请重新打开");
+                    NoteDocument.Block target=null;
+                    for(NoteDocument.Block b:blocks)if(b.id.equals(block))target=b;
+                    if(block!=null&&(target==null||target.kind!=NoteDocument.Kind.TEXT))throw new IllegalStateException("文字块已不存在");
+                    initial=target==null?"":target.text;
+                    base=MediaRepository.digest(app.exportState());
+                    record=store.read(slot);
+                    connection.setTransactionSuccessful();
+                }finally{connection.endTransaction();}
+            }
+        }
+        private static boolean sameBlocks(List<NoteDocument.Block> a,List<NoteDocument.Block> b){
+            if(b==null||a.size()!=b.size())return false;
+            for(int i=0;i<a.size();i++){
+                NoteDocument.Block x=a.get(i),y=b.get(i);
+                if(y==null||!x.id.equals(y.id)||x.kind!=y.kind||!x.text.equals(y.text)||
+                    !java.util.Objects.equals(x.assetId,y.assetId)||!x.caption.equals(y.caption)||x.privateContent!=y.privateContent)return false;
+            }
+            return true;
+        }
+        private void noOuter(){
+            if(connection.inTransaction())throw new IllegalStateException("请在当前操作完成后重开文字编辑");
+        }
+        private void active(){
+            if(terminal||!connection.isOpen()||app.getWritableDatabase()!=connection)
+                throw new IllegalStateException("文字编辑已失效，请重新打开");
+        }
+        private void unchanged(){
+            active();
+            if(!base.equals(MediaRepository.digest(app.exportState())))throw new IllegalStateException("本机内容已变化；草稿保留，请重新打开核对");
+        }
+        private void currentDraft()throws IOException{
+            if(!record.token.equals(store.read(slot).token))throw new IOException("草稿已有新版本，请重新打开");
+        }
+        synchronized void saveDraft(String text)throws IOException{
+            synchronized(app){
+                active();noOuter();connection.beginTransaction();
+                try{
+                    unchanged();
+                    record=store.save(slot,record.token,base,text);usingDraft=true;
+                    connection.setTransactionSuccessful();
+                }finally{connection.endTransaction();}
+            }
+        }
+        synchronized String recover()throws IOException{
+            synchronized(app){
+                active();noOuter();connection.beginTransaction();
+                try{
+                    unchanged();currentDraft();record.requireBase(base);
+                    usingDraft=true;connection.setTransactionSuccessful();return record.text;
+                }finally{connection.endTransaction();}
+            }
+        }
+        synchronized void discard()throws IOException{
+            synchronized(app){active();noOuter();record=store.clear(slot,record.token);usingDraft=false;}
+        }
+        /** False means the body DID commit but cleanup failed; caller must not retry
+         * the body write. A newer draft is retained by expected-token comparison.
+         * An existing draft not explicitly recovered/saved by this dialog is retained.
+         */
+        synchronized boolean commit(String raw)throws IOException{
+            if(raw==null||raw.trim().isEmpty())throw new IllegalStateException("内容不能为空");
+            synchronized(app){
+                active();noOuter();connection.beginTransaction();
+                try{
+                    unchanged();currentDraft();
+                    String id=block==null?UUID.randomUUID().toString():block;
+                    List<NoteDocument.Block> next=new ArrayList<>(blocks);
+                    boolean privacy=false;
+                    if(block!=null)for(NoteDocument.Block b:blocks)if(b.id.equals(block))privacy=b.privateContent;
+                    NoteDocument.Block value=NoteDocument.Block.text(id,raw.trim(),privacy);
+                    if(block==null)next.add(value);
+                    else for(int i=0;i<next.size();i++)if(next.get(i).id.equals(block)){next.set(i,value);break;}
+                    app.saveNote(note,next);
+                    connection.setTransactionSuccessful();
+                }finally{connection.endTransaction();}
+                terminal=true;
+                if(usingDraft&&record.text!=null){
+                    try{record=store.clear(slot,record.token);}
+                    catch(IOException|RuntimeException cleanup){return false;}
+                }
+                return true;
+            }
+        }
+        @Override public synchronized void close(){terminal=true;}
     }
     private void persist(State s,NoteDocument.Block block,boolean replacing){persistBlocks(s,block,replacing);}
     private void persistBlocks(State s,NoteDocument.Block block,boolean replacing){

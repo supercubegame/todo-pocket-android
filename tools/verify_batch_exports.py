@@ -42,6 +42,151 @@ ORDER_UI_LABELS = ["boundary_controls", "singleton_disabled_readonly",
                    "original_order_restored_two_revisions", "all_media_preserved"]
 ORDER_UI_SCOPE = "NATIVE_NOTE_ORDER_STABLE_ID_FORCE_STOP_RESTART_NOT_LMK"
 
+EDITOR_ORDER_LABELS = ["up_fresh_default_first", "up_picker_order_cancel_readonly",
+                       "up_same_title_identity_readonly", "down_fresh_default_first",
+                       "down_picker_order_cancel_readonly", "down_same_title_identity_readonly"]
+EDITOR_ORDER_SCOPE = "NATIVE_REORDER_EDITOR_INDEXED_PICKER_DISTINCT_BODY_WITNESS_NOT_LMK"
+
+
+def editor_picker_check(rows, actual):
+    assert rows and len({r[0] for r in rows}) == len(rows)
+    expected = [str(i+1)+". "+row[2] for i, row in enumerate(rows)]
+    assert actual == expected, "editor picker order, membership or duplicate entry differs"
+
+
+def editor_selection_check(data, owner, note, observed):
+    # This is a discriminating visible body witness, not exhaustive/offscreen body validation.
+    rows = [r for r in data["notes"] if r[1] == owner]
+    ids = [r[0] for r in rows]
+    assert note in ids and len(ids) == len(set(ids))
+    index = ids.index(note)
+    expected_header = rows[index][2]+" · "+str(index+1)+" / "+str(len(rows))
+    headers = [n.get("text") for n in observed if n.get("content-desc") == "note-current"]
+    assert headers == [expected_header], "editor selected title/index differs"
+    blocks = sorted((r for r in data["blocks"] if r[0] == note), key=lambda r: r[2])
+    empty = [n for n in observed if n.get("text") == "写点什么，或加一张图。"]
+    if not blocks:
+        assert len(empty) == 1
+        assert not any(n.get("content-desc", "").startswith(("note-text-", "note-image-")) for n in observed)
+        return
+    assert not empty
+    texts = [r for r in blocks if r[3] == "TEXT" and r[4]]
+    assert texts, "selected fixture has no visible text identity witness"
+    witness = texts[0]; key, text = "note-text-"+witness[1], witness[4]
+    assert {r[0] for r in data["blocks"] if r[3] == "TEXT" and r[1] == witness[1] and r[4] == text} == {note}, "body witness not unique across notes"
+    matches = [n.get("text") for n in observed if n.get("content-desc") == key]
+    assert matches == [text], "selected note body identity differs"
+
+
+def editor_order_receipt(value, api, source, run, apk, owner, note, sibling):
+    return isinstance(value, dict) and (
+        value.get("status") == "PASS" and value.get("scope") == EDITOR_ORDER_SCOPE and
+        type(value.get("api")) is int and value["api"] == api and
+        value.get("commit") == source and value.get("run_id") == run and
+        isinstance(apk, str) and re.fullmatch("[0-9a-f]{64}", apk) is not None and
+        value.get("apk_sha256") == apk and
+        value.get("labels") == EDITOR_ORDER_LABELS and type(value.get("checks")) is int and
+        value["checks"] == 6 and value.get("release_ready") is False and
+        type(value.get("owner")) is int and value["owner"] == owner and owner > 0 and
+        isinstance(note, str) and bool(note.strip()) and isinstance(sibling, str) and bool(sibling.strip()) and
+        note != sibling and value.get("note_id") == note and value.get("sibling_id") == sibling and
+        value.get("state") == "BROWSING_CANCEL_SELECTION_ALL_TABLES_REVISION_MEDIA_UNCHANGED")
+
+
+def editor_order_sample():
+    return {"status": "PASS", "scope": EDITOR_ORDER_SCOPE, "api": 26,
+            "commit": "source", "run_id": "run", "apk_sha256": "a"*64,
+            "labels": EDITOR_ORDER_LABELS[:], "checks": 6, "release_ready": False,
+            "owner": 1, "note_id": "b", "sibling_id": "a",
+            "state": "BROWSING_CANCEL_SELECTION_ALL_TABLES_REVISION_MEDIA_UNCHANGED"}
+
+
+def editor_order_selftest():
+    rows = [("first", 1, "First"), ("empty", 1, "Same"), ("filled", 1, "Same")]
+    data = {"notes": rows + [("other", 2, "Other")],
+            "blocks": [("first", "t1", 0, "TEXT", "First body", None, "", 0, None),
+                       ("filled", "t2", 0, "TEXT", "Unique body", None, "", 0, None),
+                       ("filled", "im", 1, "IMAGE", "", "asset", "", 0, None),
+                       ("other", "t2", 0, "TEXT", "Wrong owner", None, "", 0, None)]}
+    labels = ["1. First", "2. Same", "3. Same"]
+    editor_picker_check(rows, labels)
+    picker_bad = [[], labels[::-1], labels[:-1], labels + ["4. Other"],
+                  ["1. First", "2. Same", "2. Same"], ["1. First", "2. Wrong", "3. Same"]]
+    for bad in picker_bad:
+        try: editor_picker_check(rows, bad)
+        except AssertionError: pass
+        else: raise AssertionError("editor picker negative survived")
+    empty = [{"content-desc": "note-current", "text": "Same · 2 / 3"},
+             {"text": "写点什么，或加一张图。"}]
+    filled = [{"content-desc": "note-current", "text": "Same · 3 / 3"},
+              {"content-desc": "note-text-t2", "text": "Unique body"}]
+    editor_selection_check(data, 1, "empty", empty)
+    editor_selection_check(data, 1, "filled", filled)
+    bads = [("empty", filled), ("filled", empty),
+            ("filled", [dict(filled[0])]), ("empty", [dict(empty[0])])]
+    for note, good in (("empty", empty), ("filled", filled)):
+        for key, value in (("text", "Same · 1 / 3"), ("content-desc", "wrong")):
+            bad = copy.deepcopy(good); bad[0][key] = value; bads.append((note, bad))
+        bads.append((note, good + [dict(good[0])]))
+    bads.extend([
+        ("filled", [filled[0], {"content-desc": "note-text-t2", "text": "Wrong owner"}]),
+        ("filled", [filled[0], {"content-desc": "note-text-wrong", "text": "Unique body"}]),
+        ("filled", filled + [dict(filled[1])]),
+        ("empty", empty + [{"content-desc": "note-image-im", "text": ""}]),
+        ("filled", filled + [{"text": "写点什么，或加一张图。"}]),
+    ])
+    for note, bad in bads:
+        try: editor_selection_check(data, 1, note, bad)
+        except AssertionError: pass
+        else: raise AssertionError("editor selected-note negative survived")
+    ambiguous = copy.deepcopy(data)
+    ambiguous["blocks"].append(("empty", "t2", 0, "TEXT", "Unique body", None, "", 0, None))
+    try: editor_selection_check(ambiguous, 1, "filled", filled)
+    except AssertionError: pass
+    else: raise AssertionError("ambiguous selected-note witness accepted")
+    good = editor_order_sample()
+    assert editor_order_receipt(good, 26, "source", "run", "a"*64, 1, "b", "a")
+    bad_receipts = [None, {}]
+    for key in good:
+        bad = copy.deepcopy(good); del bad[key]; bad_receipts.append(bad)
+    for key, value in (("status", "FAIL"), ("scope", "HOST_ONLY"), ("api", True),
+                       ("api", 34), ("commit", "old"), ("run_id", "old"),
+                       ("apk_sha256", "b"*64), ("checks", True), ("checks", 5),
+                       ("owner", True), ("owner", 2), ("note_id", "a"), ("sibling_id", "b"),
+                       ("release_ready", 0), ("labels", EDITOR_ORDER_LABELS[::-1]),
+                       ("state", "NOT_VERIFIED")):
+        bad = copy.deepcopy(good); bad[key] = value; bad_receipts.append(bad)
+    for index in range(6):
+        bad = copy.deepcopy(good); bad["labels"].pop(index); bad["checks"] -= 1; bad_receipts.append(bad)
+    for bad in bad_receipts:
+        assert not editor_order_receipt(bad, 26, "source", "run", "a"*64, 1, "b", "a")
+    parent = order_ui_sample()
+    for bad in bad_receipts:
+        invalid = copy.deepcopy(parent); invalid["editor_ui"] = bad
+        assert not order_ui_receipt(invalid, 26, "source", "run", "a"*64)
+    import inspect
+    mutants = [
+        (editor_picker_check, "actual == expected", "True",
+         lambda f: f(rows, labels[::-1])),
+        (editor_selection_check, 'headers == [expected_header]', "True",
+         lambda f: f(data, 1, "filled", [dict(filled[0], text="Same · 2 / 3"), filled[1]])),
+        (editor_selection_check, 'matches == [text]', "True",
+         lambda f: f(data, 1, "filled", [filled[0], dict(filled[1], text="Wrong owner")])),
+        (editor_order_receipt, 'value.get("apk_sha256") == apk', "True", None),
+    ]
+    for fn, old, new, call in mutants:
+        source = inspect.getsource(fn); assert source.count(old) == 1
+        namespace = dict(globals()); exec(source.replace(old, new), namespace)
+        mutated = namespace[fn.__name__]
+        if call is not None: call(mutated)
+        else:
+            assert mutated(dict(good, apk_sha256="b"*64), 26, "source", "run", "a"*64, 1, "b", "a")
+    print("EDITOR_ORDER_HOST picker=1_positive_"+str(len(picker_bad))+
+          "_negative selection=2_positive_"+str(len(bads)+1)+
+          "_negative receipt=1_positive_"+str(len(bad_receipts))+
+          "_negative parent="+str(len(bad_receipts))+
+          "_negative 4_mutations_exposed HOST_ONLY", flush=True)
+
 
 def order_expected(before, note, owner, direction):
     assert type(owner) is int and owner > 0 and type(direction) is int and direction in (-1, 1)
@@ -67,6 +212,8 @@ def order_readback(before, actual, note, owner, direction):
 
 def order_ui_receipt(value, api, source, run, apk):
     return isinstance(value, dict) and (
+        editor_order_receipt(value.get("editor_ui"), api, source, run, apk,
+                             value.get("owner"), value.get("note_id"), value.get("sibling_id")) and
         value.get("status") == "PASS" and value.get("scope") == ORDER_UI_SCOPE and
         type(value.get("api")) is int and value["api"] == api and
         value.get("commit") == source and value.get("run_id") == run and
@@ -82,6 +229,7 @@ def order_ui_receipt(value, api, source, run, apk):
 
 def order_ui_sample():
     return {"status": "PASS", "scope": ORDER_UI_SCOPE, "api": 26, "commit": "source", "run_id": "run",
+            "editor_ui": editor_order_sample(),
             "apk_sha256": "a"*64, "labels": ORDER_UI_LABELS[:], "checks": 8, "release_ready": False,
             "owner": 1, "note_id": "b", "sibling_id": "a",
             "state": "EXACT_OWNER_SLOT_SWAP_PER_MOVE_TWO_REVISIONS_ALL_OTHER_TABLES_MEDIA_UNCHANGED"}
@@ -490,6 +638,7 @@ public class BatchPageCheck {
 
 def selftest():
     note_management.selftest()
+    editor_order_selftest()
     order_ui_selftest()
     deletion_ui_selftest()
     rename_selftest()
@@ -963,6 +1112,45 @@ def native(adb, gate):
                 shell("input", "swipe", "160", "440", "160", "190", "350")
             else: raise AssertionError("order summary/control coverage incomplete")
             stop(); assert state() == snapshot, "order browsing wrote database or media"
+        editor_proof = {"status": "FAIL", "scope": EDITOR_ORDER_SCOPE, "api": gate.API,
+                        "commit": source, "run_id": run_id, "apk_sha256": result["apk_sha256"],
+                        "labels": [], "checks": 0, "release_ready": False,
+                        "owner": owner, "note_id": note, "sibling_id": sibling[0]}
+        proof["editor_ui"] = editor_proof
+        def editor_passed(label):
+            assert EDITOR_ORDER_LABELS[len(editor_proof["labels"])] == label
+            editor_proof["labels"].append(label); editor_proof["checks"] = len(editor_proof["labels"])
+        def editor_observe(snapshot, phase):
+            rows = [r for r in snapshot[0]["notes"] if r[1] == owner]
+            # Existing three-entry fixture fits a single picker viewport; do not claim pagination.
+            assert len(rows) == 3 and rows[0][0] not in (note, sibling[0])
+            assert not any(r[0] == note for r in snapshot[0]["blocks"])
+            assert any(r[0] == sibling[0] and r[3] == "TEXT" for r in snapshot[0]["blocks"])
+            detail(owner); tap("笔记"); ready()
+            def selected(identity):
+                find(**{"content-desc": "note-current"})
+                current = nodes()
+                relevant = [n for n in current if n.get("content-desc") == "note-current" or
+                            n.get("content-desc", "").startswith(("note-text-", "note-image-")) or
+                            n.get("text") == "写点什么，或加一张图。"]
+                assert relevant and all(n.get("package") == gate.PKG for n in relevant)
+                editor_selection_check(snapshot[0], owner, identity, relevant)
+            def picker():
+                tap("切换笔记"); find(text="选择笔记")
+                items = [n for n in nodes() if n.get("resource-id") == "android:id/text1"]
+                assert all(n.get("package") == gate.PKG for n in items)
+                editor_picker_check(rows, [n.get("text") for n in items])
+            selected(rows[0][0]); editor_passed(phase+"_fresh_default_first")
+            picker(); tap("取消"); selected(rows[0][0])
+            stop(); assert state() == snapshot, "editor picker cancellation mutated state"
+            editor_passed(phase+"_picker_order_cancel_readonly")
+            detail(owner); tap("笔记"); ready()
+            for identity in (note, sibling[0]):
+                picker()
+                index = [r[0] for r in rows].index(identity)
+                tap(str(index+1)+". "+rows[index][2]); ready(); selected(identity)
+            stop(); assert state() == snapshot, "editor selection mutated state"
+            editor_passed(phase+"_same_title_identity_readonly")
         observe(initial, owner); passed("boundary_controls")
         singles = [a for a in initial[2] if sum(r[1] == a for r in initial[0]["notes"]) == 1]
         assert singles, "singleton order fixture missing"
@@ -971,14 +1159,17 @@ def native(adb, gate):
         stop(); moved = state(); order_readback(initial, moved, note, owner, -1)
         passed("same_title_up_exact_state")
         observe(moved, owner); passed("restart_up_summary_order")
+        editor_observe(moved, "up")
         detail(owner); click(locate("note-down-"+note)); ready()
         stop(); restored = state(); order_readback(moved, restored, note, owner, 1)
         passed("same_title_down_exact_state")
         observe(restored, owner); passed("restart_down_summary_order")
+        editor_observe(restored, "down")
         expected = copy.deepcopy(initial)
         expected[0]["revision"] = [(1, initial[0]["revision"][0][1]+2)]
         assert restored == expected; passed("original_order_restored_two_revisions")
         assert initial[1] and state()[1] == initial[1]; passed("all_media_preserved")
+        editor_proof.update(status="PASS", state="BROWSING_CANCEL_SELECTION_ALL_TABLES_REVISION_MEDIA_UNCHANGED")
         proof.update(status="PASS", state="EXACT_OWNER_SLOT_SWAP_PER_MOVE_TWO_REVISIONS_ALL_OTHER_TABLES_MEDIA_UNCHANGED")
         assert order_ui_receipt(proof, gate.API, source, run_id, result["apk_sha256"])
     def deletion_ui():

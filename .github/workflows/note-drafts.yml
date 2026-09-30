@@ -60,6 +60,38 @@ jobs:
           calls=[n for n in ast.walk(native_fn) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='create_category_fixture']
           assert len(calls)==1 and [n.id for n in calls[0].args]==['tap','fill','button','ready','find']
           print('DRAFT_CATEGORY_FIXTURE host_sequence=1 compiled_omission_mutants=5 PASS; not Android execution')
+          setup=next((n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='configure_literal_input'),None)
+          assert setup is not None, 'literal whitespace input requires explicit emulator punctuation setup'
+          def exercise_input(node,ci='true',qemu='1',after='0',fail=False):
+              scope={'os':type('Env',(),{'environ':{'GITHUB_ACTIONS':ci}})}
+              exec(compile(ast.Module(body=[node],type_ignores=[]),'input-fixture','exec'),scope)
+              calls=[];receipt={}
+              def shell(*args):
+                  calls.append(args)
+                  if args==('getprop','ro.kernel.qemu'):return qemu+'\n'
+                  if args==('settings','get','system','text_auto_punctuate'):
+                      return ('1' if len(calls)==2 else after)+'\n'
+                  assert args==('settings','put','system','text_auto_punctuate','0')
+                  if fail:raise RuntimeError('injected settings failure')
+                  return ''
+              scope['configure_literal_input'](shell,receipt)
+              return calls,receipt
+          def input_contract(node):
+              calls,receipt=exercise_input(node)
+              assert calls==[('getprop','ro.kernel.qemu'),('settings','get','system','text_auto_punctuate'),
+                  ('settings','put','system','text_auto_punctuate','0'),('settings','get','system','text_auto_punctuate')]
+              assert receipt=={'scope':'DISPOSABLE_EMULATOR_INPUT_NOT_DEFAULT_KEYBOARD_ACCEPTANCE','before':'1','after':'0'}
+              for kwargs in ({'ci':'false'},{'qemu':'0'},{'after':'1'},{'fail':True}):
+                  try:exercise_input(node,**kwargs)
+                  except (AssertionError,RuntimeError):pass
+                  else:raise AssertionError('unsafe or failed input setup accepted')
+          input_contract(setup)
+          for index in range(len(setup.body)):
+              mutant=copy.deepcopy(setup);del mutant.body[index]
+              try:input_contract(mutant)
+              except (AssertionError,KeyError,NameError):pass
+              else:raise AssertionError(('input setup omission accepted',index))
+          print('DRAFT_INPUT_FIXTURE host_positive=1 negative=4 omission_mutants='+str(len(setup.body))+' PASS; not Android execution')
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -168,6 +200,14 @@ jobs:
               button(True)
               ready()
               find(text='DraftCategory',**{'content-desc':'category-name-1'})
+          def configure_literal_input(shell,receipt):
+              assert os.environ.get('GITHUB_ACTIONS')=='true', 'CI input fixture only'
+              assert shell('getprop','ro.kernel.qemu').strip()=='1', 'emulator input fixture only'
+              receipt['before']=shell('settings','get','system','text_auto_punctuate').strip()
+              shell('settings','put','system','text_auto_punctuate','0')
+              receipt['after']=shell('settings','get','system','text_auto_punctuate').strip()
+              assert receipt['after']=='0', ('punctuation setting not applied',receipt)
+              receipt['scope']='DISPOSABLE_EMULATOR_INPUT_NOT_DEFAULT_KEYBOARD_ACCEPTANCE'
           def native(adb):
               prefix=[str(adb),'-s',gate.SERIAL];serial=0
               def command(*args,binary=False):
@@ -221,7 +261,8 @@ jobs:
                   shell('input','keyevent',*(['KEYCODE_DEL']*(size+1)))
                   assert find(**{'content-desc':desc}).get('text')==''
                   if value:shell('input','text',value.replace(' ','%s'))
-                  assert find(**{'content-desc':desc}).get('text')==value
+                  actual=find(**{'content-desc':desc}).get('text')
+                  assert actual==value, ('input preparation mismatch',desc,repr(value),repr(actual))
                   keyboard=shell('dumpsys','input_method')
                   if re.search(r'(?:mInputShown|isInputViewShown)\s*=\s*true',keyboard):
                       shell('input','keyevent','KEYCODE_BACK')
@@ -271,6 +312,10 @@ jobs:
                   command('install','-r','-t',str(apks[0]))
                   installed=shell('pm','path',gate.PKG).strip();assert installed.startswith('package:') and '\n' not in installed
                   assert command('exec-out','cat',installed[8:],binary=True)==product
+                  # Fix synthetic key input, not product text or the expected whitespace.
+                  # Only this fresh emulator is affected and it is destroyed after the test.
+                  result['input_fixture']={}
+                  configure_literal_input(shell,result['input_fixture'])
                   start();tap('活动');ready()
                   create_category_fixture(tap,fill,button,ready,find)
                   adds=[n for n in nodes() if n.get('content-desc','').startswith('category-add-')];assert adds
@@ -416,6 +461,10 @@ jobs:
               assert type(v['checks']) is int and v['checks']==12 and v['labels']==NATIVE_REQUIRED
               assert v['release_ready'] is False and v['cleanup_failure_race']=='NOT_TESTED'
               assert v['unicode_input']=='BACKEND_ONLY'
+              fixture=v['input_fixture']
+              assert fixture['scope']=='DISPOSABLE_EMULATOR_INPUT_NOT_DEFAULT_KEYBOARD_ACCEPTANCE'
+              assert isinstance(fixture['before'],str) and len(fixture['before'])<=32
+              assert fixture['after']=='0'
               labels=[line.removeprefix('DRAFT_NATIVE_PASS ') for line in log.splitlines() if line.startswith('DRAFT_NATIVE_PASS ')]
               assert labels==NATIVE_REQUIRED
               emitted=[line.removeprefix('DRAFT_NATIVE_RESULT ') for line in log.splitlines() if line.startswith('DRAFT_NATIVE_RESULT ')]
@@ -449,6 +498,7 @@ jobs:
               v=dict(m,status='PASS',scope='NATIVE_DRAFT_BUTTONS_ASCII_IMAGE_FORCE_STOP_NOT_LMK_OR_CLEANUP_RACE',
                   checks=12,labels=NATIVE_REQUIRED[:],release_ready=False,cleanup_failure_race='NOT_TESTED',unicode_input='BACKEND_ONLY',
                   force_stop=stop,final_stop=stop,snapshots=['d'*64]*10+['e'*64]*2,
+                  input_fixture=dict(scope='DISPOSABLE_EMULATOR_INPUT_NOT_DEFAULT_KEYBOARD_ACCEPTANCE',before='1',after='0'),
                   screens=[dict(file=k,sha256=hashlib.sha256(raw).hexdigest(),bytes=len(raw)) for k,raw in images.items()])
               def log(w):return ''.join('DRAFT_NATIVE_PASS '+s+'\n' for s in w['labels'])+'DRAFT_NATIVE_RESULT '+json.dumps(w)+'\n'
               assert validate_native(v,m,log(v),images)
@@ -459,6 +509,8 @@ jobs:
                   w=copy.deepcopy(v);del w['labels'][i];bad.append(w)
               for key,value in [('status','FAIL'),('checks',12.0),('release_ready',0),('commit','f'*40),('api',26.0),('apk_sha256','f'*64),('unicode_input','PASS')]:
                   w=copy.deepcopy(v);w[key]=value;bad.append(w)
+              for key,value in [('scope','DEFAULT_KEYBOARD_PASS'),('before',None),('after','1')]:
+                  w=copy.deepcopy(v);w['input_fixture'][key]=value;bad.append(w)
               for key in ('force_stop','final_stop'):
                   for code in (0,255,True):
                       w=copy.deepcopy(v);w[key]['probes'][-1]['returncode']=code;bad.append(w)

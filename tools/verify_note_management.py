@@ -107,7 +107,8 @@ def sample(api=26, source="source", run="run", apk="a"*64):
 def selftest():
     good = sample()
     def parents(value):
-        batch = {"status": "PASS", "note_management": value, "deletion_ui": report_ui_sample()}
+        batch = {"status": "PASS", "note_management": value, "deletion_ui": report_ui_sample(),
+                 "order_ui": report_ordering_sample()}
         return ({"status": "PASS", "api": 26, "commit": "source", "run_id": "run",
                  "release_ready": False, "apk_sha256": "a"*64, "batch_ui": copy.deepcopy(batch)},
                 {"status": "PASS", "batch_ui": copy.deepcopy(batch)})
@@ -583,7 +584,8 @@ def deletion_selftest():
         value = copy.deepcopy(good);value["log"] = log
         value["log_sha256"] = hashlib.sha256(log.encode()).hexdigest()
         assert not accepted(value, 26, "source", "run", "a"*64)
-        batch = {"status":"PASS", "note_management":value, "deletion_ui":report_ui_sample()}
+        batch = {"status":"PASS", "note_management":value, "deletion_ui":report_ui_sample(),
+                 "order_ui":report_ordering_sample()}
         codec = {"status":"PASS", "api":26, "commit":"source", "run_id":"run",
                  "release_ready":False, "apk_sha256":"a"*64, "batch_ui":batch}
         assert aggregate(codec, {"status":"PASS","batch_ui":copy.deepcopy(batch)}, 26, "source", "run")["status"] != "PASS"
@@ -710,6 +712,44 @@ _backend_aggregate = aggregate
 _backend_selftest = selftest
 
 
+# Independent expectations: do not import the emitter's labels or validator.
+REPORT_ORDER_UI_LABELS = [
+    "boundary_controls", "singleton_disabled_readonly", "same_title_up_exact_state",
+    "restart_up_summary_order", "same_title_down_exact_state",
+    "restart_down_summary_order", "original_order_restored_two_revisions",
+    "all_media_preserved",
+]
+
+
+def report_ordering_ui(value, api, source, run, apk):
+    if not isinstance(value, dict):
+        return False
+    return (
+        value.get("status") == "PASS" and
+        value.get("scope") == "NATIVE_NOTE_ORDER_STABLE_ID_FORCE_STOP_RESTART_NOT_LMK" and
+        type(value.get("api")) is int and value["api"] == api and
+        value.get("commit") == source and value.get("run_id") == run and
+        isinstance(apk, str) and re.fullmatch("[0-9a-f]{64}", apk) is not None and
+        value.get("apk_sha256") == apk and value.get("release_ready") is False and
+        value.get("labels") == REPORT_ORDER_UI_LABELS and
+        type(value.get("checks")) is int and value["checks"] == 8 and
+        isinstance(value.get("note_id"), str) and bool(value["note_id"].strip()) and
+        isinstance(value.get("sibling_id"), str) and bool(value["sibling_id"].strip()) and
+        value["note_id"] != value["sibling_id"] and
+        type(value.get("owner")) is int and value["owner"] > 0 and
+        value.get("state") == "EXACT_OWNER_SLOT_SWAP_PER_MOVE_TWO_REVISIONS_ALL_OTHER_TABLES_MEDIA_UNCHANGED"
+    )
+
+
+def report_ordering_sample(api=26, source="source", run="run", apk="a"*64):
+    # Host fixture only, never a device result.
+    return {"status": "PASS", "scope": "NATIVE_NOTE_ORDER_STABLE_ID_FORCE_STOP_RESTART_NOT_LMK",
+            "api": api, "commit": source, "run_id": run, "apk_sha256": apk,
+            "release_ready": False, "labels": REPORT_ORDER_UI_LABELS[:], "checks": 8,
+            "note_id": "third", "sibling_id": "second", "owner": 1,
+            "state": "EXACT_OWNER_SLOT_SWAP_PER_MOVE_TWO_REVISIONS_ALL_OTHER_TABLES_MEDIA_UNCHANGED"}
+
+
 def aggregate(codec, native, api, source, run):
     result = _backend_aggregate(codec, native, api, source, run)
     c = codec.get("batch_ui") if isinstance(codec, dict) else None
@@ -730,13 +770,24 @@ def aggregate(codec, native, api, source, run):
         "scope": "INDEPENDENT_NATIVE_DELETE_RECEIPT_NOT_NEW_DEVICE_EXECUTION",
         "release_ready": False,
     }
-    result["status"] = "PASS" if passed else "NOT_VERIFIED"
+    order_value = c.get("order_ui")
+    ordered = (passed and order_value == n.get("order_ui") and
+               report_ordering_ui(order_value, api, source, run, apk) and
+               report_ordering_ui(n.get("order_ui"), api, source, run, apk))
+    result["order_ui"] = {
+        "status": "PASS" if ordered else "NOT_VERIFIED",
+        "evidence": order_value, "checks": 8 if ordered else 0,
+        "scope": "INDEPENDENT_NATIVE_ORDER_RECEIPT_NOT_NEW_DEVICE_EXECUTION",
+        "release_ready": False,
+    }
+    result["status"] = "PASS" if ordered else "NOT_VERIFIED"
     return result
 
 
 def report_deletion_selftest():
     def parents(value, api=26):
-        batch = {"status": "PASS", "note_management": sample(api), "deletion_ui": value}
+        batch = {"status": "PASS", "note_management": sample(api), "deletion_ui": value,
+                 "order_ui": report_ordering_sample(api)}
         return ({"status": "PASS", "api": api, "commit": "source", "run_id": "run",
                  "release_ready": False, "apk_sha256": "a"*64, "batch_ui": copy.deepcopy(batch)},
                 {"status": "PASS", "batch_ui": copy.deepcopy(batch)})
@@ -1011,7 +1062,8 @@ def order_selftest():
     ))
     # Regression receipts have to remain positive before each negative edit.
     def parents(value):
-        batch = {"status":"PASS", "note_management":value, "deletion_ui":report_ui_sample()}
+        batch = {"status":"PASS", "note_management":value, "deletion_ui":report_ui_sample(),
+                 "order_ui":report_ordering_sample()}
         return ({"status":"PASS", "api":26, "commit":"source", "run_id":"run",
                  "release_ready":False, "apk_sha256":"a"*64, "batch_ui":copy.deepcopy(batch)},
                 {"status":"PASS", "batch_ui":copy.deepcopy(batch)})
@@ -1099,6 +1151,7 @@ def selftest():
     result = _before_order_selftest()
     result["ordering_backend"] = order_selftest()
     result["ordering_projection"] = order_projection_selftest()
+    result["ordering_ui_report"] = report_ordering_selftest()
     return result
 
 
@@ -1106,6 +1159,112 @@ _order_entry = '   verify();deleteVerify();need(count==18,"contract count");'
 assert JAVA.count(_order_entry) == JAVA.count(_declaration) == 1
 JAVA = JAVA.replace(_order_entry, '   verify();deleteVerify();orderVerify();need(count==18,"contract count");', 1)
 JAVA = JAVA.replace(_declaration, ORDER_JAVA+"\n"+_declaration, 1)
+
+
+def report_ordering_selftest():
+    """Independent report contract; fixtures never claim Android execution."""
+    def good(api=26):
+        return {"status": "PASS",
+                "scope": "NATIVE_NOTE_ORDER_STABLE_ID_FORCE_STOP_RESTART_NOT_LMK",
+                "api": api, "commit": "source", "run_id": "run", "apk_sha256": "a"*64,
+                "release_ready": False,
+                "labels": ["boundary_controls", "singleton_disabled_readonly",
+                           "same_title_up_exact_state", "restart_up_summary_order",
+                           "same_title_down_exact_state", "restart_down_summary_order",
+                           "original_order_restored_two_revisions", "all_media_preserved"],
+                "checks": 8, "note_id": "third", "sibling_id": "second", "owner": 1,
+                "state": "EXACT_OWNER_SLOT_SWAP_PER_MOVE_TWO_REVISIONS_ALL_OTHER_TABLES_MEDIA_UNCHANGED"}
+    def parents(value, api=26):
+        batch = {"status": "PASS", "note_management": sample(api),
+                 "deletion_ui": report_ui_sample(api), "order_ui": value}
+        return ({"status": "PASS", "api": api, "commit": "source", "run_id": "run",
+                 "release_ready": False, "apk_sha256": "a"*64, "batch_ui": copy.deepcopy(batch)},
+                {"status": "PASS", "batch_ui": copy.deepcopy(batch)})
+    # Regression red: current aggregate accepts both parents with no order UI.
+    absent = list(parents(good()))
+    for side in absent:
+        del side["batch_ui"]["order_ui"]
+    assert aggregate(*absent, 26, "source", "run")["status"] == "NOT_VERIFIED", "missing ordering evidence accepted"
+    for api in (26, 34):
+        pair = parents(good(api), api); frozen = copy.deepcopy(pair)
+        result = aggregate(*pair, api, "source", "run")
+        assert result["status"] == result["order_ui"]["status"] == "PASS"
+        assert result["order_ui"]["checks"] == 8 and pair == frozen
+        assert report_ordering_ui(good(api), api, "source", "run", "a"*64)
+    value = good()
+    bad = [None, {}, []]
+    for key in value:
+        item = copy.deepcopy(value); del item[key]; bad.append(item)
+    for key, replacement in (
+        ("status", "FAIL"), ("scope", "BACKEND_ONLY"), ("api", 34), ("api", True),
+        ("api", 26.0), ("commit", "old"), ("run_id", "old"), ("apk_sha256", "b"*64),
+        ("release_ready", True), ("release_ready", 0), ("checks", True), ("checks", 8.0),
+        ("checks", 7), ("note_id", ""), ("note_id", " "), ("note_id", None),
+        ("sibling_id", ""), ("sibling_id", " "), ("sibling_id", None),
+        ("sibling_id", "third"), ("owner", True), ("owner", 1.0), ("owner", 0),
+        ("owner", -1), ("state", "NOT_VERIFIED"), ("labels", value["labels"][::-1]),
+    ):
+        item = copy.deepcopy(value); item[key] = replacement; bad.append(item)
+    for index in range(8):
+        for mode in ("missing", "duplicate", "substituted"):
+            item = copy.deepcopy(value)
+            if mode == "missing": item["labels"].pop(index)
+            elif mode == "duplicate": item["labels"].insert(index, item["labels"][index])
+            else: item["labels"][index] = "unrelated"
+            item["checks"] = len(item["labels"]); bad.append(item)
+    pairs = [absent]
+    for item in bad:
+        assert not report_ordering_ui(item, 26, "source", "run", "a"*64)
+        pairs.append(parents(item))
+    for side in (0, 1):
+        pair = list(parents(value)); del pair[side]["batch_ui"]["order_ui"]; pairs.append(pair)
+        for key, replacement in (("note_id", "different"), ("sibling_id", "different"), ("owner", 2)):
+            pair = list(parents(value)); pair[side]["batch_ui"]["order_ui"][key] = replacement
+            assert report_ordering_ui(pair[side]["batch_ui"]["order_ui"], 26, "source", "run", "a"*64)
+            pairs.append(pair)
+        for key, replacement in (("owner", True), ("owner", 1.0), ("checks", 8.0), ("release_ready", 0)):
+            pair = list(parents(value)); pair[side]["batch_ui"]["order_ui"][key] = replacement
+            assert pair[0]["batch_ui"]["order_ui"] == pair[1]["batch_ui"]["order_ui"]
+            pairs.append(pair)
+        for level in ("parent", "batch", "backend", "deletion"):
+            pair = list(parents(value))
+            if level == "parent": pair[side]["status"] = "FAIL"
+            elif level == "batch": pair[side]["batch_ui"]["status"] = "FAIL"
+            elif level == "backend": del pair[side]["batch_ui"]["note_management"]
+            else: del pair[side]["batch_ui"]["deletion_ui"]
+            pairs.append(pair)
+    for key, replacement in (("api", True), ("api", 34), ("commit", "old"),
+                             ("run_id", "old"), ("apk_sha256", "b"*64), ("release_ready", True)):
+        pair = list(parents(value)); pair[0][key] = replacement; pairs.append(pair)
+    # Two parents cannot manufacture acceptance with an invalid but matching digest.
+    for apk in (None, "", "a"*63, "A"*64, "g"*64):
+        assert not report_ordering_ui(dict(value, apk_sha256=apk), 26, "source", "run", apk)
+    for pair in pairs:
+        result = aggregate(*pair, 26, "source", "run")
+        assert result["status"] == result["order_ui"]["status"] == "NOT_VERIFIED"
+        assert result["order_ui"]["checks"] == 0, "failed ordering report retained success count"
+    import inspect
+    source = inspect.getsource(aggregate)
+    killed = 0
+    for old in (
+        'order_value == n.get("order_ui")',
+        "report_ordering_ui(order_value, api, source, run, apk)",
+        'report_ordering_ui(n.get("order_ui"), api, source, run, apk)',
+        "ordered = (passed and",
+    ):
+        assert source.count(old) == 1
+        replacement = "ordered = (True and" if old.startswith("ordered =") else "True"
+        namespace = dict(globals())
+        exec(compile(source.replace(old, replacement, 1), "<order-report-mutant>", "exec"), namespace)
+        checker = namespace["aggregate"]
+        assert checker(*parents(value), 26, "source", "run")["status"] == "PASS"
+        assert any(checker(*pair, 26, "source", "run")["status"] == "PASS" for pair in pairs), old
+        killed += 1
+    result = {"positive": 2, "receipt_negative": len(bad)+5,
+              "aggregate_negative": len(pairs), "permanent_report_mutants": killed,
+              "scope": "HOST_INDEPENDENT_REPORT_NOT_ANDROID_EXECUTION"}
+    print("NOTE_ORDER_UI_REPORT_HOST "+json.dumps(result), flush=True)
+    return result
 
 
 if __name__ == "__main__":

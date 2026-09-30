@@ -282,7 +282,8 @@ public final class NoteEditorScreen {
         Button save=host.button("存草稿",()->{}),recover=host.button("恢复草稿",()->{}),discard=host.button("丢弃草稿",()->{});
         save.setContentDescription("note-draft-save");recover.setContentDescription("note-draft-recover");discard.setContentDescription("note-draft-discard");
         for(Button b:new Button[]{save,recover,discard})body.addView(b,new LinearLayout.LayoutParams(-1,host.dp(48)));
-        body.addView(validation);
+        // Feedback precedes the input, not the off-screen tail of the actions.
+        body.addView(validation,0);
         ScrollView scroll=new ScrollView(host.activity);scroll.addView(body);
         AlertDialog dialog=new AlertDialog.Builder(host.activity).setTitle(session.block==null?"加入文字":"修改文字")
             .setView(scroll).setNegativeButton("取消",null).setPositiveButton("保存",null).create();

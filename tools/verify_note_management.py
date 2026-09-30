@@ -1051,7 +1051,7 @@ ORDER_JAVA = r'''
    need(Arrays.equals(Files.readAllBytes(mediaStore.path(digest)),assetBytes),"registered shared asset changed");
   }
   try(AppDatabase reopened=AppDatabase.openSchema3(context,name)){
-   need(state(reopened).equals(finalState)&&Arrays.equals(reopened.exportState(),wire)),"helper reopen changed order/state");media();orderPass("order_helper_reopen");
+   need(state(reopened).equals(finalState)&&Arrays.equals(reopened.exportState(),wire),"helper reopen changed order/state");media();orderPass("order_helper_reopen");
   }
   com.supercubegame.pockettodo.MediaRepository restoredMedia=new com.supercubegame.pockettodo.MediaRepository(folder.resolve("restored-media"),8388608);
   try(AppDatabase restored=AppDatabase.openSchema3(context,restoredName)){

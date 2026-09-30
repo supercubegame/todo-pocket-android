@@ -388,7 +388,7 @@ public final class NoteEditorScreen {
             String caption=field.getText().toString().trim();boolean privateContent=privacy.isChecked();
             dialog.setCancelable(false);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);field.setEnabled(false);privacy.setEnabled(false);
             host.work(()->{persist(s,NoteDocument.Block.image(existing.id,existing.assetId,caption,privateContent),true);return true;},ignored->{dialog.dismiss();load();},()->{
-                dialog.setCancelable(true);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);field.setEnabled(true);privacy.setEnabled(true);validation.setText("未能保存，请重试");validation.setTextColor(TodayScreen.ERROR);
+                dialog.setCancelable(true);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);field.setEnabled(true);privacy.setEnabled(true);validation.setText("未能保存，请重试；原图不变");validation.setTextColor(TodayScreen.ERROR);
             });
         }));
         dialog.show();

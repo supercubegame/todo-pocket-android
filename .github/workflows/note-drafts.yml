@@ -1,0 +1,308 @@
+name: Independent note draft verification
+on:
+  push:
+    branches: [feature/v1.2-activity-notes-ledger]
+  pull_request:
+    branches: [main, feature/v1.1-edit-backup]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  draft_host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Use Java 17
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+      - name: Existing draft contracts and independent report controls
+        run: |
+          set -euo pipefail
+          python3 tools/verify_note_drafts.py selftest 2>&1 | tee draft-host.log
+          python3 - <<'PY' 2>&1 | tee -a draft-host.log
+          from pathlib import Path
+          import os, subprocess, textwrap
+          text=Path('.github/workflows/note-drafts.yml').read_text()
+          start='          # DRAFT_REPORT_BEGIN\n'
+          end='          # DRAFT_REPORT_END\n'
+          assert text.count(start)==text.count(end)==1
+          code=textwrap.dedent(text.split(start,1)[1].split(end,1)[0])
+          compile(code,'draft-report','exec')
+          env=dict(os.environ,DRAFT_REPORT_SELFTEST='1')
+          subprocess.run(['python3','-c',code],env=env,check=True,timeout=60)
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: draft-host
+          path: draft-host.log
+          if-no-files-found: error
+  draft_device:
+    needs: draft_host
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [26, 34]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      TEST_API: ${{ matrix.api }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Fixed Android build setup
+        run: |
+          set -euo pipefail
+          exec > >(tee draft-setup.log) 2>&1
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip.sha256 -o /tmp/gradle.sha256
+          echo "$(cat /tmp/gradle.sha256)  /tmp/gradle.zip" | sha256sum -c -
+          unzip -q /tmp/gradle.zip -d /tmp
+          echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+      - name: Reuse unchanged configuration-only build retry guard
+        env:
+          BUILD_429_EXECUTE: 'true'
+          BUILD_LOG: draft-build.log
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          # Read only the canonical YAML block, never execute the surrounding workflow.
+          # This keeps the existing recognized-429 guard and its tests byte-identical.
+          lines=Path('.github/workflows/android.yml').read_text().splitlines()
+          anchor='        run: &verified_build |'
+          assert lines.count(anchor)==1
+          body=[]
+          for line in lines[lines.index(anchor)+1:]:
+              if line and not line.startswith('          '):break
+              body.append(line[10:] if line else '')
+          script='\n'.join(body)+'\n'
+          assert script.startswith("set -euo pipefail\npython3 - <<'PY'\n") and script.endswith('PY\n')
+          assert 'selftest()' in script and 'rate_limited_configuration' in script
+          subprocess.run(['bash','-n'],input=script,text=True,check=True)
+          subprocess.run(['bash','-euo','pipefail','-c',script],check=True,timeout=900)
+          PY
+      - name: Freeze independently built product identity
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os,re,subprocess
+          from pathlib import Path
+          files=list(Path('build/outputs/apk/debug').glob('*.apk'))
+          assert len(files)==1
+          apk=files[0];tools=Path(os.environ['ANDROID_HOME'])/'build-tools/35.0.0'
+          def run(args):return subprocess.check_output(list(map(str,args)),text=True,timeout=30)
+          badging=run([tools/'aapt','dump','badging',apk])
+          assert "name='com.supercubegame.pockettodo.v12.preview'" in badging
+          assert "versionCode='3'" in badging and "sdkVersion:'26'" in badging and "targetSdkVersion:'34'" in badging
+          assert 'uses-permission:' not in run([tools/'aapt','dump','permissions',apk])
+          certs=re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([0-9a-f]{64})$',run([tools/'apksigner','verify','--verbose','--print-certs',apk]),re.M)
+          assert len(certs)==1
+          data=apk.read_bytes()
+          value=dict(commit=os.environ['GITHUB_SHA'],run_id=os.environ['GITHUB_RUN_ID'],
+                     run_attempt=os.environ['GITHUB_RUN_ATTEMPT'],api=int(os.environ['TEST_API']),
+                     apk_sha256=hashlib.sha256(data).hexdigest(),apk_bytes=len(data),certificate=certs[0])
+          Path('draft-apk.json').write_text(json.dumps(value,indent=2)+'\n')
+          PY
+      - name: Real draft session SQLite and file checks in a disposable emulator
+        run: |
+          set -euo pipefail
+          python3 tools/verify_note_drafts.py android 2>&1 | tee draft-android.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: draft-device-api-${{ matrix.api }}
+          path: |
+            draft-apk.json
+            draft-device/
+            draft-setup.log
+            draft-build.log
+            draft-android.log
+            emulator.log
+            device-schema3-registration-draft-*.txt
+          if-no-files-found: error
+          retention-days: 14
+  draft_report:
+    needs: [draft_host, draft_device]
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: draft-*
+          path: collected-drafts
+      - name: Require exact dual-device evidence and publish bounded diagnostics
+        if: always()
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          # DRAFT_REPORT_BEGIN
+          import copy,hashlib,json,os,re,sys,urllib.request
+          from pathlib import Path
+          sys.path.insert(0,'tools')
+          from verify_note_drafts import device_observe
+          # Independent coverage list: editing the emitter cannot shrink acceptance.
+          REQUIRED={
+              'seed':'''initial_body exact_draft_save draft_all_tables_readonly explicit_recover
+          recover_all_tables_readonly cancel_keeps_draft empty_draft_exact empty_draft_readonly
+          discard_tombstone discard_readonly same_title_note_isolation owner_slot_isolation
+          new_text_slot_isolation media_unchanged restart_fixture_saved'''.split(),
+              'reopen':'''restart_exact_draft restart_full_state restart_media
+          wrong_owner missing_note missing_block stale_shown_blocks
+          same_revision_mutation stale_recover stale_commit stale_save stale_refusal_readonly
+          stale_draft_retained new_session_stale_base cas_save cas_recover cas_discard
+          cas_newer_draft_retained late_sql_failure late_sql_rollback late_sql_draft_retained
+          commit_cleanup commit_exact_body commit_one_revision commit_preserves_siblings
+          commit_terminal new_block_append new_block_preserves_existing final_media'''.split()}
+          PACKAGE='com.supercubegame.pockettodo.v12.preview'
+          SCOPE='ACTUAL_ANDROID_DRAFT_SESSION_SQLITE_FILES_FORCE_STOP_NOT_NATIVE_BUTTONS_OR_LMK'
+          def validate(v,manifest,logs,api,source,run,attempt):
+              assert type(api) is int and api in (26,34)
+              assert v['status']=='PASS' and v['scope']==SCOPE
+              assert type(v['api']) is int and v['api']==api
+              assert (v['commit'],v['run_id'],v['run_attempt'])==(source,run,attempt)
+              for key,expected in [('commit',source),('run_id',run),('run_attempt',attempt),('api',api)]:
+                  assert type(manifest[key]) is type(expected) and manifest[key]==expected
+              for key in ('apk_sha256','certificate'):
+                  assert isinstance(v[key],str) and re.fullmatch('[0-9a-f]{64}',v[key])
+                  assert v[key]==manifest[key]
+              assert type(v['apk_bytes']) is int and type(manifest['apk_bytes']) is int
+              assert 0<v['apk_bytes']==manifest['apk_bytes']
+              assert type(v['checks']) is int and v['checks']==44
+              assert v['labels']==REQUIRED['seed']+REQUIRED['reopen']
+              assert v['release_ready'] is False
+              assert v['native_buttons']==v['cleanup_failure_race']=='NOT_TESTED'
+              assert v['media_scope']=='UNREFERENCED_SYNTHETIC_FILE_NOT_IMAGE_NOTE_COVERAGE'
+              assert v['product_readback']=='EXACT_BEFORE_AND_AFTER'
+              assert v['default_test_restored'] is True and v['diagnostic_failure_rejected'] is True
+              nonce=run+'-'+attempt+'-'+str(api)
+              for phase in REQUIRED:
+                  text=logs[phase];row=v[phase]
+                  assert row['log']==text and row['log_sha256']==hashlib.sha256(text.encode()).hexdigest()
+                  assert row['labels']==device_observe(text,PACKAGE,api,nonce,phase)==REQUIRED[phase]
+              diagnostic=logs['diagnostic']
+              assert 'java.lang.AssertionError: draft_device_diagnostic_sentinel' in diagnostic
+              assert 'DRAFT_DEVICE_FAILED' in diagnostic and 'INSTRUMENTATION_CODE: 0' in diagnostic
+              try:device_observe(diagnostic,PACKAGE,api,nonce,'seed')
+              except AssertionError:pass
+              else:raise AssertionError('failed instrumentation accepted')
+              stop=v['force_stop']
+              assert stop['status']=='PASS' and stop['package']==PACKAGE
+              assert stop['scope']=='COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK'
+              assert type(stop['force_stop_attempts']) is int and stop['force_stop_attempts']==1
+              cmd=stop['command'];last=stop['probes'][-1]
+              assert type(cmd['returncode']) is int and cmd['returncode']==0
+              assert cmd['stdout']==cmd['stderr']==''
+              assert cmd['args'][-3:]==['am','force-stop',PACKAGE]
+              assert type(last['returncode']) is int and last['returncode']==1
+              assert last['stdout'].strip()==last['stderr'].strip()==''
+              assert last['args'][-2:]==['pidof',PACKAGE]
+              return True
+          def all_parents(needs):
+              return all(needs.get(k,{}).get('result')=='success' for k in ('draft_host','draft_device'))
+          def selftest():
+              total=0
+              for api in (26,34):
+                  source='a'*40;run='123';attempt='1';nonce=run+'-'+attempt+'-'+str(api)
+                  logs={}
+                  for phase,labels in REQUIRED.items():
+                      logs[phase]='INSTRUMENTATION_RESULT: stream=DRAFT_DEVICE_TARGET '+PACKAGE+' 10123 '+str(api)+' '+nonce+' '+phase+'\n'
+                      logs[phase]+=''.join('DRAFT_DEVICE_PASS '+s+'\n' for s in labels)
+                      logs[phase]+='DRAFT_DEVICE_RESULT '+phase+' '+str(len(labels))+' PASS\nINSTRUMENTATION_CODE: -1\n'
+                  logs['diagnostic']='java.lang.AssertionError: draft_device_diagnostic_sentinel\nDRAFT_DEVICE_FAILED\nINSTRUMENTATION_CODE: 0\n'
+                  m=dict(commit=source,run_id=run,run_attempt=attempt,api=api,apk_sha256='b'*64,certificate='c'*64,apk_bytes=100)
+                  v=dict(m,status='PASS',scope=SCOPE,checks=44,labels=REQUIRED['seed']+REQUIRED['reopen'],
+                      release_ready=False,native_buttons='NOT_TESTED',cleanup_failure_race='NOT_TESTED',
+                      media_scope='UNREFERENCED_SYNTHETIC_FILE_NOT_IMAGE_NOTE_COVERAGE',
+                      product_readback='EXACT_BEFORE_AND_AFTER',default_test_restored=True,diagnostic_failure_rejected=True,
+                      force_stop=dict(status='PASS',package=PACKAGE,scope='COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK',force_stop_attempts=1,
+                          command=dict(returncode=0,stdout='',stderr='',args=['am','force-stop',PACKAGE]),
+                          probes=[dict(returncode=1,stdout='',stderr='',args=['pidof',PACKAGE])]))
+                  for phase in REQUIRED:v[phase]=dict(log=logs[phase],log_sha256=hashlib.sha256(logs[phase].encode()).hexdigest(),labels=REQUIRED[phase][:])
+                  assert validate(v,m,logs,api,source,run,attempt)
+                  bad=[]
+                  for key in v:
+                      w=copy.deepcopy(v);del w[key];bad.append((w,m,logs))
+                  for key,value in [('status','FAIL'),('api',float(api)),('checks',44.0),('commit','d'*40),('run_id','124'),('run_attempt','2'),('apk_sha256','d'*64),('apk_bytes',True),('certificate','d'*64),('release_ready',0),('default_test_restored',1),('diagnostic_failure_rejected',1),('native_buttons','PASS')]:
+                      w=copy.deepcopy(v);w[key]=value;bad.append((w,m,logs))
+                  for key in m:
+                      other=copy.deepcopy(m);del other[key];bad.append((v,other,logs))
+                  for phase in REQUIRED:
+                      for label in REQUIRED[phase]:
+                          w=copy.deepcopy(v);newlogs=copy.deepcopy(logs)
+                          newlogs[phase]=newlogs[phase].replace('DRAFT_DEVICE_PASS '+label+'\n','')
+                          w[phase]['log']=newlogs[phase];w[phase]['log_sha256']=hashlib.sha256(newlogs[phase].encode()).hexdigest()
+                          w[phase]['labels'].remove(label);bad.append((w,m,newlogs))
+                  for code in (0,255,True):
+                      w=copy.deepcopy(v);w['force_stop']['probes'][-1]['returncode']=code;bad.append((w,m,logs))
+                  for a,b,c in bad:
+                      try:validate(a,b,c,api,source,run,attempt)
+                      except (AssertionError,KeyError,TypeError,IndexError):total+=1
+                      else:raise AssertionError('draft report accepted invalid receipt')
+              good={k:{'result':'success'} for k in ('draft_host','draft_device')}
+              assert all_parents(good)
+              for k in good:
+                  for status in ('failure','cancelled','skipped',''):
+                      bad=copy.deepcopy(good);bad[k]['result']=status;assert not all_parents(bad)
+              assert not all_parents({})
+              return dict(positive=2,negative=total,parent_negative=9,scope='HOST_REPORT_CONTROLS_NOT_ANDROID_EXECUTION')
+          controls=selftest()
+          if os.environ.get('DRAFT_REPORT_SELFTEST')=='1':
+              print('DRAFT_REPORT_CONTROLS '+json.dumps(controls));raise SystemExit(0)
+          source,run,attempt=(os.environ[k] for k in ('GITHUB_SHA','GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT'))
+          needs=json.loads(os.environ['NEEDS_JSON']);devices={};passed=all_parents(needs)
+          for api in (26,34):
+              folder=Path('collected-drafts')/('draft-device-api-'+str(api))
+              row={'status':'FAIL'};devices[str(api)]=row
+              try:
+                  path=folder/'draft-device/result.json';assert path.stat().st_size<=2*1024*1024
+                  value=json.loads(path.read_text());manifest=json.loads((folder/'draft-apk.json').read_text())
+                  logs={p:(folder/'draft-device'/(p+'.log')).read_text() for p in ('seed','reopen','diagnostic')}
+                  validate(value,manifest,logs,api,source,run,attempt)
+                  row.update(status='PASS',evidence=value,manifest=manifest)
+              except (OSError,ValueError,AssertionError,KeyError,TypeError,IndexError) as exc:
+                  passed=False;row['error']=repr(exc)
+              row['diagnostics']={}
+              for name in ('draft-android.log','draft-build.log','emulator.log','draft-device/result.json'):
+                  try:
+                      with (folder/name).open('rb') as f:
+                          f.seek(0,2);size=f.tell();f.seek(max(0,size-12000));tail=f.read(12000)
+                      row['diagnostics'][name]=dict(bytes=size,tail=tail.decode('utf-8','replace'),truncated=size>12000)
+                  except OSError as exc:row['diagnostics'][name]={'error':repr(exc)}
+          doc=dict(status='PASS' if passed else 'FAIL',scope='INDEPENDENT_DRAFT_BACKEND_MATRIX_NOT_FULL_V12_OR_NATIVE_UI',
+                   commit=source,run_id=run,run_attempt=attempt,devices=devices,parents=needs,
+                   observer_controls=controls,release_ready=False,durable_upgrade_ready=False)
+          data=(json.dumps(doc,ensure_ascii=False,indent=2)+'\n').encode()
+          Path('draft-report.json').write_bytes(data)
+          from verify_evidence import publish
+          endpoint='https://api.github.com/repos/'+os.environ['GITHUB_REPOSITORY']+'/'
+          def api_call(path,method='GET',body=None):
+              req=urllib.request.Request(endpoint+path,method=method,data=None if body is None else json.dumps(body).encode(),
+                  headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+              with urllib.request.urlopen(req,timeout=30) as response:return json.load(response)
+          receipt=publish(api_call,'reports/note-drafts-'+source+'-'+run+'-'+attempt+'.json',data)
+          print('DRAFT_REPORT_PUBLISHED '+str(receipt),flush=True)
+          assert passed,'Draft device evidence missing, mismatched or failed'
+          # DRAFT_REPORT_END
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: independent-draft-report
+          path: draft-report.json
+          if-no-files-found: error
+          retention-days: 14

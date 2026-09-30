@@ -713,6 +713,42 @@ _backend_selftest = selftest
 
 
 # Independent expectations: do not import the emitter's labels or validator.
+REPORT_EDITOR_UI_LABELS = [
+    "up_fresh_default_first", "up_picker_order_cancel_readonly",
+    "up_same_title_identity_readonly", "down_fresh_default_first",
+    "down_picker_order_cancel_readonly", "down_same_title_identity_readonly",
+]
+
+
+def report_editor_ui(value, api, source, run, apk, owner, note, sibling):
+    return isinstance(value, dict) and (
+        value.get("status") == "PASS" and
+        value.get("scope") == "NATIVE_REORDER_EDITOR_INDEXED_PICKER_DISTINCT_BODY_WITNESS_NOT_LMK" and
+        type(value.get("api")) is int and value["api"] == api and
+        value.get("commit") == source and value.get("run_id") == run and
+        isinstance(apk, str) and re.fullmatch("[0-9a-f]{64}", apk) is not None and
+        value.get("apk_sha256") == apk and value.get("release_ready") is False and
+        value.get("labels") == REPORT_EDITOR_UI_LABELS and
+        type(value.get("checks")) is int and value["checks"] == 6 and
+        type(owner) is int and owner > 0 and
+        type(value.get("owner")) is int and value.get("owner") == owner and
+        isinstance(note, str) and bool(note.strip()) and
+        isinstance(sibling, str) and bool(sibling.strip()) and note != sibling and
+        value.get("note_id") == note and value.get("sibling_id") == sibling and
+        value.get("state") == "BROWSING_CANCEL_SELECTION_ALL_TABLES_REVISION_MEDIA_UNCHANGED"
+    )
+
+
+def report_editor_sample(api=26, source="source", run="run", apk="a"*64):
+    # Host fixture only. Never used to manufacture device evidence.
+    return {"status": "PASS",
+            "scope": "NATIVE_REORDER_EDITOR_INDEXED_PICKER_DISTINCT_BODY_WITNESS_NOT_LMK",
+            "api": api, "commit": source, "run_id": run, "apk_sha256": apk,
+            "release_ready": False, "labels": REPORT_EDITOR_UI_LABELS[:], "checks": 6,
+            "note_id": "third", "sibling_id": "second", "owner": 1,
+            "state": "BROWSING_CANCEL_SELECTION_ALL_TABLES_REVISION_MEDIA_UNCHANGED"}
+
+
 REPORT_ORDER_UI_LABELS = [
     "boundary_controls", "singleton_disabled_readonly", "same_title_up_exact_state",
     "restart_up_summary_order", "same_title_down_exact_state",
@@ -737,7 +773,9 @@ def report_ordering_ui(value, api, source, run, apk):
         isinstance(value.get("sibling_id"), str) and bool(value["sibling_id"].strip()) and
         value["note_id"] != value["sibling_id"] and
         type(value.get("owner")) is int and value["owner"] > 0 and
-        value.get("state") == "EXACT_OWNER_SLOT_SWAP_PER_MOVE_TWO_REVISIONS_ALL_OTHER_TABLES_MEDIA_UNCHANGED"
+        value.get("state") == "EXACT_OWNER_SLOT_SWAP_PER_MOVE_TWO_REVISIONS_ALL_OTHER_TABLES_MEDIA_UNCHANGED" and
+        report_editor_ui(value.get("editor_ui"), api, source, run, apk,
+                         value["owner"], value["note_id"], value["sibling_id"])
     )
 
 
@@ -747,6 +785,7 @@ def report_ordering_sample(api=26, source="source", run="run", apk="a"*64):
             "api": api, "commit": source, "run_id": run, "apk_sha256": apk,
             "release_ready": False, "labels": REPORT_ORDER_UI_LABELS[:], "checks": 8,
             "note_id": "third", "sibling_id": "second", "owner": 1,
+            "editor_ui": report_editor_sample(api, source, run, apk),
             "state": "EXACT_OWNER_SLOT_SWAP_PER_MOVE_TWO_REVISIONS_ALL_OTHER_TABLES_MEDIA_UNCHANGED"}
 
 
@@ -781,6 +820,13 @@ def aggregate(codec, native, api, source, run):
         "release_ready": False,
     }
     result["status"] = "PASS" if ordered else "NOT_VERIFIED"
+    result["editor_ui"] = {
+        "status": "PASS" if ordered else "NOT_VERIFIED",
+        "evidence": order_value.get("editor_ui") if isinstance(order_value, dict) else None,
+        "checks": 6 if ordered else 0,
+        "scope": "INDEPENDENT_NATIVE_EDITOR_RECEIPT_NOT_NEW_DEVICE_EXECUTION",
+        "release_ready": False,
+    }
     return result
 
 
@@ -1005,7 +1051,7 @@ ORDER_JAVA = r'''
    need(Arrays.equals(Files.readAllBytes(mediaStore.path(digest)),assetBytes),"registered shared asset changed");
   }
   try(AppDatabase reopened=AppDatabase.openSchema3(context,name)){
-   need(state(reopened).equals(finalState)&&Arrays.equals(reopened.exportState(),wire),"helper reopen changed order/state");media();orderPass("order_helper_reopen");
+   need(state(reopened).equals(finalState)&&Arrays.equals(reopened.exportState(),wire)),"helper reopen changed order/state");media();orderPass("order_helper_reopen");
   }
   com.supercubegame.pockettodo.MediaRepository restoredMedia=new com.supercubegame.pockettodo.MediaRepository(folder.resolve("restored-media"),8388608);
   try(AppDatabase restored=AppDatabase.openSchema3(context,restoredName)){
@@ -1152,6 +1198,7 @@ def selftest():
     result["ordering_backend"] = order_selftest()
     result["ordering_projection"] = order_projection_selftest()
     result["ordering_ui_report"] = report_ordering_selftest()
+    result["editor_ui_report"] = report_editor_selftest()
     return result
 
 
@@ -1173,6 +1220,7 @@ def report_ordering_selftest():
                            "same_title_down_exact_state", "restart_down_summary_order",
                            "original_order_restored_two_revisions", "all_media_preserved"],
                 "checks": 8, "note_id": "third", "sibling_id": "second", "owner": 1,
+                "editor_ui": report_editor_sample(api),
                 "state": "EXACT_OWNER_SLOT_SWAP_PER_MOVE_TWO_REVISIONS_ALL_OTHER_TABLES_MEDIA_UNCHANGED"}
     def parents(value, api=26):
         batch = {"status": "PASS", "note_management": sample(api),
@@ -1220,6 +1268,7 @@ def report_ordering_selftest():
         pair = list(parents(value)); del pair[side]["batch_ui"]["order_ui"]; pairs.append(pair)
         for key, replacement in (("note_id", "different"), ("sibling_id", "different"), ("owner", 2)):
             pair = list(parents(value)); pair[side]["batch_ui"]["order_ui"][key] = replacement
+            pair[side]["batch_ui"]["order_ui"]["editor_ui"][key] = replacement
             assert report_ordering_ui(pair[side]["batch_ui"]["order_ui"], 26, "source", "run", "a"*64)
             pairs.append(pair)
         for key, replacement in (("owner", True), ("owner", 1.0), ("checks", 8.0), ("release_ready", 0)):
@@ -1264,6 +1313,85 @@ def report_ordering_selftest():
               "aggregate_negative": len(pairs), "permanent_report_mutants": killed,
               "scope": "HOST_INDEPENDENT_REPORT_NOT_ANDROID_EXECUTION"}
     print("NOTE_ORDER_UI_REPORT_HOST "+json.dumps(result), flush=True)
+    return result
+
+
+def report_editor_selftest():
+    def parents(editor, api=26):
+        order = report_ordering_sample(api)
+        order["editor_ui"] = copy.deepcopy(editor)
+        batch = {"status": "PASS", "note_management": sample(api),
+                 "deletion_ui": report_ui_sample(api), "order_ui": order}
+        return ({"status": "PASS", "api": api, "commit": "source", "run_id": "run",
+                 "release_ready": False, "apk_sha256": "a"*64, "batch_ui": copy.deepcopy(batch)},
+                {"status": "PASS", "batch_ui": copy.deepcopy(batch)})
+    absent = parents(None)
+    for parent in absent:
+        del parent["batch_ui"]["order_ui"]["editor_ui"]
+    assert aggregate(*absent, 26, "source", "run")["status"] == "NOT_VERIFIED", "missing editor evidence accepted"
+    for api in (26, 34):
+        good = report_editor_sample(api)
+        pair = parents(good, api); frozen = copy.deepcopy(pair)
+        result = aggregate(*pair, api, "source", "run")
+        assert result["status"] == result["editor_ui"]["status"] == "PASS"
+        assert result["editor_ui"]["checks"] == 6 and pair == frozen
+    good = report_editor_sample()
+    invalid = [None, {}, [], True]
+    for key in good:
+        bad = copy.deepcopy(good); del bad[key]; invalid.append(bad)
+    for key, value in (
+        ("status", "FAIL"), ("scope", "HOST_ONLY"), ("api", 34), ("api", True), ("api", 26.0),
+        ("commit", "old"), ("run_id", "old"), ("apk_sha256", "b"*64),
+        ("release_ready", True), ("release_ready", 0), ("checks", True), ("checks", 6.0),
+        ("checks", 5), ("owner", True), ("owner", 1.0), ("owner", 0), ("owner", 2),
+        ("note_id", ""), ("note_id", "second"), ("note_id", "different"),
+        ("sibling_id", "third"), ("sibling_id", "different"), ("sibling_id", None),
+        ("state", "NOT_VERIFIED"), ("labels", good["labels"][::-1]),
+    ):
+        bad = copy.deepcopy(good); bad[key] = value; invalid.append(bad)
+    for i in range(6):
+        for mode in ("missing", "duplicate", "substituted"):
+            bad = copy.deepcopy(good)
+            if mode == "missing": bad["labels"].pop(i)
+            elif mode == "duplicate": bad["labels"].insert(i, bad["labels"][i])
+            else: bad["labels"][i] = "unrelated"
+            bad["checks"] = len(bad["labels"]); invalid.append(bad)
+    pairs = [absent]
+    for value in invalid:
+        assert not report_editor_ui(value, 26, "source", "run", "a"*64, 1, "third", "second")
+        pairs.append(parents(value))
+        for side in (0, 1):
+            pair = parents(good); pair[side]["batch_ui"]["order_ui"]["editor_ui"] = value
+            pairs.append(pair)
+    for side in (0, 1):
+        pair = parents(good); del pair[side]["batch_ui"]["order_ui"]["editor_ui"]; pairs.append(pair)
+        for level in ("parent", "batch", "order", "backend", "deletion"):
+            pair = parents(good)
+            target = pair[side] if level == "parent" else pair[side]["batch_ui"]
+            if level == "order": target = target["order_ui"]
+            if level == "backend": target = target["note_management"]
+            if level == "deletion": target = target["deletion_ui"]
+            target["status"] = "FAIL"; pairs.append(pair)
+    for pair in pairs:
+        result = aggregate(*pair, 26, "source", "run")
+        assert result["status"] == result["editor_ui"]["status"] == "NOT_VERIFIED"
+        assert result["editor_ui"]["checks"] == 0
+    import inspect
+    original = inspect.getsource(report_editor_ui)
+    for old in (
+        'value.get("labels") == REPORT_EDITOR_UI_LABELS',
+        'value.get("apk_sha256") == apk',
+        'value.get("note_id") == note',
+        'type(value.get("owner")) is int',
+    ):
+        assert original.count(old) == 1
+        namespace = dict(globals())
+        exec(original.replace(old, "True"), namespace)
+        assert namespace["report_editor_ui"](good, 26, "source", "run", "a"*64, 1, "third", "second")
+        assert any(namespace["report_editor_ui"](bad, 26, "source", "run", "a"*64, 1, "third", "second") for bad in invalid)
+    result = {"positive": 2, "receipt_negative": len(invalid), "aggregate_negative": len(pairs),
+              "permanent_report_mutants": 4, "scope": "HOST_INDEPENDENT_EDITOR_REPORT_NOT_ANDROID_EXECUTION"}
+    print("NOTE_EDITOR_REPORT_HOST "+json.dumps(result), flush=True)
     return result
 
 

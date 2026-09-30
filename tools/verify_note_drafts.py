@@ -504,8 +504,249 @@ def session_selftest():
         print("NOTE_DRAFT_SESSION_HOST "+json.dumps(result), flush=True)
         return result
 
+UI_MODEL = r'''
+import java.util.*;
+import java.util.concurrent.Callable;
+import java.util.function.Consumer;
+public class DraftUiContract {
+ static final class View {
+  boolean enabled=true; String desc=""; Consumer<View> click;
+  void setContentDescription(String x){desc=x;}
+  void setEnabled(boolean x){enabled=x;}
+  void setOnClickListener(Consumer<View> x){click=x;}
+  void press(){if(enabled&&click!=null)click.accept(this);}
+ }
+ static class TextView {
+  boolean enabled=true; String desc="",text=""; int color;
+  void setContentDescription(String x){desc=x;}
+  void setEnabled(boolean x){enabled=x;}
+  void setText(String x){text=x;}
+  String getText(){return text;}
+  void setTextColor(int x){color=x;}
+ }
+ static final class EditText extends TextView {}
+ static final class Button extends TextView {
+  Consumer<Button> click; void setOnClickListener(Consumer<Button> x){click=x;}
+  void press(){if(enabled&&click!=null)click.accept(this);}
+ }
+ static final class LinearLayout {
+  final List<Object> children=new ArrayList<>();
+  void setPadding(int a,int b,int c,int d){}
+  void addView(Object x){children.add(x);}
+  void addView(Object x,int at){children.add(at,x);}
+  void addView(Object x,LayoutParams p){children.add(x);}
+  static final class LayoutParams{LayoutParams(int w,int h){}}
+ }
+ static final class ScrollView {
+  Object child; ScrollView(Object activity){}
+  void addView(Object x){child=x;}
+ }
+ static final class Window {
+  int softInputMode;
+  void setSoftInputMode(int x){softInputMode=x;}
+ }
+ static final class AlertDialog {
+  static final int BUTTON_POSITIVE=-1,BUTTON_NEGATIVE=-2;
+  static AlertDialog last;
+  final Button positive=new Button(),negative=new Button();
+  final Window window=new Window();
+  Object view; String title,message; boolean showing,cancelable=true;
+  Consumer<AlertDialog> shown,dismissed;
+  interface Confirm{void accept(AlertDialog d,int which);}
+  Button getButton(int which){return which==BUTTON_POSITIVE?positive:negative;}
+  Window getWindow(){return window;}
+  void setCancelable(boolean x){cancelable=x;}
+  boolean isShowing(){return showing;}
+  void setOnShowListener(Consumer<AlertDialog> x){shown=x;}
+  void setOnDismissListener(Consumer<AlertDialog> x){dismissed=x;}
+  void show(){showing=true;last=this;if(shown!=null)shown.accept(this);}
+  void dismiss(){if(showing){showing=false;if(dismissed!=null)dismissed.accept(this);}}
+  void back(){if(cancelable)dismiss();}
+  static final class Builder {
+   final AlertDialog d=new AlertDialog(); Builder(Object activity){}
+   Builder setTitle(String x){d.title=x;return this;}
+   Builder setMessage(String x){d.message=x;return this;}
+   Builder setView(Object x){d.view=x;return this;}
+   Builder setNegativeButton(String text,Confirm c){
+    d.negative.text=text;d.negative.click=v->{if(c!=null)c.accept(d,BUTTON_NEGATIVE);d.dismiss();};return this;
+   }
+   Builder setPositiveButton(String text,Confirm c){
+    d.positive.text=text;d.positive.click=v->{if(c!=null)c.accept(d,BUTTON_POSITIVE);d.dismiss();};return this;
+   }
+   AlertDialog create(){return d;}
+   AlertDialog show(){d.show();return d;}
+  }
+ }
+ static final class TodayScreen {
+  static final int MUTED=1,ERROR=2;
+  final Object activity=new Object();
+  boolean defer,fail; Runnable pending; String notice; int loads;
+  LinearLayout column(){return new LinearLayout();}
+  int dp(int x){return x;}
+  EditText field(String name,boolean multiline){EditText f=new EditText();f.desc=name;return f;}
+  TextView text(String text,int size,int color){TextView t=new TextView();t.text=text;t.color=color;return t;}
+  Button button(String text,Runnable r){Button b=new Button();b.text=text;b.click=v->r.run();return b;}
+  void message(String text,boolean error){notice=text;}
+  <T> void work(Callable<T> action,Consumer<T> success,Runnable failure){
+   if(pending!=null)throw new AssertionError("overlapping host work");
+   pending=()->{T value;try{if(fail)throw new Exception("injected");value=action.call();}
+    catch(Exception e){failure.run();return;}success.accept(value);};
+   if(!defer)complete();
+  }
+  void complete(){Runnable r=pending;pending=null;if(r==null)throw new AssertionError("missing work");r.run();}
+ }
+ static final class TextDraftSession {
+  String initial="body",block="block"; final Record record=new Record();
+  int saves,recovers,discards,commits,closes; String committed; boolean clean=true;
+  static final class Record{String text;}
+  void saveDraft(String s){saves++;record.text=s;}
+  String recover(){recovers++;return record.text;}
+  void discard(){discards++;record.text=null;}
+  boolean commit(String s){commits++;committed=s;return clean;}
+  void close(){closes++;}
+ }
+ final TodayScreen host=new TodayScreen();
+ void load(){host.loads++;}
+ // ACTUAL_METHOD
+ static int count;
+ static void ok(boolean x,String label){if(!x)throw new AssertionError(label);count++;System.out.println("DRAFT_UI_PASS "+label);}
+ static final class Fixture {
+  final DraftUiContract app=new DraftUiContract();
+  final TextDraftSession s=new TextDraftSession();
+  final AlertDialog d; final LinearLayout body; final EditText input;
+  final TextView status; final Button save,recover,discard;
+  Fixture(String draft){
+   s.record.text=draft;app.showTextDraft(s);d=AlertDialog.last;
+   body=(LinearLayout)((ScrollView)d.view).child;
+   input=(EditText)find("文字内容");status=(TextView)find("note-draft-status");
+   save=(Button)find("note-draft-save");recover=(Button)find("note-draft-recover");discard=(Button)find("note-draft-discard");
+  }
+  Object find(String desc){
+   Object found=null;for(Object x:body.children)if(x instanceof TextView&&((TextView)x).desc.equals(desc)){
+    if(found!=null)throw new AssertionError("ambiguous control "+desc);found=x;
+   }if(found==null)throw new AssertionError("missing control "+desc);return found;
+  }
+  boolean untouched(){return s.saves==0&&s.recovers==0&&s.discards==0&&s.commits==0;}
+ }
+ public static void main(String[] args){
+  Fixture f=new Fixture(null);
+  ok(f.body.children.get(0)==f.status&&f.body.children.get(1)==f.input,"feedback_before_input");
+  ok(f.d.window.softInputMode==16,"resize_window");
+  ok(f.input.text.equals("body")&&f.untouched(),"canonical_initial_no_autorestore");
+  ok(f.save.enabled&&!f.recover.enabled&&!f.discard.enabled,"absent_draft_controls");
+  f.input.setText("cancel input");f.d.negative.press();
+  ok(!f.d.showing&&f.s.closes==1&&f.untouched(),"cancel_no_draft_mutation");
+  f=new Fixture("  草稿\n😀  ");
+  ok(f.recover.enabled&&f.discard.enabled&&f.input.text.equals("body")&&f.untouched(),"present_draft_explicit");
+  f.input.setText(" \n\t ");f.d.positive.press();
+  ok(f.d.showing&&f.status.text.equals("内容不能为空")&&f.status.color==TodayScreen.ERROR&&f.untouched(),"blank_body_stays_open");
+  String exact=" \n草稿😀\t ";f.input.setText(exact);f.save.press();
+  ok(f.s.saves==1&&exact.equals(f.s.record.text)&&f.s.commits==0,"save_exact_draft");
+  ok(f.input.enabled&&f.save.enabled&&f.recover.enabled&&f.discard.enabled&&f.d.cancelable,"save_unlocks");
+  f.input.setText("unsaved");f.recover.press();AlertDialog confirm=AlertDialog.last;
+  ok(confirm!=f.d&&confirm.showing&&f.s.recovers==0,"recover_requires_confirmation");
+  confirm.negative.press();
+  ok(f.s.recovers==0&&f.input.text.equals("unsaved")&&f.d.showing,"recover_cancel_keeps_input");
+  f.recover.press();AlertDialog.last.positive.press();
+  ok(f.s.recovers==1&&f.input.text.equals(exact)&&f.s.commits==0,"recover_exact_no_body_commit");
+  f.discard.press();confirm=AlertDialog.last;
+  ok(confirm!=f.d&&confirm.showing&&f.s.discards==0,"discard_requires_confirmation");
+  confirm.negative.press();
+  ok(f.s.discards==0&&f.s.record.text.equals(exact),"discard_cancel_keeps_draft");
+  f.discard.press();AlertDialog.last.positive.press();
+  ok(f.s.discards==1&&f.s.record.text==null&&f.input.text.equals(exact)&&f.s.commits==0,"discard_keeps_input_body");
+  ok(!f.recover.enabled&&!f.discard.enabled&&f.save.enabled,"discard_updates_controls");
+  f=new Fixture("");
+  ok(f.recover.enabled&&f.discard.enabled,"empty_draft_is_present");
+  f.recover.press();AlertDialog.last.positive.press();
+  ok(f.input.text.equals("")&&f.s.recovers==1,"empty_draft_recovery");
+  f=new Fixture(null);f.app.host.defer=true;f.input.setText(exact);f.save.press();
+  ok(!f.save.enabled&&!f.recover.enabled&&!f.discard.enabled&&!f.input.enabled&&!f.d.positive.enabled&&!f.d.negative.enabled&&!f.d.cancelable,"busy_disables_all");
+  f.d.back();f.d.negative.press();f.save.press();
+  ok(f.d.showing&&f.s.closes==0&&f.s.saves==0,"busy_blocks_cancel_duplicate");
+  f.app.host.complete();
+  ok(f.s.saves==1&&f.d.negative.enabled&&f.d.positive.enabled&&f.d.cancelable,"deferred_save_completes_once");
+  f=new Fixture("old");f.app.host.fail=true;f.input.setText(exact);f.save.press();
+  ok(f.input.text.equals(exact)&&f.s.record.text.equals("old")&&f.untouched()&&f.d.showing,"failure_preserves_input_draft");
+  ok(f.status.color==TodayScreen.ERROR&&f.save.enabled&&f.input.enabled&&f.d.cancelable,"failure_feedback_unlocks");
+  f=new Fixture(null);f.input.setText("body change");f.d.positive.press();
+  ok(f.s.commits==1&&f.s.committed.equals("body change")&&!f.d.showing&&f.s.closes==1&&f.app.host.loads==1,"body_commit_closes_reload");
+  f=new Fixture("draft");f.s.clean=false;f.input.setText("body change");f.d.positive.press();
+  ok(f.s.commits==1&&!f.d.showing&&f.app.host.loads==1&&f.app.host.notice.contains("正文已保存")&&f.app.host.notice.contains("请勿重复保存"),"cleanup_failure_not_body_failure");
+  f=new Fixture("keep");f.d.back();
+  ok(!f.d.showing&&f.s.closes==1&&f.untouched()&&f.s.record.text.equals("keep"),"back_closes_without_clear");
+  System.out.println("DRAFT_UI_RESULT "+count+" PASS");
+ }
+}
+'''
+
+UI_LABELS = """feedback_before_input resize_window canonical_initial_no_autorestore
+absent_draft_controls cancel_no_draft_mutation present_draft_explicit blank_body_stays_open
+save_exact_draft save_unlocks recover_requires_confirmation recover_cancel_keeps_input
+recover_exact_no_body_commit discard_requires_confirmation discard_cancel_keeps_draft
+discard_keeps_input_body discard_updates_controls empty_draft_is_present empty_draft_recovery
+busy_disables_all busy_blocks_cancel_duplicate deferred_save_completes_once
+failure_preserves_input_draft failure_feedback_unlocks body_commit_closes_reload
+cleanup_failure_not_body_failure back_closes_without_clear""".split()
+
+def ui_model_selftest():
+    """Actual Java UI method, modeled widgets/session. NOT Android geometry or SQLite."""
+    java = shutil.which("java") or str(Path(os.environ["JAVA_HOME"])/"bin/java")
+    source = ROOT/"src/main/java/com/supercubegame/pockettodo/NoteEditorScreen.java"
+    # Reuse the compiler parser, never regex-match method braces or comments.
+    extractor_source = SESSION_EXTRACT.replace("ExtractSession", "ExtractDraftUi").replace(
+        "visitClass(ClassTree node", "visitMethod(MethodTree node").replace(
+        'node.getSimpleName().contentEquals("TextDraftSession")',
+        'node.getName().contentEquals("showTextDraft")').replace(
+        "super.visitClass(node,unused)", "super.visitMethod(node,unused)")
+    with tempfile.TemporaryDirectory(prefix="draft-ui-contract-") as tmp:
+        folder = Path(tmp)
+        extractor = folder/"ExtractDraftUi.java"; extractor.write_text(extractor_source)
+        parsed = subprocess.run([java, str(extractor), str(source)], text=True,
+                                capture_output=True, timeout=30)
+        if parsed.returncode:
+            raise RuntimeError("Draft UI extraction failed:\n"+parsed.stderr[-6000:])
+        actual = parsed.stdout
+        assert actual.strip().startswith("private void showTextDraft(")
+        boot = folder/"CompileDrafts.java"; boot.write_text(BOOT)
+        window = folder/"android/view/WindowManager.java"; window.parent.mkdir(parents=True)
+        window.write_text("package android.view; public interface WindowManager {"
+                          "public static class LayoutParams {public static final int SOFT_INPUT_ADJUST_RESIZE=16;}}")
+        product = folder/"DraftUiContract.java"
+        def build(method, name):
+            product.write_text(UI_MODEL.replace("// ACTUAL_METHOD", method))
+            classes = folder/name; classes.mkdir()
+            command([java, boot, "--release", "8", "-encoding", "UTF-8", "-d", classes, window, product])
+            return subprocess.run([java, "-cp", str(classes), "DraftUiContract"], text=True,
+                                  capture_output=True, timeout=30)
+        run = build(actual, "positive")
+        labels = [line.removeprefix("DRAFT_UI_PASS ") for line in run.stdout.splitlines()
+                  if line.startswith("DRAFT_UI_PASS ")]
+        assert run.returncode == 0 and labels == UI_LABELS, (run.stdout, run.stderr)
+        assert run.stdout.splitlines()[-1] == "DRAFT_UI_RESULT 26 PASS"
+        mutations = (
+            ("body.addView(validation,0);", "body.addView(validation);", "feedback_before_input"),
+            ("android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE", "0", "resize_window"),
+            ("if(value.trim().isEmpty())", "if(false)", "blank_body_stays_open"),
+            ("String exact=field.getText().toString();", "String exact=field.getText().toString().trim();", "save_exact_draft"),
+            ("unused->session.close()", "unused->{}", "cancel_no_draft_mutation"),
+        )
+        for index, (before, after, expected) in enumerate(mutations):
+            assert actual.count(before) == 1, "Draft UI mutation anchor changed"
+            result = build(actual.replace(before, after, 1), "negative-"+str(index))
+            assert result.returncode != 0 and "AssertionError: "+expected in result.stderr, (
+                "UI mutant survived or wrong failure", expected, result.stdout, result.stderr)
+        result = {"status": "PASS", "checks": len(labels), "labels": labels,
+                  "compiled_ui_mutants": len(mutations),
+                  "scope": "ACTUAL_JAVA_UI_METHOD_MODELED_WIDGETS_SESSION_NOT_ANDROID_GEOMETRY_OR_DB",
+                  "release_ready": False}
+        print("NOTE_DRAFT_UI_MODEL "+json.dumps(result), flush=True)
+        return result
+
+
 if __name__ == "__main__":
     import sys
     assert sys.argv[1:] == ["selftest"]
     selftest()
     session_selftest()
+    ui_model_selftest()

@@ -32,6 +32,10 @@ jobs:
           compile(code,'draft-report','exec')
           env=dict(os.environ,DRAFT_REPORT_SELFTEST='1')
           subprocess.run(['python3','-c',code],env=env,check=True,timeout=60)
+          a='          # DRAFT_NATIVE_BEGIN\n';b='          # DRAFT_NATIVE_END\n'
+          assert text.count(a)==text.count(b)==1
+          native=textwrap.dedent(text.split(a,1)[1].split(b,1)[0])
+          compile(native,'draft-native','exec')
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -114,6 +118,207 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/verify_note_drafts.py android 2>&1 | tee draft-android.log
+      - name: Native draft buttons in a separate fresh disposable emulator
+        run: |
+          set -euo pipefail
+          cp emulator.log draft-device/emulator.log
+          export RUNNER_TEMP="$RUNNER_TEMP/draft-native"
+          mkdir -p "$RUNNER_TEMP"
+          python3 - <<'PY' 2>&1 | tee draft-native.log
+          # DRAFT_NATIVE_BEGIN
+          import copy,hashlib,json,os,re,sqlite3,subprocess,sys,time,traceback
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          sys.path.insert(0,'tools')
+          import emulator_gate as gate
+          from verify_process_control import stop_verified
+          LABELS='fixture_text_image cancel_unsaved_readonly explicit_save_readonly restart_no_autorestore recover_cancel_readonly recover_confirm_readonly discard_cancel_readonly discard_confirm_readonly empty_draft_saved empty_recovered_body_rejected commit_exact_one_revision restart_committed'.split()
+          SCOPE='NATIVE_DRAFT_BUTTONS_ASCII_IMAGE_FORCE_STOP_NOT_LMK_OR_CLEANUP_RACE'
+          out=Path('draft-native');out.mkdir(exist_ok=True)
+          manifest=json.loads(Path('draft-apk.json').read_text())
+          result=dict(manifest,status='FAIL',scope=SCOPE,labels=[],checks=0,release_ready=False,
+                      unicode_input='BACKEND_ONLY',cleanup_failure_race='NOT_TESTED',screens=[],snapshots=[])
+          def native(adb):
+              prefix=[str(adb),'-s',gate.SERIAL];serial=0
+              def command(*args,binary=False):
+                  try:
+                      p=subprocess.run(prefix+list(args),stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE,text=not binary,timeout=40)
+                  except subprocess.TimeoutExpired as e:
+                      result['command_failure']=dict(args=list(args),timeout=40,stdout=str(e.stdout)[-3000:],stderr=str(e.stderr)[-3000:]);raise
+                  if p.returncode:
+                      result['command_failure']=dict(args=list(args),returncode=p.returncode,stdout=str(p.stdout)[-3000:],stderr=str(p.stderr)[-3000:])
+                      raise RuntimeError('native draft command failed')
+                  return p.stdout
+              def shell(*args):return command('shell','-n','-T',*args)
+              def nodes():
+                  shell('uiautomator','dump','/sdcard/draft-native.xml')
+                  raw=shell('cat','/sdcard/draft-native.xml');(out/'last-window.xml').write_text(raw)
+                  return list(ET.fromstring(raw).iter('node'))
+              def find(**attrs):
+                  deadline=time.monotonic()+18;current=[]
+                  while time.monotonic()<deadline:
+                      current=nodes();hits=[n for n in current if all(n.get(k)==v for k,v in attrs.items())]
+                      assert len(hits)<=1,('ambiguous',attrs)
+                      if hits:return hits[0]
+                      time.sleep(.25)
+                  raise AssertionError(('missing',attrs,[n.attrib for n in current]))
+              def seek(desc):
+                  # Bounded viewport traversal, not a retry of failed product assertions.
+                  for direction in (1,1,-1,-1,-1):
+                      current=nodes();hits=[n for n in current if n.get('content-desc')==desc]
+                      assert len(hits)<=1
+                      if hits:return hits[0]
+                      scroll=[n for n in current if n.get('class')=='android.widget.ScrollView' and n.get('scrollable')=='true']
+                      assert len(scroll)==1,('no unique dialog scroll',desc)
+                      x1,y1,x2,y2=map(int,re.findall(r'\d+',scroll[0].get('bounds')))
+                      x=x2-12;top=y1+35;bottom=y2-35
+                      assert bottom>top
+                      shell('input','swipe',str(x),str(bottom if direction==1 else top),str(x),str(top if direction==1 else bottom),'300')
+                  return find(**{'content-desc':desc})
+              def click(n):
+                  assert n.get('package')==gate.PKG and n.get('enabled')=='true'
+                  x1,y1,x2,y2=map(int,re.findall(r'\d+',n.get('bounds')));assert x2>x1 and y2>y1
+                  shell('input','tap',str((x1+x2)//2),str((y1+y2)//2))
+              def tap(text):click(find(text=text))
+              def touch(desc):click(seek(desc))
+              def button(positive):click(find(**{'resource-id':'android:id/button'+('1' if positive else '2')}))
+              def ready():find(**{'content-desc':'v12-status','text':'已保存到本机'})
+              def fill(desc,value):
+                  field=seek(desc);click(field)
+                  shell('input','keyevent','KEYCODE_MOVE_END')
+                  size=len(field.get('text','').encode('utf-16-le'))//2
+                  shell('input','keyevent',*(['KEYCODE_DEL']*(size+1)))
+                  assert find(**{'content-desc':desc}).get('text')==''
+                  if value:shell('input','text',value.replace(' ','%s'))
+                  assert find(**{'content-desc':desc}).get('text')==value
+                  keyboard=shell('dumpsys','input_method')
+                  if re.search(r'(?:mInputShown|isInputViewShown)\s*=\s*true',keyboard):
+                      shell('input','keyevent','KEYCODE_BACK')
+                  assert find(**{'content-desc':desc}).get('text')==value
+              def status(text):
+                  seek('note-draft-status')
+                  find(**{'content-desc':'note-draft-status','text':text})
+              def read_file(path):return command('exec-out','run-as',gate.PKG,'cat',path,binary=True)
+              def state():
+                  # Quiescent UI boundary; copy SQLite plus WAL and compare all rows/rowids.
+                  nonlocal serial
+                  serial+=1;p=out/('state-'+str(serial)+'.db')
+                  p.write_bytes(read_file('databases/pocket-v12.db'))
+                  if 'pocket-v12.db-wal' in shell('run-as',gate.PKG,'ls','databases').splitlines():
+                      Path(str(p)+'-wal').write_bytes(read_file('databases/pocket-v12.db-wal'))
+                  with sqlite3.connect(p) as db:
+                      assert db.execute('PRAGMA integrity_check').fetchall()==[('ok',)]
+                      tables=[r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
+                      data={t:db.execute('SELECT rowid AS rowid,* FROM "'+t+'" ORDER BY rowid').fetchall() for t in tables}
+                  media={}
+                  for name in shell('run-as',gate.PKG,'ls','files/media').splitlines():
+                      assert re.fullmatch('[0-9a-f]{64}',name)
+                      media[name]=hashlib.sha256(read_file('files/media/'+name)).hexdigest();assert media[name]==name
+                  value=(data,media);result['snapshots'].append(hashlib.sha256(repr(value).encode()).hexdigest())
+                  return value
+              def drafts():
+                  names=shell('run-as',gate.PKG,'ls','files/note-drafts').splitlines()
+                  assert all(n=='.lock' or re.fullmatch('[0-9a-f]{64}[.]draft',n) for n in names)
+                  return {n:read_file('files/note-drafts/'+n) for n in names if n.endswith('.draft')}
+              def shot():
+                  data=command('exec-out','screencap','-p',binary=True);assert data[:8]==b'\x89PNG\r\n\x1a\n'
+                  name='screen-'+str(len(result['screens']))+'.png';(out/name).write_bytes(data)
+                  result['screens'].append(dict(file=name,sha256=hashlib.sha256(data).hexdigest(),bytes=len(data)))
+              def ok(label):
+                  assert LABELS[len(result['labels'])]==label
+                  result['labels'].append(label);print('DRAFT_NATIVE_PASS '+label,flush=True)
+              def start():
+                  shell('am','start','-W','-n',gate.PKG+'/com.supercubegame.pockettodo.MainActivity');ready()
+              def open_note():
+                  start();tap('活动');ready();touch(activity);ready();tap('笔记');ready()
+                  touch('note-edit-'+block);status('发现本机草稿，请明确恢复；当前仍显示正文。')
+              try:
+                  assert os.environ.get('GITHUB_ACTIONS')=='true' and shell('getprop','ro.kernel.qemu').strip()=='1'
+                  assert int(shell('getprop','ro.build.version.sdk').strip())==manifest['api']==gate.API
+                  apks=list(Path('build/outputs/apk/debug').glob('*.apk'));assert len(apks)==1
+                  product=apks[0].read_bytes();assert hashlib.sha256(product).hexdigest()==manifest['apk_sha256']
+                  command('install','-r','-t',str(apks[0]))
+                  installed=shell('pm','path',gate.PKG).strip();assert installed.startswith('package:') and '\n' not in installed
+                  assert command('exec-out','cat',installed[8:],binary=True)==product
+                  start();tap('活动');ready()
+                  adds=[n for n in nodes() if n.get('content-desc','').startswith('category-add-')];assert adds
+                  click(adds[0]);fill('活动名称','DraftNative');button(True);ready()
+                  activity=find(text='DraftNative').get('content-desc');assert re.fullmatch('activity-[0-9]+',activity)
+                  touch(activity);ready();tap('笔记');ready()
+                  tap('加入文字');fill('文字内容','Canonical');button(True);ready()
+                  tap('加入图片');button(True);ready()
+                  baseline=state();data,media=baseline
+                  rows=[r for r in data['blocks'] if r[4]=='TEXT'];assert len(rows)==1 and rows[0][5]=='Canonical'
+                  original=rows[0];note,block=original[1:3]
+                  assert len(data['blocks'])==2 and len(media)==1 and len(data['media'])==1
+                  ok('fixture_text_image')
+                  touch('note-edit-'+block);status('暂无已保存草稿；正文不能为空。')
+                  assert drafts()=={}
+                  fill('文字内容','NotSaved');button(False);ready()
+                  assert state()==baseline and drafts()=={};ok('cancel_unsaved_readonly')
+                  touch('note-edit-'+block);fill('文字内容','  Draft kept  ')
+                  touch('note-draft-save');status('草稿已保存，正文未修改。')
+                  saved=drafts();assert len(saved)==1 and state()==baseline
+                  assert seek('文字内容').get('text')=='  Draft kept  ';shot();ok('explicit_save_readonly')
+                  result['force_stop']=stop_verified(adb,gate.SERIAL,gate.PKG)
+                  assert state()==baseline and drafts()==saved
+                  open_note();assert seek('文字内容').get('text')=='Canonical' and drafts()==saved
+                  ok('restart_no_autorestore')
+                  fill('文字内容','Unsaved replacement');touch('note-draft-recover');find(text='恢复草稿？');button(False)
+                  assert seek('文字内容').get('text')=='Unsaved replacement' and drafts()==saved and state()==baseline
+                  ok('recover_cancel_readonly')
+                  touch('note-draft-recover');find(text='恢复草稿？');button(True)
+                  status('已恢复到输入框；点击保存才会修改正文。')
+                  assert seek('文字内容').get('text')=='  Draft kept  ' and drafts()==saved and state()==baseline
+                  ok('recover_confirm_readonly')
+                  touch('note-draft-discard');find(text='丢弃本机草稿？');button(False)
+                  assert seek('文字内容').get('text')=='  Draft kept  ' and drafts()==saved and state()==baseline
+                  ok('discard_cancel_readonly')
+                  touch('note-draft-discard');find(text='丢弃本机草稿？');button(True)
+                  status('草稿已丢弃，正文和当前输入未修改。')
+                  tomb=drafts();assert tomb.keys()==saved.keys() and tomb!=saved and state()==baseline
+                  assert seek('文字内容').get('text')=='  Draft kept  '
+                  assert seek('note-draft-recover').get('enabled')=='false' and seek('note-draft-discard').get('enabled')=='false'
+                  ok('discard_confirm_readonly')
+                  fill('文字内容','');touch('note-draft-save');status('草稿已保存，正文未修改。')
+                  empty=drafts();assert empty.keys()==saved.keys() and empty!=tomb and state()==baseline
+                  assert seek('note-draft-recover').get('enabled')=='true';ok('empty_draft_saved')
+                  fill('文字内容','Temporary');touch('note-draft-recover');button(True);status('已恢复到输入框；点击保存才会修改正文。')
+                  assert seek('文字内容').get('text')==''
+                  button(True);status('内容不能为空')
+                  assert state()==baseline and drafts()==empty;shot();ok('empty_recovered_body_rejected')
+                  fill('文字内容','Committed');button(True);ready()
+                  after=state();expected=copy.deepcopy(data)
+                  expected['blocks']=[tuple(list(r[:5])+['Committed']+list(r[6:])) if r[1:3]==(note,block) else r for r in expected['blocks']]
+                  assert len(expected['revision'])==1
+                  revision=list(expected['revision'][0]);revision[-1]+=1;expected['revision']=[tuple(revision)]
+                  assert after==(expected,media) and drafts()!=empty
+                  ok('commit_exact_one_revision')
+                  result['final_stop']=stop_verified(adb,gate.SERIAL,gate.PKG)
+                  start();tap('活动');ready();touch(activity);ready();tap('笔记');ready()
+                  assert find(**{'content-desc':'note-text-'+block}).get('text')=='Committed'
+                  touch('note-edit-'+block);status('暂无已保存草稿；正文不能为空。')
+                  assert seek('note-draft-recover').get('enabled')=='false' and state()==after
+                  assert command('exec-out','cat',installed[8:],binary=True)==product
+                  shot();ok('restart_committed');result['status']='PASS'
+              finally:
+                  result['checks']=len(result['labels'])
+                  if result['status']!='PASS':
+                      try:shot()
+                      except Exception as e:result['screenshot_error']=repr(e)
+          try:
+              gate.verify_database=lambda adb:None
+              gate.verify_native_ui=native
+              gate.main()
+              assert result['labels']==LABELS and result['status']=='PASS'
+          except BaseException as e:
+              result.update(status='FAIL',error=repr(e),traceback=traceback.format_exc()[-12000:]);raise
+          finally:
+              (out/'result.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
+              print('DRAFT_NATIVE_RESULT '+json.dumps(result,ensure_ascii=False),flush=True)
+          # DRAFT_NATIVE_END
+          PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -124,6 +329,8 @@ jobs:
             draft-setup.log
             draft-build.log
             draft-android.log
+            draft-native/
+            draft-native.log
             emulator.log
             device-schema3-registration-draft-*.txt
           if-no-files-found: error
@@ -170,6 +377,74 @@ jobs:
           commit_terminal new_block_append new_block_preserves_existing final_media'''.split()}
           PACKAGE='com.supercubegame.pockettodo.v12.preview'
           SCOPE='ACTUAL_ANDROID_DRAFT_SESSION_SQLITE_FILES_FORCE_STOP_NOT_NATIVE_BUTTONS_OR_LMK'
+          NATIVE_REQUIRED='fixture_text_image cancel_unsaved_readonly explicit_save_readonly restart_no_autorestore recover_cancel_readonly recover_confirm_readonly discard_cancel_readonly discard_confirm_readonly empty_draft_saved empty_recovered_body_rejected commit_exact_one_revision restart_committed'.split()
+          def validate_native(v,manifest,log,images):
+              for key,expected in manifest.items():
+                  assert type(v[key]) is type(expected) and v[key]==expected
+              assert v['status']=='PASS' and v['scope']=='NATIVE_DRAFT_BUTTONS_ASCII_IMAGE_FORCE_STOP_NOT_LMK_OR_CLEANUP_RACE'
+              assert type(v['checks']) is int and v['checks']==12 and v['labels']==NATIVE_REQUIRED
+              assert v['release_ready'] is False and v['cleanup_failure_race']=='NOT_TESTED'
+              assert v['unicode_input']=='BACKEND_ONLY'
+              labels=[line.removeprefix('DRAFT_NATIVE_PASS ') for line in log.splitlines() if line.startswith('DRAFT_NATIVE_PASS ')]
+              assert labels==NATIVE_REQUIRED
+              emitted=[line.removeprefix('DRAFT_NATIVE_RESULT ') for line in log.splitlines() if line.startswith('DRAFT_NATIVE_RESULT ')]
+              assert len(emitted)==1 and json.loads(emitted[0])==v
+              assert len(v['screens'])==3 and len(images)==3
+              for i,s in enumerate(v['screens']):
+                  assert s['file']=='screen-'+str(i)+'.png'
+                  raw=images[s['file']]
+                  assert raw.startswith(b'\x89PNG\r\n\x1a\n')
+                  assert type(s['bytes']) is int and s['bytes']==len(raw)
+                  assert s['sha256']==hashlib.sha256(raw).hexdigest()
+              snapshots=v['snapshots'];assert len(snapshots)==12
+              assert all(isinstance(s,str) and re.fullmatch('[0-9a-f]{64}',s) for s in snapshots)
+              assert len(set(snapshots[:10]))==len(set(snapshots[10:]))==1 and snapshots[0]!=snapshots[-1]
+              for key in ('force_stop','final_stop'):
+                  stop=v[key];assert stop['status']=='PASS' and stop['package']==PACKAGE
+                  assert stop['scope']=='COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK'
+                  assert type(stop['force_stop_attempts']) is int and stop['force_stop_attempts']==1
+                  cmd=stop['command'];last=stop['probes'][-1]
+                  assert type(cmd['returncode']) is int and cmd['returncode']==0 and cmd['stdout']==cmd['stderr']==''
+                  assert cmd['args'][-3:]==['am','force-stop',PACKAGE]
+                  assert type(last['returncode']) is int and last['returncode']==1 and last['stdout'].strip()==last['stderr'].strip()==''
+                  assert last['args'][-2:]==['pidof',PACKAGE]
+              return True
+          def native_controls():
+              m=dict(commit='a'*40,run_id='123',run_attempt='1',api=26,apk_sha256='b'*64,certificate='c'*64,apk_bytes=100)
+              stop=dict(status='PASS',package=PACKAGE,scope='COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK',force_stop_attempts=1,
+                  command=dict(returncode=0,stdout='',stderr='',args=['am','force-stop',PACKAGE]),
+                  probes=[dict(returncode=1,stdout='',stderr='',args=['pidof',PACKAGE])])
+              images={'screen-'+str(i)+'.png':b'\x89PNG\r\n\x1a\n'+bytes([i]) for i in range(3)}
+              v=dict(m,status='PASS',scope='NATIVE_DRAFT_BUTTONS_ASCII_IMAGE_FORCE_STOP_NOT_LMK_OR_CLEANUP_RACE',
+                  checks=12,labels=NATIVE_REQUIRED[:],release_ready=False,cleanup_failure_race='NOT_TESTED',unicode_input='BACKEND_ONLY',
+                  force_stop=stop,final_stop=stop,snapshots=['d'*64]*10+['e'*64]*2,
+                  screens=[dict(file=k,sha256=hashlib.sha256(raw).hexdigest(),bytes=len(raw)) for k,raw in images.items()])
+              def log(w):return ''.join('DRAFT_NATIVE_PASS '+s+'\n' for s in w['labels'])+'DRAFT_NATIVE_RESULT '+json.dumps(w)+'\n'
+              assert validate_native(v,m,log(v),images)
+              bad=[]
+              for key in v:
+                  w=copy.deepcopy(v);del w[key];bad.append(w)
+              for i in range(12):
+                  w=copy.deepcopy(v);del w['labels'][i];bad.append(w)
+              for key,value in [('status','FAIL'),('checks',12.0),('release_ready',0),('commit','f'*40),('api',26.0),('apk_sha256','f'*64),('unicode_input','PASS')]:
+                  w=copy.deepcopy(v);w[key]=value;bad.append(w)
+              for key in ('force_stop','final_stop'):
+                  for code in (0,255,True):
+                      w=copy.deepcopy(v);w[key]['probes'][-1]['returncode']=code;bad.append(w)
+              for i in range(12):
+                  w=copy.deepcopy(v);w['snapshots'][i]='f'*64;bad.append(w)
+              for i in range(3):
+                  w=copy.deepcopy(v);w['screens'][i]['sha256']='f'*64;bad.append(w)
+              for w in bad:
+                  text=log(w) if 'labels' in w else log(v)
+                  try:validate_native(w,m,text,images)
+                  except (AssertionError,KeyError,TypeError,IndexError):pass
+                  else:raise AssertionError('invalid native receipt accepted')
+              for text,imgs in [(log(v).replace('DRAFT_NATIVE_PASS ','REMOVED ',1),images),(log(v)+log(v),images),(log(v),{})]:
+                  try:validate_native(v,m,text,imgs)
+                  except (AssertionError,KeyError,TypeError,IndexError):pass
+                  else:raise AssertionError('native evidence mismatch accepted')
+              return dict(positive=1,negative=len(bad)+3,scope='HOST_NATIVE_RECEIPT_CONTROLS_NOT_DEVICE')
           def validate(v,manifest,logs,api,source,run,attempt):
               assert type(api) is int and api in (26,34)
               assert v['status']=='PASS' and v['scope']==SCOPE
@@ -261,6 +536,7 @@ jobs:
               assert not all_parents({})
               return dict(positive=2,negative=total,parent_negative=9,scope='HOST_REPORT_CONTROLS_NOT_ANDROID_EXECUTION')
           controls=selftest()
+          controls['native']=native_controls()
           if os.environ.get('DRAFT_REPORT_SELFTEST')=='1':
               print('DRAFT_REPORT_CONTROLS '+json.dumps(controls));raise SystemExit(0)
           source,run,attempt=(os.environ[k] for k in ('GITHUB_SHA','GITHUB_RUN_ID','GITHUB_RUN_ATTEMPT'))
@@ -273,17 +549,21 @@ jobs:
                   value=json.loads(path.read_text());manifest=json.loads((folder/'draft-apk.json').read_text())
                   logs={p:(folder/'draft-device'/(p+'.log')).read_text() for p in ('seed','reopen','diagnostic')}
                   validate(value,manifest,logs,api,source,run,attempt)
-                  row.update(status='PASS',evidence=value,manifest=manifest)
+                  native=json.loads((folder/'draft-native/result.json').read_text())
+                  native_log=(folder/'draft-native.log').read_text()
+                  images={p.name:p.read_bytes() for p in (folder/'draft-native').glob('screen-*.png')}
+                  validate_native(native,manifest,native_log,images)
+                  row.update(status='PASS',evidence=value,manifest=manifest,native_ui=native)
               except (OSError,ValueError,AssertionError,KeyError,TypeError,IndexError) as exc:
                   passed=False;row['error']=repr(exc)
               row['diagnostics']={}
-              for name in ('draft-android.log','draft-build.log','emulator.log','draft-device/result.json'):
+              for name in ('draft-android.log','draft-build.log','emulator.log','draft-device/result.json','draft-native.log','draft-native/result.json','draft-native/last-window.xml'):
                   try:
                       with (folder/name).open('rb') as f:
                           f.seek(0,2);size=f.tell();f.seek(max(0,size-12000));tail=f.read(12000)
                       row['diagnostics'][name]=dict(bytes=size,tail=tail.decode('utf-8','replace'),truncated=size>12000)
                   except OSError as exc:row['diagnostics'][name]={'error':repr(exc)}
-          doc=dict(status='PASS' if passed else 'FAIL',scope='INDEPENDENT_DRAFT_BACKEND_MATRIX_NOT_FULL_V12_OR_NATIVE_UI',
+          doc=dict(status='PASS' if passed else 'FAIL',scope='INDEPENDENT_DRAFT_BACKEND_AND_NATIVE_MATRIX_NOT_FULL_V12',
                    commit=source,run_id=run,run_attempt=attempt,devices=devices,parents=needs,
                    observer_controls=controls,release_ready=False,durable_upgrade_ready=False)
           data=(json.dumps(doc,ensure_ascii=False,indent=2)+'\n').encode()

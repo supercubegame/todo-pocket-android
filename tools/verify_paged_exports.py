@@ -493,6 +493,7 @@ def pdf_text_diagnostic(text):
             "form_feeds":text.count("\f")}
 
 def selftest():
+    dependency_setup_selftest()
     format_button_selftest()
     native_receipt_selftest()
     derived_receipt_selftest()
@@ -628,9 +629,7 @@ def verify(folder,classes,android,prefix,remote,gate):
     """Called inside the existing codec job; failures propagate to its exit status."""
     selftest()
     # Independent PDF parser/rasterizer. Install only in disposable CI when absent.
-    if not all(shutil.which(x) for x in ("pdftotext","pdftoppm","pdftocairo","pdfimages","pdfinfo","pdffonts")):
-        run(["sudo","apt-get","update"],timeout=240)
-        run(["sudo","apt-get","install","-y","poppler-utils"],timeout=240)
+    dependencies = ensure_poppler()
     labels,identity=instrumentation(folder,prefix,gate)
     host=folder/"PagedHostCheck.java";host.write_text(HOST,encoding="utf-8")
     run(["javac","-encoding","UTF-8","-d",folder,host])
@@ -696,7 +695,7 @@ def verify(folder,classes,android,prefix,remote,gate):
             "status":"PASS","scope":"APK_PAGED_BACKEND_POPPLER_AND_JDK_NOT_UI_SAF_RECEIVER",
             "checks":29,"labels":labels,"independent_outputs":evidence,"text_observer_negative_controls":13,
             "actualtext_removal_control":"REJECTED_WITH_IDENTICAL_PIXELS","apk_size":size,
-            "rasterizer_oracle":oracle,
+            "rasterizer_oracle":oracle,"dependency_setup":dependencies,
             "preview_ui":{"checks":len(PREVIEW_LABELS),"labels":PREVIEW_LABELS,
                           "scope":"ACTUAL_DIALOG_AND_INTERCEPTED_SAF_NOT_PROVIDER_E2E"},
             "instrumentation":identity,"release_ready":False}
@@ -1216,5 +1215,296 @@ def derived_receipt_selftest():
             v=copy.deepcopy(good);v["outputs"][kind][field]=value;bad.append(v)
     for v in bad:assert not derived_receipt(v,26,"source","run"),"missing derived evidence accepted"
     print("DERIVED_RECEIPT_CONTROLS 1 positive "+str(len(bad))+" negatives HOST_ONLY",flush=True)
+
+def temporary_apt_dns(text):
+    """Conservative allowlist: only explicit temporary DNS failures, not any timeout."""
+    found = False
+    pending = False
+    summary = ("Some index files failed to download. They have been ignored, or old ones used instead.",
+               "Unable to fetch some archives, maybe run apt-get update or try with --fix-missing?")
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        dns = re.fullmatch(r"(?:[EW]: Failed to fetch \S+\s+)?Temporary failure resolving '[^'\r\n]+'", line)
+        if dns:
+            found = True
+            pending = False
+            continue
+        if pending:
+            return False
+        if re.match(r"Err:\d+\s", line):
+            pending = True
+        elif line.startswith(("E:", "W:")):
+            if line[2:].strip() not in summary:
+                return False
+        elif line.startswith(("dpkg:", "sudo:")) or re.search(
+                r"(?i)(permission denied|not signed|NO_PUBKEY|hash sum mismatch|"
+                r"certificate verification failed|404 Not Found|could not get lock)", line):
+            return False
+    return found and not pending
+
+
+def ensure_poppler(*, _which=None, _run=None, _clock=None, _sleep=None):
+    """Only dependency setup retries. Each original 240s phase retains its deadline.
+    75s/attempt and 5s,10s waits are operational caps, not performance measurements.
+    Subprocess termination and Python scheduling can exceed a deadline slightly.
+    """
+    import time
+    which = shutil.which if _which is None else _which
+    runner = subprocess.run if _run is None else _run
+    clock = time.monotonic if _clock is None else _clock
+    sleep = time.sleep if _sleep is None else _sleep
+    tools = ("pdftotext", "pdftoppm", "pdftocairo", "pdfimages", "pdfinfo", "pdffonts")
+    receipt = {"status": "FAIL", "scope": "HOST_DEPENDENCY_SETUP_NOT_EXPORT_ACCEPTANCE",
+               "commit": os.environ.get("GITHUB_SHA"), "run_id": os.environ.get("GITHUB_RUN_ID"),
+               "phase_budget_seconds": 240, "max_attempts_per_phase": 3, "attempts": []}
+    def fail(reason, cause=None):
+        receipt["reason"] = reason
+        raise RuntimeError("PAGED_DEPENDENCY_RECEIPT " + json.dumps(receipt)) from cause
+    try:
+        receipt["missing_before"] = [name for name in tools if not which(name)]
+        if not receipt["missing_before"]:
+            receipt.update(status="READY", mode="ALREADY_PRESENT")
+            return receipt
+        receipt["mode"] = "INSTALL_MISSING"
+        if os.environ.get("GITHUB_ACTIONS") != "true":
+            fail("dependency_install_requires_disposable_ci")
+        common = ["sudo", "-n", "apt-get", "-o", "Acquire::Retries=0",
+                  "-o", "Acquire::http::Timeout=20", "-o", "Acquire::https::Timeout=20"]
+        commands = (
+            ("update", common + ["-o", "APT::Update::Error-Mode=any", "update"]),
+            ("install", common + ["install", "-y", "poppler-utils"]))
+        for phase, command in commands:
+            deadline = clock() + 240
+            for number in range(1, 4):
+                remaining = deadline - clock()
+                if remaining <= 0:
+                    fail("dependency_phase_deadline_exhausted")
+                timeout = min(75, remaining)
+                started = clock()
+                error = None
+                try:
+                    p = runner(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, timeout=timeout,
+                               env=dict(os.environ, LC_ALL="C", LANG="C"))
+                    code, raw = p.returncode, p.stdout
+                except subprocess.TimeoutExpired as exc:
+                    error = exc
+                    code, raw = None, exc.output
+                # Other errors, including product assertions, are never retried.
+                if raw is None:
+                    raw = b""
+                if isinstance(raw, str):
+                    raw = raw.encode("utf-8")
+                text = raw.decode("utf-8", errors="replace")
+                recognized = temporary_apt_dns(text)
+                diagnostics = recognized or bool(re.search(r"(?m)^(?:[EW]:|Err:\d+\s)", text))
+                record = {"phase": phase, "number": number, "command": command[:],
+                          "timeout_seconds": timeout, "returncode": code,
+                          "error_type": type(error).__name__ if error else None,
+                          "elapsed_seconds": round(clock() - started, 3),
+                          "recognized_temporary_dns": recognized, "retry_wait_seconds": 0,
+                          "output_bytes": len(raw), "output_tail": raw[-2048:].decode("utf-8", errors="replace"),
+                          "output_truncated": len(raw) > 2048}
+                receipt["attempts"].append(record)
+                if code == 0 and not diagnostics and clock() <= deadline:
+                    break
+                if not recognized:
+                    fail("dependency_failure_not_allowlisted", error)
+                if number == 3:
+                    fail("dependency_attempts_exhausted", error)
+                wait = (5, 10)[number - 1]
+                if deadline - clock() <= wait:
+                    fail("dependency_phase_deadline_exhausted", error)
+                record["retry_wait_seconds"] = wait
+                sleep(wait)
+        receipt["missing_after"] = [name for name in tools if not which(name)]
+        if receipt["missing_after"]:
+            fail("dependency_tools_still_missing")
+        receipt["status"] = "READY"
+        return receipt
+    finally:
+        # On failure the same complete attempt receipt is in the exception
+        # consumed by existing reports; on success verify() nests it in its result.
+        print("PAGED_DEPENDENCY_RECEIPT " + json.dumps(receipt), flush=True)
+
+
+def dependency_setup_contract(ensure):
+    """Injected host contracts only: no apt, network or Android execution."""
+    import contextlib
+    import io
+    from unittest.mock import patch
+    from subprocess import CompletedProcess, TimeoutExpired
+    dns = b"Err:1 https://example.invalid stable InRelease\n  Temporary failure resolving 'example.invalid'\n"
+    labels = []
+
+    def scenario(answers=(), installed=False, after=True, ci=True, oversleep=False, missing_after_name=None):
+        calls, sleeps = [], []
+        now = [100.0]
+        ready = [installed]
+        def which(name):
+            return "/usr/bin/" + name if ready[0] and name != missing_after_name else None
+        def clock():
+            return now[0]
+        def sleep(seconds):
+            sleeps.append(seconds)
+            now[0] += 300 if oversleep else seconds
+        def runner(command, **kwargs):
+            index = len(calls)
+            assert index < len(answers), "unexpected dependency retry"
+            calls.append((list(command), dict(kwargs)))
+            code, output, duration = answers[index]
+            assert 0 < kwargs["timeout"] <= 75
+            assert kwargs["stdin"] == subprocess.DEVNULL
+            assert kwargs["stderr"] == subprocess.STDOUT
+            assert kwargs["env"]["LC_ALL"] == "C"
+            now[0] += min(duration, kwargs["timeout"])
+            if code == "timeout":
+                raise TimeoutExpired(command, kwargs["timeout"], output=output)
+            if code == "assert":
+                raise AssertionError("product assertion sentinel")
+            if code == 0 and command[-3:] == ["install", "-y", "poppler-utils"] and after:
+                ready[0] = True
+            return CompletedProcess(command, code, output)
+        result, error = None, None
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": "true" if ci else "false"}):
+            with contextlib.redirect_stdout(io.StringIO()) as captured:
+                try:
+                    result = ensure(_which=which, _run=runner, _clock=clock, _sleep=sleep)
+                except Exception as exc:
+                    error = exc
+        return result, error, calls, sleeps, captured.getvalue()
+
+    def check(value, label):
+        assert value, label
+        labels.append(label)
+
+    result, error, calls, sleeps, log = scenario(installed=True)
+    check(error is None and result["status"] == "READY" and result["attempts"] == [] and
+          not calls and not sleeps and result["mode"] == "ALREADY_PRESENT", "present_no_apt")
+    ok = (0, b"Reading package lists... Done\n", 1)
+    result, error, calls, sleeps, log = scenario([ok, ok])
+    check(error is None and result["status"] == "READY" and len(calls) == 2 and
+          [a["phase"] for a in result["attempts"]] == ["update", "install"] and
+          all(a["number"] == 1 and a["retry_wait_seconds"] == 0 for a in result["attempts"]),
+          "install_and_record_first_attempt")
+    check(all(c[:3] == ["sudo", "-n", "apt-get"] and "Acquire::Retries=0" in c and
+              "Acquire::http::Timeout=20" in c and "Acquire::https::Timeout=20" in c for c, _ in calls)
+          and "APT::Update::Error-Mode=any" in calls[0][0] and
+          calls[0][0][-1] == "update" and calls[1][0][-3:] == ["install", "-y", "poppler-utils"],
+          "strict_fixed_dependency_commands")
+    result, error, calls, sleeps, log = scenario([(100, dns, 2), ok, ok])
+    check(error is None and len(calls) == 3 and sleeps == [5] and
+          result["attempts"][0]["recognized_temporary_dns"] is True and
+          result["attempts"][0]["returncode"] == 100 and
+          "Temporary failure resolving" in result["attempts"][0]["output_tail"],
+          "dns_failure_retry_retains_first_failure")
+    result, error, calls, sleeps, log = scenario([("timeout", dns, 75), ok, ok])
+    check(error is None and sleeps == [5] and
+          result["attempts"][0]["error_type"] == "TimeoutExpired", "dns_timeout_bytes_retry")
+    for answer, label in [
+        (("timeout", b"", 75), "unknown_timeout_not_retried"),
+        ((100, b"E: Unable to locate package poppler-utils\n", 1), "unknown_error_not_retried"),
+        ((100, dns + b"E: The repository is not signed.\n", 1), "mixed_signature_failure_not_retried"),
+        ((100, dns + b"E: Could not get lock /var/lib/dpkg/lock\n", 1), "mixed_lock_failure_not_retried"),
+        ((100, b"E: 404 Not Found\n", 1), "http_404_not_retried"),
+        ((0, b"W: Some index files failed to download. They have been ignored, or old ones used instead.\n", 1),
+         "partial_update_not_silent_success"),
+    ]:
+        result, error, calls, sleeps, log = scenario([answer])
+        check(result is None and error is not None and len(calls) == 1 and not sleeps and
+              "PAGED_DEPENDENCY_RECEIPT" in str(error) and '"status": "FAIL"' in str(error), label)
+    result, error, calls, sleeps, log = scenario([(0, dns, 1), ok, ok])
+    check(error is None and sleeps == [5] and len(calls) == 3 and
+          result["attempts"][0]["returncode"] == 0, "zero_exit_dns_not_accepted")
+    result, error, calls, sleeps, log = scenario([(100, dns, 75)] * 3)
+    check(result is None and error is not None and len(calls) == 3 and sleeps == [5, 10] and
+          sum(k["timeout"] for _, k in calls) + sum(sleeps) <= 240 and
+          str(error).count('"phase": "update"') == 3, "three_attempts_with_original_budget")
+    result, error, calls, sleeps, log = scenario([ok, (100, dns, 1), ok])
+    check(error is None and [c[-1] for c, _ in calls] == ["update", "poppler-utils", "poppler-utils"]
+          and [a["number"] for a in result["attempts"]] == [1, 1, 2], "install_retries_only_install")
+    result, error, calls, sleeps, log = scenario([ok, ok], after=False)
+    check(result is None and error is not None and len(calls) == 2 and
+          "missing_after" in str(error), "all_six_tools_required_after_install")
+    for tool in ("pdftotext", "pdftoppm", "pdftocairo", "pdfimages", "pdfinfo", "pdffonts"):
+        result, error, calls, sleeps, log = scenario([ok, ok], missing_after_name=tool)
+        check(result is None and error is not None and len(calls) == 2 and
+              '"missing_after": ["' + tool + '"]' in str(error), "missing_tool_" + tool)
+    result, error, calls, sleeps, log = scenario([], ci=False)
+    check(error is not None and not calls and not sleeps, "no_non_ci_install")
+    result, error, calls, sleeps, log = scenario([("assert", b"", 1)])
+    check(type(error) is AssertionError and str(error) == "product assertion sentinel" and
+          len(calls) == 1 and not sleeps, "assertions_unchanged_no_retry")
+    result, error, calls, sleeps, log = scenario([(100, dns, 1)], oversleep=True)
+    check(type(error) is RuntimeError and "dependency_phase_deadline_exhausted" in str(error)
+          and len(calls) == 1 and sleeps == [5], "deadline_rechecked_after_sleep")
+    large = b"x" * 5000 + b"\n" + dns
+    result, error, calls, sleeps, log = scenario([(100, large, 1), ok, ok])
+    check(error is None and result["attempts"][0]["output_bytes"] == len(large) and
+          result["attempts"][0]["output_truncated"] is True and
+          len(result["attempts"][0]["output_tail"].encode()) <= 2048, "bounded_attempt_output")
+    check("PAGED_DEPENDENCY_RECEIPT" in log and '"attempts":' in log,
+          "attempt_receipt_emitted")
+    return labels
+
+
+def dependency_setup_selftest():
+    import ast
+    import inspect
+    labels = dependency_setup_contract(ensure_poppler)
+    source = inspect.getsource(ensure_poppler)
+    mutations = [
+        ("if not recognized:", "if False:"),
+        ("code == 0 and not diagnostics", "code == 0"),
+        ('receipt["attempts"].append(record)', 'receipt["attempts"] = [record]'),
+        ('if receipt["missing_after"]:', "if False:"),
+        ("min(75, remaining)", "min(90, remaining)"),
+        ("if remaining <= 0:", "if False:"),
+    ]
+    for old, new in mutations:
+        assert source.count(old) == 1, "dependency mutation anchor drift"
+        changed = source.replace(old, new)
+        namespace = dict(globals())
+        exec(compile(changed, "<dependency-mutant>", "exec"), namespace)
+        try:
+            dependency_setup_contract(namespace["ensure_poppler"])
+        except AssertionError:
+            continue
+        raise AssertionError("dependency mutant survived: " + old)
+    # Execute the real verify() prefix, stopping before Android instrumentation.
+    # Also inspect the actual report field, not a separately hand-written receipt.
+    tree = ast.parse(inspect.getsource(verify))
+    function = tree.body[0]
+    boundary = next(i for i, statement in enumerate(function.body)
+                    if isinstance(statement, ast.Assign) and isinstance(statement.value, ast.Call)
+                    and isinstance(statement.value.func, ast.Name) and statement.value.func.id == "instrumentation")
+    report = next(statement.value for statement in function.body
+                  if isinstance(statement, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "report" for t in statement.targets))
+    fields = {k.value: v for k, v in zip(report.keys, report.values) if isinstance(k, ast.Constant)}
+    assert isinstance(fields["dependency_setup"], ast.Name) and fields["dependency_setup"].id == "dependencies"
+    function.body = function.body[:boundary] + [ast.Return(value=ast.Name(id="dependencies", ctx=ast.Load()))]
+    sentinel = {"dependency": "sentinel"}
+    calls = []
+    def setup():
+        calls.append("setup")
+        return sentinel
+    namespace = {"selftest": lambda: None, "ensure_poppler": setup}
+    exec(compile(ast.fix_missing_locations(tree), "<dependency-wiring>", "exec"), namespace)
+    assert namespace["verify"](*([None] * 6)) is sentinel and calls == ["setup"]
+    failure = RuntimeError("dependency prefix failure sentinel")
+    def broken():
+        raise failure
+    namespace["ensure_poppler"] = broken
+    try:
+        namespace["verify"](*([None] * 6))
+    except RuntimeError as exc:
+        assert exc is failure
+    else:
+        raise AssertionError("dependency prefix swallowed original failure")
+    print("PAGED_DEPENDENCY_CONTROLS " + str(len(labels)) +
+          " checks 6 implementation mutants rejected; prefix 2 checks report binding 1 HOST_ONLY", flush=True)
+
 
 if __name__=="__main__":selftest()

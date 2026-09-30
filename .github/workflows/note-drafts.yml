@@ -36,6 +36,30 @@ jobs:
           assert text.count(a)==text.count(b)==1
           native=textwrap.dedent(text.split(a,1)[1].split(b,1)[0])
           compile(native,'draft-native','exec')
+          import ast
+          tree=ast.parse(native)
+          fixture=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='create_category_fixture']
+          assert len(fixture)==1, 'fresh native fixture must create its own category'
+          def exercise(node):
+              scope={}
+              exec(compile(ast.Module(body=[node],type_ignores=[]),'category-fixture','exec'),scope)
+              calls=[]
+              def capture(name):
+                  return lambda *args,**kwargs:calls.append((name,args,kwargs))
+              scope['create_category_fixture'](*(capture(k) for k in ('tap','fill','button','ready','find')))
+              assert calls==[('tap',('新建分类',),{}),('fill',('分类名称','DraftCategory'),{}),
+                  ('button',(True,),{}),('ready',(),{}),('find',(),{'text':'DraftCategory','content-desc':'category-name-1'})]
+          exercise(fixture[0])
+          import copy
+          for index in range(5):
+              mutant=copy.deepcopy(fixture[0]);del mutant.body[index]
+              try:exercise(mutant)
+              except AssertionError:pass
+              else:raise AssertionError('missing category fixture step accepted')
+          native_fn=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='native')
+          calls=[n for n in ast.walk(native_fn) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='create_category_fixture']
+          assert len(calls)==1 and [n.id for n in calls[0].args]==['tap','fill','button','ready','find']
+          print('DRAFT_CATEGORY_FIXTURE host_sequence=1 compiled_omission_mutants=5 PASS; not Android execution')
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -138,6 +162,12 @@ jobs:
           manifest=json.loads(Path('draft-apk.json').read_text())
           result=dict(manifest,status='FAIL',scope=SCOPE,labels=[],checks=0,release_ready=False,
                       unicode_input='BACKEND_ONLY',cleanup_failure_race='NOT_TESTED',screens=[],snapshots=[])
+          def create_category_fixture(tap,fill,button,ready,find):
+              tap('新建分类')
+              fill('分类名称','DraftCategory')
+              button(True)
+              ready()
+              find(text='DraftCategory',**{'content-desc':'category-name-1'})
           def native(adb):
               prefix=[str(adb),'-s',gate.SERIAL];serial=0
               def command(*args,binary=False):
@@ -242,6 +272,7 @@ jobs:
                   installed=shell('pm','path',gate.PKG).strip();assert installed.startswith('package:') and '\n' not in installed
                   assert command('exec-out','cat',installed[8:],binary=True)==product
                   start();tap('活动');ready()
+                  create_category_fixture(tap,fill,button,ready,find)
                   adds=[n for n in nodes() if n.get('content-desc','').startswith('category-add-')];assert adds
                   click(adds[0]);fill('活动名称','DraftNative');button(True);ready()
                   activity=find(text='DraftNative').get('content-desc');assert re.fullmatch('activity-[0-9]+',activity)

@@ -92,6 +92,64 @@ jobs:
               except (AssertionError,KeyError,NameError):pass
               else:raise AssertionError(('input setup omission accepted',index))
           print('DRAFT_INPUT_FIXTURE host_positive=1 negative=4 omission_mutants='+str(len(setup.body))+' PASS; not Android execution')
+          literal=next((n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='enter_literal_text'),None)
+          assert literal is not None, 'literal input needs a tested editing sequence'
+          def literal_contract(node):
+              scope={}
+              exec(compile(ast.Module(body=[node],type_ignores=[]),'literal-edit','exec'),scope)
+              for value in ('','Canonical','  Draft kept  ',' ', '  ', 'A ', 'A   ', '  A B  '):
+                  text='';cursor=0;calls=[]
+                  def shell(*args):
+                      nonlocal text,cursor
+                      calls.append(args)
+                      if args==('input','keyevent','KEYCODE_MOVE_HOME'):cursor=0;return
+                      assert args[:2]==('input','text') and len(args)==3
+                      for char in args[2].replace('%s',' '):
+                          text=text[:cursor]+char+text[cursor:];cursor+=1
+                          # Independent model of the observed double-space conversion.
+                          if cursor>=3 and text[cursor-2:cursor]=='  ' and text[cursor-3].isalnum():
+                              text=text[:cursor-2]+'. '+text[cursor:]
+                  scope['enter_literal_text'](shell,value)
+                  assert text==value, (value,text,calls)
+                  if value=='  Draft kept  ':
+                      assert calls==[('input','text','%s%s'),('input','keyevent','KEYCODE_MOVE_HOME'),('input','text','%s%sDraft%skept')]
+          literal_contract(literal)
+          mutants=[]
+          for path in ('suffix','home','prefix'):
+              m=copy.deepcopy(literal)
+              branch=next(n for n in ast.walk(m) if isinstance(n,ast.If) and len(n.body)==3)
+              del branch.body[('suffix','home','prefix').index(path)];mutants.append(m)
+          m=copy.deepcopy(literal);m.body=ast.parse("if value: shell('input','text',value.replace(' ','%s'))").body;mutants.append(m)
+          for m in mutants:
+              try:literal_contract(m)
+              except AssertionError:pass
+              else:raise AssertionError('broken literal editing sequence accepted')
+          fills=[n for n in ast.walk(native_fn) if isinstance(n,ast.FunctionDef) and n.name=='fill'];assert len(fills)==1
+          wired=[n for n in ast.walk(fills[0]) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='enter_literal_text']
+          assert len(wired)==1 and [n.id for n in wired[0].args]==['shell','value']
+          print('DRAFT_LITERAL_EDIT host_cases=8 compiled_mutants=4 PASS; modeled key events, Android pending')
+          dump_fn=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='read_ui_dump')
+          dump_scope={}
+          exec(compile(ast.Module(body=[dump_fn],type_ignores=[]),'ui-dump','exec'),dump_scope)
+          def dump_case(message,fail_read=False):
+              calls=[];receipt={}
+              def shell(*args):
+                  calls.append(args)
+                  if args[0]=='rm':return ''
+                  if args[0]=='uiautomator':return message
+                  assert args==('cat','/sdcard/draft-native.xml')
+                  if fail_read:raise RuntimeError('missing XML')
+                  return '<hierarchy/>'
+              raw=dump_scope['read_ui_dump'](shell,receipt)
+              assert raw=='<hierarchy/>' and receipt=={'output':message}
+              assert calls==[('rm','-f','/sdcard/draft-native.xml'),('uiautomator','dump','/sdcard/draft-native.xml'),('cat','/sdcard/draft-native.xml')]
+          success='UI hierchary dumped to: /sdcard/draft-native.xml\n'
+          dump_case(success)
+          for message,fail_read in [('',False),('ERROR: could not get idle state.',False),(success.replace('draft-native','wrong'),False),(success,True)]:
+              try:dump_case(message,fail_read)
+              except (AssertionError,RuntimeError):pass
+              else:raise AssertionError('failed or missing UI dump accepted')
+          print('DRAFT_UI_DUMP host_positive=1 negative=4 PASS; no dump retry')
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -208,6 +266,24 @@ jobs:
               receipt['after']=shell('settings','get','system','text_auto_punctuate').strip()
               assert receipt['after']=='0', ('punctuation setting not applied',receipt)
               receipt['scope']='DISPOSABLE_EMULATOR_INPUT_NOT_DEFAULT_KEYBOARD_ACCEPTANCE'
+          def enter_literal_text(shell,value):
+              # ASCII fixture editing, not an IME acceptance test. Seed trailing spaces
+              # in the empty field, then insert the prefix before them. Keep exact oracle.
+              assert '  ' not in value.strip(' '), 'internal double spaces not supported by this fixture'
+              prefix=value.rstrip(' ');suffix=value[len(prefix):]
+              if prefix and len(suffix)>=2:
+                  shell('input','text',suffix.replace(' ','%s'))
+                  shell('input','keyevent','KEYCODE_MOVE_HOME')
+                  shell('input','text',prefix.replace(' ','%s'))
+              elif value:shell('input','text',value.replace(' ','%s'))
+          def read_ui_dump(shell,receipt):
+              # A zero dump exit code does not prove a new XML was written.
+              # Remove stale output and retain the dump's own diagnosis before reading.
+              path='/sdcard/draft-native.xml'
+              shell('rm','-f',path)
+              receipt['output']=shell('uiautomator','dump',path)
+              assert 'UI hierchary dumped to: '+path in receipt['output'], ('UI dump not produced',receipt)
+              return shell('cat',path)
           def native(adb):
               prefix=[str(adb),'-s',gate.SERIAL];serial=0
               def command(*args,binary=False):
@@ -222,8 +298,8 @@ jobs:
                   return p.stdout
               def shell(*args):return command('shell','-n','-T',*args)
               def nodes():
-                  shell('uiautomator','dump','/sdcard/draft-native.xml')
-                  raw=shell('cat','/sdcard/draft-native.xml');(out/'last-window.xml').write_text(raw)
+                  result['last_ui_dump']={}
+                  raw=read_ui_dump(shell,result['last_ui_dump']);(out/'last-window.xml').write_text(raw)
                   return list(ET.fromstring(raw).iter('node'))
               def find(**attrs):
                   deadline=time.monotonic()+18;current=[]
@@ -260,7 +336,7 @@ jobs:
                   size=len(field.get('text','').encode('utf-16-le'))//2
                   shell('input','keyevent',*(['KEYCODE_DEL']*(size+1)))
                   assert find(**{'content-desc':desc}).get('text')==''
-                  if value:shell('input','text',value.replace(' ','%s'))
+                  enter_literal_text(shell,value)
                   actual=find(**{'content-desc':desc}).get('text')
                   assert actual==value, ('input preparation mismatch',desc,repr(value),repr(actual))
                   keyboard=shell('dumpsys','input_method')

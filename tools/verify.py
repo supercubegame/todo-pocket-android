@@ -163,6 +163,7 @@ def v12():
     run([sys.executable, "tools/verify_exports.py"])
     share_ticket()
     share_write()
+    run([sys.executable, "tools/verify_note_drafts.py", "selftest"])
     print("V12_ACCEPTANCE PARTIAL: JVM domain/file/pixel contracts only; Android codecs/persisted derivatives/UI/share NOT_TESTED by this fast gate")
 
 def share_ticket():

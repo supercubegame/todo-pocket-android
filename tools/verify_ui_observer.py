@@ -95,11 +95,28 @@ public final class PocketUiObserver {
     b.append(' ').append(k).append("=\"").append(escape(v)).append('"');
     if(b.length()>LIMIT)throw new IOException("XML limit");
   }
-  static void node(StringBuilder b,AccessibilityNodeInfo n,int index,int depth,Rect clip)throws Exception {
+  static String bounds(Rect r) {
+    return "["+r.left+","+r.top+"]["+r.right+","+r.bottom+"]";
+  }
+  static void clearObservationCache(UiAutomation ui)throws Exception {
+    // Invalidate only this shell observer's accessibility cache before its ONE read.
+    // API26 has the process-wide client cache; API34 exposes a connection cache.
+    // No reconnect, second tree read, input replay or cached-XML fallback.
+    if(Build.VERSION.SDK_INT==26) {
+      Class<?> client=Class.forName("android.view.accessibility.AccessibilityInteractionClient");
+      Object instance=client.getMethod("getInstance").invoke(null);
+      client.getMethod("clearCache").invoke(instance);
+    } else if(Build.VERSION.SDK_INT==34) {
+      if(!ui.clearCache())throw new IOException("cache clear refused");
+    } else throw new IOException("unsupported cache API");
+  }
+  static void node(StringBuilder b,AccessibilityNodeInfo n,int index,int depth,Rect clip,String path)throws Exception {
     if(depth>96||++nodes>20000)throw new IOException("hierarchy limit");
     if(!n.isVisibleToUser())return;
     Rect r=new Rect();n.getBoundsInScreen(r);
-    if(!r.intersect(clip))throw new IOException("visible node outside root/scroll viewport");
+    String rawBounds=bounds(r);
+    if(!r.intersect(clip))throw new IOException("visible node outside root/scroll viewport"
+        +" path="+path+" window="+n.getWindowId()+" bounds="+rawBounds+" clip="+bounds(clip));
     b.append("<node");
     attr(b,"index",index);attr(b,"text",n.getText());attr(b,"resource-id",n.getViewIdResourceName());
     attr(b,"class",n.getClassName());attr(b,"package",n.getPackageName());attr(b,"content-desc",n.getContentDescription());
@@ -110,8 +127,8 @@ public final class PocketUiObserver {
     attr(b,"bounds","["+r.left+","+r.top+"]["+r.right+","+r.bottom+"]");b.append('>');
     for(int i=0;i<n.getChildCount();i++) {
       AccessibilityNodeInfo child=n.getChild(i);
-      if(child==null)throw new IOException("missing hierarchy child");
-      try { node(b,child,i,depth+1,n.isScrollable()?r:clip); }
+      if(child==null)throw new IOException("missing hierarchy child path="+path+"/"+i+" window="+n.getWindowId());
+      try { node(b,child,i,depth+1,n.isScrollable()?r:clip,path+"/"+i); }
       finally {child.recycle();}
     }
     b.append("</node>");
@@ -126,6 +143,7 @@ public final class PocketUiObserver {
     if(remaining<=0)throw new IOException("settle budget exhausted");
     ui.waitForIdle(1000,remaining);
     if(SystemClock.uptimeMillis()>=deadline)throw new IOException("late idle observation");
+    clearObservationCache(ui);
     AccessibilityNodeInfo root=ui.getRootInActiveWindow();
     if(root==null)throw new IOException("no active root");
     try {
@@ -134,7 +152,7 @@ public final class PocketUiObserver {
       Rect clip=new Rect();root.getBoundsInScreen(clip);
       if(clip.isEmpty())throw new IOException("empty root bounds");
       nodes=0;StringBuilder b=new StringBuilder("<hierarchy>");
-      node(b,root,0,0,clip);b.append("</hierarchy>");return b.toString();
+      node(b,root,0,0,clip,"0");b.append("</hierarchy>");return b.toString();
     } finally {root.recycle();}
   }
   static String request(String line,long next)throws Exception {
@@ -498,21 +516,35 @@ def java_contracts():
       "android/os/HandlerThread.java":"""package android.os; public class HandlerThread {
         public HandlerThread(String n){} public void start(){} public Looper getLooper(){return new Looper();}
         public boolean quitSafely(){return true;} }""",
-      "android/os/Build.java":"package android.os; public class Build {public static class VERSION {public static int SDK_INT=26;}}",
+      "android/os/Build.java":"package android.os; public class Build {public static class VERSION {public static int SDK_INT=Integer.getInteger(\"api\",26);}}",
       "android/os/Process.java":"package android.os; public class Process {public static int myUid(){return 2000;}}",
       "android/os/SystemProperties.java":'package android.os; public class SystemProperties {public static String get(String k){return "1";}}',
       "android/app/IUiAutomationConnection.java":"package android.app; public interface IUiAutomationConnection {}",
       "android/app/UiAutomationConnection.java":"package android.app; public class UiAutomationConnection implements IUiAutomationConnection {public UiAutomationConnection(){}}",
       "android/graphics/Rect.java":"""package android.graphics; public class Rect {
         public int left=0,top=0,right=100,bottom=100;
-        public boolean intersect(Rect r){return true;} public boolean isEmpty(){return false;} }""",
+        public boolean intersect(Rect r){
+          if(left<r.right&&r.left<right&&top<r.bottom&&r.top<bottom){
+            left=Math.max(left,r.left);top=Math.max(top,r.top);
+            right=Math.min(right,r.right);bottom=Math.min(bottom,r.bottom);return true;
+          }return false;
+        }
+        public boolean isEmpty(){return left>=right||top>=bottom;} }""",
+      "android/view/accessibility/AccessibilityInteractionClient.java":"""package android.view.accessibility;
+        public class AccessibilityInteractionClient {
+          public static AccessibilityInteractionClient getInstance(){return new AccessibilityInteractionClient();}
+          public void clearCache(){
+            if(android.os.Build.VERSION.SDK_INT!=26)throw new AssertionError("wrong legacy cache path");
+            android.app.UiAutomation.clearFixture();
+          }
+        }""",
       "android/util/Base64.java":"""package android.util; public class Base64 {
         public static final int NO_WRAP=2;public static String encodeToString(byte[] b,int f){
         return java.util.Base64.getEncoder().encodeToString(b);}}""",
       "android/app/UiAutomation.java":"""package android.app;
         import android.os.Looper; import android.view.accessibility.AccessibilityNodeInfo;
         public class UiAutomation {
-          static boolean connected=false;static int reads;
+          static boolean connected=false;static int reads,clears,idles;
           public UiAutomation(Looper l,IUiAutomationConnection c){}
           public void connect(){if(connected)throw new AssertionError("reconnect");connected=true;System.err.println("CONNECT");}
           public void disconnect(){if(!connected)throw new AssertionError("double disconnect");connected=false;System.err.println("DISCONNECT");}
@@ -522,17 +554,39 @@ def java_contracts():
             if(idle!=1000||total!=9000)throw new AssertionError("shared idle budget");
             if("idle".equals(System.getProperty("fixture")))throw new java.util.concurrent.TimeoutException("idle");
             if("late-idle".equals(System.getProperty("fixture")))android.os.SystemClock.now+=9000;
+            idles++;
+          }
+          public static void clearFixture(){
+            if(!connected||idles!=reads+1||clears!=reads)throw new AssertionError("cache clear order/count");
+            if("cache-failure".equals(System.getProperty("fixture")))throw new IllegalStateException("fixture cache failure");
+            clears++;
+          }
+          public boolean clearCache(){
+            if(android.os.Build.VERSION.SDK_INT!=34)throw new AssertionError("wrong modern cache path");
+            if("cache-false".equals(System.getProperty("fixture")))return false;
+            clearFixture();return true;
           }
           public AccessibilityNodeInfo getRootInActiveWindow(){
+            if(clears!=reads+1)throw new AssertionError("fresh cache invalidation missing");
             if("null".equals(System.getProperty("fixture")))return null;
             return new AccessibilityNodeInfo(++reads);
           }
         }""",
       "android/view/accessibility/AccessibilityNodeInfo.java":"""package android.view.accessibility;
         import android.graphics.Rect;public class AccessibilityNodeInfo {
-        int n;public AccessibilityNodeInfo(int n){this.n=n;}
+        int n,level;public AccessibilityNodeInfo(int n){this(n,0);}
+        AccessibilityNodeInfo(int n,int level){this.n=n;this.level=level;}
+        String fixture(){return System.getProperty("fixture","");}
+        boolean tree(){return fixture().equals("nested")||fixture().equals("outside");}
         public boolean refresh(){return !"stale".equals(System.getProperty("fixture"));}
-        public boolean isVisibleToUser(){return !"invisible".equals(System.getProperty("fixture"));} public void getBoundsInScreen(Rect r){}
+        public boolean isVisibleToUser(){return !"invisible".equals(System.getProperty("fixture"));}
+        public void getBoundsInScreen(Rect r){
+          if(fixture().equals("empty"))r.right=0;
+          if(tree()&&level==1){r.left=10;r.top=10;r.right=90;r.bottom=90;}
+          if(tree()&&level==2){r.left=20;r.top=0;r.right=80;r.bottom=100;}
+          if(fixture().equals("outside")&&level==2){r.left=110;r.right=120;}
+        }
+        public int getWindowId(){return 7;}
         public CharSequence getText(){return "  草稿😀\\nline\\t "+n;}
         public String getViewIdResourceName(){return "id";}
         public CharSequence getClassName(){return "EditText";} public CharSequence getPackageName(){return "fixture";}
@@ -540,9 +594,10 @@ def java_contracts():
         public boolean isEnabled(){return true;} public boolean isClickable(){return false;}
         public boolean isLongClickable(){return false;} public boolean isCheckable(){return false;}
         public boolean isChecked(){return false;} public boolean isFocusable(){return true;}
-        public boolean isFocused(){return true;} public boolean isScrollable(){return false;}
+        public boolean isFocused(){return true;} public boolean isScrollable(){return tree()&&level==1;}
         public boolean isSelected(){return false;} public boolean isPassword(){return false;}
-        public int getChildCount(){return "child".equals(System.getProperty("fixture"))?1:0;} public AccessibilityNodeInfo getChild(int n){return null;}
+        public int getChildCount(){return fixture().equals("child")||tree()&&level<2?1:0;}
+        public AccessibilityNodeInfo getChild(int i){return tree()?new AccessibilityNodeInfo(n,level+1):null;}
         public void recycle(){}
         }"""
     }
@@ -553,21 +608,41 @@ def java_contracts():
             path=folder/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(body);sources.append(path)
         source=folder/"PocketUiObserver.java";source.write_text(JAVA);sources.append(source)
         compile_java(folder,sources)
-        def run(requests,fixture=None):
-            cmd=["java"]+([] if fixture is None else ["-Dfixture="+fixture])+["-cp",str(folder),"PocketUiObserver",nonce]
+        def run(requests,fixture=None,api=26):
+            cmd=["java","-Dapi="+str(api)]+([] if fixture is None else ["-Dfixture="+fixture])+["-cp",str(folder),"PocketUiObserver",nonce]
             return subprocess.run(cmd,input=requests,capture_output=True,text=True,timeout=8)
         requests=nonce+" 1 DUMP\n"+nonce+" 2 DUMP\n"+nonce+" 3 STOP\n"
-        def positive():
-            p=run(requests);assert p.returncode==0,(p.stdout,p.stderr)
+        def positive(api=26):
+            p=run(requests,api=api);assert p.returncode==0,(p.stdout,p.stderr)
             lines=p.stdout.encode().splitlines(keepends=True);assert len(lines)==4
-            assert decode_frame(lines[0],nonce,0,"READY")=="26"
+            assert decode_frame(lines[0],nonce,0,"READY")==str(api)
             for seq in (1,2):
                 root=ET.fromstring(decode_frame(lines[seq],nonce,seq,"OK"))
                 assert root[0].get("text")=="  草稿😀\nline\t "+str(seq)
                 assert root[0].get("content-desc")=="desc" and root[0].get("bounds")=="[0,0][100,100]"
             assert decode_frame(lines[3],nonce,3,"BYE")=="closed"
             assert p.stderr.splitlines()==["CONNECT","DISCONNECT"]
-        positive()
+        positive();positive(34)
+        def cache_geometry_controls():
+            for api in (26,34):
+                p=run(requests,"nested",api)
+                assert p.returncode==0,(p.stdout,p.stderr)
+                lines=p.stdout.encode().splitlines(keepends=True)
+                for seq in (1,2):
+                    tree=ET.fromstring(decode_frame(lines[seq],nonce,seq,"OK"))
+                    assert [n.get("bounds") for n in tree.iter("node")]==[
+                        "[0,0][100,100]","[10,10][90,90]","[20,10][80,90]"]
+                for fixture,reason in (("outside","visible node outside root/scroll viewport"),
+                                       ("empty","empty root bounds"),("cache-failure","fixture cache failure")):
+                    p=run(requests,fixture,api)
+                    assert p.returncode!=0 and reason in p.stderr and " OK " not in p.stdout,(fixture,p.stdout,p.stderr)
+                    if fixture=="outside":
+                        assert all(s in p.stderr for s in (
+                            "path=0/0/0","window=7","bounds=[110,0][120,100]","clip=[10,10][90,90]"))
+                    assert p.stderr.splitlines().count("CONNECT")==p.stderr.splitlines().count("DISCONNECT")==1
+            p=run(requests,"cache-false",34)
+            assert p.returncode!=0 and "cache clear refused" in p.stderr and " OK " not in p.stdout
+        cache_geometry_controls()
         def budget_controls():
             for fixture,reason in (("settle-overrun","settle budget exhausted"),("late-idle","late idle observation")):
                 p=run(requests,fixture)
@@ -608,7 +683,20 @@ def java_contracts():
             try:positive();budget_controls()
             except AssertionError:pass
             else:raise AssertionError("compiled settle mutant survived "+old)
-    print("UI_OBSERVER_JAVA_HOST 1 sequence positive 13 negative 8 compiled mutants rejected; ANDROID_DOUBLES_NOT_DEVICE",flush=True)
+        for old,new in [
+            ("clearObservationCache(ui);",""),
+            ('client.getMethod("clearCache").invoke(instance);',""),
+            ('if(!ui.clearCache())throw new IOException("cache clear refused");',"ui.clearCache();"),
+            ("n.isScrollable()?r:clip","clip"),
+            ("if(!r.intersect(clip))","if(false)"),
+            ('+" path="+path+" window="+n.getWindowId()+" bounds="+rawBounds+" clip="+bounds(clip)', '+" details omitted"'),
+        ]:
+            assert JAVA.count(old)==1
+            source.write_text(JAVA.replace(old,new));compile_java(folder,sources)
+            try:positive();positive(34);cache_geometry_controls()
+            except AssertionError:pass
+            else:raise AssertionError("compiled cache/geometry mutant survived "+old)
+    print("UI_OBSERVER_JAVA_HOST 2 API sequence positives 2 nested geometry positives 20 negative 14 compiled mutants rejected; ANDROID_DOUBLES_NOT_DEVICE",flush=True)
 
 
 if __name__ == "__main__":

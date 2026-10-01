@@ -252,12 +252,38 @@ class LinePipe:
         self.selector.close()
 
 
+def validate_receipt(receipt, binding, xml, reads):
+    """Validate against separately frozen identity and actual last XML, not self-consistency alone."""
+    commit,run,attempt,api,nonce,dex=binding
+    assert isinstance(commit,str) and re.fullmatch("[0-9a-f]{40}",commit)
+    assert all(isinstance(v,str) and re.fullmatch("[1-9][0-9]*",v) for v in (run,attempt))
+    assert type(api) is int and api in (26,34)
+    assert isinstance(nonce,str) and re.fullmatch("[0-9a-f]{32}",nonce)
+    assert isinstance(dex,str) and re.fullmatch("[0-9a-f]{64}",dex)
+    assert type(reads) is int and reads>0
+    expected=dict(commit=commit,run_id=run,run_attempt=attempt,api=api,nonce=nonce,dex_sha256=dex,
+        status="CLOSED",scope="CI_PERSISTENT_READONLY_UI_NOT_PRODUCT_OR_ROOT_CAUSE_PROOF")
+    for key,value in expected.items():
+        assert type(receipt[key]) is type(value) and receipt[key]==value
+    for key,value in dict(starts=1,reconnects=0,reads=reads,last_sequence=reads,exit_code=0).items():
+        assert type(receipt[key]) is int and receipt[key]==value
+    assert not any(key in receipt for key in ("error","close_error","cleanup_errors"))
+    assert isinstance(xml,bytes) and 0<len(xml)<=MAX_XML
+    text=xml.decode("utf-8",errors="strict")
+    assert "<!" not in text
+    root=ET.fromstring(text)
+    assert root.tag=="hierarchy" and list(root.iter("node"))
+    assert receipt["last_xml_sha256"]==hashlib.sha256(xml).hexdigest()
+    return True
+
+
 class Observer:
     def __init__(self, adb, serial, sdk, folder, receipt):
         self.prefix=[str(adb),"-s",serial]
         self.serial=serial;self.sdk=Path(sdk);self.folder=Path(folder)
         self.receipt=receipt;self.process=None;self.pipe=None;self.log=None
         self.nonce=uuid.uuid4().hex;self.seq=0;self.failed=False;self.closed=False
+        self.binding=None
         receipt.update(status="NOT_STARTED",scope="CI_PERSISTENT_READONLY_UI_NOT_PRODUCT_OR_ROOT_CAUSE_PROOF",
                        nonce=self.nonce,starts=0,reads=0,reconnects=0)
 
@@ -292,6 +318,9 @@ class Observer:
             if p.returncode:raise RuntimeError("observer dex failed\n"+p.stdout[-4000:]+p.stderr[-4000:])
             data=(dex/"classes.dex").read_bytes()
             self.receipt["dex_sha256"]=hashlib.sha256(data).hexdigest()
+            # Immutable expected values come from CI/device/build inputs, never the mutable receipt.
+            self.binding=(env["GITHUB_SHA"],env["GITHUB_RUN_ID"],env["GITHUB_RUN_ATTEMPT"],
+                          self.api,self.nonce,hashlib.sha256(data).hexdigest())
             remote="/data/local/tmp/pocket-ui-"+self.nonce+".dex"
             self.command("push",str(dex/"classes.dex"),remote)
             if self.command("exec-out","cat",remote)!=data:raise RuntimeError("observer dex readback mismatch")
@@ -367,6 +396,9 @@ class Observer:
                     if stream and not stream.closed:cleanup(stream.close)
             if self.pipe:cleanup(self.pipe.close)
             if self.log:cleanup(self.log.close)
+            if error is None and self.receipt["status"]=="CLOSED":
+                cleanup(lambda:validate_receipt(self.receipt,self.binding,
+                    (self.folder/"observer-last.xml").read_bytes(),self.seq-1))
             def write_receipt():
                 self.folder.mkdir(parents=True,exist_ok=True)
                 (self.folder/"observer.json").write_text(json.dumps(self.receipt,indent=2)+"\n")
@@ -413,7 +445,75 @@ def contracts(decode, guard):
     return {"positive": 5, "negative": len(bad)+len(env)+4}
 
 
+def receipt_contracts(validate):
+    import copy
+    xml=b'<hierarchy><node text="exact"/></hierarchy>'
+    binding=("a"*40,"12","1",26,"b"*32,"c"*64)
+    good=dict(status="CLOSED",scope="CI_PERSISTENT_READONLY_UI_NOT_PRODUCT_OR_ROOT_CAUSE_PROOF",
+        commit=binding[0],run_id="12",run_attempt="1",api=26,nonce=binding[4],
+        dex_sha256=binding[5],starts=1,reads=2,reconnects=0,last_sequence=2,exit_code=0,
+        last_xml_sha256=hashlib.sha256(xml).hexdigest())
+    original=copy.deepcopy(good)
+    assert validate(good,binding,xml,2) is True and good==original
+    other=dict(good,api=34)
+    assert validate(other,binding[:3]+(34,)+binding[4:],xml,2) is True
+    bad=[]
+    for key in good:
+        item=copy.deepcopy(good);del item[key];bad.append((item,binding,xml,2))
+    for key,values in {
+        "status":["ACTIVE","FAIL"],
+        "scope":["PRODUCT_ACCEPTANCE"],
+        "commit":["d"*40],"run_id":["13"],"run_attempt":["2"],
+        "api":[34,26.0,True],"nonce":["e"*32],"dex_sha256":["f"*64],
+        "starts":[0,2,True,1.0],"reads":[0,1,3,True,2.0],
+        "reconnects":[1,False,0.0],"last_sequence":[1,3,True,2.0],
+        "exit_code":[255,False,0.0],"last_xml_sha256":["f"*64],
+        "error":["earlier failure"],"close_error":["shutdown failed"],"cleanup_errors":[[]],
+    }.items():
+        for value in values:
+            item=copy.deepcopy(good);item[key]=value;bad.append((item,binding,xml,2))
+    for data in (b"",b"wrong",b"<hierarchy/>",
+                 b'<!DOCTYPE hierarchy><hierarchy><node/></hierarchy>',b"\xff"):
+        item=dict(good,last_xml_sha256=hashlib.sha256(data).hexdigest())
+        bad.append((item,binding,data,2))
+    bad.append((good,binding,xml+b" ",2))
+    for count in (0,1,3,True,2.0):bad.append((good,binding,xml,count))
+    for index,value in enumerate(("", "0", "01", 27, "nonce", "dex")):
+        changed=list(binding);changed[index]=value;item=dict(good)
+        item[("commit","run_id","run_attempt","api","nonce","dex_sha256")[index]]=value
+        bad.append((item,tuple(changed),xml,2))
+    for args in bad:
+        try:validate(*args)
+        except (AssertionError,ValueError,KeyError,TypeError,ET.ParseError,UnicodeError):pass
+        else:raise AssertionError("invalid observer receipt accepted "+repr(args[:2]))
+    return len(bad)
+
+
+def receipt_selftest():
+    count=receipt_contracts(validate_receipt)
+    source=inspect.getsource(validate_receipt)
+    for old,new in [
+        ('assert type(receipt[key]) is type(value) and receipt[key]==value',
+         'assert True'),
+        ('assert type(receipt[key]) is int and receipt[key]==value',
+         'assert receipt[key]==value'),
+        ('assert receipt["last_xml_sha256"]==hashlib.sha256(xml).hexdigest()', 'assert True'),
+        ('assert not any(key in receipt for key in ("error","close_error","cleanup_errors"))',
+         'assert True'),
+        ('assert root.tag=="hierarchy" and list(root.iter("node"))', 'assert True'),
+    ]:
+        assert source.count(old)==1
+        scope=dict(globals())
+        exec(compile(source.replace(old,new,1),"receipt-mutant","exec"),scope)
+        try:receipt_contracts(scope["validate_receipt"])
+        except AssertionError:pass
+        else:raise AssertionError("observer receipt mutant survived "+old)
+    print("UI_OBSERVER_RECEIPT_HOST 2 positive "+str(count)+
+          " negative 5 compiled mutants rejected; NOT_INDEPENDENT_REPORT_ACCEPTANCE",flush=True)
+
+
 def selftest():
+    receipt_selftest()
     counts = contracts(decode_frame, require_ci)
     mutations = [
         ("parts[:3] != [\"PTO1\", nonce, str(seq)]", "parts[:1] != [\"PTO1\"]"),
@@ -478,6 +578,8 @@ for line in sys.stdin:
                 stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,bufsize=0)
             observer.pipe=LinePipe(observer.process)
             receipt.update(starts=1,status="ACTIVE")
+            observer.binding=("a"*40,"12","1",26,observer.nonce,"c"*64)
+            receipt.update(commit="a"*40,run_id="12",run_attempt="1",api=26,dex_sha256="c"*64)
             return observer,receipt
         obs,receipt=attach("ok")
         for i in (1,2):
@@ -512,7 +614,22 @@ for line in sys.stdin:
             try:raise sentinel
             finally:obs.close(primary_failed=True)
         except ValueError as caught:assert caught is sentinel
+        for field,value in (("commit","d"*40),("reads",True),("last_xml_sha256","f"*64)):
+            obs,receipt=attach("tamper-"+field);obs.dump();receipt[field]=value
+            try:obs.close()
+            except AssertionError:pass
+            else:raise AssertionError("close accepted corrupted receipt "+field)
+            assert receipt["status"]=="FAIL" and obs.closed and obs.process.poll()==0
+            persisted=json.loads((obs.folder/"observer.json").read_text())
+            assert persisted["status"]=="FAIL" and persisted["cleanup_errors"]
+        obs,receipt=attach("tamper-primary");obs.dump();receipt["commit"]="d"*40
+        try:
+            try:raise sentinel
+            finally:obs.close(primary_failed=True)
+        except ValueError as caught:assert caught is sentinel
+        assert receipt["status"]=="FAIL"
     print("UI_OBSERVER_SESSION_HOST 2 positive 8 negative; ACTUAL_PIPES_NOT_ADB",flush=True)
+    print("UI_OBSERVER_RECEIPT_CLOSE 3 tamper rejections 1 original failure preserved; ACTUAL_HOST_PIPES",flush=True)
 
 
 def java_contracts():

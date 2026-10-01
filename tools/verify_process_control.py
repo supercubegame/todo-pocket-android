@@ -193,7 +193,85 @@ def selftest():
     return count
 
 
-def capture_crash_logs(adb, serial, *, runner=subprocess.run, environment=None, snapshot_reader=None):
+def capture_adb_connection(adb, serial, *, runner=subprocess.run, environment=None,
+                           connector=None, monotonic=time.monotonic):
+    """Host-only observations; never start/reset/reconnect adb or replay a shell command."""
+    import os
+    import socket
+    import tempfile
+    environment = os.environ if environment is None else environment
+    if environment.get("GITHUB_ACTIONS") != "true" or serial != "emulator-5554":
+        raise ValueError("isolated CI emulator required")
+    result = {"status": "DIAGNOSTIC_ONLY_NOT_DEVICE_PROOF", "serial": serial,
+              "budget_seconds": 6, "reads": [], "release_ready": False}
+    # Do not accidentally query a different server or disclose custom endpoint values.
+    if any(environment.get(k) for k in
+           ("ADB_SERVER_SOCKET", "ANDROID_ADB_SERVER_ADDRESS", "ANDROID_ADB_SERVER_PORT")):
+        result["status"] = "CUSTOM_ENDPOINT_NOT_OBSERVED"
+        return result
+    started = monotonic()
+    deadline = started + 6
+    connect = socket.create_connection if connector is None else connector
+    def remaining():
+        value = min(2, deadline - monotonic())
+        if value <= 0:
+            raise TimeoutError("host diagnostic budget exhausted")
+        return value
+    def tail(stream):
+        stream.flush(); size = stream.seek(0, 2); stream.seek(max(0, size - 8192))
+        return {"bytes": size, "truncated": size > 8192,
+                "tail": stream.read(8192).decode("utf-8", errors="replace")}
+    record = {"kind": "local_client_version", "command": [str(adb), "version"]}
+    result["reads"].append(record)
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        try:
+            timeout = remaining(); record["timeout_seconds"] = timeout
+            value = runner(record["command"], stdin=subprocess.DEVNULL,
+                           stdout=out, stderr=err, timeout=timeout)
+            record.update(returncode=value.returncode, status=(
+                "OBSERVED_NOT_ACCEPTANCE" if value.returncode == 0 else "COMMAND_FAILED"))
+        except Exception as exc:
+            record.update(status="NOT_OBSERVED", error=repr(exc))
+        record.update(stdout=tail(out), stderr=tail(err))
+    # Direct smart-socket requests do not invoke adb's auto-start/version-mismatch logic.
+    # Each service is requested once on its own protocol connection, not a retry.
+    for service in (b"host:version", b"host:devices-l"):
+        record = {"kind": "existing_server_query", "service": service.decode(),
+                  "endpoint": "127.0.0.1:5037", "status": "NOT_OBSERVED"}
+        result["reads"].append(record)
+        try:
+            with connect(("127.0.0.1", 5037), timeout=remaining()) as connection:
+                def receive(size):
+                    data = b""
+                    while len(data) < size:
+                        connection.settimeout(remaining())
+                        part = connection.recv(size - len(data))
+                        if not part:
+                            raise EOFError("incomplete smart-socket response")
+                        data += part
+                    return data
+                connection.settimeout(remaining())
+                connection.sendall(("%04x" % len(service)).encode() + service)
+                status = receive(4); record["protocol_status"] = status.decode("ascii", "replace")
+                if status not in (b"OKAY", b"FAIL"):
+                    raise ValueError("invalid smart-socket status")
+                length = receive(4)
+                if not re.fullmatch(b"[0-9a-fA-F]{4}", length):
+                    raise ValueError("invalid smart-socket length")
+                count = int(length, 16); record["payload_bytes"] = count
+                if count > 32768:
+                    raise ValueError("host response exceeds diagnostic limit")
+                record["payload"] = receive(count).decode("utf-8", "strict")
+                remaining()
+                record["status"] = "OBSERVED_NOT_ACCEPTANCE" if status == b"OKAY" else "SERVER_REFUSED"
+        except Exception as exc:
+            record.update(status="NOT_OBSERVED", error=repr(exc))
+    result["elapsed_seconds"] = round(monotonic() - started, 6)
+    return result
+
+
+def capture_crash_logs(adb, serial, *, runner=subprocess.run, environment=None, snapshot_reader=None,
+                       host_connection_reader=None):
     """Read only disposable CI logs. Empty/missing tails never prove no crash."""
     import os
     import tempfile
@@ -231,6 +309,14 @@ def capture_crash_logs(adb, serial, *, runner=subprocess.run, environment=None, 
     result["identity"] = identity
     if not (identity["returncode"] == 0 and identity["stdout"]["tail"].strip() == "1"
             and not identity["stdout"]["truncated"] and identity["stderr"]["bytes"] == 0):
+        # Only this early-exit path has unused time: 3 + 6 <= original 19 seconds.
+        # Normal collection remains 19 + 32 = 51. No extra device query or retry.
+        if host_connection_reader is not None:
+            try:
+                result["host_connection"] = host_connection_reader(
+                    adb, serial, runner=runner, environment=environment)
+            except Exception as diagnostic:
+                result["host_connection_error"] = repr(diagnostic)
         return result
     for args in (
         ["logcat", "-b", "crash", "-d", "-t", "160", "-v", "threadtime"],
@@ -548,7 +634,7 @@ def process_snapshot_contract(capture):
             assert i < len(expected), "extra/retried diagnostic command"
             assert args == prefix+expected[i], (name, i, args)
             assert set(kw) == {"stdin", "stdout", "stderr", "timeout"}
-            assert kw["stdin"] == subprocess.DEVNULL and kw["stdout"] is not kw["stderr"]
+            assert kw["stdin"] is subprocess.DEVNULL and kw["stdout"] is not kw["stderr"]
             assert kw["timeout"] == (8 if expected[i] == context else 3)
             calls.append(args)
             code, out, err = answers[i]
@@ -650,9 +736,189 @@ def process_snapshot_selftest():
     print("PROCESS_SNAPSHOT_CONTROLS "+str(count)+" PASS; mutants=4/4 rejected; wiring=2/2 mutant=1/1; HOST_ONLY", flush=True)
 
 
+def adb_connection_selftest():
+    import inspect
+    env = {"GITHUB_ACTIONS": "true"}
+    def contract(capture):
+        cases = [
+            (b"OKAY00040029", b"OKAY0016emulator-5554\tdevice\n\n"),
+            (b"FAIL0006denied", b"OKAY0000"),
+            (b"", b"NOPE"),
+            (b"OKAYzzzz", b"OKAYffff"),
+            (b"OKAY0002\xff\xff", b"OKAY0003x"),
+            (TimeoutError("socket timeout"), ConnectionRefusedError("not listening")),
+        ]
+        for index, replies in enumerate(cases):
+            calls = []; sockets = []; clock = [0.]
+            def runner(args, **kw):
+                assert args == ["adb", "version"]
+                assert set(kw) == {"stdin", "stdout", "stderr", "timeout"}
+                assert kw["stdin"] == subprocess.DEVNULL and 0 < kw["timeout"] <= 2
+                calls.append(args)
+                kw["stdout"].write(b"x" * 9000); kw["stderr"].write(b"err")
+                if index == 2: raise subprocess.TimeoutExpired(args, kw["timeout"])
+                if index == 3: raise FileNotFoundError("missing client")
+                return subprocess.CompletedProcess(args, 255 if index == 1 else 0)
+            class Connection:
+                def __init__(self, raw): self.raw = raw; self.sent = []; self.closed = False
+                def __enter__(self): return self
+                def __exit__(self, *args): self.closed = True
+                def settimeout(self, value): assert 0 < value <= 2
+                def sendall(self, value): self.sent.append(value)
+                def recv(self, size):
+                    assert 0 < size <= 32768
+                    value = self.raw[:min(size, 2)]; self.raw = self.raw[len(value):]
+                    return value
+            attempts = []
+            def connect(address, timeout):
+                assert address == ("127.0.0.1", 5037) and 0 < timeout <= 2
+                n = len(attempts); attempts.append(address); reply = replies[n]
+                if isinstance(reply, Exception): raise reply
+                value = Connection(reply); sockets.append((n, value)); return value
+            value = capture("adb", "emulator-5554", runner=runner, environment=env,
+                            connector=connect, monotonic=lambda: clock[0])
+            assert len(calls) == 1 and len(attempts) == 2 and len(value["reads"]) == 3
+            assert value["budget_seconds"] == 6 and value["release_ready"] is False
+            assert value["status"] == "DIAGNOSTIC_ONLY_NOT_DEVICE_PROOF"
+            for n, connection in sockets:
+                assert connection.closed
+                assert connection.sent == [[b"000chost:version", b"000ehost:devices-l"][n]]
+            client = value["reads"][0]
+            assert client["stdout"] == {"bytes": 9000, "truncated": True, "tail": "x" * 8192}
+            assert client["stderr"]["tail"] == "err"
+            assert client["status"] == ("NOT_OBSERVED" if index in (2, 3) else
+                                        "COMMAND_FAILED" if index == 1 else "OBSERVED_NOT_ACCEPTANCE")
+            if index == 0:
+                assert [r["payload"] for r in value["reads"][1:]] == ["0029", "emulator-5554\tdevice\n\n"]
+                assert all(r["status"] == "OBSERVED_NOT_ACCEPTANCE" for r in value["reads"])
+            elif index == 1:
+                assert value["reads"][1]["status"] == "SERVER_REFUSED"
+                assert value["reads"][2]["payload"] == ""
+            else:
+                assert all(r["status"] == "NOT_OBSERVED" and r["error"] for r in value["reads"][1:])
+                if index == 3:
+                    assert "exceeds diagnostic limit" in value["reads"][2]["error"]
+        def forbidden(*args, **kw): raise AssertionError("unexpected IO")
+        for key in ("ADB_SERVER_SOCKET", "ANDROID_ADB_SERVER_ADDRESS", "ANDROID_ADB_SERVER_PORT"):
+            value = capture("adb", "emulator-5554", runner=forbidden, connector=forbidden,
+                            environment=dict(env, **{key: "secret-sentinel"}))
+            assert value["status"] == "CUSTOM_ENDPOINT_NOT_OBSERVED" and not value["reads"]
+            assert "secret-sentinel" not in json.dumps(value)
+        for environment, serial in (({}, "emulator-5554"), (env, "physical"), (env, "emulator-5556")):
+            try: capture("adb", serial, runner=forbidden, connector=forbidden, environment=environment)
+            except ValueError: pass
+            else: raise AssertionError("scope accepted")
+        clock = iter([0, 7, 7, 7, 7])
+        value = capture("adb", "emulator-5554", runner=forbidden, connector=forbidden,
+                        environment=env, monotonic=lambda: next(clock))
+        assert all(r["status"] == "NOT_OBSERVED" for r in value["reads"])
+        assert all("budget exhausted" in r["error"] for r in value["reads"])
+    contract(capture_adb_connection)
+    source = inspect.getsource(capture_adb_connection)
+    for old, new in [
+        ("stdin=subprocess.DEVNULL", "stdin=None"),
+        ("count > 32768", "count > 65535"),
+        ("value <= 0", "value < -100"),
+        ('status == b"OKAY"', "True"),
+        ('environment.get(k)', 'False'),
+    ]:
+        assert source.count(old) == 1
+        namespace = dict(globals())
+        exec(compile(source.replace(old, new, 1), "<host-connection-mutant>", "exec"), namespace)
+        try: contract(namespace["capture_adb_connection"])
+        except AssertionError: pass
+        else: raise AssertionError("host connection mutant survived: " + old)
+    # Opt-in on failed identity only; untouched normal path and first error retained.
+    for broken in (False, True):
+        calls = []
+        def runner(args, **kw):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 255)
+        def reader(adb, serial, **kw):
+            calls.append("host")
+            if broken: raise OSError("host diagnostic sentinel")
+            return {"status": "DIAGNOSTIC_ONLY_NOT_DEVICE_PROOF", "budget_seconds": 6}
+        value = capture_crash_logs("adb", "emulator-5554", runner=runner, environment=env,
+                                   host_connection_reader=reader)
+        assert len(calls) == 2 and calls[-1] == "host"
+        assert value["identity"]["returncode"] == 255 and value["status"] == "SCOPE_NOT_VERIFIED"
+        assert value["collection_budget_seconds"] == 19 and value["logs"] == []
+        assert (3 + 6) <= value["collection_budget_seconds"]
+        assert ("host_connection_error" in value) is broken
+        assert ("host_connection" in value) is not broken
+    print("ADB_CONNECTION_HOST cases=13 mutants=5 wiring=2 PASS; NOT_ANDROID_OR_ROOT_CAUSE", flush=True)
+
+
+def adb_failure_wiring(workflow):
+    import ast
+    import copy
+    import textwrap
+    start = "          # DRAFT_NATIVE_BEGIN\n"; end = "          # DRAFT_NATIVE_END\n"
+    assert workflow.count(start) == workflow.count(end) == 1
+    tree = ast.parse(textwrap.dedent(workflow.split(start)[1].split(end)[0]))
+    native = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "native")
+    command = next(n for n in native.body if isinstance(n, ast.FunctionDef) and n.name == "command")
+    def contract(node):
+        for timeout_first, timeout_second in ((False, False), (False, True), (True, False), (True, True)):
+            result = {}; calls = []; original = subprocess.TimeoutExpired(["first"], 40, b"first", b"err")
+            def run(args, **kw):
+                assert kw == dict(stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, text=True, timeout=40)
+                calls.append(args)
+                if len(calls) == 1 and timeout_first: raise original
+                if len(calls) == 2 and timeout_second: raise subprocess.TimeoutExpired(args, 40, b"later", b"later")
+                return subprocess.CompletedProcess(args, 255 if len(calls) == 1 else 17, "first" if len(calls) == 1 else "later", "")
+            scope = dict(result=result, prefix=["adb", "-s", "emulator-5554"],
+                         subprocess=type("Fake", (), dict(run=staticmethod(run), TimeoutExpired=subprocess.TimeoutExpired,
+                                                         DEVNULL=subprocess.DEVNULL, PIPE=subprocess.PIPE)))
+            exec(compile(ast.Module(body=[node], type_ignores=[]), "<actual-draft-command>", "exec"), scope)
+            try: scope["command"]("first")
+            except subprocess.TimeoutExpired as exc: assert timeout_first and exc is original
+            except RuntimeError: assert not timeout_first
+            else: raise AssertionError("first failure swallowed")
+            first = copy.deepcopy(result["command_failure"])
+            try: scope["command"]("screenshot")
+            except (RuntimeError, subprocess.TimeoutExpired): pass
+            else: raise AssertionError("later failure swallowed")
+            assert result["command_failure"] == first, "original failure overwritten"
+            assert calls == [["adb", "-s", "emulator-5554", "first"],
+                             ["adb", "-s", "emulator-5554", "screenshot"]]
+    contract(command)
+    for first in (True, False):
+        mutant = copy.deepcopy(command)
+        candidates = [n for n in ast.walk(mutant) if isinstance(n, ast.Expr) and
+                      isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Attribute) and
+                      n.value.func.attr == "setdefault"]
+        assert len(candidates) == 2
+        call = candidates[0 if first else 1].value
+        assignment = ast.Assign(targets=[ast.Subscript(value=ast.Name(id="result", ctx=ast.Load()),
+                                slice=ast.Constant("command_failure"), ctx=ast.Store())], value=call.args[1])
+        class Replace(ast.NodeTransformer):
+            def visit_Expr(self, node):
+                return ast.copy_location(assignment, node) if node.value is call else self.generic_visit(node)
+        mutant = ast.fix_missing_locations(Replace().visit(mutant))
+        try: contract(mutant)
+        except AssertionError: pass
+        else: raise AssertionError("first failure mutation survived")
+    capture = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "capture_draft_failure")
+    calls = [n for n in ast.walk(capture) if isinstance(n, ast.Call) and
+             isinstance(n.func, ast.Name) and n.func.id == "capture_crash_logs"]
+    assert len(calls) == 1 and ast.unparse(calls[0]) == "capture_crash_logs(adb, serial, host_connection_reader=capture_adb_connection)"
+    assert any(isinstance(n, ast.ImportFrom) and n.module == "verify_process_control" and
+               any(a.name == "capture_adb_connection" for a in n.names) for n in tree.body)
+    assert workflow.count("python3 tools/verify_process_control.py connection-selftest 2>&1 | tee -a draft-host.log") == 1
+    print("ADB_FAILURE_WIRING first_failure=4 mutants=2 PASS; actual workflow AST", flush=True)
+
+
 if __name__ == "__main__":
     import sys
+    if sys.argv[1:] == ["connection-selftest"]:
+        adb_connection_selftest()
+        adb_failure_wiring(Path(".github/workflows/note-drafts.yml").read_text())
+        sys.exit(0)
     assert sys.argv[1:] == ["selftest"], "usage: verify_process_control.py selftest"
     selftest()
     crash_selftest(Path(".github/workflows/android.yml").read_text())
     process_snapshot_selftest()
+    adb_connection_selftest()
+    adb_failure_wiring(Path(".github/workflows/note-drafts.yml").read_text())

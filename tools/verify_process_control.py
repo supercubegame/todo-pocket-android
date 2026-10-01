@@ -193,6 +193,148 @@ def selftest():
     return count
 
 
+def run_adb_traced(args, *, receipt, binary=False, runner=subprocess.run, environment=None):
+    """One original invocation, bounded receipt; stderr intentionally contains mixed trace.
+
+    PIPE capture is unchanged and is not a hard process-memory/output quota. Only the
+    retained receipt is bounded. No filtering can safely separate remote stderr from
+    client trace, and this collector does not infer whether an exit packet was received.
+    """
+    import base64
+    import os
+    env = dict(os.environ if environment is None else environment)
+    if env.get("GITHUB_ACTIONS") != "true" or list(args)[1:3] != ["-s", "emulator-5554"]:
+        raise ValueError("isolated CI emulator required")
+    env["ADB_TRACE"] = "rwx,shell"
+    def record(status, stderr, returncode=None):
+        try:
+            raw = stderr if isinstance(stderr, bytes) else (stderr or "").encode("utf-8")
+            receipt.update(status=status, attempts=1, timeout_seconds=40,
+                           trace_categories="rwx,shell",
+                           stderr_kind="UNFILTERED_MIXED_ADB_TRACE_AND_COMMAND_STDERR",
+                           stderr_encoding="RAW_BYTES" if isinstance(stderr, bytes) else "UTF8_REENCODED_TEXT",
+                           stderr_bytes=len(raw), stderr_truncated=len(raw) > 4096,
+                           stderr_tail_base64=base64.b64encode(raw[-4096:]).decode("ascii"),
+                           returncode=returncode)
+        except Exception:
+            # A diagnostic allocation/serialization failure cannot replace the command.
+            pass
+    try:
+        completed = runner(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, text=not binary, timeout=40, env=env)
+    except subprocess.TimeoutExpired as exc:
+        record("TIMEOUT", exc.stderr)
+        raise
+    except OSError:
+        record("SPAWN_ERROR", None)
+        raise
+    record("COMPLETED", completed.stderr, completed.returncode)
+    return completed
+
+
+def adb_trace_selftest():
+    """Host contracts, not evidence that a device emitted an exit packet."""
+    import base64
+    import inspect
+    import os
+    import tempfile
+    def contract(invoke):
+        count = 0
+        for binary in (False, True):
+            for mode in ("ok", "nonzero", "timeout", "spawn"):
+                calls = []; receipt = {}
+                env = {"GITHUB_ACTIONS": "true", "ADB_TRACE": "all", "PRIVATE_SENTINEL": "not-a-log"}
+                original_env = env.copy()
+                args = ["adb", "-s", "emulator-5554", "shell", "-n", "-T", "ls", "files/media"]
+                raw = b"remote-error\n" + bytes(range(256)) * 40
+                stderr = raw if binary else raw.decode("latin1")
+                stdout = b"\x00\xff exact \n" if binary else "  exact \n"
+                error = (subprocess.TimeoutExpired(args, 40, stdout, stderr)
+                         if mode == "timeout" else OSError("spawn failure"))
+                completed = subprocess.CompletedProcess(args, 255 if mode == "nonzero" else 0, stdout, stderr)
+                def runner(actual, **kw):
+                    calls.append(actual)
+                    assert actual == args
+                    assert kw == dict(stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE, text=not binary, timeout=40,
+                                      env=dict(original_env, ADB_TRACE="rwx,shell"))
+                    if mode in ("timeout", "spawn"): raise error
+                    return completed
+                try: actual = invoke(args, binary=binary, receipt=receipt, runner=runner, environment=env)
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    assert mode in ("timeout", "spawn") and exc is error
+                else:
+                    assert mode in ("ok", "nonzero") and actual is completed
+                    assert actual.stdout == stdout and actual.stderr == stderr
+                assert len(calls) == 1 and env == original_env
+                assert receipt["attempts"] == 1 and receipt["timeout_seconds"] == 40
+                assert receipt["stderr_kind"] == "UNFILTERED_MIXED_ADB_TRACE_AND_COMMAND_STDERR"
+                assert receipt["trace_categories"] == "rwx,shell"
+                assert "PRIVATE_SENTINEL" not in json.dumps(receipt) and "not-a-log" not in json.dumps(receipt)
+                assert receipt["status"] == ("TIMEOUT" if mode == "timeout" else "SPAWN_ERROR" if mode == "spawn" else "COMPLETED")
+                if mode != "spawn":
+                    expected = stderr if isinstance(stderr, bytes) else stderr.encode("utf-8")
+                    assert base64.b64decode(receipt["stderr_tail_base64"]) == expected[-4096:]
+                    assert receipt["stderr_bytes"] == len(expected) and receipt["stderr_truncated"] is True
+                    assert receipt["stderr_encoding"] == ("RAW_BYTES" if binary else "UTF8_REENCODED_TEXT")
+                if mode in ("ok", "nonzero"): assert receipt["returncode"] == completed.returncode
+                count += 1
+        for env, args in (({}, ["adb", "-s", "emulator-5554"]),
+                          ({"GITHUB_ACTIONS": "true"}, ["adb", "-s", "phone"])):
+            def forbidden(*args, **kw): raise AssertionError("out of scope invocation")
+            try: invoke(args, receipt={}, runner=forbidden, environment=env)
+            except ValueError: pass
+            else: raise AssertionError("scope guard missing")
+            count += 1
+        class Broken(dict):
+            def update(self, *args, **kw): raise OSError("receipt unavailable")
+        for failure in (False, True):
+            original = subprocess.TimeoutExpired(["adb"], 40, b"partial", b"mixed")
+            p = subprocess.CompletedProcess(["adb"], 0, "exact", "mixed")
+            calls = []
+            def run(*args, **kw):
+                calls.append(args)
+                if failure: raise original
+                return p
+            try: value = invoke(["adb", "-s", "emulator-5554"], receipt=Broken(), runner=run,
+                                environment={"GITHUB_ACTIONS": "true"})
+            except subprocess.TimeoutExpired as exc: assert failure and exc is original
+            else: assert not failure and value is p
+            assert len(calls) == 1
+            count += 1
+        return count
+    count = contract(run_adb_traced)
+    source = inspect.getsource(run_adb_traced)
+    mutations = (('env["ADB_TRACE"] = "rwx,shell"', 'env["ADB_TRACE"] = "all"'),
+                 ("timeout=40,", "timeout=41,"),
+                 ("stdin=subprocess.DEVNULL", "stdin=None"),
+                 ("raw[-4096:]", "raw"),
+                 ("return completed", "return subprocess.CompletedProcess(args, 0, completed.stdout, completed.stderr)"))
+    for old, new in mutations:
+        assert source.count(old) == 1, old
+        scope = dict(globals()); exec(compile(source.replace(old, new), "<trace-mutant>", "exec"), scope)
+        try: contract(scope["run_adb_traced"])
+        except AssertionError: pass
+        else: raise AssertionError("trace mutant survived: " + old)
+    with tempfile.TemporaryDirectory(prefix="pocket-trace-host-") as tmp:
+        tool = Path(tmp) / "adb"; marker = Path(tmp) / "count"
+        tool.write_text("#!/usr/bin/env python3\nimport os,sys\n"
+                        "with open(os.environ['TRACE_COUNT'],'ab') as f:f.write(b'1')\n"
+                        "assert os.environ['ADB_TRACE']=='rwx,shell'\n"
+                        "sys.stdout.buffer.write(b'\\x00\\xff exact \\n')\n"
+                        "sys.stderr.buffer.write(b'original remote error\\n'+b'T'*20000)\n"
+                        "sys.exit(255)\n")
+        tool.chmod(0o700)
+        receipt = {}; env = dict(os.environ, GITHUB_ACTIONS="true", TRACE_COUNT=str(marker))
+        p = run_adb_traced([str(tool), "-s", "emulator-5554", "shell", "-n", "-T", "ls"],
+                           binary=True, receipt=receipt, environment=env)
+        assert marker.read_bytes() == b"1" and p.returncode == 255
+        assert p.stdout == b"\x00\xff exact \n" and len(p.stderr) == 20022
+        assert base64.b64decode(receipt["stderr_tail_base64"]) == b"T"*4096
+        assert receipt["stderr_bytes"] == 20022 and receipt["stderr_truncated"] is True
+    print(f"ADB_FIRST_INVOCATION_TRACE host={count} mutants=5 real_subprocess=1 PASS; MIXED_STDERR_NOT_DEVICE_PROTOCOL_PROOF", flush=True)
+
+
 def capture_adb_connection(adb, serial, *, runner=subprocess.run, environment=None,
                            connector=None, monotonic=time.monotonic):
     """Host-only observations; never start/reset/reconnect adb or replay a shell command."""
@@ -862,6 +1004,7 @@ def adb_failure_wiring(workflow):
         for timeout_first, timeout_second in ((False, False), (False, True), (True, False), (True, True)):
             result = {}; calls = []; original = subprocess.TimeoutExpired(["first"], 40, b"first", b"err")
             def run(args, **kw):
+                assert kw.pop("env") == {"GITHUB_ACTIONS": "true", "ADB_TRACE": "rwx,shell"}
                 assert kw == dict(stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE, text=True, timeout=40)
                 calls.append(args)
@@ -869,6 +1012,7 @@ def adb_failure_wiring(workflow):
                 if len(calls) == 2 and timeout_second: raise subprocess.TimeoutExpired(args, 40, b"later", b"later")
                 return subprocess.CompletedProcess(args, 255 if len(calls) == 1 else 17, "first" if len(calls) == 1 else "later", "")
             scope = dict(result=result, prefix=["adb", "-s", "emulator-5554"],
+                         run_adb_traced=lambda *a, **kw: run_adb_traced(*a, **kw, environment={"GITHUB_ACTIONS": "true"}),
                          subprocess=type("Fake", (), dict(run=staticmethod(run), TimeoutExpired=subprocess.TimeoutExpired,
                                                          DEVNULL=subprocess.DEVNULL, PIPE=subprocess.PIPE)))
             exec(compile(ast.Module(body=[node], type_ignores=[]), "<actual-draft-command>", "exec"), scope)
@@ -877,6 +1021,8 @@ def adb_failure_wiring(workflow):
             except RuntimeError: assert not timeout_first
             else: raise AssertionError("first failure swallowed")
             first = copy.deepcopy(result["command_failure"])
+            assert first["adb_trace"]["attempts"] == 1
+            assert first["adb_trace"]["stderr_kind"] == "UNFILTERED_MIXED_ADB_TRACE_AND_COMMAND_STDERR"
             try: scope["command"]("screenshot")
             except (RuntimeError, subprocess.TimeoutExpired): pass
             else: raise AssertionError("later failure swallowed")
@@ -884,6 +1030,12 @@ def adb_failure_wiring(workflow):
             assert calls == [["adb", "-s", "emulator-5554", "first"],
                              ["adb", "-s", "emulator-5554", "screenshot"]]
     contract(command)
+    traced_calls = [n for n in ast.walk(command) if isinstance(n, ast.Call) and
+                    isinstance(n.func, ast.Name) and n.func.id == "run_adb_traced"]
+    assert len(traced_calls) == 1
+    assert ast.unparse(traced_calls[0]) == "run_adb_traced(prefix + list(args), binary=binary, receipt=trace, runner=subprocess.run)"
+    assert any(isinstance(n, ast.ImportFrom) and n.module == "verify_process_control" and
+               any(a.name == "run_adb_traced" for a in n.names) for n in tree.body)
     for first in (True, False):
         mutant = copy.deepcopy(command)
         candidates = [n for n in ast.walk(mutant) if isinstance(n, ast.Expr) and
@@ -913,6 +1065,7 @@ def adb_failure_wiring(workflow):
 if __name__ == "__main__":
     import sys
     if sys.argv[1:] == ["connection-selftest"]:
+        adb_trace_selftest()
         adb_connection_selftest()
         adb_failure_wiring(Path(".github/workflows/note-drafts.yml").read_text())
         sys.exit(0)
@@ -920,5 +1073,6 @@ if __name__ == "__main__":
     selftest()
     crash_selftest(Path(".github/workflows/android.yml").read_text())
     process_snapshot_selftest()
+    adb_trace_selftest()
     adb_connection_selftest()
     adb_failure_wiring(Path(".github/workflows/note-drafts.yml").read_text())

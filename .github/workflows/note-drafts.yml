@@ -235,6 +235,53 @@ jobs:
               except (AssertionError,TypeError,ValueError):pass
               else:raise AssertionError('invalid append state accepted')
           print('DRAFT_APPEND_ORACLE host_positive=1 negative='+str(len(bad))+' PASS; SQLite device execution pending')
+          restart_fn=next((n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='restart_new_slot'),None)
+          assert restart_fn is not None, 'new text slot needs explicit restart acceptance'
+          def restart_contract(node,has_draft=True,fault=None):
+              events=[];expected_files={'slot':b'exact'};expected_state=('tables','media')
+              def stop():
+                  events.append('stop')
+                  if fault=='stop':raise RuntimeError('stop sentinel')
+                  return {'before':{'returncode':True if fault=='bool-code' else 1 if fault=='absent' else 0,
+                      'stdout':'' if fault=='pid' else '123\n','stderr':'error' if fault=='stderr' else ''}}
+              def reopen():events.append('reopen')
+              def tap(value):events.append(('tap',value))
+              def status(value):events.append(('status',value))
+              def seek(desc):
+                  events.append(('seek',desc))
+                  if desc=='文字内容':return {'text':'restored' if fault=='autorestore' else ''}
+                  assert desc=='note-draft-recover'
+                  return {'enabled':str(not has_draft if fault=='enabled' else has_draft).lower()}
+              def drafts():
+                  events.append('drafts');return {} if fault=='files' else expected_files
+              def state():
+                  events.append('state');return ('changed','media') if fault=='state' else expected_state
+              scope={'re':re}
+              exec(compile(ast.Module(body=[node],type_ignores=[]),'new-slot-restart','exec'),scope)
+              receipt=scope['restart_new_slot'](stop,reopen,tap,status,seek,drafts,state,expected_files,expected_state,has_draft)
+              if fault is None:
+                  assert receipt=={'before':{'returncode':0,'stdout':'123\n','stderr':''}}
+                  assert events==['stop','reopen',('tap','加入文字'),
+                      ('status','发现本机草稿，请明确恢复；当前仍显示正文。' if has_draft else '暂无已保存草稿；正文不能为空。'),
+                      ('seek','文字内容'),('seek','note-draft-recover'),'drafts','state']
+          def restart_suite(node):
+              for has_draft in (True,False):
+                  restart_contract(node,has_draft)
+                  for fault in ('stop','autorestore','enabled','files','state','bool-code','absent','pid','stderr'):
+                      try:restart_contract(node,has_draft,fault)
+                      except (AssertionError,RuntimeError):pass
+                      else:raise AssertionError('restart fault accepted '+fault)
+          restart_suite(restart_fn)
+          # Recompile omissions of every observable step; compilation failure is not a pass.
+          for index in range(2,len(restart_fn.body)-1):
+              mutant=copy.deepcopy(restart_fn);del mutant.body[index]
+              ast.fix_missing_locations(mutant)
+              try:restart_suite(mutant)
+              except AssertionError:pass
+              else:raise AssertionError('restart omission survived '+str(index))
+          restart_calls=[n for n in ast.walk(native_fn) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='restart_new_slot']
+          assert len(restart_calls)==2 and [n.args[-1].value for n in restart_calls]==[True,False]
+          print('DRAFT_NEW_SLOT_RESTART host_positive=2 negative=18 omission_controls=PASS; not Android execution')
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -333,7 +380,7 @@ jobs:
           from verify_process_control import stop_verified,capture_crash_logs
           from verify_ui_observer import Observer
           LABELS='fixture_text_image cancel_unsaved_readonly explicit_save_readonly restart_no_autorestore recover_cancel_readonly recover_confirm_readonly discard_cancel_readonly discard_confirm_readonly empty_draft_saved empty_recovered_body_rejected commit_exact_one_revision restart_committed'.split()
-          LABELS+='new_slot_save_readonly existing_slot_isolation new_slot_recover_readonly new_slot_commit_append new_slot_cleanup_readonly'.split()
+          LABELS+='new_slot_save_readonly new_slot_restart_saved existing_slot_isolation new_slot_recover_readonly new_slot_commit_append new_slot_cleanup_readonly new_slot_restart_cleaned'.split()
           SCOPE='NATIVE_DRAFT_BUTTONS_ASCII_IMAGE_FORCE_STOP_NOT_LMK_OR_CLEANUP_RACE'
           out=Path('draft-native');out.mkdir(exist_ok=True)
           manifest=json.loads(Path('draft-apk.json').read_text())
@@ -397,6 +444,19 @@ jobs:
               revision=list(expected['revision'][0]);revision[-1]+=1;expected['revision']=[tuple(revision)]
               assert actual==expected
               return new_id
+          def restart_new_slot(stop,reopen,tap,status,seek,drafts,state,expected_files,expected_state,has_draft):
+              receipt=stop()
+              before=receipt['before']
+              assert type(before['returncode']) is int and before['returncode']==0 and before['stderr']==''
+              assert re.fullmatch('[1-9][0-9]*\n?',before['stdout'])
+              reopen()
+              tap('加入文字')
+              status('发现本机草稿，请明确恢复；当前仍显示正文。' if has_draft else '暂无已保存草稿；正文不能为空。')
+              assert seek('文字内容').get('text')==''
+              assert seek('note-draft-recover').get('enabled')==('true' if has_draft else 'false')
+              assert drafts()==expected_files
+              assert state()==expected_state
+              return receipt
           def native(adb):
               prefix=[str(adb),'-s',gate.SERIAL];serial=0
               result['ui_observer']={}
@@ -494,6 +554,8 @@ jobs:
               def open_note():
                   start();tap('活动');ready();touch(activity);ready();tap('笔记');ready()
                   touch('note-edit-'+block);status('发现本机草稿，请明确恢复；当前仍显示正文。')
+              def reopen_editor():
+                  start();tap('活动');ready();touch(activity);ready();tap('笔记');ready()
               try:
                   assert os.environ.get('GITHUB_ACTIONS')=='true' and shell('getprop','ro.kernel.qemu').strip()=='1'
                   assert int(shell('getprop','ro.build.version.sdk').strip())==manifest['api']==gate.API
@@ -577,6 +639,9 @@ jobs:
                   new_drafts=drafts();assert len(new_drafts)==len(old_drafts)+1
                   assert all(new_drafts[k]==v for k,v in old_drafts.items()) and state()==after
                   ok('new_slot_save_readonly')
+                  result['new_slot_saved_stop']=restart_new_slot(
+                      lambda:stop_verified(adb,gate.SERIAL,gate.PKG),reopen_editor,tap,status,seek,drafts,state,new_drafts,after,True)
+                  ok('new_slot_restart_saved')
                   button(False);ready();touch('note-edit-'+block);status('暂无已保存草稿；正文不能为空。')
                   assert seek('文字内容').get('text')=='Committed' and seek('note-draft-recover').get('enabled')=='false'
                   assert drafts()==new_drafts and state()==after;ok('existing_slot_isolation')
@@ -594,6 +659,10 @@ jobs:
                   assert drafts()==cleaned and state()==appended
                   assert command('exec-out','cat',installed[8:],binary=True)==product
                   shot();ok('new_slot_cleanup_readonly')
+                  result['new_slot_cleaned_stop']=restart_new_slot(
+                      lambda:stop_verified(adb,gate.SERIAL,gate.PKG),reopen_editor,tap,status,seek,drafts,state,cleaned,appended,False)
+                  assert command('exec-out','cat',installed[8:],binary=True)==product
+                  ok('new_slot_restart_cleaned')
                   observer.close();result['status']='PASS'
               except Exception:
                   capture_draft_failure(adb,gate.SERIAL,result,out)
@@ -675,12 +744,12 @@ jobs:
           PACKAGE='com.supercubegame.pockettodo.v12.preview'
           SCOPE='ACTUAL_ANDROID_DRAFT_SESSION_SQLITE_FILES_FORCE_STOP_NOT_NATIVE_BUTTONS_OR_LMK'
           NATIVE_REQUIRED='fixture_text_image cancel_unsaved_readonly explicit_save_readonly restart_no_autorestore recover_cancel_readonly recover_confirm_readonly discard_cancel_readonly discard_confirm_readonly empty_draft_saved empty_recovered_body_rejected commit_exact_one_revision restart_committed'.split()
-          NATIVE_REQUIRED+='new_slot_save_readonly existing_slot_isolation new_slot_recover_readonly new_slot_commit_append new_slot_cleanup_readonly'.split()
+          NATIVE_REQUIRED+='new_slot_save_readonly new_slot_restart_saved existing_slot_isolation new_slot_recover_readonly new_slot_commit_append new_slot_cleanup_readonly new_slot_restart_cleaned'.split()
           def validate_native(v,manifest,log,images):
               for key,expected in manifest.items():
                   assert type(v[key]) is type(expected) and v[key]==expected
               assert v['status']=='PASS' and v['scope']=='NATIVE_DRAFT_BUTTONS_ASCII_IMAGE_FORCE_STOP_NOT_LMK_OR_CLEANUP_RACE'
-              assert type(v['checks']) is int and v['checks']==17 and v['labels']==NATIVE_REQUIRED
+              assert type(v['checks']) is int and v['checks']==19 and v['labels']==NATIVE_REQUIRED
               assert v['release_ready'] is False and v['cleanup_failure_race']=='NOT_TESTED'
               assert v['unicode_input']=='BACKEND_ONLY'
               fixture=v['input_fixture']
@@ -698,11 +767,11 @@ jobs:
                   assert raw.startswith(b'\x89PNG\r\n\x1a\n')
                   assert type(s['bytes']) is int and s['bytes']==len(raw)
                   assert s['sha256']==hashlib.sha256(raw).hexdigest()
-              snapshots=v['snapshots'];assert len(snapshots)==17
+              snapshots=v['snapshots'];assert len(snapshots)==19
               assert all(isinstance(s,str) and re.fullmatch('[0-9a-f]{64}',s) for s in snapshots)
-              assert len(set(snapshots[:10]))==len(set(snapshots[10:15]))==len(set(snapshots[15:]))==1
-              assert len({snapshots[0],snapshots[10],snapshots[15]})==3
-              for key in ('force_stop','final_stop'):
+              assert len(set(snapshots[:10]))==len(set(snapshots[10:16]))==len(set(snapshots[16:]))==1
+              assert len({snapshots[0],snapshots[10],snapshots[16]})==3
+              for key in ('force_stop','final_stop','new_slot_saved_stop','new_slot_cleaned_stop'):
                   stop=v[key];assert stop['status']=='PASS' and stop['package']==PACKAGE
                   assert stop['scope']=='COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK'
                   assert type(stop['force_stop_attempts']) is int and stop['force_stop_attempts']==1
@@ -711,16 +780,22 @@ jobs:
                   assert cmd['args'][-3:]==['am','force-stop',PACKAGE]
                   assert type(last['returncode']) is int and last['returncode']==1 and last['stdout'].strip()==last['stderr'].strip()==''
                   assert last['args'][-2:]==['pidof',PACKAGE]
+                  if key.startswith('new_slot_'):
+                      before=stop['before']
+                      assert type(before['returncode']) is int and before['returncode']==0 and before['stderr']==''
+                      assert before['args'][-2:]==['pidof',PACKAGE] and re.fullmatch('[1-9][0-9]*\n?',before['stdout'])
               return True
           def native_controls():
               m=dict(commit='a'*40,run_id='123',run_attempt='1',api=26,apk_sha256='b'*64,certificate='c'*64,apk_bytes=100)
               stop=dict(status='PASS',package=PACKAGE,scope='COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK',force_stop_attempts=1,
+                  before=dict(returncode=0,stdout='123\n',stderr='',args=['pidof',PACKAGE]),
                   command=dict(returncode=0,stdout='',stderr='',args=['am','force-stop',PACKAGE]),
                   probes=[dict(returncode=1,stdout='',stderr='',args=['pidof',PACKAGE])])
               images={'screen-'+str(i)+'.png':b'\x89PNG\r\n\x1a\n'+bytes([i]) for i in range(4)}
               v=dict(m,status='PASS',scope='NATIVE_DRAFT_BUTTONS_ASCII_IMAGE_FORCE_STOP_NOT_LMK_OR_CLEANUP_RACE',
-                  checks=17,labels=NATIVE_REQUIRED[:],release_ready=False,cleanup_failure_race='NOT_TESTED',unicode_input='BACKEND_ONLY',
-                  force_stop=stop,final_stop=stop,snapshots=['d'*64]*10+['e'*64]*5+['a'*64]*2,
+                  checks=19,labels=NATIVE_REQUIRED[:],release_ready=False,cleanup_failure_race='NOT_TESTED',unicode_input='BACKEND_ONLY',
+                  force_stop=stop,final_stop=stop,new_slot_saved_stop=copy.deepcopy(stop),new_slot_cleaned_stop=copy.deepcopy(stop),
+                  snapshots=['d'*64]*10+['e'*64]*6+['a'*64]*3,
                   input_fixture=dict(scope='DISPOSABLE_EMULATOR_INPUT_NOT_DEFAULT_KEYBOARD_ACCEPTANCE',before='1',after='0'),
                   screens=[dict(file=k,sha256=hashlib.sha256(raw).hexdigest(),bytes=len(raw)) for k,raw in images.items()])
               def log(w):return ''.join('DRAFT_NATIVE_PASS '+s+'\n' for s in w['labels'])+'DRAFT_NATIVE_RESULT '+json.dumps(w)+'\n'
@@ -728,16 +803,19 @@ jobs:
               bad=[]
               for key in v:
                   w=copy.deepcopy(v);del w[key];bad.append(w)
-              for i in range(17):
+              for i in range(19):
                   w=copy.deepcopy(v);del w['labels'][i];bad.append(w)
-              for key,value in [('status','FAIL'),('checks',17.0),('checks',12),('release_ready',0),('commit','f'*40),('api',26.0),('apk_sha256','f'*64),('unicode_input','PASS')]:
+              for key,value in [('status','FAIL'),('checks',19.0),('checks',17.0),('checks',17),('checks',12),('release_ready',0),('commit','f'*40),('api',26.0),('apk_sha256','f'*64),('unicode_input','PASS')]:
                   w=copy.deepcopy(v);w[key]=value;bad.append(w)
               for key,value in [('scope','DEFAULT_KEYBOARD_PASS'),('before',None),('after','1')]:
                   w=copy.deepcopy(v);w['input_fixture'][key]=value;bad.append(w)
-              for key in ('force_stop','final_stop'):
+              for key in ('force_stop','final_stop','new_slot_saved_stop','new_slot_cleaned_stop'):
                   for code in (0,255,True):
                       w=copy.deepcopy(v);w[key]['probes'][-1]['returncode']=code;bad.append(w)
-              for i in range(17):
+              for key in ('new_slot_saved_stop','new_slot_cleaned_stop'):
+                  for field,value in [('returncode',1),('returncode',True),('stdout',''),('stdout','0\n'),('stderr','error'),('args',['pidof','wrong'])]:
+                      w=copy.deepcopy(v);w[key]['before'][field]=value;bad.append(w)
+              for i in range(19):
                   w=copy.deepcopy(v);w['snapshots'][i]='f'*64;bad.append(w)
               for i in range(4):
                   w=copy.deepcopy(v);w['screens'][i]['sha256']='f'*64;bad.append(w)

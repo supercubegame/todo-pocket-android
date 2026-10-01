@@ -282,6 +282,54 @@ jobs:
           restart_calls=[n for n in ast.walk(native_fn) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='restart_new_slot']
           assert len(restart_calls)==2 and [n.args[-1].value for n in restart_calls]==[True,False]
           print('DRAFT_NEW_SLOT_RESTART host_positive=2 negative=18 omission_controls=PASS; not Android execution')
+          same_fn=next((n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='validate_same_title_fixture'),None)
+          file_fn=next((n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='new_draft_file'),None)
+          assert same_fn is not None and file_fn is not None, 'same-title native draft isolation needs exact oracles'
+          def same_contract(node):
+              scope={'copy':copy,'re':re}
+              exec(compile(ast.Module(body=[node],type_ignores=[]),'same-title-oracle','exec'),scope)
+              before=({'notes':[(1,'first',7,'DraftNative')],'revision':[(1,1,8)],
+                  'blocks':[(1,'first','block',0,'TEXT','Committed')],'other':[(1,'keep')]},{'image':'exact'})
+              after=copy.deepcopy(before);identity='12345678-1234-4123-8123-123456789abc'
+              after[0]['notes'].append((2,identity,7,'DraftNative'));after[0]['revision']=[(1,1,9)]
+              assert scope['validate_same_title_fixture'](before,after,'first')==identity
+              bad=[]
+              for table,rows in after[0].items():
+                  for i,row in enumerate(rows):
+                      for j in range(len(row)):
+                          w=copy.deepcopy(after);changed=list(row);changed[j]='wrong';w[0][table][i]=tuple(changed);bad.append(w)
+              w=copy.deepcopy(after);w[1]['image']='changed';bad.append(w)
+              w=copy.deepcopy(after);w[0]['notes'].pop();bad.append(w)
+              w=copy.deepcopy(after);w[0]['notes'].append(w[0]['notes'][-1]);bad.append(w)
+              w=copy.deepcopy(after);w[0]['notes'][1]=(2,'first',7,'DraftNative');bad.append(w)
+              for w in bad:
+                  try:scope['validate_same_title_fixture'](before,w,'first')
+                  except (AssertionError,IndexError,KeyError,TypeError):pass
+                  else:raise AssertionError('same-title fixture mutation accepted')
+              return len(bad)
+          same_count=same_contract(same_fn)
+          def file_contract(node):
+              scope={}
+              exec(compile(ast.Module(body=[node],type_ignores=[]),'draft-file-oracle','exec'),scope)
+              before={'old':b'old','other':b'other'};after=dict(before,new=b'draft')
+              assert scope['new_draft_file'](before,after)=='new'
+              bad=[dict(after,old=b'changed'),dict(after,other=b'changed'),before,
+                  dict(after,extra=b'x'),{'new':b'draft'},dict(after,new=b'')]
+              for w in bad:
+                  try:scope['new_draft_file'](before,w)
+                  except AssertionError:pass
+                  else:raise AssertionError('draft file isolation mutation accepted')
+              return len(bad)
+          file_count=file_contract(file_fn)
+          # Mutate the actual compiled oracle, not a separately reimplemented checker.
+          for node,contract in ((same_fn,same_contract),(file_fn,file_contract)):
+              mutant=copy.deepcopy(node)
+              mutant.body=[n for n in mutant.body if not isinstance(n,ast.Assert)]
+              ast.fix_missing_locations(mutant)
+              try:contract(mutant)
+              except AssertionError:pass
+              else:raise AssertionError('unguarded same-title oracle survived')
+          print('DRAFT_SAME_TITLE host_positive=2 negative='+str(same_count+file_count)+' compiled_mutants=2 PASS; not Android execution')
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -381,6 +429,7 @@ jobs:
           from verify_ui_observer import Observer
           LABELS='fixture_text_image cancel_unsaved_readonly explicit_save_readonly restart_no_autorestore recover_cancel_readonly recover_confirm_readonly discard_cancel_readonly discard_confirm_readonly empty_draft_saved empty_recovered_body_rejected commit_exact_one_revision restart_committed'.split()
           LABELS+='new_slot_save_readonly new_slot_restart_saved existing_slot_isolation new_slot_recover_readonly new_slot_commit_append new_slot_cleanup_readonly new_slot_restart_cleaned'.split()
+          LABELS+='same_title_fixture same_title_first_saved same_title_second_saved same_title_first_recovered same_title_first_discarded same_title_second_recovered'.split()
           SCOPE='NATIVE_DRAFT_BUTTONS_ASCII_IMAGE_FORCE_STOP_NOT_LMK_OR_CLEANUP_RACE'
           out=Path('draft-native');out.mkdir(exist_ok=True)
           manifest=json.loads(Path('draft-apk.json').read_text())
@@ -457,6 +506,26 @@ jobs:
               assert drafts()==expected_files
               assert state()==expected_state
               return receipt
+          def validate_same_title_fixture(before,after,note):
+              old,media=before;actual,current_media=after
+              assert len(old['notes'])==1 and old['notes'][0][1]==note
+              added=[r for r in actual['notes'] if r[1]!=note]
+              assert len(added)==1
+              identity=added[0][1]
+              assert isinstance(identity,str) and re.fullmatch('[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}',identity)
+              row=list(old['notes'][0]);row[0]+=1;row[1]=identity
+              expected=copy.deepcopy(old);expected['notes'].append(tuple(row))
+              assert len(expected['revision'])==1
+              revision=list(expected['revision'][0]);revision[-1]+=1;expected['revision']=[tuple(revision)]
+              assert actual==expected and current_media==media
+              return identity
+          def new_draft_file(before,after):
+              added=set(after)-set(before)
+              assert len(added)==1 and len(after)==len(before)+1
+              assert all(after[k]==v for k,v in before.items())
+              key=next(iter(added))
+              assert after[key]
+              return key
           def native(adb):
               prefix=[str(adb),'-s',gate.SERIAL];serial=0
               result['ui_observer']={}
@@ -663,6 +732,58 @@ jobs:
                       lambda:stop_verified(adb,gate.SERIAL,gate.PKG),reopen_editor,tap,status,seek,drafts,state,cleaned,appended,False)
                   assert command('exec-out','cat',installed[8:],binary=True)==product
                   ok('new_slot_restart_cleaned')
+                  # All canonical fixtures exist BEFORE either new draft is saved.
+                  # Creating the sibling later would invalidate the first draft's full-state base.
+                  button(False);ready();tap('新建笔记');fill('笔记标题','DraftNative');button(True);ready()
+                  twins=state();sibling=validate_same_title_fixture(appended,twins,note)
+                  assert twins[0]['notes'][0][3]=='DraftNative' and drafts()==cleaned
+                  result['same_title']=dict(note_id=note,sibling_id=sibling,title='DraftNative',
+                      scope='NATIVE_NEW_TEXT_SLOTS_SAME_TITLE_NOT_EXISTING_BLOCKS_OR_RESTART')
+                  ok('same_title_fixture')
+                  def choose_twin(index):
+                      tap('切换笔记');find(text='选择笔记')
+                      items=[n for n in nodes() if n.get('resource-id')=='android:id/text1']
+                      assert [n.get('text') for n in items]==['1. DraftNative','2. DraftNative']
+                      assert all(n.get('package')==gate.PKG for n in items)
+                      tap(str(index)+'. DraftNative');ready()
+                      find(**{'content-desc':'note-current','text':'DraftNative · '+str(index)+' / 2'})
+                      if index==1:find(**{'content-desc':'note-text-'+block,'text':'Committed'})
+                      else:
+                          find(text='写点什么，或加一张图。')
+                          assert not any(n.get('content-desc','').startswith(('note-text-','note-image-')) for n in nodes())
+                  choose_twin(1);tap('加入文字');status('暂无已保存草稿；正文不能为空。')
+                  assert seek('文字内容').get('text')==''
+                  fill('文字内容','  First note draft  ');touch('note-draft-save');status('草稿已保存，正文未修改。')
+                  first=drafts()
+                  changed=[k for k in cleaned if first.get(k)!=cleaned[k]]
+                  assert first.keys()==cleaned.keys() and len(changed)==1
+                  first_key=changed[0]
+                  assert seek('文字内容').get('text')=='  First note draft  ' and state()==twins
+                  ok('same_title_first_saved')
+                  button(False);ready();choose_twin(2);tap('加入文字');status('暂无已保存草稿；正文不能为空。')
+                  assert seek('文字内容').get('text')=='' and seek('note-draft-recover').get('enabled')=='false'
+                  assert drafts()==first
+                  fill('文字内容','  Second note draft  ');touch('note-draft-save');status('草稿已保存，正文未修改。')
+                  both=drafts();second_key=new_draft_file(first,both)
+                  assert second_key!=first_key and seek('文字内容').get('text')=='  Second note draft  ' and state()==twins
+                  ok('same_title_second_saved')
+                  button(False);ready();choose_twin(1);tap('加入文字');status('发现本机草稿，请明确恢复；当前仍显示正文。')
+                  assert seek('文字内容').get('text')=='' and drafts()==both
+                  touch('note-draft-recover');find(text='恢复草稿？');button(True);status('已恢复到输入框；点击保存才会修改正文。')
+                  assert seek('文字内容').get('text')=='  First note draft  ' and drafts()==both and state()==twins
+                  ok('same_title_first_recovered')
+                  touch('note-draft-discard');find(text='丢弃本机草稿？');button(True);status('草稿已丢弃，正文和当前输入未修改。')
+                  discarded=drafts()
+                  assert discarded.keys()==both.keys() and discarded[first_key]!=both[first_key]
+                  assert all(discarded[k]==v for k,v in both.items() if k!=first_key)
+                  assert seek('文字内容').get('text')=='  First note draft  ' and seek('note-draft-recover').get('enabled')=='false'
+                  assert state()==twins;ok('same_title_first_discarded')
+                  button(False);ready();choose_twin(2);tap('加入文字');status('发现本机草稿，请明确恢复；当前仍显示正文。')
+                  assert seek('文字内容').get('text')=='' and drafts()==discarded
+                  touch('note-draft-recover');find(text='恢复草稿？');button(True);status('已恢复到输入框；点击保存才会修改正文。')
+                  assert seek('文字内容').get('text')=='  Second note draft  ' and drafts()==discarded and state()==twins
+                  assert command('exec-out','cat',installed[8:],binary=True)==product
+                  shot();ok('same_title_second_recovered')
                   observer.close();result['status']='PASS'
               except Exception:
                   capture_draft_failure(adb,gate.SERIAL,result,out)
@@ -745,11 +866,12 @@ jobs:
           SCOPE='ACTUAL_ANDROID_DRAFT_SESSION_SQLITE_FILES_FORCE_STOP_NOT_NATIVE_BUTTONS_OR_LMK'
           NATIVE_REQUIRED='fixture_text_image cancel_unsaved_readonly explicit_save_readonly restart_no_autorestore recover_cancel_readonly recover_confirm_readonly discard_cancel_readonly discard_confirm_readonly empty_draft_saved empty_recovered_body_rejected commit_exact_one_revision restart_committed'.split()
           NATIVE_REQUIRED+='new_slot_save_readonly new_slot_restart_saved existing_slot_isolation new_slot_recover_readonly new_slot_commit_append new_slot_cleanup_readonly new_slot_restart_cleaned'.split()
+          NATIVE_REQUIRED+='same_title_fixture same_title_first_saved same_title_second_saved same_title_first_recovered same_title_first_discarded same_title_second_recovered'.split()
           def validate_native(v,manifest,log,images):
               for key,expected in manifest.items():
                   assert type(v[key]) is type(expected) and v[key]==expected
               assert v['status']=='PASS' and v['scope']=='NATIVE_DRAFT_BUTTONS_ASCII_IMAGE_FORCE_STOP_NOT_LMK_OR_CLEANUP_RACE'
-              assert type(v['checks']) is int and v['checks']==19 and v['labels']==NATIVE_REQUIRED
+              assert type(v['checks']) is int and v['checks']==25 and v['labels']==NATIVE_REQUIRED
               assert v['release_ready'] is False and v['cleanup_failure_race']=='NOT_TESTED'
               assert v['unicode_input']=='BACKEND_ONLY'
               fixture=v['input_fixture']
@@ -760,17 +882,22 @@ jobs:
               assert labels==NATIVE_REQUIRED
               emitted=[line.removeprefix('DRAFT_NATIVE_RESULT ') for line in log.splitlines() if line.startswith('DRAFT_NATIVE_RESULT ')]
               assert len(emitted)==1 and json.loads(emitted[0])==v
-              assert len(v['screens'])==4 and len(images)==4
+              assert len(v['screens'])==5 and len(images)==5
               for i,s in enumerate(v['screens']):
                   assert s['file']=='screen-'+str(i)+'.png'
                   raw=images[s['file']]
                   assert raw.startswith(b'\x89PNG\r\n\x1a\n')
                   assert type(s['bytes']) is int and s['bytes']==len(raw)
                   assert s['sha256']==hashlib.sha256(raw).hexdigest()
-              snapshots=v['snapshots'];assert len(snapshots)==19
+              snapshots=v['snapshots'];assert len(snapshots)==25
               assert all(isinstance(s,str) and re.fullmatch('[0-9a-f]{64}',s) for s in snapshots)
-              assert len(set(snapshots[:10]))==len(set(snapshots[10:16]))==len(set(snapshots[16:]))==1
+              assert len(set(snapshots[:10]))==len(set(snapshots[10:16]))==len(set(snapshots[16:19]))==1
               assert len({snapshots[0],snapshots[10],snapshots[16]})==3
+              assert len(set(snapshots[19:]))==1 and snapshots[19] not in snapshots[:19]
+              same=v['same_title']
+              assert same['scope']=='NATIVE_NEW_TEXT_SLOTS_SAME_TITLE_NOT_EXISTING_BLOCKS_OR_RESTART'
+              assert same['title']=='DraftNative' and same['note_id']!=same['sibling_id']
+              assert all(isinstance(same[k],str) and re.fullmatch('[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}',same[k]) for k in ('note_id','sibling_id'))
               for key in ('force_stop','final_stop','new_slot_saved_stop','new_slot_cleaned_stop'):
                   stop=v[key];assert stop['status']=='PASS' and stop['package']==PACKAGE
                   assert stop['scope']=='COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK'
@@ -791,11 +918,13 @@ jobs:
                   before=dict(returncode=0,stdout='123\n',stderr='',args=['pidof',PACKAGE]),
                   command=dict(returncode=0,stdout='',stderr='',args=['am','force-stop',PACKAGE]),
                   probes=[dict(returncode=1,stdout='',stderr='',args=['pidof',PACKAGE])])
-              images={'screen-'+str(i)+'.png':b'\x89PNG\r\n\x1a\n'+bytes([i]) for i in range(4)}
+              images={'screen-'+str(i)+'.png':b'\x89PNG\r\n\x1a\n'+bytes([i]) for i in range(5)}
               v=dict(m,status='PASS',scope='NATIVE_DRAFT_BUTTONS_ASCII_IMAGE_FORCE_STOP_NOT_LMK_OR_CLEANUP_RACE',
-                  checks=19,labels=NATIVE_REQUIRED[:],release_ready=False,cleanup_failure_race='NOT_TESTED',unicode_input='BACKEND_ONLY',
+                  checks=25,labels=NATIVE_REQUIRED[:],release_ready=False,cleanup_failure_race='NOT_TESTED',unicode_input='BACKEND_ONLY',
                   force_stop=stop,final_stop=stop,new_slot_saved_stop=copy.deepcopy(stop),new_slot_cleaned_stop=copy.deepcopy(stop),
-                  snapshots=['d'*64]*10+['e'*64]*6+['a'*64]*3,
+                  snapshots=['d'*64]*10+['e'*64]*6+['a'*64]*3+['b'*64]*6,
+                  same_title=dict(note_id='12345678-1234-4123-8123-123456789abc',sibling_id='22345678-1234-4123-8123-123456789abc',
+                      title='DraftNative',scope='NATIVE_NEW_TEXT_SLOTS_SAME_TITLE_NOT_EXISTING_BLOCKS_OR_RESTART'),
                   input_fixture=dict(scope='DISPOSABLE_EMULATOR_INPUT_NOT_DEFAULT_KEYBOARD_ACCEPTANCE',before='1',after='0'),
                   screens=[dict(file=k,sha256=hashlib.sha256(raw).hexdigest(),bytes=len(raw)) for k,raw in images.items()])
               def log(w):return ''.join('DRAFT_NATIVE_PASS '+s+'\n' for s in w['labels'])+'DRAFT_NATIVE_RESULT '+json.dumps(w)+'\n'
@@ -803,10 +932,17 @@ jobs:
               bad=[]
               for key in v:
                   w=copy.deepcopy(v);del w[key];bad.append(w)
-              for i in range(19):
+              for i in range(25):
                   w=copy.deepcopy(v);del w['labels'][i];bad.append(w)
               for key,value in [('status','FAIL'),('checks',19.0),('checks',17.0),('checks',17),('checks',12),('release_ready',0),('commit','f'*40),('api',26.0),('apk_sha256','f'*64),('unicode_input','PASS')]:
                   w=copy.deepcopy(v);w[key]=value;bad.append(w)
+              for key,value in [('checks',25.0),('checks',19)]:
+                  w=copy.deepcopy(v);w[key]=value;bad.append(w)
+              for field in v['same_title']:
+                  w=copy.deepcopy(v);del w['same_title'][field];bad.append(w)
+                  w=copy.deepcopy(v);w['same_title'][field]='wrong';bad.append(w)
+              w=copy.deepcopy(v);w['same_title']['sibling_id']=w['same_title']['note_id'];bad.append(w)
+              w=copy.deepcopy(v);w['snapshots'][19:]=[w['snapshots'][16]]*6;bad.append(w)
               for key,value in [('scope','DEFAULT_KEYBOARD_PASS'),('before',None),('after','1')]:
                   w=copy.deepcopy(v);w['input_fixture'][key]=value;bad.append(w)
               for key in ('force_stop','final_stop','new_slot_saved_stop','new_slot_cleaned_stop'):
@@ -815,9 +951,9 @@ jobs:
               for key in ('new_slot_saved_stop','new_slot_cleaned_stop'):
                   for field,value in [('returncode',1),('returncode',True),('stdout',''),('stdout','0\n'),('stderr','error'),('args',['pidof','wrong'])]:
                       w=copy.deepcopy(v);w[key]['before'][field]=value;bad.append(w)
-              for i in range(19):
+              for i in range(25):
                   w=copy.deepcopy(v);w['snapshots'][i]='f'*64;bad.append(w)
-              for i in range(4):
+              for i in range(5):
                   w=copy.deepcopy(v);w['screens'][i]['sha256']='f'*64;bad.append(w)
               for w in bad:
                   text=log(w) if 'labels' in w else log(v)

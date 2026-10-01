@@ -168,6 +168,136 @@ def subprocess_contracts():
     return 2
 
 
+def assert_workflow_wiring(text):
+    """Fail-closed guard for this canonical YAML layout, not a general YAML parser."""
+    import ast
+    import textwrap
+    def unique_part(value, start, end):
+        assert value.count(start) == 1 and value.count(end) == 1, "ambiguous workflow boundary"
+        return value.split(start, 1)[1].split(end, 1)[0]
+    core = unique_part(text, "\n  core:\n", "\n  export_probe:\n")
+    lines = core.splitlines()
+    expected_command = "          python3 tools/verify_adb_transfer.py 2>&1 | tee -a core.log"
+    assert lines.count(expected_command) == 1, "mandatory transfer selftest missing or weakened"
+    index = lines.index(expected_command)
+    assert lines[index-1].strip() == "python3 tools/verify_ui_observer.py selftest 2>&1 | tee -a core.log"
+    assert lines[index-3].strip() == "set -euo pipefail"
+    probe = unique_part(text, "\n  export_probe:\n", "\n  export_feedback:\n")
+    step = unique_part(probe, "      - name: Independent backend preview and synthetic image multipage native saves\n",
+                       "      - uses: actions/upload-artifact@")
+    assert step.startswith("        run: |\n          set -euo pipefail\n"), "device step may be skipped"
+    python = unique_part(step, "          python3 - <<'PY' 2>&1 | tee export-probe.log\n", "\n          PY\n")
+    tree = ast.parse(textwrap.dedent(python))
+    functions = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "install_and_probe"]
+    assert len(functions) == 1
+    body = functions[0].body
+    def same(a, b): return ast.dump(a) == ast.dump(b)
+    start = ast.parse("from verify_adb_transfer import pull_exact").body[0]
+    indices = [i for i, n in enumerate(body) if same(n, start)]
+    assert len(indices) == 1, "actual callback must import the transfer helper"
+    i = indices[0]
+    # An independently written expected sequence, not derived from observed statements.
+    expected = ast.parse("""
+from verify_adb_transfer import pull_exact
+preflight['phase'] = 'INSTALLED_BYTES'
+expected = apps[0].read_bytes()
+preflight['installed_transfer'] = {}
+actual = pull_exact(adb, gate.SERIAL, installed[8:], expected, preflight['installed_transfer'])
+preflight.update(actual_bytes=len(actual), expected_bytes=len(expected),
+    actual_sha256=hashlib.sha256(actual).hexdigest(), expected_sha256=hashlib.sha256(expected).hexdigest())
+assert actual == expected, 'installed product bytes differ from built APK'
+calls.append('installed_exact_product')
+preflight['phase'] = 'CODEC_AND_PREVIEW'
+verify_exports.android_codec(adb, gate)
+""").body
+    assert len(body[i:i+len(expected)]) == len(expected)
+    assert all(same(a, b) for a, b in zip(body[i:i+len(expected)], expected)), "transfer sequence changed"
+    assert not any(isinstance(n, (ast.Return, ast.Try, ast.If, ast.While)) for n in body[:i]), "preflight can bypass transfer"
+    binding = ast.parse("gate.verify_database = install_and_probe").body[0]
+    assert sum(same(n, binding) for n in tree.body) == 1, "callback disconnected"
+    assert sum(isinstance(n, ast.Call) and ast.unparse(n.func) == "pull_exact"
+               for n in ast.walk(functions[0])) == 1, "multiple pull calls"
+    return ast.Module(body=body[i:i+8], type_ignores=[])
+
+
+def workflow_execution(text):
+    """Execute the actual guarded workflow slice with real helper and fake transport."""
+    import ast
+    import sys
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    code = compile(assert_workflow_wiring(text), "<actual-export-workflow-transfer>", "exec")
+    payload = bytes(range(256)) * 100
+    for mode in ("exact", "short", "wrong", "exit255", "timeout"):
+        with tempfile.TemporaryDirectory(prefix="workflow-transfer-") as folder:
+            app = Path(folder) / "built.apk"; app.write_bytes(payload)
+            calls = []; stages = []; record = {}
+            timeout = subprocess.TimeoutExpired(["fixture"], 30, stderr=b"fixture timeout")
+            def invoke(command, **kwargs):
+                assert not calls, "workflow transfer retried"
+                calls.append(command)
+                assert command[:6] == ["fixture-adb", "-s", "emulator-5554", "pull", "-Z", "/data/app/fixture/base.apk"]
+                assert kwargs["stdin"] == subprocess.DEVNULL and 0 < kwargs["timeout"] <= 30
+                path = Path(command[-1]); assert not path.exists()
+                path.write_bytes(payload[:-1] if mode == "short" else b"X"+payload[1:] if mode == "wrong" else payload)
+                if mode == "timeout": raise timeout
+                return subprocess.CompletedProcess(command, 255 if mode == "exit255" else 0, b"out", b"err")
+            scope = dict(adb="fixture-adb", gate=SimpleNamespace(SERIAL="emulator-5554"),
+                         installed="package:/data/app/fixture/base.apk", apps=[app], calls=stages,
+                         preflight=record, hashlib=hashlib)
+            caught = None
+            # Import in the unmodified workflow resolves to this actual tested module.
+            with patch.dict(sys.modules, {"verify_adb_transfer": sys.modules[__name__]}):
+                with patch.object(subprocess, "run", invoke):
+                    try: exec(code, scope)
+                    except (AssertionError, subprocess.SubprocessError) as exc: caught = exc
+            assert len(calls) == 1 and not Path(calls[0][-1]).parent.exists()
+            receipt = record["installed_transfer"]
+            if mode == "exact":
+                assert caught is None and stages == ["installed_exact_product"]
+                assert receipt["status"] == "PASS" and scope["actual"] == payload
+                assert record["actual_bytes"] == record["expected_bytes"] == len(payload)
+                assert record["actual_sha256"] == record["expected_sha256"] == hashlib.sha256(payload).hexdigest()
+            else:
+                assert caught is not None and stages == [] and receipt["status"] == "FAIL"
+                assert receipt["error"] == repr(caught)
+                if mode in ("short", "wrong"):
+                    assert type(caught) is AssertionError and str(caught) == "installed product bytes differ from built APK"
+                if mode == "exit255": assert type(caught) is subprocess.CalledProcessError and caught.returncode == 255
+                if mode == "timeout": assert caught is timeout
+    return 5
+
+
+def wiring_contracts(text):
+    assert_workflow_wiring(text)
+    replacements = [
+        ("python3 tools/verify_adb_transfer.py 2>&1 | tee -a core.log",
+         "# python3 tools/verify_adb_transfer.py 2>&1 | tee -a core.log"),
+        ("python3 tools/verify_adb_transfer.py 2>&1 | tee -a core.log",
+         "python3 tools/verify_adb_transfer.py 2>&1 | tee -a core.log || true"),
+        ("from verify_adb_transfer import pull_exact", "from other import pull_exact"),
+        ("actual=pull_exact(adb,gate.SERIAL,installed[8:],expected,preflight['installed_transfer'])",
+         "actual=expected"),
+        ("actual=pull_exact(adb,gate.SERIAL,installed[8:],expected,preflight['installed_transfer'])",
+         "actual=pull_exact(adb,gate.SERIAL,installed[8:],b'wrong',preflight['installed_transfer'])"),
+        ("actual=pull_exact(adb,gate.SERIAL,installed[8:],expected,preflight['installed_transfer'])",
+         "actual=pull_exact(adb,gate.SERIAL,installed[8:],expected,{})"),
+        ("preflight['installed_transfer']={}", "preflight['installed_transfer']={'status':'PASS'}"),
+        ("assert actual==expected,'installed product bytes differ from built APK'",
+         "assert True,'installed product bytes differ from built APK'"),
+        ("calls.append('installed_exact_product')", "pass"),
+        ("gate.verify_database=install_and_probe", "gate.verify_database=lambda adb: None"),
+        ("preflight['phase']='CODEC_AND_PREVIEW'", "return"),
+    ]
+    for old, new in replacements:
+        assert text.count(old) == 1, old
+        bad = text.replace(old, new, 1)
+        try: assert_workflow_wiring(bad)
+        except AssertionError: pass
+        else: raise AssertionError("workflow wiring mutant survived: " + old)
+    return len(replacements)
+
+
 def selftest():
     import inspect
     positive, negative = contracts(pull_exact)
@@ -191,6 +321,10 @@ def selftest():
     boundary = subprocess_contracts()
     print("ADB_TRANSFER_HOST", positive, "positive", negative, "negative",
           len(changes), "compiled mutants", boundary, "real host subprocess cases; NOT_ANDROID_ACCEPTANCE")
+    workflow = Path(__file__).resolve().parents[1] / ".github/workflows/android.yml"
+    text = workflow.read_text()
+    print("ADB_TRANSFER_WIRING", wiring_contracts(text), "negative controls",
+          workflow_execution(text), "actual workflow slice cases; HOST_ONLY")
 
 
 if __name__ == "__main__":

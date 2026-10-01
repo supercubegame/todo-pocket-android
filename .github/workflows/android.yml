@@ -21,6 +21,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/verify_process_control.py selftest 2>&1 | tee core.log
+          python3 tools/verify_ui_observer.py selftest 2>&1 | tee -a core.log
           python3 tools/verify_evidence.py 2>&1 | tee -a core.log
           python3 tools/verify.py v12 2>&1 | tee -a core.log
           python3 tools/verify_schema3.py selftest 2>&1 | tee -a core.log
@@ -340,6 +341,7 @@ jobs:
               from verify_schema3 import signal_target_identity,signal_identity_selftest
               from verify_schema3 import exception_evidence,native_failure_evidence,diagnostics_selftest
               from verify_process_control import stop_verified,capture_crash_logs
+              from verify_ui_observer import Observer
               out=Path("export-native");out.mkdir()
               prefix=[str(adb),"-s",gate.SERIAL]
               result={"status":"FAIL","commit":os.environ["GITHUB_SHA"],"run_id":os.environ["GITHUB_RUN_ID"],
@@ -350,8 +352,7 @@ jobs:
                   return subprocess.check_output(prefix+list(args),text=not binary,stderr=subprocess.PIPE,timeout=timeout,stdin=subprocess.DEVNULL)
               def shell(*args,**kwargs):return command("shell","-n","-T",*args,**kwargs)
               def nodes():
-                  shell("uiautomator","dump","/sdcard/export-native-window.xml")
-                  return list(ET.fromstring(shell("cat","/sdcard/export-native-window.xml")).iter("node"))
+                  return list(ET.fromstring(observer.dump()).iter("node"))
               def find(**attrs):
                   deadline=time.monotonic()+20;current=[]
                   while time.monotonic()<deadline:
@@ -463,8 +464,11 @@ jobs:
                   assert find(text="SAVE").get("package") in ("com.android.documentsui","com.google.android.documentsui")
                   step("fresh_explicit_selection_and_consent")
               started=time.monotonic()
+              result["ui_observer"]={}
+              observer=Observer(adb,gate.SERIAL,gate.SDK,out,result["ui_observer"])
               try:
                   assert os.environ.get("GITHUB_ACTIONS")=="true" and shell("getprop","ro.kernel.qemu").strip()=="1"
+                  observer.start()
                   result["signal_identity_controls"]=signal_identity_selftest()
                   result["failure_diagnostic_controls"]=diagnostics_selftest()
                   stop();empty=state()
@@ -539,6 +543,7 @@ jobs:
                       record=result["process_loss"][kind]
                       record["labels"].append("fresh_saved_independent_output_and_state")
                       record.update(status="PASS",fresh_output=dict(result["outputs"][kind]))
+                  observer.close()
                   result["status"]="PASS"
               except Exception as exc:
                   result["error"]=repr(exc)
@@ -551,6 +556,7 @@ jobs:
                   except Exception:pass
                   raise
               finally:
+                  observer.close(primary_failed=True)
                   result.update(checks=len(result["labels"]),elapsed_seconds=round(time.monotonic()-started,3))
                   Path("export-native.json").write_text(json.dumps(result,ensure_ascii=False,indent=2)+"\n")
                   print("EXPORT_NATIVE_RESULT "+json.dumps(result,ensure_ascii=False),flush=True)
@@ -1310,7 +1316,7 @@ jobs:
                       type(out.get("bytes")) is int and 0<out["bytes"]<=16777216 and
                       isinstance(out.get("sha256"),str) and re.fullmatch("[0-9a-f]{64}",out["sha256"]) and
                       out.get("image")=="EXACT_96X96_GREEN_FIRST_PAGE_NO_OTHER_COLOR" and
-                      out.get("text")==("EXACT_WHITESPACE_INSENSITIVE" if kind=="PDF" else "NOT_OCR_TESTED")):return False
+                      out.get("text") ==("EXACT_WHITESPACE_INSENSITIVE" if kind=="PDF" else "NOT_OCR_TESTED")):return False
               return outputs["PDF"]["pages"]==outputs["PNG_ZIP"]["pages"]
           def native_sample(api=26,source="s",run="r"):
               good={"status":"PASS","commit":source,"run_id":run,"api":api,"scope":NATIVE_SCOPE,

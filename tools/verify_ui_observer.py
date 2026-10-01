@@ -55,6 +55,7 @@ import android.app.UiAutomation;
 import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.Build;
+import android.os.SystemClock;
 import android.graphics.Rect;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.util.Base64;
@@ -116,11 +117,20 @@ public final class PocketUiObserver {
     b.append("</node>");
   }
   static String dump(UiAutomation ui)throws Exception {
-    ui.waitForIdle(1000,10000);
+    // A persistent connection can already be idle from the PREVIOUS screen.
+    // Allow the new input/window transition to dispatch before observing idle.
+    // This is one pre-read barrier, not a retry of a failed tree or assertion.
+    long deadline=SystemClock.uptimeMillis()+10000;
+    SystemClock.sleep(1000);
+    long remaining=deadline-SystemClock.uptimeMillis();
+    if(remaining<=0)throw new IOException("settle budget exhausted");
+    ui.waitForIdle(1000,remaining);
+    if(SystemClock.uptimeMillis()>=deadline)throw new IOException("late idle observation");
     AccessibilityNodeInfo root=ui.getRootInActiveWindow();
     if(root==null)throw new IOException("no active root");
     try {
-      if(!root.refresh()||!root.isVisibleToUser())throw new IOException("stale/invisible root");
+      if(!root.refresh())throw new IOException("stale root refresh");
+      if(!root.isVisibleToUser())throw new IOException("invisible active root");
       Rect clip=new Rect();root.getBoundsInScreen(clip);
       if(clip.isEmpty())throw new IOException("empty root bounds");
       nodes=0;StringBuilder b=new StringBuilder("<hierarchy>");
@@ -478,6 +488,13 @@ def java_contracts():
     # Android signatures and deterministic doubles; executable Java bridge, NOT SDK/device acceptance.
     stubs={
       "android/os/Looper.java":"package android.os; public class Looper {}",
+      "android/os/SystemClock.java":"""package android.os; public class SystemClock {
+        public static long now=20000;public static int sleeps;
+        public static long uptimeMillis(){return now;}
+        public static void sleep(long duration){
+          if(duration!=1000)throw new AssertionError("settle duration");
+          sleeps++;now+="settle-overrun".equals(System.getProperty("fixture"))?10000:duration;
+        }}""",
       "android/os/HandlerThread.java":"""package android.os; public class HandlerThread {
         public HandlerThread(String n){} public void start(){} public Looper getLooper(){return new Looper();}
         public boolean quitSafely(){return true;} }""",
@@ -501,8 +518,10 @@ def java_contracts():
           public void disconnect(){if(!connected)throw new AssertionError("double disconnect");connected=false;System.err.println("DISCONNECT");}
           public void waitForIdle(long idle,long total)throws Exception {
             if(!connected)throw new AssertionError("disconnected");
-            if(idle!=1000||total!=10000)throw new AssertionError("idle budget");
+            if(android.os.SystemClock.sleeps!=reads+1)throw new AssertionError("fresh request settle missing");
+            if(idle!=1000||total!=9000)throw new AssertionError("shared idle budget");
             if("idle".equals(System.getProperty("fixture")))throw new java.util.concurrent.TimeoutException("idle");
+            if("late-idle".equals(System.getProperty("fixture")))android.os.SystemClock.now+=9000;
           }
           public AccessibilityNodeInfo getRootInActiveWindow(){
             if("null".equals(System.getProperty("fixture")))return null;
@@ -513,7 +532,7 @@ def java_contracts():
         import android.graphics.Rect;public class AccessibilityNodeInfo {
         int n;public AccessibilityNodeInfo(int n){this.n=n;}
         public boolean refresh(){return !"stale".equals(System.getProperty("fixture"));}
-        public boolean isVisibleToUser(){return true;} public void getBoundsInScreen(Rect r){}
+        public boolean isVisibleToUser(){return !"invisible".equals(System.getProperty("fixture"));} public void getBoundsInScreen(Rect r){}
         public CharSequence getText(){return "  草稿😀\\nline\\t "+n;}
         public String getViewIdResourceName(){return "id";}
         public CharSequence getClassName(){return "EditText";} public CharSequence getPackageName(){return "fixture";}
@@ -523,7 +542,7 @@ def java_contracts():
         public boolean isChecked(){return false;} public boolean isFocusable(){return true;}
         public boolean isFocused(){return true;} public boolean isScrollable(){return false;}
         public boolean isSelected(){return false;} public boolean isPassword(){return false;}
-        public int getChildCount(){return 0;} public AccessibilityNodeInfo getChild(int n){return null;}
+        public int getChildCount(){return "child".equals(System.getProperty("fixture"))?1:0;} public AccessibilityNodeInfo getChild(int n){return null;}
         public void recycle(){}
         }"""
     }
@@ -549,7 +568,13 @@ def java_contracts():
             assert decode_frame(lines[3],nonce,3,"BYE")=="closed"
             assert p.stderr.splitlines()==["CONNECT","DISCONNECT"]
         positive()
-        for fixture in ("null","stale","idle"):
+        def budget_controls():
+            for fixture,reason in (("settle-overrun","settle budget exhausted"),("late-idle","late idle observation")):
+                p=run(requests,fixture)
+                assert p.returncode!=0 and reason in p.stderr and " OK " not in p.stdout,(fixture,p.stdout,p.stderr)
+                assert p.stderr.splitlines().count("CONNECT")==p.stderr.splitlines().count("DISCONNECT")==1
+        budget_controls()
+        for fixture in ("null","stale","idle","settle-overrun","late-idle","invisible","child"):
             p=run(requests,fixture)
             assert p.returncode!=0 and " ERROR " in p.stdout and " OK " not in p.stdout,(fixture,p.stdout,p.stderr)
             assert p.stderr.splitlines().count("CONNECT")==p.stderr.splitlines().count("DISCONNECT")==1
@@ -572,7 +597,18 @@ def java_contracts():
                     p=run(request);assert p.returncode!=0 and " BYE " not in p.stdout
             except AssertionError:pass
             else:raise AssertionError("compiled Java mutant survived "+old)
-    print("UI_OBSERVER_JAVA_HOST 1 sequence positive 9 negative 4 compiled mutants rejected; ANDROID_DOUBLES_NOT_DEVICE",flush=True)
+        for old,new in [
+            ("SystemClock.sleep(1000);",""),
+            ("ui.waitForIdle(1000,remaining);","ui.waitForIdle(1000,10000);"),
+            ('if(remaining<=0)throw new IOException("settle budget exhausted");',""),
+            ('if(SystemClock.uptimeMillis()>=deadline)throw new IOException("late idle observation");',""),
+        ]:
+            assert JAVA.count(old)==1
+            source.write_text(JAVA.replace(old,new));compile_java(folder,sources)
+            try:positive();budget_controls()
+            except AssertionError:pass
+            else:raise AssertionError("compiled settle mutant survived "+old)
+    print("UI_OBSERVER_JAVA_HOST 1 sequence positive 13 negative 8 compiled mutants rejected; ANDROID_DOUBLES_NOT_DEVICE",flush=True)
 
 
 if __name__ == "__main__":

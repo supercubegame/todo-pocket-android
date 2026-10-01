@@ -22,6 +22,7 @@ jobs:
           set -euo pipefail
           python3 tools/verify_process_control.py selftest 2>&1 | tee core.log
           python3 tools/verify_ui_observer.py selftest 2>&1 | tee -a core.log
+          python3 tools/verify_adb_transfer.py 2>&1 | tee -a core.log
           python3 tools/verify_evidence.py 2>&1 | tee -a core.log
           python3 tools/verify.py v12 2>&1 | tee -a core.log
           python3 tools/verify_schema3.py selftest 2>&1 | tee -a core.log
@@ -659,10 +660,11 @@ jobs:
             installed=gate.run([adb,'-s',gate.SERIAL,'shell','pm','path',gate.PKG],capture=True).stdout.strip()
             preflight['installed_path']=installed
             assert installed.startswith('package:') and '\n' not in installed,'installed APK path missing or ambiguous'
-            import subprocess
+            from verify_adb_transfer import pull_exact
             preflight['phase']='INSTALLED_BYTES'
-            actual=subprocess.check_output([str(adb),'-s',gate.SERIAL,'exec-out','cat',installed[8:]],stderr=subprocess.PIPE,timeout=30)
             expected=apps[0].read_bytes()
+            preflight['installed_transfer']={}
+            actual=pull_exact(adb,gate.SERIAL,installed[8:],expected,preflight['installed_transfer'])
             preflight.update(actual_bytes=len(actual),expected_bytes=len(expected),actual_sha256=hashlib.sha256(actual).hexdigest(),expected_sha256=hashlib.sha256(expected).hexdigest())
             assert actual==expected,'installed product bytes differ from built APK'
             calls.append('installed_exact_product')

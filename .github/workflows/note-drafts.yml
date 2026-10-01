@@ -330,6 +330,76 @@ jobs:
               except AssertionError:pass
               else:raise AssertionError('unguarded same-title oracle survived')
           print('DRAFT_SAME_TITLE host_positive=2 negative='+str(same_count+file_count)+' compiled_mutants=2 PASS; not Android execution')
+          twin_restart=next((n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='restart_twins'),None)
+          assert twin_restart is not None, 'same-title restart must verify discarded and surviving slots'
+          def twin_restart_contract(node,fault=None):
+              events=[];selected=0;recovered=False
+              expected_files={'first':b'tombstone','second':b'exact draft'}
+              expected_state=({'notes':['first','second'],'revision':[9]},{'image':'exact'})
+              def stop():
+                  events.append('stop')
+                  if fault=='stop':raise RuntimeError('original stop failure')
+                  return {'before':dict(returncode=True if fault=='bool-code' else 0,
+                      stdout='' if fault=='absent' else '123\n',stderr='error' if fault=='stderr' else '')}
+              def reopen():events.append('reopen')
+              def choose(index):
+                  nonlocal selected
+                  selected=index;events.append(('choose',index))
+              def record(name):return lambda *args:events.append((name,)+args)
+              def touch(desc):
+                  nonlocal recovered
+                  events.append(('touch',desc));recovered=True
+              def seek(desc):
+                  events.append(('seek',desc))
+                  if desc=='文字内容':
+                      return {'text':('wrong' if fault=='wrong-recovery' else '  Second note draft  ') if recovered else
+                          ('auto' if fault=='autorestore' else '')}
+                  assert desc in ('note-draft-recover','note-draft-discard')
+                  enabled=selected==2
+                  if fault=='enabled-'+str(selected):enabled=not enabled
+                  return {'enabled':str(enabled).lower()}
+              def drafts():
+                  events.append('drafts');return {} if fault=='files-'+str(selected) else expected_files
+              def state():
+                  events.append('state');return None if fault=='state-'+str(selected) else expected_state
+              scope={'re':re}
+              exec(compile(ast.Module(body=[node],type_ignores=[]),'twin-restart','exec'),scope)
+              receipt=scope['restart_twins'](stop,reopen,choose,record('tap'),record('status'),seek,
+                  touch,record('button'),record('ready'),record('confirm'),drafts,state,
+                  expected_files,expected_state,record('ok'))
+              if fault is None:
+                  assert receipt=={'before':dict(returncode=0,stdout='123\n',stderr='')}
+                  assert events==['stop','reopen',('choose',1),('tap','加入文字'),
+                      ('status','暂无已保存草稿；正文不能为空。'),('seek','文字内容'),
+                      ('seek','note-draft-recover'),('seek','note-draft-discard'),'drafts','state',
+                      ('ok','same_title_restart_discarded'),('button',False),('ready',),('choose',2),
+                      ('tap','加入文字'),('status','发现本机草稿，请明确恢复；当前仍显示正文。'),
+                      ('seek','文字内容'),('seek','note-draft-recover'),('seek','note-draft-discard'),
+                      ('touch','note-draft-recover'),('confirm',),('button',True),
+                      ('status','已恢复到输入框；点击保存才会修改正文。'),('seek','文字内容'),
+                      'drafts','state',('ok','same_title_restart_sibling_recovered')]
+          def twin_restart_suite(node):
+              twin_restart_contract(node)
+              faults=('stop','bool-code','absent','stderr','autorestore','wrong-recovery',
+                  'enabled-1','enabled-2','files-1','files-2','state-1','state-2')
+              for fault in faults:
+                  try:twin_restart_contract(node,fault)
+                  except (AssertionError,RuntimeError):pass
+                  else:raise AssertionError('same-title restart accepted '+fault)
+          twin_restart_suite(twin_restart)
+          mutants=0
+          for index,node in enumerate(twin_restart.body):
+              if not isinstance(node,(ast.Assert,ast.Expr)):continue
+              mutant=copy.deepcopy(twin_restart);del mutant.body[index];ast.fix_missing_locations(mutant)
+              try:twin_restart_suite(mutant)
+              except AssertionError:pass
+              else:raise AssertionError('same-title restart omission survived '+str(index))
+              mutants+=1
+          calls=[n for n in ast.walk(native_fn) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='restart_twins']
+          assert len(calls)==1
+          assert [ast.unparse(n) for n in calls[0].args[1:]]==['reopen_editor','choose_twin','tap','status','seek','touch','button','ready',
+              "lambda: find(text='恢复草稿？')",'drafts','state','discarded','twins','ok']
+          print('DRAFT_TWIN_RESTART host_positive=1 negative=12 compiled_omissions='+str(mutants)+' PASS; not Android execution')
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -430,6 +500,7 @@ jobs:
           LABELS='fixture_text_image cancel_unsaved_readonly explicit_save_readonly restart_no_autorestore recover_cancel_readonly recover_confirm_readonly discard_cancel_readonly discard_confirm_readonly empty_draft_saved empty_recovered_body_rejected commit_exact_one_revision restart_committed'.split()
           LABELS+='new_slot_save_readonly new_slot_restart_saved existing_slot_isolation new_slot_recover_readonly new_slot_commit_append new_slot_cleanup_readonly new_slot_restart_cleaned'.split()
           LABELS+='same_title_fixture same_title_first_saved same_title_second_saved same_title_first_recovered same_title_first_discarded same_title_second_recovered'.split()
+          LABELS+='same_title_restart_discarded same_title_restart_sibling_recovered'.split()
           SCOPE='NATIVE_DRAFT_BUTTONS_ASCII_IMAGE_FORCE_STOP_NOT_LMK_OR_CLEANUP_RACE'
           out=Path('draft-native');out.mkdir(exist_ok=True)
           manifest=json.loads(Path('draft-apk.json').read_text())
@@ -526,6 +597,38 @@ jobs:
               key=next(iter(added))
               assert after[key]
               return key
+          def restart_twins(stop,reopen,choose,tap,status,seek,touch,button,ready,confirm,drafts,state,expected_files,expected_state,ok):
+              receipt=stop()
+              before=receipt['before']
+              assert type(before['returncode']) is int and before['returncode']==0 and before['stderr']==''
+              assert re.fullmatch('[1-9][0-9]*\n?',before['stdout'])
+              reopen()
+              choose(1)
+              tap('加入文字')
+              status('暂无已保存草稿；正文不能为空。')
+              assert seek('文字内容').get('text')==''
+              assert seek('note-draft-recover').get('enabled')=='false'
+              assert seek('note-draft-discard').get('enabled')=='false'
+              assert drafts()==expected_files
+              assert state()==expected_state
+              ok('same_title_restart_discarded')
+              button(False)
+              ready()
+              choose(2)
+              tap('加入文字')
+              status('发现本机草稿，请明确恢复；当前仍显示正文。')
+              assert seek('文字内容').get('text')==''
+              assert seek('note-draft-recover').get('enabled')=='true'
+              assert seek('note-draft-discard').get('enabled')=='true'
+              touch('note-draft-recover')
+              confirm()
+              button(True)
+              status('已恢复到输入框；点击保存才会修改正文。')
+              assert seek('文字内容').get('text')=='  Second note draft  '
+              assert drafts()==expected_files
+              assert state()==expected_state
+              ok('same_title_restart_sibling_recovered')
+              return receipt
           def native(adb):
               prefix=[str(adb),'-s',gate.SERIAL];serial=0
               result['ui_observer']={}
@@ -784,6 +887,12 @@ jobs:
                   assert seek('文字内容').get('text')=='  Second note draft  ' and drafts()==discarded and state()==twins
                   assert command('exec-out','cat',installed[8:],binary=True)==product
                   shot();ok('same_title_second_recovered')
+                  # Kill with the second draft still open; first slot is a tombstone.
+                  result['same_title_restart_stop']=restart_twins(
+                      lambda:stop_verified(adb,gate.SERIAL,gate.PKG),reopen_editor,choose_twin,tap,status,seek,
+                      touch,button,ready,lambda:find(text='恢复草稿？'),drafts,state,discarded,twins,ok)
+                  assert command('exec-out','cat',installed[8:],binary=True)==product
+                  shot()
                   observer.close();result['status']='PASS'
               except Exception:
                   capture_draft_failure(adb,gate.SERIAL,result,out)
@@ -867,11 +976,12 @@ jobs:
           NATIVE_REQUIRED='fixture_text_image cancel_unsaved_readonly explicit_save_readonly restart_no_autorestore recover_cancel_readonly recover_confirm_readonly discard_cancel_readonly discard_confirm_readonly empty_draft_saved empty_recovered_body_rejected commit_exact_one_revision restart_committed'.split()
           NATIVE_REQUIRED+='new_slot_save_readonly new_slot_restart_saved existing_slot_isolation new_slot_recover_readonly new_slot_commit_append new_slot_cleanup_readonly new_slot_restart_cleaned'.split()
           NATIVE_REQUIRED+='same_title_fixture same_title_first_saved same_title_second_saved same_title_first_recovered same_title_first_discarded same_title_second_recovered'.split()
+          NATIVE_REQUIRED+='same_title_restart_discarded same_title_restart_sibling_recovered'.split()
           def validate_native(v,manifest,log,images):
               for key,expected in manifest.items():
                   assert type(v[key]) is type(expected) and v[key]==expected
               assert v['status']=='PASS' and v['scope']=='NATIVE_DRAFT_BUTTONS_ASCII_IMAGE_FORCE_STOP_NOT_LMK_OR_CLEANUP_RACE'
-              assert type(v['checks']) is int and v['checks']==25 and v['labels']==NATIVE_REQUIRED
+              assert type(v['checks']) is int and v['checks']==27 and v['labels']==NATIVE_REQUIRED
               assert v['release_ready'] is False and v['cleanup_failure_race']=='NOT_TESTED'
               assert v['unicode_input']=='BACKEND_ONLY'
               fixture=v['input_fixture']
@@ -882,14 +992,14 @@ jobs:
               assert labels==NATIVE_REQUIRED
               emitted=[line.removeprefix('DRAFT_NATIVE_RESULT ') for line in log.splitlines() if line.startswith('DRAFT_NATIVE_RESULT ')]
               assert len(emitted)==1 and json.loads(emitted[0])==v
-              assert len(v['screens'])==5 and len(images)==5
+              assert len(v['screens'])==6 and len(images)==6
               for i,s in enumerate(v['screens']):
                   assert s['file']=='screen-'+str(i)+'.png'
                   raw=images[s['file']]
                   assert raw.startswith(b'\x89PNG\r\n\x1a\n')
                   assert type(s['bytes']) is int and s['bytes']==len(raw)
                   assert s['sha256']==hashlib.sha256(raw).hexdigest()
-              snapshots=v['snapshots'];assert len(snapshots)==25
+              snapshots=v['snapshots'];assert len(snapshots)==27
               assert all(isinstance(s,str) and re.fullmatch('[0-9a-f]{64}',s) for s in snapshots)
               assert len(set(snapshots[:10]))==len(set(snapshots[10:16]))==len(set(snapshots[16:19]))==1
               assert len({snapshots[0],snapshots[10],snapshots[16]})==3
@@ -898,7 +1008,7 @@ jobs:
               assert same['scope']=='NATIVE_NEW_TEXT_SLOTS_SAME_TITLE_NOT_EXISTING_BLOCKS_OR_RESTART'
               assert same['title']=='DraftNative' and same['note_id']!=same['sibling_id']
               assert all(isinstance(same[k],str) and re.fullmatch('[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}',same[k]) for k in ('note_id','sibling_id'))
-              for key in ('force_stop','final_stop','new_slot_saved_stop','new_slot_cleaned_stop'):
+              for key in ('force_stop','final_stop','new_slot_saved_stop','new_slot_cleaned_stop','same_title_restart_stop'):
                   stop=v[key];assert stop['status']=='PASS' and stop['package']==PACKAGE
                   assert stop['scope']=='COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK'
                   assert type(stop['force_stop_attempts']) is int and stop['force_stop_attempts']==1
@@ -907,7 +1017,7 @@ jobs:
                   assert cmd['args'][-3:]==['am','force-stop',PACKAGE]
                   assert type(last['returncode']) is int and last['returncode']==1 and last['stdout'].strip()==last['stderr'].strip()==''
                   assert last['args'][-2:]==['pidof',PACKAGE]
-                  if key.startswith('new_slot_'):
+                  if key.startswith('new_slot_') or key=='same_title_restart_stop':
                       before=stop['before']
                       assert type(before['returncode']) is int and before['returncode']==0 and before['stderr']==''
                       assert before['args'][-2:]==['pidof',PACKAGE] and re.fullmatch('[1-9][0-9]*\n?',before['stdout'])
@@ -918,11 +1028,12 @@ jobs:
                   before=dict(returncode=0,stdout='123\n',stderr='',args=['pidof',PACKAGE]),
                   command=dict(returncode=0,stdout='',stderr='',args=['am','force-stop',PACKAGE]),
                   probes=[dict(returncode=1,stdout='',stderr='',args=['pidof',PACKAGE])])
-              images={'screen-'+str(i)+'.png':b'\x89PNG\r\n\x1a\n'+bytes([i]) for i in range(5)}
+              images={'screen-'+str(i)+'.png':b'\x89PNG\r\n\x1a\n'+bytes([i]) for i in range(6)}
               v=dict(m,status='PASS',scope='NATIVE_DRAFT_BUTTONS_ASCII_IMAGE_FORCE_STOP_NOT_LMK_OR_CLEANUP_RACE',
-                  checks=25,labels=NATIVE_REQUIRED[:],release_ready=False,cleanup_failure_race='NOT_TESTED',unicode_input='BACKEND_ONLY',
+                  checks=27,labels=NATIVE_REQUIRED[:],release_ready=False,cleanup_failure_race='NOT_TESTED',unicode_input='BACKEND_ONLY',
                   force_stop=stop,final_stop=stop,new_slot_saved_stop=copy.deepcopy(stop),new_slot_cleaned_stop=copy.deepcopy(stop),
-                  snapshots=['d'*64]*10+['e'*64]*6+['a'*64]*3+['b'*64]*6,
+                  same_title_restart_stop=copy.deepcopy(stop),
+                  snapshots=['d'*64]*10+['e'*64]*6+['a'*64]*3+['b'*64]*8,
                   same_title=dict(note_id='12345678-1234-4123-8123-123456789abc',sibling_id='22345678-1234-4123-8123-123456789abc',
                       title='DraftNative',scope='NATIVE_NEW_TEXT_SLOTS_SAME_TITLE_NOT_EXISTING_BLOCKS_OR_RESTART'),
                   input_fixture=dict(scope='DISPOSABLE_EMULATOR_INPUT_NOT_DEFAULT_KEYBOARD_ACCEPTANCE',before='1',after='0'),
@@ -932,28 +1043,31 @@ jobs:
               bad=[]
               for key in v:
                   w=copy.deepcopy(v);del w[key];bad.append(w)
-              for i in range(25):
+              for i in range(27):
                   w=copy.deepcopy(v);del w['labels'][i];bad.append(w)
               for key,value in [('status','FAIL'),('checks',19.0),('checks',17.0),('checks',17),('checks',12),('release_ready',0),('commit','f'*40),('api',26.0),('apk_sha256','f'*64),('unicode_input','PASS')]:
                   w=copy.deepcopy(v);w[key]=value;bad.append(w)
               for key,value in [('checks',25.0),('checks',19)]:
                   w=copy.deepcopy(v);w[key]=value;bad.append(w)
+              for value in (25,27.0,True):
+                  w=copy.deepcopy(v);w['checks']=value;bad.append(w)
               for field in v['same_title']:
                   w=copy.deepcopy(v);del w['same_title'][field];bad.append(w)
                   w=copy.deepcopy(v);w['same_title'][field]='wrong';bad.append(w)
               w=copy.deepcopy(v);w['same_title']['sibling_id']=w['same_title']['note_id'];bad.append(w)
               w=copy.deepcopy(v);w['snapshots'][19:]=[w['snapshots'][16]]*6;bad.append(w)
+              w=copy.deepcopy(v);w['snapshots'][19:]=[w['snapshots'][16]]*8;bad.append(w)
               for key,value in [('scope','DEFAULT_KEYBOARD_PASS'),('before',None),('after','1')]:
                   w=copy.deepcopy(v);w['input_fixture'][key]=value;bad.append(w)
-              for key in ('force_stop','final_stop','new_slot_saved_stop','new_slot_cleaned_stop'):
+              for key in ('force_stop','final_stop','new_slot_saved_stop','new_slot_cleaned_stop','same_title_restart_stop'):
                   for code in (0,255,True):
                       w=copy.deepcopy(v);w[key]['probes'][-1]['returncode']=code;bad.append(w)
-              for key in ('new_slot_saved_stop','new_slot_cleaned_stop'):
+              for key in ('new_slot_saved_stop','new_slot_cleaned_stop','same_title_restart_stop'):
                   for field,value in [('returncode',1),('returncode',True),('stdout',''),('stdout','0\n'),('stderr','error'),('args',['pidof','wrong'])]:
                       w=copy.deepcopy(v);w[key]['before'][field]=value;bad.append(w)
-              for i in range(25):
+              for i in range(27):
                   w=copy.deepcopy(v);w['snapshots'][i]='f'*64;bad.append(w)
-              for i in range(5):
+              for i in range(6):
                   w=copy.deepcopy(v);w['screens'][i]['sha256']='f'*64;bad.append(w)
               for w in bad:
                   text=log(w) if 'labels' in w else log(v)

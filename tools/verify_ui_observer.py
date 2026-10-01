@@ -52,6 +52,7 @@ def decode_frame(line, nonce, seq, expected):
 
 JAVA = r'''
 import android.app.UiAutomation;
+import android.accessibilityservice.AccessibilityServiceInfo;
 import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.Build;
@@ -97,6 +98,17 @@ public final class PocketUiObserver {
   }
   static String bounds(Rect r) {
     return "["+r.left+","+r.top+"]["+r.right+","+r.bottom+"]";
+  }
+  static void configureWindowTracking(UiAutomation ui)throws Exception {
+    // Register window-change tracking once, before READY and before any UI input.
+    // Preserve existing view-ID, event and feedback configuration; no touch exploration.
+    AccessibilityServiceInfo info=ui.getServiceInfo();
+    if(info==null)throw new IOException("missing observer service info");
+    int expected=info.flags|AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
+    info.flags=expected;
+    ui.setServiceInfo(info);
+    AccessibilityServiceInfo actual=ui.getServiceInfo();
+    if(actual==null||actual.flags!=expected)throw new IOException("window tracking configuration mismatch");
   }
   static void clearObservationCache(UiAutomation ui)throws Exception {
     // Invalidate only this shell observer's accessibility cache before its ONE read.
@@ -175,6 +187,7 @@ public final class PocketUiObserver {
       Object service=Class.forName("android.app.UiAutomationConnection").getConstructor().newInstance();
       ui=(UiAutomation)UiAutomation.class.getConstructor(Looper.class,connection).newInstance(thread.getLooper(),service);
       UiAutomation.class.getMethod("connect").invoke(ui);connected=true;
+      configureWindowTracking(ui);
       frame("READY",Integer.toString(Build.VERSION.SDK_INT));
       BufferedReader in=new BufferedReader(new InputStreamReader(System.in,StandardCharsets.UTF_8));
       for(;;) {
@@ -505,6 +518,11 @@ for line in sys.stdin:
 def java_contracts():
     # Android signatures and deterministic doubles; executable Java bridge, NOT SDK/device acceptance.
     stubs={
+      "android/accessibilityservice/AccessibilityServiceInfo.java":"""package android.accessibilityservice;
+        public class AccessibilityServiceInfo {
+          public static final int FLAG_RETRIEVE_INTERACTIVE_WINDOWS=64;
+          public int flags=18,eventTypes=-1,feedbackType=16;public long notificationTimeout=0;
+        }""",
       "android/os/Looper.java":"package android.os; public class Looper {}",
       "android/os/SystemClock.java":"""package android.os; public class SystemClock {
         public static long now=20000;public static int sleeps;
@@ -543,13 +561,33 @@ def java_contracts():
         return java.util.Base64.getEncoder().encodeToString(b);}}""",
       "android/app/UiAutomation.java":"""package android.app;
         import android.os.Looper; import android.view.accessibility.AccessibilityNodeInfo;
+        import android.accessibilityservice.AccessibilityServiceInfo;
         public class UiAutomation {
           static boolean connected=false;static int reads,clears,idles;
+          static int infoReads,infoWrites;static boolean verifiedInfo;
+          static AccessibilityServiceInfo info=new AccessibilityServiceInfo();
           public UiAutomation(Looper l,IUiAutomationConnection c){}
           public void connect(){if(connected)throw new AssertionError("reconnect");connected=true;System.err.println("CONNECT");}
           public void disconnect(){if(!connected)throw new AssertionError("double disconnect");connected=false;System.err.println("DISCONNECT");}
+          public AccessibilityServiceInfo getServiceInfo(){
+            if(!connected||reads!=0||idles!=0)throw new AssertionError("service info outside startup");
+            infoReads++;String f=System.getProperty("fixture","");
+            if(f.equals("info-null")&&infoReads==1||f.equals("info-readback-null")&&infoReads==2)return null;
+            AccessibilityServiceInfo result=new AccessibilityServiceInfo();
+            result.flags=f.equals("info-mismatch")&&infoReads==2?18:info.flags;
+            if(infoReads==2)verifiedInfo=true;
+            return result;
+          }
+          public void setServiceInfo(AccessibilityServiceInfo value){
+            if(!connected||infoReads!=1||infoWrites++!=0||reads!=0)throw new AssertionError("service setup order");
+            if("info-write-failure".equals(System.getProperty("fixture")))throw new IllegalStateException("fixture service failure");
+            if(value.flags!=82||value.eventTypes!=-1||value.feedbackType!=16||value.notificationTimeout!=0)
+              throw new AssertionError("old service properties lost");
+            info=value;
+          }
           public void waitForIdle(long idle,long total)throws Exception {
             if(!connected)throw new AssertionError("disconnected");
+            if(infoWrites!=1||infoReads!=2||!verifiedInfo||info.flags!=82)throw new AssertionError("window tracking setup missing");
             if(android.os.SystemClock.sleeps!=reads+1)throw new AssertionError("fresh request settle missing");
             if(idle!=1000||total!=9000)throw new AssertionError("shared idle budget");
             if("idle".equals(System.getProperty("fixture")))throw new java.util.concurrent.TimeoutException("idle");
@@ -623,6 +661,17 @@ def java_contracts():
             assert decode_frame(lines[3],nonce,3,"BYE")=="closed"
             assert p.stderr.splitlines()==["CONNECT","DISCONNECT"]
         positive();positive(34)
+        def window_config_controls():
+            for api in (26,34):
+                for fixture,reason in (("info-null","missing observer service info"),
+                                       ("info-readback-null","window tracking configuration mismatch"),
+                                       ("info-mismatch","window tracking configuration mismatch"),
+                                       ("info-write-failure","fixture service failure")):
+                    p=run(requests,fixture,api)
+                    assert p.returncode!=0 and reason in p.stderr,(fixture,p.stdout,p.stderr)
+                    assert " READY " not in p.stdout and " OK " not in p.stdout
+                    assert p.stderr.splitlines().count("CONNECT")==p.stderr.splitlines().count("DISCONNECT")==1
+        window_config_controls()
         def cache_geometry_controls():
             for api in (26,34):
                 p=run(requests,"nested",api)
@@ -696,7 +745,19 @@ def java_contracts():
             try:positive();positive(34);cache_geometry_controls()
             except AssertionError:pass
             else:raise AssertionError("compiled cache/geometry mutant survived "+old)
-    print("UI_OBSERVER_JAVA_HOST 2 API sequence positives 2 nested geometry positives 20 negative 14 compiled mutants rejected; ANDROID_DOUBLES_NOT_DEVICE",flush=True)
+        for old,new in [
+            ("configureWindowTracking(ui);",""),
+            ("info.flags|AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS",
+             "AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS"),
+            ("ui.setServiceInfo(info);",""),
+            ('if(actual==null||actual.flags!=expected)throw new IOException("window tracking configuration mismatch");',""),
+        ]:
+            assert JAVA.count(old)==1
+            source.write_text(JAVA.replace(old,new));compile_java(folder,sources)
+            try:positive();positive(34);window_config_controls()
+            except AssertionError:pass
+            else:raise AssertionError("compiled window configuration mutant survived "+old)
+    print("UI_OBSERVER_JAVA_HOST 2 API sequence positives 2 nested geometry positives 28 negative 18 compiled mutants rejected; ANDROID_DOUBLES_NOT_DEVICE",flush=True)
 
 
 if __name__ == "__main__":

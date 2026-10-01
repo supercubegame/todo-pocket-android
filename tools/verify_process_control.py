@@ -634,7 +634,7 @@ def process_snapshot_contract(capture):
             assert i < len(expected), "extra/retried diagnostic command"
             assert args == prefix+expected[i], (name, i, args)
             assert set(kw) == {"stdin", "stdout", "stderr", "timeout"}
-            assert kw["stdin"] is subprocess.DEVNULL and kw["stdout"] is not kw["stderr"]
+            assert kw["stdin"] == subprocess.DEVNULL and kw["stdout"] is not kw["stderr"]
             assert kw["timeout"] == (8 if expected[i] == context else 3)
             calls.append(args)
             code, out, err = answers[i]

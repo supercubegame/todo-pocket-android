@@ -21,6 +21,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/verify_note_drafts.py selftest 2>&1 | tee draft-host.log
+          python3 tools/verify_ui_observer.py selftest 2>&1 | tee -a draft-host.log
           python3 - <<'PY' 2>&1 | tee -a draft-host.log
           from pathlib import Path
           import os, subprocess, textwrap
@@ -330,6 +331,7 @@ jobs:
           sys.path.insert(0,'tools')
           import emulator_gate as gate
           from verify_process_control import stop_verified,capture_crash_logs
+          from verify_ui_observer import Observer
           LABELS='fixture_text_image cancel_unsaved_readonly explicit_save_readonly restart_no_autorestore recover_cancel_readonly recover_confirm_readonly discard_cancel_readonly discard_confirm_readonly empty_draft_saved empty_recovered_body_rejected commit_exact_one_revision restart_committed'.split()
           LABELS+='new_slot_save_readonly existing_slot_isolation new_slot_recover_readonly new_slot_commit_append new_slot_cleanup_readonly'.split()
           SCOPE='NATIVE_DRAFT_BUTTONS_ASCII_IMAGE_FORCE_STOP_NOT_LMK_OR_CLEANUP_RACE'
@@ -397,6 +399,8 @@ jobs:
               return new_id
           def native(adb):
               prefix=[str(adb),'-s',gate.SERIAL];serial=0
+              result['ui_observer']={}
+              observer=Observer(adb,gate.SERIAL,gate.SDK,out,result['ui_observer'])
               def command(*args,binary=False):
                   try:
                       p=subprocess.run(prefix+list(args),stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,
@@ -409,8 +413,7 @@ jobs:
                   return p.stdout
               def shell(*args):return command('shell','-n','-T',*args)
               def nodes():
-                  result['last_ui_dump']={}
-                  raw=read_ui_dump(shell,result['last_ui_dump']);(out/'last-window.xml').write_text(raw)
+                  raw=observer.dump();(out/'last-window.xml').write_text(raw)
                   return list(ET.fromstring(raw).iter('node'))
               def find(**attrs):
                   deadline=time.monotonic()+18;current=[]
@@ -503,6 +506,7 @@ jobs:
                   # Only this fresh emulator is affected and it is destroyed after the test.
                   result['input_fixture']={}
                   configure_literal_input(shell,result['input_fixture'])
+                  observer.start()
                   start();tap('活动');ready()
                   create_category_fixture(tap,fill,button,ready,find)
                   adds=[n for n in nodes() if n.get('content-desc','').startswith('category-add-')];assert adds
@@ -589,11 +593,13 @@ jobs:
                   assert seek('文字内容').get('text')=='' and seek('note-draft-recover').get('enabled')=='false'
                   assert drafts()==cleaned and state()==appended
                   assert command('exec-out','cat',installed[8:],binary=True)==product
-                  shot();ok('new_slot_cleanup_readonly');result['status']='PASS'
+                  shot();ok('new_slot_cleanup_readonly')
+                  observer.close();result['status']='PASS'
               except Exception:
                   capture_draft_failure(adb,gate.SERIAL,result,out)
                   raise
               finally:
+                  observer.close(primary_failed=True)
                   result['checks']=len(result['labels'])
                   if result['status']!='PASS':
                       try:shot()

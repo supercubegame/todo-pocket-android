@@ -209,6 +209,31 @@ jobs:
               else:assert success, 'original native failure swallowed'
               assert events==(['finally'] if success else ['capture','finally'])
           print('DRAFT_FAILURE_DIAGNOSTICS host_cases=3 omission_mutants=3 success_and_failure_order=PASS; diagnostic only, no retry')
+          append_fn=next((n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='validate_appended_text'),None)
+          assert append_fn is not None, 'new-slot UI needs an exact append oracle'
+          import re
+          scope={'copy':copy,'re':re}
+          exec(compile(ast.Module(body=[append_fn],type_ignores=[]),'append-oracle','exec'),scope)
+          before=({'blocks':[(1,'note','old',0,'TEXT','Committed',None,'',0,None),
+              (2,'note','image',1,'IMAGE','', 'asset','caption',0,None)],
+              'revision':[(1,1,7)],'notes':[(1,'note',1,'Title')]},{'asset':'hash'})
+          after=copy.deepcopy(before);newid='12345678-1234-4123-8123-123456789abc'
+          after[0]['blocks'].append((3,'note',newid,2,'TEXT','Appended draft',None,'',0,None))
+          after[0]['revision']=[(1,1,8)]
+          assert scope['validate_appended_text'](before,after,'note')==newid
+          bad=[]
+          for table,rows in after[0].items():
+              for i,row in enumerate(rows):
+                  for j,value in enumerate(row):
+                      w=copy.deepcopy(after);changed=list(w[0][table][i]);changed[j]='wrong';w[0][table][i]=tuple(changed);bad.append(w)
+          w=copy.deepcopy(after);w[1]['asset']='changed';bad.append(w)
+          w=copy.deepcopy(after);w[0]['blocks'].pop();bad.append(w)
+          w=copy.deepcopy(after);w[0]['blocks'].append(w[0]['blocks'][-1]);bad.append(w)
+          for w in bad:
+              try:scope['validate_appended_text'](before,w,'note')
+              except (AssertionError,TypeError,ValueError):pass
+              else:raise AssertionError('invalid append state accepted')
+          print('DRAFT_APPEND_ORACLE host_positive=1 negative='+str(len(bad))+' PASS; SQLite device execution pending')
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -306,6 +331,7 @@ jobs:
           import emulator_gate as gate
           from verify_process_control import stop_verified,capture_crash_logs
           LABELS='fixture_text_image cancel_unsaved_readonly explicit_save_readonly restart_no_autorestore recover_cancel_readonly recover_confirm_readonly discard_cancel_readonly discard_confirm_readonly empty_draft_saved empty_recovered_body_rejected commit_exact_one_revision restart_committed'.split()
+          LABELS+='new_slot_save_readonly existing_slot_isolation new_slot_recover_readonly new_slot_commit_append new_slot_cleanup_readonly'.split()
           SCOPE='NATIVE_DRAFT_BUTTONS_ASCII_IMAGE_FORCE_STOP_NOT_LMK_OR_CLEANUP_RACE'
           out=Path('draft-native');out.mkdir(exist_ok=True)
           manifest=json.loads(Path('draft-apk.json').read_text())
@@ -352,6 +378,23 @@ jobs:
                   receipt['failure_diagnostics_file']='failure-diagnostics.json'
               except Exception as exc:
                   receipt['diagnostic_error']=repr(exc)
+          def validate_appended_text(before,after,note):
+              old,media=before;actual,current_media=after
+              assert old.keys()==actual.keys() and current_media==media
+              ids={r[2] for r in old['blocks']}
+              added=[r for r in actual['blocks'] if r[2] not in ids]
+              assert len(added)==1
+              new_id=added[0][2]
+              assert isinstance(new_id,str) and re.fullmatch('[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}',new_id)
+              templates=[r for r in old['blocks'] if r[1]==note and r[4]=='TEXT']
+              assert len(templates)==1
+              row=list(templates[0]);row[0]=max(r[0] for r in old['blocks'])+1
+              row[2]=new_id;row[3]=len([r for r in old['blocks'] if r[1]==note]);row[5]='Appended draft'
+              expected=copy.deepcopy(old);expected['blocks'].append(tuple(row))
+              assert len(expected['revision'])==1
+              revision=list(expected['revision'][0]);revision[-1]+=1;expected['revision']=[tuple(revision)]
+              assert actual==expected
+              return new_id
           def native(adb):
               prefix=[str(adb),'-s',gate.SERIAL];serial=0
               def command(*args,binary=False):
@@ -521,7 +564,32 @@ jobs:
                   touch('note-edit-'+block);status('暂无已保存草稿；正文不能为空。')
                   assert seek('note-draft-recover').get('enabled')=='false' and state()==after
                   assert command('exec-out','cat',installed[8:],binary=True)==product
-                  shot();ok('restart_committed');result['status']='PASS'
+                  shot();ok('restart_committed')
+                  # Append after the original twelve checks; no new canonical fixture mutation.
+                  button(False);ready();old_drafts=drafts()
+                  tap('加入文字');status('暂无已保存草稿；正文不能为空。')
+                  assert seek('文字内容').get('text')==''
+                  fill('文字内容','  Appended draft  ');touch('note-draft-save');status('草稿已保存，正文未修改。')
+                  new_drafts=drafts();assert len(new_drafts)==len(old_drafts)+1
+                  assert all(new_drafts[k]==v for k,v in old_drafts.items()) and state()==after
+                  ok('new_slot_save_readonly')
+                  button(False);ready();touch('note-edit-'+block);status('暂无已保存草稿；正文不能为空。')
+                  assert seek('文字内容').get('text')=='Committed' and seek('note-draft-recover').get('enabled')=='false'
+                  assert drafts()==new_drafts and state()==after;ok('existing_slot_isolation')
+                  button(False);ready();tap('加入文字');status('发现本机草稿，请明确恢复；当前仍显示正文。')
+                  assert seek('文字内容').get('text')==''
+                  touch('note-draft-recover');find(text='恢复草稿？');button(True);status('已恢复到输入框；点击保存才会修改正文。')
+                  assert seek('文字内容').get('text')=='  Appended draft  ' and drafts()==new_drafts and state()==after
+                  ok('new_slot_recover_readonly')
+                  button(True);ready();appended=state();new_id=validate_appended_text(after,appended,note)
+                  assert seek('note-text-'+new_id).get('text')=='Appended draft'
+                  cleaned=drafts();assert cleaned.keys()==new_drafts.keys() and cleaned!=new_drafts
+                  assert all(cleaned[k]==v for k,v in old_drafts.items());ok('new_slot_commit_append')
+                  tap('加入文字');status('暂无已保存草稿；正文不能为空。')
+                  assert seek('文字内容').get('text')=='' and seek('note-draft-recover').get('enabled')=='false'
+                  assert drafts()==cleaned and state()==appended
+                  assert command('exec-out','cat',installed[8:],binary=True)==product
+                  shot();ok('new_slot_cleanup_readonly');result['status']='PASS'
               except Exception:
                   capture_draft_failure(adb,gate.SERIAL,result,out)
                   raise
@@ -601,11 +669,12 @@ jobs:
           PACKAGE='com.supercubegame.pockettodo.v12.preview'
           SCOPE='ACTUAL_ANDROID_DRAFT_SESSION_SQLITE_FILES_FORCE_STOP_NOT_NATIVE_BUTTONS_OR_LMK'
           NATIVE_REQUIRED='fixture_text_image cancel_unsaved_readonly explicit_save_readonly restart_no_autorestore recover_cancel_readonly recover_confirm_readonly discard_cancel_readonly discard_confirm_readonly empty_draft_saved empty_recovered_body_rejected commit_exact_one_revision restart_committed'.split()
+          NATIVE_REQUIRED+='new_slot_save_readonly existing_slot_isolation new_slot_recover_readonly new_slot_commit_append new_slot_cleanup_readonly'.split()
           def validate_native(v,manifest,log,images):
               for key,expected in manifest.items():
                   assert type(v[key]) is type(expected) and v[key]==expected
               assert v['status']=='PASS' and v['scope']=='NATIVE_DRAFT_BUTTONS_ASCII_IMAGE_FORCE_STOP_NOT_LMK_OR_CLEANUP_RACE'
-              assert type(v['checks']) is int and v['checks']==12 and v['labels']==NATIVE_REQUIRED
+              assert type(v['checks']) is int and v['checks']==17 and v['labels']==NATIVE_REQUIRED
               assert v['release_ready'] is False and v['cleanup_failure_race']=='NOT_TESTED'
               assert v['unicode_input']=='BACKEND_ONLY'
               fixture=v['input_fixture']
@@ -616,16 +685,17 @@ jobs:
               assert labels==NATIVE_REQUIRED
               emitted=[line.removeprefix('DRAFT_NATIVE_RESULT ') for line in log.splitlines() if line.startswith('DRAFT_NATIVE_RESULT ')]
               assert len(emitted)==1 and json.loads(emitted[0])==v
-              assert len(v['screens'])==3 and len(images)==3
+              assert len(v['screens'])==4 and len(images)==4
               for i,s in enumerate(v['screens']):
                   assert s['file']=='screen-'+str(i)+'.png'
                   raw=images[s['file']]
                   assert raw.startswith(b'\x89PNG\r\n\x1a\n')
                   assert type(s['bytes']) is int and s['bytes']==len(raw)
                   assert s['sha256']==hashlib.sha256(raw).hexdigest()
-              snapshots=v['snapshots'];assert len(snapshots)==12
+              snapshots=v['snapshots'];assert len(snapshots)==17
               assert all(isinstance(s,str) and re.fullmatch('[0-9a-f]{64}',s) for s in snapshots)
-              assert len(set(snapshots[:10]))==len(set(snapshots[10:]))==1 and snapshots[0]!=snapshots[-1]
+              assert len(set(snapshots[:10]))==len(set(snapshots[10:15]))==len(set(snapshots[15:]))==1
+              assert len({snapshots[0],snapshots[10],snapshots[15]})==3
               for key in ('force_stop','final_stop'):
                   stop=v[key];assert stop['status']=='PASS' and stop['package']==PACKAGE
                   assert stop['scope']=='COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK'
@@ -641,10 +711,10 @@ jobs:
               stop=dict(status='PASS',package=PACKAGE,scope='COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK',force_stop_attempts=1,
                   command=dict(returncode=0,stdout='',stderr='',args=['am','force-stop',PACKAGE]),
                   probes=[dict(returncode=1,stdout='',stderr='',args=['pidof',PACKAGE])])
-              images={'screen-'+str(i)+'.png':b'\x89PNG\r\n\x1a\n'+bytes([i]) for i in range(3)}
+              images={'screen-'+str(i)+'.png':b'\x89PNG\r\n\x1a\n'+bytes([i]) for i in range(4)}
               v=dict(m,status='PASS',scope='NATIVE_DRAFT_BUTTONS_ASCII_IMAGE_FORCE_STOP_NOT_LMK_OR_CLEANUP_RACE',
-                  checks=12,labels=NATIVE_REQUIRED[:],release_ready=False,cleanup_failure_race='NOT_TESTED',unicode_input='BACKEND_ONLY',
-                  force_stop=stop,final_stop=stop,snapshots=['d'*64]*10+['e'*64]*2,
+                  checks=17,labels=NATIVE_REQUIRED[:],release_ready=False,cleanup_failure_race='NOT_TESTED',unicode_input='BACKEND_ONLY',
+                  force_stop=stop,final_stop=stop,snapshots=['d'*64]*10+['e'*64]*5+['a'*64]*2,
                   input_fixture=dict(scope='DISPOSABLE_EMULATOR_INPUT_NOT_DEFAULT_KEYBOARD_ACCEPTANCE',before='1',after='0'),
                   screens=[dict(file=k,sha256=hashlib.sha256(raw).hexdigest(),bytes=len(raw)) for k,raw in images.items()])
               def log(w):return ''.join('DRAFT_NATIVE_PASS '+s+'\n' for s in w['labels'])+'DRAFT_NATIVE_RESULT '+json.dumps(w)+'\n'
@@ -652,18 +722,18 @@ jobs:
               bad=[]
               for key in v:
                   w=copy.deepcopy(v);del w[key];bad.append(w)
-              for i in range(12):
+              for i in range(17):
                   w=copy.deepcopy(v);del w['labels'][i];bad.append(w)
-              for key,value in [('status','FAIL'),('checks',12.0),('release_ready',0),('commit','f'*40),('api',26.0),('apk_sha256','f'*64),('unicode_input','PASS')]:
+              for key,value in [('status','FAIL'),('checks',17.0),('checks',12),('release_ready',0),('commit','f'*40),('api',26.0),('apk_sha256','f'*64),('unicode_input','PASS')]:
                   w=copy.deepcopy(v);w[key]=value;bad.append(w)
               for key,value in [('scope','DEFAULT_KEYBOARD_PASS'),('before',None),('after','1')]:
                   w=copy.deepcopy(v);w['input_fixture'][key]=value;bad.append(w)
               for key in ('force_stop','final_stop'):
                   for code in (0,255,True):
                       w=copy.deepcopy(v);w[key]['probes'][-1]['returncode']=code;bad.append(w)
-              for i in range(12):
+              for i in range(17):
                   w=copy.deepcopy(v);w['snapshots'][i]='f'*64;bad.append(w)
-              for i in range(3):
+              for i in range(4):
                   w=copy.deepcopy(v);w['screens'][i]['sha256']='f'*64;bad.append(w)
               for w in bad:
                   text=log(w) if 'labels' in w else log(v)

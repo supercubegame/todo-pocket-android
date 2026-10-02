@@ -357,6 +357,253 @@ class ParseTodo{public static void main(String[] args)throws Exception{
     print(json.dumps(dict(status="PASS", positive=6, negative=negatives, parser_mutants=3,
                          scope="HOST_RECEIPT_PARSER_AND_JAVA_SYNTAX_ONLY_NOT_PRODUCT_BEHAVIOR", release_ready=False)))
     report_selftest()
+    ui_host_observer_selftest()
+    ui_product_selftest()
+
+
+# Embedded into the approved existing gate; no new repository file.
+UI_LABELS = """preview_readonly exact_target_details honest_limit cancel_readonly
+duplicate_confirm_disabled delete_once_token_retained stable_undo_identity single_use_undo
+composer_remembered busy_preview stale_row_rejected late_preview_disposed changed_title_rejected
+changed_done_rejected stale_confirm_rejected leave_closes_preview leave_invalidates_undo
+closed_completion_disposes_undo destroyed_completion_disposes_preview finishing_preview_blocked
+delete_failure_no_undo undo_failure_consumed stale_delete_completion_disposed wrong_page_blocked
+invalidation_hides_both_controls invalidated_control_no_write
+undo_hides_before_async_without_closing_token hidden_undo_still_executes
+rerender_hides_old_controls_keeps_token""".split()
+UI_MUTANTS = [
+    ("stale_view", "stale_row_rejected", "&&todoView==expected", ""),
+    ("changed_title", "changed_title_rejected", "!item.title.equals(plan.title())||item.done!=plan.done()", "false"),
+    ("undo_close", "leave_invalidates_undo", "if(token!=null)token.close();", ""),
+    ("cancel_close", "cancel_readonly", "if(pendingTodoDeletion==plan){pendingTodoDeletion=null;plan.close();}", "if(pendingTodoDeletion==plan){pendingTodoDeletion=null;}"),
+    ("hint_visibility", "invalidation_hides_both_controls", "todoUndoHint.setVisibility(View.GONE);", ""),
+    ("button_visibility", "invalidation_hides_both_controls", "todoUndoButton.setVisibility(View.GONE);", ""),
+]
+UI_SCOPE = "ACTUAL_TODAYSCREEN_MEMBERS_MODELED_WIDGETS_DB_SCHEDULER_NOT_ANDROID"
+UI_MARKER = "TODO_UI_MODEL "
+UI_SOURCE = "src/main/java/com/supercubegame/pockettodo/TodayScreen.java"
+
+
+def validate_ui_host(text, source, run, attempt, digest):
+    lines = [line[len(UI_MARKER):] for line in text.splitlines() if line.startswith(UI_MARKER)]
+    assert len(lines) == 1, "Missing or duplicate actual-product UI host evidence"
+    value = json.loads(lines[0])
+    for key, expected in dict(status="PASS", scope=UI_SCOPE, commit=source, run_id=run,
+                              run_attempt=attempt, source_sha256=digest).items():
+        assert type(value[key]) is str and value[key] == expected, "UI host binding "+key
+    assert type(value["checks"]) is int and value["checks"] == 29
+    assert value["labels"] == UI_LABELS and len(set(value["labels"])) == 29
+    assert value["mutants_rejected"] == ["stale_view", "changed_title", "undo_close", "cancel_close", "hint_visibility", "button_visibility"]
+    assert value["missing_members_rejected"] is True and value["release_ready"] is False
+    assert re.fullmatch("[0-9a-f]{64}", value["source_sha256"])
+    return value
+
+
+def ui_host_observer_selftest():
+    good = dict(status="PASS", scope=UI_SCOPE, commit="a"*40, run_id="123", run_attempt="1",
+                source_sha256="b"*64, checks=29, labels=UI_LABELS[:],
+                mutants_rejected=["stale_view", "changed_title", "undo_close", "cancel_close", "hint_visibility", "button_visibility"],
+                missing_members_rejected=True, release_ready=False)
+    def log(value):
+        return UI_MARKER+json.dumps(value)+"\n"
+    args = ("a"*40, "123", "1", "b"*64)
+    assert validate_ui_host(log(good), *args) == good
+    bad = ["", log(good)+log(good)]
+    for key in good:
+        value = copy.deepcopy(good);del value[key];bad.append(log(value))
+    for key in ("status", "scope", "commit", "run_id", "run_attempt", "source_sha256"):
+        value = copy.deepcopy(good);value[key] = "wrong";bad.append(log(value))
+    for n in (0, 28, 30, True, 29.0):
+        value = copy.deepcopy(good);value["checks"] = n;bad.append(log(value))
+    for label in UI_LABELS:
+        value = copy.deepcopy(good);value["labels"].remove(label);bad.append(log(value))
+    for mutant in good["mutants_rejected"]:
+        value = copy.deepcopy(good);value["mutants_rejected"].remove(mutant);bad.append(log(value))
+    for key in ("missing_members_rejected", "release_ready"):
+        value = copy.deepcopy(good);value[key] = not value[key];bad.append(log(value))
+    value = copy.deepcopy(good);value["labels"].reverse();bad.append(log(value))
+    for text in bad:
+        try:
+            validate_ui_host(text, *args)
+        except (AssertionError, KeyError, TypeError, ValueError):
+            pass
+        else:
+            raise AssertionError("Incomplete UI host evidence accepted")
+    # Deliberately remove each guard, then use the same negative witness.
+    validator = inspect.getsource(validate_ui_host)
+    witnesses = [
+        ('assert len(lines) == 1, "Missing or duplicate actual-product UI host evidence"', 'assert True', log(good)+log(good)),
+        ('assert type(value["checks"]) is int and value["checks"] == 29', 'assert True', log(dict(good, checks=True))),
+        ('assert value["labels"] == UI_LABELS and len(set(value["labels"])) == 29', 'assert True', log(dict(good, labels=UI_LABELS[:-1]))),
+    ]
+    for old, new, witness in witnesses:
+        assert validator.count(old) == 1
+        namespace = dict(globals())
+        exec(compile(validator.replace(old, new, 1), "<ui-host-validator-mutant>", "exec"), namespace)
+        namespace["validate_ui_host"](witness, *args)
+    print("TODO_UI_HOST_OBSERVER "+json.dumps(dict(positive=1, negative=len(bad), validator_mutants=3,
+                                                scope="HOST_RECEIPT_CONTROLS_NOT_ANDROID")))
+
+
+def ui_product_selftest():
+    product = ROOT/UI_SOURCE
+    original = product.read_bytes()
+    java = shutil.which("java") or "java"
+    with tempfile.TemporaryDirectory(prefix="todo-ui-product-") as tmp:
+        folder = Path(tmp)
+        (folder/"TodayScreen.java").write_bytes(original)
+        (folder/"ExtractUi.java").write_text(UI_EXTRACTOR, encoding="utf-8")
+        extracted = folder/"members.txt"
+        p = subprocess.run([java, str(folder/"ExtractUi.java"), str(folder/"TodayScreen.java"), str(extracted)],
+                           capture_output=True, text=True, timeout=30)
+        assert p.returncode == 0, "Actual product AST extraction failed\n"+p.stdout+p.stderr
+        fragment = extracted.read_text(encoding="utf-8")
+        def run_model(code):
+            path = folder/"UiModel.java"
+            path.write_text(UI_MODEL_PREFIX+code+UI_MODEL_SUFFIX, encoding="utf-8")
+            return subprocess.run([java, str(path)], capture_output=True, text=True, timeout=30)
+        missing = run_model("")
+        assert missing.returncode != 0 and "cannot find symbol" in missing.stderr
+        p = run_model(fragment)
+        assert p.returncode == 0, p.stdout+p.stderr
+        labels = [line.removeprefix("UI_PASS ") for line in p.stdout.splitlines() if line.startswith("UI_PASS ")]
+        assert labels == UI_LABELS and p.stdout.splitlines()[-1] == "UI_CHECKS 29 PASS MODEL_NOT_ANDROID"
+        print(p.stdout, end="")
+        rejected = []
+        for name, label, old, new in UI_MUTANTS:
+            assert fragment.count(old) == 1, "UI mutant anchor "+name
+            p = run_model(fragment.replace(old, new, 1))
+            assert p.returncode != 0 and "AssertionError: "+label in p.stderr, (name, p.stdout, p.stderr)
+            # Every compiled mutant still passes the initial normal preview witness.
+            assert "UI_PASS preview_readonly\n" in p.stdout, "Mutant failed before behavioral witness "+name
+            rejected.append(name)
+        assert product.read_bytes() == original, "Host model changed product source"
+    value = dict(status="PASS", scope=UI_SCOPE, commit=os.environ.get("GITHUB_SHA", "LOCAL"),
+                 run_id=os.environ.get("GITHUB_RUN_ID", "LOCAL"), run_attempt=os.environ.get("GITHUB_RUN_ATTEMPT", "LOCAL"),
+                 source_sha256=hashlib.sha256(original).hexdigest(), checks=len(labels), labels=labels,
+                 mutants_rejected=rejected, missing_members_rejected=True, release_ready=False)
+    print(UI_MARKER+json.dumps(value, ensure_ascii=False), flush=True)
+
+
+UI_EXTRACTOR = r'''
+import javax.tools.*;
+import com.sun.source.tree.*;
+import com.sun.source.util.*;
+import java.nio.file.*;
+import java.util.*;
+public class ExtractUi {
+ public static void main(String[] args)throws Exception{
+  JavaCompiler compiler=ToolProvider.getSystemJavaCompiler();
+  DiagnosticCollector<JavaFileObject> errors=new DiagnosticCollector<>();
+  try(StandardJavaFileManager fm=compiler.getStandardFileManager(errors,null,null)){
+   String source=Files.readString(Path.of(args[0]));
+   JavacTask task=(JavacTask)compiler.getTask(null,fm,errors,List.of("-proc:none"),null,fm.getJavaFileObjects(args[0]));
+   CompilationUnitTree unit=task.parse().iterator().next();
+   for(Diagnostic<?> d:errors.getDiagnostics())if(d.getKind()==Diagnostic.Kind.ERROR)throw new AssertionError(d);
+   SourcePositions positions=Trees.instance(task).getSourcePositions();
+   Set<String> required=new LinkedHashSet<>(List.of("pendingTodoDeletion","todoUndo","todoUndoHint","todoUndoButton","todoDialog","todoView","todoViewCurrent","clearTodoUndo","clearTodoUndoControls","clearTodoPreview","leaveTodoSession","previewTodoDeletion","showTodoDeletion","renderTodoUndo"));
+   Set<String> seen=new HashSet<>();StringBuilder out=new StringBuilder();
+   for(Tree type:unit.getTypeDecls())if(type instanceof ClassTree&&((ClassTree)type).getSimpleName().contentEquals("TodayScreen"))
+    for(Tree member:((ClassTree)type).getMembers()){
+     String name=member instanceof MethodTree?((MethodTree)member).getName().toString():member instanceof VariableTree?((VariableTree)member).getName().toString():"";
+     if(required.contains(name)){
+      if(!seen.add(name))throw new AssertionError("Duplicate product member "+name);
+      out.append(source.substring((int)positions.getStartPosition(unit,member),(int)positions.getEndPosition(unit,member))).append('\n');
+     }
+    }
+   if(!seen.equals(required))throw new AssertionError("Missing product members "+required+" observed "+seen);
+   Files.writeString(Path.of(args[1]),out);
+  }
+ }
+}
+'''
+UI_MODEL_PREFIX = r'''
+import java.util.*;
+import java.util.concurrent.Callable;
+import java.util.function.Consumer;
+public class UiModel {
+ static class View {static final int GONE=8;Consumer<View> click;String description;boolean enabled=true;int visibility=0;void setVisibility(int v){visibility=v;}void setContentDescription(String s){description=s;}void setMinHeight(int v){}void setEnabled(boolean v){enabled=v;}void setOnClickListener(Consumer<View> c){click=c;}void tap(){if(enabled&&visibility!=GONE&&click!=null)click.accept(this);}}
+ static class TextView extends View {String text;TextView(String s){text=s;}}
+ static class Button extends TextView {Button(String s){super(s);}}
+ static class LinearLayout extends View {List<View> children=new ArrayList<>();void addView(View v){children.add(v);}void addView(View v,LayoutParams p){addView(v);}void setPadding(int a,int b,int c,int d){}static class LayoutParams{LayoutParams(int a,int b){}}}
+ static class ScrollView extends LinearLayout {ScrollView(Activity a){}}
+ static class Activity {boolean destroyed,finishing;boolean isDestroyed(){return destroyed;}boolean isFinishing(){return finishing;}}
+ static class AlertDialog {
+  static final int BUTTON_POSITIVE=1,BUTTON_NEGATIVE=-1;static AlertDialog last;
+  Button pos=new Button(""),neg=new Button("");View body;Consumer<Object> show,dismiss;boolean showing,cancelable=true;
+  AlertDialog(){neg.setOnClickListener(v->dismiss());}
+  void setOnDismissListener(Consumer<Object> c){dismiss=c;}void setOnShowListener(Consumer<Object> c){show=c;}void show(){last=this;showing=true;if(show!=null)show.accept(this);}
+  void dismiss(){if(!showing)return;showing=false;if(dismiss!=null)dismiss.accept(this);}
+  Button getButton(int n){return n==1?pos:neg;}void setCancelable(boolean b){cancelable=b;}
+  static class Builder{AlertDialog d=new AlertDialog();Builder(Activity a){}Builder setTitle(String s){return this;}Builder setView(View v){d.body=v;return this;}Builder setNegativeButton(String s,Object v){d.neg.text=s;return this;}Builder setPositiveButton(String s,Object v){d.pos.text=s;return this;}AlertDialog create(){return d;}}
+ }
+ static class AppDatabase {
+  static class TodoDeletionPlan {String id,title;boolean done,closed;TodoDeletionPlan(String i,String t,boolean d){id=i;title=t;done=d;}String todoId(){return id;}String title(){return title;}boolean done(){return done;}void close(){closed=true;}}
+  static class TodoDeletionUndo {String id,title;boolean closed;TodoDeletionUndo(TodoDeletionPlan p){id=p.id;title=p.title;}String todoId(){return id;}String title(){return title;}void close(){closed=true;}}
+  int prepares,deletes,undos;boolean failDelete,failUndo;String title="same";boolean done=true;TodoDeletionPlan plan;TodoDeletionUndo token;
+  TodoDeletionPlan prepareTodoDeletion(String id){prepares++;return plan=new TodoDeletionPlan(id,title,done);}
+  TodoDeletionUndo confirmTodoDeletion(TodoDeletionPlan p){if(p.closed)throw new IllegalStateException();p.close();if(failDelete)throw new IllegalStateException();deletes++;return token=new TodoDeletionUndo(p);}
+  void undoTodoDeletion(TodoDeletionUndo t){if(t.closed)throw new IllegalStateException();t.close();if(failUndo)throw new IllegalStateException();undos++;}
+ }
+ static class TodoRow {String id,title;boolean done;TodoRow(String i){id=i;title="same";done=true;}}
+ Activity activity=new Activity();AppDatabase db=new AppDatabase();boolean closed,busy;int page,loads,remembered;String notice="";
+ static final int INK=1,ERROR=2,MUTED=3;
+ LinearLayout column(){return new LinearLayout();}TextView text(String v,int s,int c){return new TextView(v);}int dp(int v){return v;}
+ Button button(String v,Runnable action){Button b=new Button(v);b.setOnClickListener(w->{if(!busy)action.run();});return b;}
+ void message(String v,boolean b){notice=v;}void rememberDraft(){remembered++;}void loadTodos(){loads++;todoView=new Object();}
+ Runnable pending;
+ <T> void work(Callable<T> action,Consumer<T> success,Runnable failure){work(action,success,failure,ignored->{});}
+ <T> void work(Callable<T> action,Consumer<T> success,Runnable failure,Consumer<T> abandoned){
+  if(closed||busy)return;busy=true;
+  pending=()->{try{T result=action.call();if(closed||activity.isDestroyed()){abandoned.accept(result);return;}busy=false;success.accept(result);}catch(Exception e){busy=false;if(failure!=null)failure.run();}};
+ }
+ void finish(){Runnable r=pending;pending=null;if(r==null)throw new AssertionError("missing queued action");r.run();}
+ void preview(){previewTodoDeletion(new TodoRow("second-id"),todoView);}
+ void open(){preview();finish();}
+ void confirm(){AlertDialog.last.pos.tap();}
+ Button undoButton(){LinearLayout b=column();renderTodoUndo(b);return (Button)b.children.get(1);}
+ static int checks;static void ok(boolean value,String name){if(!value)throw new AssertionError(name);checks++;System.out.println("UI_PASS "+name);}
+'''
+UI_MODEL_SUFFIX = r'''
+ public static void main(String[] args){
+  UiModel m=new UiModel();m.open();ok(m.db.deletes==0&&m.pendingTodoDeletion==m.db.plan,"preview_readonly");
+  ScrollView scroll=(ScrollView)AlertDialog.last.body;LinearLayout details=(LinearLayout)scroll.children.get(0);
+  ok(((TextView)details.children.get(0)).text.equals("same\n状态：已完成\nID：second-id"),"exact_target_details");
+  ok(((TextView)details.children.get(1)).text.contains("重启后不可撤销"),"honest_limit");
+  AlertDialog.last.neg.tap();ok(m.db.plan.closed&&m.pendingTodoDeletion==null&&m.db.deletes==0,"cancel_readonly");
+  m=new UiModel();m.open();AlertDialog d=AlertDialog.last;m.confirm();m.confirm();ok(m.busy&&!d.cancelable&&!d.pos.enabled&&!d.neg.enabled,"duplicate_confirm_disabled");m.finish();
+  ok(m.db.deletes==1&&m.todoUndo==m.db.token&&!d.showing,"delete_once_token_retained");
+  Button u=m.undoButton();ok(u.description.equals("todo-undo-second-id"),"stable_undo_identity");u.tap();u.tap();m.finish();
+  ok(m.db.undos==1&&m.todoUndo==null&&m.db.token.closed,"single_use_undo");
+  ok(m.remembered==2,"composer_remembered");
+  m=new UiModel();m.busy=true;m.preview();ok(m.pending==null,"busy_preview");
+  m=new UiModel();Object old=m.todoView;m.todoView=new Object();m.previewTodoDeletion(new TodoRow("second-id"),old);ok(m.pending==null,"stale_row_rejected");
+  m=new UiModel();m.preview();m.todoView=new Object();m.finish();ok(m.db.plan.closed&&m.pendingTodoDeletion==null,"late_preview_disposed");
+  m=new UiModel();m.db.title="changed";m.open();ok(m.db.plan.closed&&m.pendingTodoDeletion==null&&m.loads==1,"changed_title_rejected");
+  m=new UiModel();m.db.done=false;m.open();ok(m.db.plan.closed&&m.pendingTodoDeletion==null,"changed_done_rejected");
+  m=new UiModel();m.open();m.todoView=new Object();m.confirm();ok(m.pending==null&&m.db.deletes==0,"stale_confirm_rejected");
+  m=new UiModel();m.open();m.leaveTodoSession();ok(m.db.plan.closed&&m.pendingTodoDeletion==null&&!AlertDialog.last.showing,"leave_closes_preview");
+  m=new UiModel();m.open();m.confirm();m.finish();u=m.undoButton();m.leaveTodoSession();u.tap();ok(m.pending==null&&m.todoUndo==null&&m.db.token.closed,"leave_invalidates_undo");
+  m=new UiModel();m.open();m.confirm();m.closed=true;m.finish();ok(m.db.token.closed&&m.todoUndo==null,"closed_completion_disposes_undo");
+  m=new UiModel();m.preview();m.activity.destroyed=true;m.finish();ok(m.db.plan.closed,"destroyed_completion_disposes_preview");
+  m=new UiModel();m.activity.finishing=true;m.preview();ok(m.pending==null,"finishing_preview_blocked");
+  m=new UiModel();m.open();m.db.failDelete=true;m.confirm();m.finish();ok(m.todoUndo==null&&m.db.deletes==0&&!AlertDialog.last.showing&&m.notice.contains("删除未完成"),"delete_failure_no_undo");
+  m=new UiModel();m.open();m.confirm();m.finish();m.db.failUndo=true;u=m.undoButton();u.tap();m.finish();ok(m.todoUndo==null&&m.db.undos==0&&m.notice.contains("无法撤销"),"undo_failure_consumed");
+  m=new UiModel();m.open();m.confirm();m.todoView=new Object();m.finish();ok(m.db.token.closed&&m.todoUndo==null,"stale_delete_completion_disposed");
+  m=new UiModel();m.page=1;m.preview();ok(m.pending==null,"wrong_page_blocked");
+  m=new UiModel();m.open();m.confirm();m.finish();LinearLayout body=m.column();m.renderTodoUndo(body);
+  TextView hint=(TextView)body.children.get(0);u=(Button)body.children.get(1);m.clearTodoUndo();
+  ok(hint.visibility==View.GONE&&u.visibility==View.GONE&&m.todoUndo==null&&m.db.token.closed,"invalidation_hides_both_controls");
+  m.clearTodoUndo();u.tap();ok(m.pending==null&&m.db.undos==0,"invalidated_control_no_write");
+  m=new UiModel();m.open();m.confirm();m.finish();body=m.column();m.renderTodoUndo(body);hint=(TextView)body.children.get(0);u=(Button)body.children.get(1);u.tap();
+  ok(hint.visibility==View.GONE&&u.visibility==View.GONE&&m.busy&&!m.db.token.closed,"undo_hides_before_async_without_closing_token");
+  m.finish();ok(m.db.undos==1&&m.db.token.closed,"hidden_undo_still_executes");
+  m=new UiModel();m.open();m.confirm();m.finish();body=m.column();m.renderTodoUndo(body);hint=(TextView)body.children.get(0);u=(Button)body.children.get(1);m.renderTodoUndo(m.column());
+  ok(hint.visibility==View.GONE&&u.visibility==View.GONE&&!m.db.token.closed,"rerender_hides_old_controls_keeps_token");
+  System.out.println("UI_CHECKS "+checks+" PASS MODEL_NOT_ANDROID");
+ }
+}
+'''
 
 
 def android():
@@ -557,6 +804,12 @@ def report():
     source, run, attempt = (os.environ[k] for k in ("GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT"))
     needs = json.loads(os.environ["NEEDS_JSON"])
     passed = all(needs.get(k, {}).get("result") == "success" for k in ("todo_host", "todo_device"))
+    host = {"status": "FAIL"}
+    try:
+        log = (ROOT/"collected-todos/todo-host/todo-host.log").read_text(encoding="utf-8")
+        host = validate_ui_host(log, source, run, attempt, hashlib.sha256((ROOT/UI_SOURCE).read_bytes()).hexdigest())
+    except (OSError, ValueError, AssertionError, KeyError, TypeError) as e:
+        passed = False;host["error"] = repr(e)
     devices = {}
     for api in (26, 34):
         folder = ROOT/"collected-todos"/("todo-device-api-"+str(api))
@@ -579,7 +832,7 @@ def report():
                 row["diagnostics"][name] = dict(error=repr(e))
     value = dict(status="PASS" if passed else "FAIL", scope="TODO_BACKEND_GATE_ONLY_NOT_FEATURE_ACCEPTANCE",
                  commit=source, run_id=run, run_attempt=attempt, devices=devices, parents=needs,
-                 native_ui="NOT_IMPLEMENTED", release_ready=False, durable_upgrade_ready=False)
+                 native_ui="NOT_IMPLEMENTED", ui_host_model=host, release_ready=False, durable_upgrade_ready=False)
     data = (json.dumps(value, ensure_ascii=False, indent=2)+"\n").encode()
     (ROOT/"todo-report.json").write_bytes(data)
     endpoint = "https://api.github.com/repos/"+os.environ["GITHUB_REPOSITORY"]+"/"

@@ -31,12 +31,12 @@ jobs:
           import verify_todo_management as backend
           LABELS={
            "seed":"fresh_ui_database ui_created_same_title_completed exact_confirmation_identity explicit_undo_limit preview_all_state_readonly cancel_all_state_readonly cancel_preserves_composer delete_exact_all_tables_media delete_preserves_composer undo_exact_identity_done_position_rowid undo_single_use_and_composer second_delete_exact navigation_invalidates_undo_readonly deleted_restart_checkpoint".split(),
-           "deleted":"deleted_restart_state restart_has_no_undo second_identity_delete_undo undone_restart_checkpoint".split(),
+           "deleted":"deleted_restart_state restart_has_no_undo second_identity_delete_undo edit_cancel_fixture_created edit_open_invalidates_undo_controls edit_cancel_readonly edit_cancel_preserves_composer edit_cancel_stale_undo_readonly undone_restart_checkpoint".split(),
            "undone":"undone_restart_state undone_restart_no_replay".split(),
           }
           SCOPE="ACTUAL_NATIVE_WIDGET_CALLBACKS_SQLITE_NOT_PHYSICAL_TOUCH_KEYBOARD_OR_LMK"
           # The emission list and acceptance list are deliberately independent.
-          ACCEPTED="fresh_ui_database ui_created_same_title_completed exact_confirmation_identity explicit_undo_limit preview_all_state_readonly cancel_all_state_readonly cancel_preserves_composer delete_exact_all_tables_media delete_preserves_composer undo_exact_identity_done_position_rowid undo_single_use_and_composer second_delete_exact navigation_invalidates_undo_readonly deleted_restart_checkpoint deleted_restart_state restart_has_no_undo second_identity_delete_undo undone_restart_checkpoint undone_restart_state undone_restart_no_replay".split()
+          ACCEPTED="fresh_ui_database ui_created_same_title_completed exact_confirmation_identity explicit_undo_limit preview_all_state_readonly cancel_all_state_readonly cancel_preserves_composer delete_exact_all_tables_media delete_preserves_composer undo_exact_identity_done_position_rowid undo_single_use_and_composer second_delete_exact navigation_invalidates_undo_readonly deleted_restart_checkpoint deleted_restart_state restart_has_no_undo second_identity_delete_undo edit_cancel_fixture_created edit_open_invalidates_undo_controls edit_cancel_readonly edit_cancel_preserves_composer edit_cancel_stale_undo_readonly undone_restart_checkpoint undone_restart_state undone_restart_no_replay".split()
           JAVA = r'''
           package ci.todos;
           import android.app.*;
@@ -46,6 +46,7 @@ jobs:
           import android.database.sqlite.*;
           import android.graphics.Rect;
           import android.view.*;
+          import android.view.accessibility.AccessibilityNodeInfo;
           import android.widget.*;
           import com.supercubegame.pockettodo.AppDatabase;
           import java.lang.reflect.*;
@@ -131,9 +132,9 @@ jobs:
              }finally{sql.endTransaction();}
             }
            }
-           static Map<String,List<List<String>>> expected(Map<String,List<List<String>>> original,String omit,int delta){
+           static Map<String,List<List<String>>> expected(Map<String,List<List<String>>> before,String omit,int delta){
             Map<String,List<List<String>>> out=new TreeMap<>();
-            for(Map.Entry<String,List<List<String>>> e:original.entrySet()){
+            for(Map.Entry<String,List<List<String>>> e:before.entrySet()){
              List<List<String>> rows=new ArrayList<>();for(List<String> r:e.getValue())rows.add(new ArrayList<>(r));out.put(e.getKey(),rows);
             }
             if(omit!=null){
@@ -154,6 +155,59 @@ jobs:
            String idAt(Map<String,List<List<String>>> s,int index){List<List<String>> r=s.get("todos");return r.get(index+1).get(r.get(0).indexOf("id")).substring(2);}
            void save(String name,String value)throws Exception{Files.write(folder.resolve(name),value.getBytes("UTF-8"),StandardOpenOption.CREATE_NEW);}
            String read(String name)throws Exception{return new String(Files.readAllBytes(folder.resolve(name)),"UTF-8");}
+           static void hiddenUndo(View hint,View button,Object token){
+            need(hint.getVisibility()==View.GONE,"undo hint hidden");
+            need(button.getVisibility()==View.GONE,"undo button hidden");
+            need(token==null,"undo token invalidated");
+           }
+           void nodes(AccessibilityNodeInfo node,String value,boolean description,List<AccessibilityNodeInfo> out){
+            CharSequence actual=description?node.getContentDescription():node.getText();
+            if(value.contentEquals(actual==null?"":actual))out.add(node);
+            for(int i=0;i<node.getChildCount();i++){AccessibilityNodeInfo child=node.getChild(i);if(child!=null)nodes(child,value,description,out);}
+           }
+           AccessibilityNodeInfo editWindow(boolean present)throws Exception{
+            long deadline=SystemClock.elapsedRealtime()+10000;
+            while(true){
+             AccessibilityNodeInfo window=getUiAutomation().getRootInActiveWindow();
+             if(window!=null&&getTargetContext().getPackageName().contentEquals(window.getPackageName()==null?"":window.getPackageName())){
+              List<AccessibilityNodeInfo> found=new ArrayList<>();nodes(window,"编辑待办输入",true,found);
+              if(present&&found.size()==1||!present&&found.isEmpty())return window;
+             }
+             need(SystemClock.elapsedRealtime()<deadline,"editor accessibility window deadline");SystemClock.sleep(50);
+            }
+           }
+           void editCancel(String first)throws Exception{
+            Map<String,List<List<String>>> initial=state();add("Edit cancellation victim");
+            Map<String,List<List<String>>> withVictim=state();String victim=null;
+            Set<String> old=new HashSet<>();for(int i=0;i<initial.get("todos").size()-1;i++)old.add(idAt(initial,i));
+            for(int i=0;i<withVictim.get("todos").size()-1;i++){String id=idAt(withVictim,i);if(!old.contains(id)){need(victim==null,"one added victim");victim=id;}}
+            need(victim!=null,"new victim identity");input("  cancel keeps composer  ");remove(victim);confirm();
+            Map<String,List<List<String>>> deleted=state();Map<String,String> assets=media();
+            pass(deleted.equals(expected(withVictim,victim,1)),"edit_cancel_fixture_created");
+            final View[] saved=new View[2];final Object[] rendered=new Object[1];
+            ui(()->{saved[0]=unique(root(),"todo-undo-notice",true);saved[1]=unique(root(),"撤销删除",false);
+             need(saved[0].isShown()&&saved[1].isShown()&&field(screen,"todoUndo")!=null,"live undo before edit");
+             rendered[0]=field(screen,"todoView");});
+            click(root(),"edit-"+first,true);
+            AccessibilityNodeInfo window=editWindow(true);
+            List<AccessibilityNodeInfo> inputs=new ArrayList<>();nodes(window,"编辑待办输入",true,inputs);
+            need(inputs.size()==1&&"Same native todo".contentEquals(inputs.get(0).getText()),"exact edit initial title");
+            ui(()->hiddenUndo(saved[0],saved[1],field(screen,"todoUndo")));
+            pass(deleted.equals(state())&&assets.equals(media()),"edit_open_invalidates_undo_controls");
+            Bundle text=new Bundle();text.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,"Do not save this edit");
+            need(inputs.get(0).performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,text),"edit text action");
+            window=editWindow(true);inputs.clear();nodes(window,"编辑待办输入",true,inputs);
+            need(inputs.size()==1&&"Do not save this edit".contentEquals(inputs.get(0).getText()),"edit text readback");
+            List<AccessibilityNodeInfo> cancel=new ArrayList<>();nodes(window,"取消",false,cancel);
+            need(cancel.size()==1&&cancel.get(0).isEnabled()&&cancel.get(0).isVisibleToUser(),"unique visible editor cancel");
+            need(cancel.get(0).performAction(AccessibilityNodeInfo.ACTION_CLICK),"editor cancel action");editWindow(false);ready();
+            ui(()->{need(field(screen,"todoView")==rendered[0],"cancel without list redraw");hiddenUndo(saved[0],saved[1],field(screen,"todoUndo"));});
+            pass(deleted.equals(state())&&assets.equals(media()),"edit_cancel_readonly");
+            pass(text(root(),"新待办输入").equals("  cancel keeps composer  "),"edit_cancel_preserves_composer");
+            // Deliberately deliver a stale callback once; hidden views must not replay undo.
+            ui(()->saved[1].performClick());ready();
+            pass(deleted.equals(state())&&assets.equals(media()),"edit_cancel_stale_undo_readonly");
+           }
            void seed()throws Exception{
             need(!getTargetContext().getDatabasePath("pocket-v12.db").exists(),"no SQL-seeded live UI database");
             need(!Files.exists(folder),"fresh native receipt directory");Files.createDirectory(folder);
@@ -190,6 +244,7 @@ jobs:
             noUndo();pass(true,"restart_has_no_undo");
             Map<String,List<List<String>>> before=state();String first=read("first-id");remove(first);confirm();click(root(),"todo-undo-"+first,true);
             pass(expected(before,null,2).equals(state())&&read("media").equals(media().toString()),"second_identity_delete_undo");
+            editCancel(first);
             save("undone-state",state().toString());pass(true,"undone_restart_checkpoint");
            }
            void undone()throws Exception{
@@ -227,7 +282,7 @@ jobs:
               for k in ("apk_sha256","certificate"):
                   assert re.fullmatch("[0-9a-f]{64}",v[k]) and v[k]==m[k]
               assert type(v["apk_bytes"]) is int and type(m["apk_bytes"]) is int and 0<v["apk_bytes"]==m["apk_bytes"]
-              assert type(v["checks"]) is int and v["checks"]==20 and v["labels"]==ACCEPTED
+              assert type(v["checks"]) is int and v["checks"]==25 and v["labels"]==ACCEPTED
               assert v["release_ready"] is False and v["cross_restart_undo"]=="NOT_SUPPORTED"
               assert v["native_ui"]=="WIDGET_CALLBACKS_NOT_PHYSICAL_TOUCH"
               assert v["default_test_restored"] is True and v["diagnostic_rejected"] is True
@@ -260,7 +315,7 @@ jobs:
               stop=dict(status="PASS",package=backend.PACKAGE,scope="COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",force_stop_attempts=1,
                         command=dict(args=["am","force-stop",backend.PACKAGE],returncode=0,stdout="",stderr=""),
                         probes=[dict(args=["pidof",backend.PACKAGE],returncode=1,stdout="",stderr="")])
-              v=dict(m,status="PASS",scope=SCOPE,checks=20,labels=ACCEPTED[:],release_ready=False,cross_restart_undo="NOT_SUPPORTED",
+              v=dict(m,status="PASS",scope=SCOPE,checks=25,labels=ACCEPTED[:],release_ready=False,cross_restart_undo="NOT_SUPPORTED",
                      native_ui="WIDGET_CALLBACKS_NOT_PHYSICAL_TOUCH",default_test_restored=True,diagnostic_rejected=True,
                      product_readback="EXACT_BEFORE_AND_AFTER",stops=[copy.deepcopy(stop),copy.deepcopy(stop)])
               logs={"diagnostic":"java.lang.AssertionError: todo_diagnostic_sentinel\nTODO_FAILED\nINSTRUMENTATION_CODE: 0"}
@@ -341,7 +396,7 @@ jobs:
                       b=copy.deepcopy(v);del b[key];bad.append((b,m,l))
                   for key in m:
                       b=dict(m);del b[key];bad.append((v,b,l))
-                  for key,value in (("checks",20.0),("checks",True),("api",float(api)),("status","FAIL"),("commit","d"*40),
+                  for key,value in (("checks",25.0),("checks",True),("api",float(api)),("status","FAIL"),("commit","d"*40),
                                     ("run_id","124"),("run_attempt","2"),("apk_bytes",True),("apk_sha256","d"*64),
                                     ("certificate","d"*64),("native_ui","PASS"),("release_ready",0),("default_test_restored",1),
                                     ("diagnostic_rejected",1),("command_failure",{}),("error","sentinel")):
@@ -361,7 +416,7 @@ jobs:
               # Actual compiled Python validator mutations, with otherwise valid fixtures.
               source=inspect.getsource(validate);v,m,l=fixture(26)
               changes=[
-                ('assert type(v["checks"]) is int and v["checks"]==20 and v["labels"]==ACCEPTED',"assert True","labels",[]),
+                ('assert type(v["checks"]) is int and v["checks"]==25 and v["labels"]==ACCEPTED',"assert True","labels",[]),
                 ('assert type(v[k]) is type(want) and v[k]==want',"assert True","commit","d"*40),
                 ('assert v["native_ui"]=="WIDGET_CALLBACKS_NOT_PHYSICAL_TOUCH"',"assert True","native_ui","NOT_IMPLEMENTED"),
               ]
@@ -460,7 +515,37 @@ jobs:
                       result=click_execute(click_method.replace(old,new))
                       assert result.returncode!=0 and "AssertionError: "+label in result.stderr,(label,result.stdout,result.stderr)
                       print("NATIVE_CLICK_MUTANT_REJECTED",label)
-              assert sum(LABELS.values(),[])==ACCEPTED and len(ACCEPTED)==20
+                  subprocess.run(["java",str(p/"Parse.java"),str(p/"TodoInstrumentation.java"),str(p/"hidden.txt"),"hiddenUndo"],check=True,timeout=30)
+                  hidden_method=(p/"hidden.txt").read_text()
+                  hidden_harness='''class HiddenOracle{
+          static void need(boolean b,String s){if(!b)throw new AssertionError(s);}
+          static class View{static final int GONE=8;int visibility;View(int v){visibility=v;}int getVisibility(){return visibility;}}
+          __METHOD__
+          static void check(int hint,int button,Object token,boolean accept,String label){
+          boolean passed=false;try{hiddenUndo(new View(hint),new View(button),token);passed=true;}catch(AssertionError e){}
+          need(passed==accept,label);}
+          public static void main(String[]args){
+          check(8,8,null,true,"hidden_consumed");
+          System.out.println("HIDDEN_POSITIVE_PASS");
+          check(0,8,null,false,"reject_visible_hint");
+          check(8,0,null,false,"reject_visible_button");
+          check(8,8,new Object(),false,"reject_live_token");
+          System.out.println("NATIVE_HIDDEN_CONTRACT positive=1 negative=3 PASS; modeled visibility, not Android");
+          }}'''
+                  def hidden_execute(code):
+                      (p/"HiddenOracle.java").write_text(hidden_harness.replace("__METHOD__",code))
+                      return subprocess.run(["java",str(p/"HiddenOracle.java")],capture_output=True,text=True,timeout=30)
+                  result=hidden_execute(hidden_method);assert result.returncode==0,(result.stdout,result.stderr);print(result.stdout.strip())
+                  for old,label in (
+                      ('need(hint.getVisibility()==View.GONE,"undo hint hidden");',"reject_visible_hint"),
+                      ('need(button.getVisibility()==View.GONE,"undo button hidden");',"reject_visible_button"),
+                      ('need(token==null,"undo token invalidated");',"reject_live_token"),
+                  ):
+                      assert hidden_method.count(old)==1
+                      result=hidden_execute(hidden_method.replace(old,";"))
+                      assert result.returncode!=0 and "AssertionError: "+label in result.stderr and "HIDDEN_POSITIVE_PASS" in result.stdout,(label,result.stdout,result.stderr)
+                      print("NATIVE_HIDDEN_MUTANT_REJECTED",label)
+              assert sum(LABELS.values(),[])==ACCEPTED and len(ACCEPTED)==25
               print("TODO_NATIVE_HOST",json.dumps(dict(positive=2,negative=total,validator_mutants=3,java="SYNTAX_ONLY_NOT_ANDROID")))
           
           def android():

@@ -406,6 +406,148 @@ class Observer:
         if error is not None and not primary_failed:raise error
 
 
+def run_native_phase(observer, body, phase):
+    """One original-native phase; return only after strict observer shutdown.
+
+    body receives a fresh node reader. This is an adapter, not full-gate wiring:
+    the caller must invoke it at the original phase boundary, and its independent
+    report must require the persisted receipt, binding, DEX and XML artifacts.
+    """
+    started=time.monotonic();primary=None;binding=None;reads=0;last_xml=b""
+    phase.clear()
+    phase.update(status="FAIL",release_ready=False,
+        scope="ORIGINAL_NATIVE_PHASE_OBSERVER_LIFECYCLE_NOT_PRODUCT_ACCEPTANCE")
+    try:
+        observer.start()
+        binding=tuple(observer.binding)
+        phase["binding"]=list(binding)
+        def nodes():
+            nonlocal reads,last_xml
+            text=observer.dump()
+            tree=ET.fromstring(text)
+            assert tree.tag=="hierarchy" and list(tree.iter("node"))
+            last_xml=text.encode("utf-8");reads+=1
+            return list(tree.iter("node"))
+        value=body(nodes)
+    except BaseException as exc:
+        primary=exc
+        phase["error"]=repr(exc)
+        raise
+    finally:
+        try:
+            observer.close(primary_failed=primary is not None)
+            if primary is None:
+                validate_receipt(observer.receipt,binding,last_xml,reads)
+                phase.update(status="PASS",reads=reads,close_before_return=True,
+                    last_xml_sha256=hashlib.sha256(last_xml).hexdigest())
+        except BaseException as exc:
+            phase["status"]="FAIL"
+            if primary is None:
+                phase["error"]=repr(exc)
+                raise
+            phase["close_error"]=repr(exc)
+        finally:
+            phase["elapsed_seconds"]=float(time.monotonic()-started)
+    return value
+
+
+def native_phase_contracts(run):
+    """Exercise the exact phase runner with lifecycle doubles, not Android."""
+    import copy
+    primary=ValueError("original native assertion")
+    close_error=RuntimeError("observer close sentinel")
+    xml='<hierarchy><node text="fresh"/></hierarchy>'
+    counts={"positive":0,"negative":0}
+    def case(mode):
+        events=[];phase={};receipt={}
+        class Model:
+            binding=("a"*40,"12","1",26,"b"*32,"c"*64)
+            def start(self):
+                events.append("start")
+                if mode=="start":raise primary
+                receipt.update(commit="a"*40,run_id="12",run_attempt="1",api=26,
+                    nonce="b"*32,dex_sha256="c"*64,status="ACTIVE",starts=1,
+                    reconnects=0,reads=0,last_sequence=0,exit_code=0,
+                    scope="CI_PERSISTENT_READONLY_UI_NOT_PRODUCT_OR_ROOT_CAUSE_PROOF")
+                return self
+            def dump(self):
+                events.append("dump")
+                if mode=="dump":raise primary
+                receipt["reads"]+=1;receipt["last_sequence"]+=1
+                receipt["last_xml_sha256"]=hashlib.sha256(xml.encode()).hexdigest()
+                return xml
+            def close(self,primary_failed=False):
+                events.append(("close",primary_failed))
+                if mode in ("close","both"):raise close_error
+                if mode!="not_closed":receipt["status"]="CLOSED"
+        observer=Model();observer.receipt=receipt
+        def body(nodes):
+            events.append("body")
+            if mode=="zero":return 42
+            for i in range(2):
+                got=nodes();assert len(got)==1 and got[0].get("text")=="fresh"
+            if mode in ("body","both"):raise primary
+            if mode=="binding":
+                observer.binding=("d"*40,)+observer.binding[1:]
+                receipt["commit"]="d"*40
+            if mode=="count":
+                receipt["reads"]=receipt["last_sequence"]=3
+            return 42
+        try:
+            value=run(observer,body,phase)
+        except BaseException as exc:
+            if mode in ("start","dump","body","both"):
+                assert exc is primary,("primary exception replaced",mode,exc)
+            elif mode=="close":assert exc is close_error
+            else:assert isinstance(exc,(AssertionError,ValueError,KeyError)),(mode,exc)
+            assert phase["status"]=="FAIL" and "error" in phase
+            assert events.count("start")==1
+            assert sum(isinstance(e,tuple) and e[0]=="close" for e in events)==1
+            if mode=="both":assert phase["close_error"]==repr(close_error)
+            assert "later_instrumentation" not in events
+            counts["negative"]+=1
+        else:
+            assert mode=="ok",("invalid phase accepted",mode)
+            assert value==42 and phase["status"]=="PASS"
+            assert events==["start","body","dump","dump",("close",False)]
+            # A following suite is entered only after the synchronous return.
+            events.append("later_instrumentation")
+            assert phase["reads"]==2 and phase["binding"]==list(observer.binding)
+            assert phase["last_xml_sha256"]==hashlib.sha256(xml.encode()).hexdigest()
+            assert phase["close_before_return"] is True
+            assert phase["scope"]=="ORIGINAL_NATIVE_PHASE_OBSERVER_LIFECYCLE_NOT_PRODUCT_ACCEPTANCE"
+            assert phase["release_ready"] is False
+            counts["positive"]+=1
+        assert type(phase["elapsed_seconds"]) is float and phase["elapsed_seconds"]>=0
+        return copy.deepcopy(phase)
+    case("ok")
+    for mode in ("start","dump","body","close","both","zero","not_closed","binding","count"):
+        case(mode)
+    return counts
+
+
+def native_phase_selftest():
+    counts=native_phase_contracts(run_native_phase)
+    source=inspect.getsource(run_native_phase)
+    mutants=[
+        ("primary=exc", "primary=None"),
+        ("validate_receipt(observer.receipt,binding,last_xml,reads)",
+         "validate_receipt(observer.receipt,observer.binding,last_xml,reads)"),
+        ("validate_receipt(observer.receipt,binding,last_xml,reads)",
+         'validate_receipt(observer.receipt,binding,last_xml,observer.receipt["reads"])'),
+    ]
+    for old,new in mutants:
+        assert source.count(old)==1
+        scope=dict(globals())
+        exec(compile(source.replace(old,new,1),"native-phase-mutant","exec"),scope)
+        # contracts always execute the valid two-read lifecycle before bad input.
+        try:native_phase_contracts(scope["run_native_phase"])
+        except AssertionError:pass
+        else:raise AssertionError("native phase mutant survived "+old)
+    print("UI_OBSERVER_NATIVE_PHASE_HOST "+json.dumps(counts)+
+          " 3 compiled mutants rejected; LIFECYCLE_DOUBLES_NOT_FULL_GATE_WIRING",flush=True)
+
+
 def contracts(decode, guard):
     nonce = "a" * 32
     xml = '<hierarchy><node text="  草稿😀&#10;line&#9; " bounds="[0,0][80,40]" enabled="true"/></hierarchy>'
@@ -514,6 +656,7 @@ def receipt_selftest():
 
 def selftest():
     receipt_selftest()
+    native_phase_selftest()
     counts = contracts(decode_frame, require_ci)
     mutations = [
         ("parts[:3] != [\"PTO1\", nonce, str(seq)]", "parts[:1] != [\"PTO1\"]"),
@@ -628,6 +771,31 @@ for line in sys.stdin:
             finally:obs.close(primary_failed=True)
         except ValueError as caught:assert caught is sentinel
         assert receipt["status"]=="FAIL"
+        for mode in ("phase-ok","phase-dead","phase-both"):
+            obs,receipt=attach(mode);phase={}
+            # Only setup is substituted. dump/close and the local process pipe
+            # are the actual implementation; Android startup is not simulated.
+            obs.start=lambda:obs
+            def body(nodes):
+                for number in (1,2):
+                    assert nodes()[0].get("text")==str(number)
+                if mode!="phase-ok":
+                    obs.process.terminate();obs.process.wait(timeout=3)
+                if mode=="phase-both":raise sentinel
+                return "completed"
+            try:value=run_native_phase(obs,body,phase)
+            except BaseException as exc:
+                if mode=="phase-both":assert exc is sentinel
+                else:assert mode=="phase-dead" and isinstance(exc,RuntimeError)
+                assert phase["status"]=="FAIL" and receipt["status"]=="FAIL"
+            else:
+                assert mode=="phase-ok" and value=="completed"
+                assert phase["status"]=="PASS" and phase["reads"]==2
+                assert receipt["status"]=="CLOSED" and receipt["exit_code"]==0
+            assert obs.closed and obs.process.poll() is not None
+            persisted=json.loads((obs.folder/"observer.json").read_text())
+            assert persisted==receipt
+    print("UI_OBSERVER_NATIVE_PHASE_PIPES 1 positive 2 negative; ACTUAL_HOST_PIPES_NOT_ADB",flush=True)
     print("UI_OBSERVER_SESSION_HOST 2 positive 8 negative; ACTUAL_PIPES_NOT_ADB",flush=True)
     print("UI_OBSERVER_RECEIPT_CLOSE 3 tamper rejections 1 original failure preserved; ACTUAL_HOST_PIPES",flush=True)
 

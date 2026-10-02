@@ -302,7 +302,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
         }finally{plan.close();}
     }
     /** Registry only: caller must copy/verify files and validate actual image format. */
-    public synchronized void registerMedia(String id,String mime,long bytes){MediaRepository.validId(id);String clean=text(mime);if(bytes<=0)throw new IllegalArgumentException("媒体大小无效");tx(db->{try(Cursor c=db.rawQuery("SELECT mime,bytes FROM media WHERE id=?",new String[]{id})){if(c.moveToFirst()){if(!clean.equals(c.getString(0))||bytes!=c.getLong(1))throw new IllegalStateException("媒体标识对应的元数据冲突");return null;}}db.execSQL("INSERT INTO media VALUES(?,?,?)",new Object[]{id,clean,bytes});bump(db);return null;});}
+    public synchronized void registerMedia(String id,String mime,long bytes){MediaRepository.validId(id);String clean=text(mime);if(bytes<=0)throw new IllegalArgumentException("媒体大小无效");tx(db->{try(Cursor c=db.rawQuery("SELECT mime,bytes FROM media WHERE id=?",new String[]{id})){if(c.moveToFirst()){if(!clean.equals(c.getString(0),mime)||bytes!=c.getLong(1))throw new IllegalStateException("媒体标识对应的元数据冲突");return null;}}db.execSQL("INSERT INTO media VALUES(?,?,?)",new Object[]{id,clean,bytes});bump(db);return null;});}
     public synchronized void saveNote(String id,List<NoteDocument.Block> blocks){if(schema3!=null){schema3.saveNote(id,blocks,schema3.snapshot());return;}Ledger.identifier(id);if(blocks==null||Ledger.hasNull(blocks))throw new IllegalArgumentException("缺少笔记内容");List<NoteDocument.Block> owned=new ArrayList<>(blocks);NoteDocument validator=new NoteDocument();for(NoteDocument.Block b:owned)validator.add(b);tx(db->{exists(db,"notes",id);db.delete("blocks","note_id=?",new String[]{id});for(int i=0;i<owned.size();i++){NoteDocument.Block b=owned.get(i);if(b.kind==NoteDocument.Kind.IMAGE)exists(db,"media",b.assetId);db.execSQL("INSERT INTO blocks VALUES(?,?,?,?,?,?,?,?)",new Object[]{id,b.id,i,b.kind.name(),b.text,b.kind==NoteDocument.Kind.IMAGE?b.assetId:null,b.caption,b.privateContent?1:0});}bump(db);return null;});}
     public synchronized List<NoteDocument.Block> noteBlocks(String id){SQLiteDatabase db=getReadableDatabase();exists(db,"notes",id);List<NoteDocument.Block> out=new ArrayList<>();try(Cursor c=db.rawQuery("SELECT id,kind,text,asset_id,caption,private FROM blocks WHERE note_id=? ORDER BY position",new String[]{id})){while(c.moveToNext())out.add(c.getString(1).equals("TEXT")?NoteDocument.Block.text(c.getString(0),c.getString(2),c.getInt(5)!=0):NoteDocument.Block.image(c.getString(0),c.getString(3),c.getString(4),c.getInt(5)!=0));}return Collections.unmodifiableList(out);}
 
@@ -339,6 +339,137 @@ public final class AppDatabase extends SQLiteOpenHelper {
     public synchronized void editTodo(String id,String title,boolean done){Ledger.identifier(id);String clean=text(title);tx(db->{exists(db,"todos",id);db.execSQL("UPDATE todos SET title=?,done=? WHERE id=?",new Object[]{clean,done?1:0,id});bump(db);return null;});}
     public synchronized Todo todo(String id){Ledger.identifier(id);try(Cursor c=getReadableDatabase().rawQuery("SELECT title,done FROM todos WHERE id=?",new String[]{id})){if(!c.moveToFirst())throw new IllegalArgumentException("待办不存在");return new Todo(id,c.getString(0),c.getInt(1)!=0);}}
     public synchronized List<String> todoIds(){List<String> ids=new ArrayList<>();try(Cursor c=getReadableDatabase().rawQuery("SELECT id FROM todos ORDER BY position",null)){while(c.moveToNext())ids.add(c.getString(0));}return Collections.unmodifiableList(ids);}
+    /** In-memory, single-attempt ordinary-todo preview. No schema or media changes.
+     * All token state is guarded by the owning helper monitor. Closing a helper
+     * changes restoreSession, so reopening that same helper cannot revive a token.
+     */
+    public static final class TodoDeletionPlan implements AutoCloseable {
+        private final AppDatabase owner;
+        private final Object session;
+        private final SQLiteDatabase connection;
+        private final String id,title;
+        private final boolean done;
+        private final long position,rowid;
+        private byte[] before;
+        private boolean terminal;
+        private TodoDeletionPlan(AppDatabase owner,SQLiteDatabase connection,String id,String title,
+                                 boolean done,long position,long rowid,byte[] before){
+            this.owner=owner;this.session=owner.restoreSession;this.connection=connection;
+            this.id=id;this.title=title;this.done=done;this.position=position;this.rowid=rowid;this.before=before;
+        }
+        public String todoId(){return id;}
+        public String title(){return title;}
+        public boolean done(){return done;}
+        public long position(){return position;}
+        @Override public void close(){synchronized(owner){terminal=true;before=null;}}
+    }
+    public static final class TodoDeletionUndo implements AutoCloseable {
+        private final AppDatabase owner;
+        private final Object session;
+        private final SQLiteDatabase connection;
+        private final String id,title;
+        private final boolean done;
+        private final long position,rowid;
+        private byte[] after,restored;
+        private boolean terminal;
+        private TodoDeletionUndo(TodoDeletionPlan plan,byte[] after,byte[] restored){
+            owner=plan.owner;session=plan.session;connection=plan.connection;
+            id=plan.id;title=plan.title;done=plan.done;position=plan.position;rowid=plan.rowid;
+            this.after=after;this.restored=restored;
+        }
+        public String todoId(){return id;}
+        public String title(){return title;}
+        @Override public void close(){synchronized(owner){terminal=true;after=null;restored=null;}}
+    }
+    /** Canonical full-state oracle with an optional logical deletion and revision
+     * replacement. These transformations calculate the expected result BEFORE SQL.
+     * Include every table, column, storage type and rowid; keep the existing 8MiB
+     * snapshot budget. Registry only: immutable media files are never touched.
+     */
+    private static byte[] todoDeletionState(SQLiteDatabase db,String omit,long revisionValue){
+        tableSet(db);
+        try{
+            LimitedBytes bytes=new LimitedBytes();DataOutputStream out=new DataOutputStream(bytes);
+            out.writeInt(0x54444c31);out.writeInt(db.getVersion());out.writeInt(SNAPSHOT_TABLES.length);
+            for(String table:SNAPSHOT_TABLES)try(Cursor c=db.rawQuery("SELECT rowid,* FROM "+table+" ORDER BY rowid",null)){
+                boolean deleting=omit!=null&&table.equals("todos");
+                int idColumn=deleting?c.getColumnIndexOrThrow("id"):-1;
+                int revisionColumn=table.equals("revision")?c.getColumnIndexOrThrow("value"):-1;
+                utf8(out,table);out.writeInt(c.getColumnCount());for(String name:c.getColumnNames())utf8(out,name);
+                out.writeInt(c.getCount()-(deleting?1:0));int omitted=0;
+                while(c.moveToNext()){
+                    if(deleting&&omit.equals(c.getString(idColumn))){omitted++;continue;}
+                    for(int i=0;i<c.getColumnCount();i++){
+                        Object value=cell(c,i);out.writeByte(c.getType(i));
+                        if(i==revisionColumn&&revisionValue>=0)value=revisionValue;
+                        if(value instanceof Long)out.writeLong((Long)value);
+                        else if(value instanceof String)utf8(out,(String)value);
+                        else if(value instanceof byte[])blob(out,(byte[])value);
+                    }
+                }
+                if(deleting&&omitted!=1)throw new IllegalStateException("待办目标已变化，请重新预览");
+            }
+            out.flush();return bytes.toByteArray();
+        }catch(IOException e){throw new IllegalStateException("无法读取待办删除状态",e);}
+    }
+    public synchronized TodoDeletionPlan prepareTodoDeletion(String id){
+        Ledger.identifier(id);SQLiteDatabase db=getReadableDatabase();noteDeletionNoOuterTransaction(db);
+        db.beginTransaction();
+        try{
+            String title;boolean done;long position,rowid;
+            try(Cursor c=db.rawQuery("SELECT title,done,position,rowid FROM todos WHERE id=?",new String[]{id})){
+                if(!c.moveToFirst())throw new IllegalArgumentException("待办不存在");
+                title=c.getString(0);done=c.getInt(1)!=0;position=c.getLong(2);rowid=c.getLong(3);
+            }
+            TodoDeletionPlan plan=new TodoDeletionPlan(this,db,id,title,done,position,rowid,todoDeletionState(db,null,-1));
+            db.setTransactionSuccessful();return plan;
+        }finally{db.endTransaction();}
+    }
+    /** Caller obtains explicit consent. Owner attempts consume even on failure.
+     * Final full-state comparison, exact deletion, revision and readback share one
+     * transaction. The undo token is returned only after tx has successfully ended.
+     */
+    public synchronized TodoDeletionUndo confirmTodoDeletion(TodoDeletionPlan plan){
+        if(plan==null||plan.owner!=this)throw new IllegalArgumentException("删除预览不属于当前数据库");
+        if(plan.terminal||plan.session!=restoreSession){plan.close();throw new IllegalStateException("删除预览已取消、使用或失效");}
+        plan.terminal=true;
+        try{
+            SQLiteDatabase connection=getWritableDatabase();noteDeletionNoOuterTransaction(connection);
+            if(connection!=plan.connection||!connection.isOpen())throw new IllegalStateException("数据库连接已变化");
+            return tx(db->{
+                if(!Arrays.equals(plan.before,todoDeletionState(db,null,-1)))throw new IllegalStateException("本机内容已变化，请重新预览删除");
+                long next=Math.incrementExact(revision(db));
+                byte[] expected=todoDeletionState(db,plan.id,next);
+                byte[] restored=todoDeletionState(db,null,0);
+                if(db.delete("todos","id=?",new String[]{plan.id})!=1)throw new IllegalStateException("待办删除数量不一致");
+                if(bump(db)!=next||!Arrays.equals(expected,todoDeletionState(db,null,-1)))
+                    throw new IllegalStateException("待办删除回读不一致，本次修改已回滚");
+                return new TodoDeletionUndo(plan,expected,restored);
+            });
+        }finally{plan.close();}
+    }
+    /** Same session only, no persistent undo log. Any intervening full-state change
+     * refuses restoration. Reinstate the original rowid as well as ID/title/done/
+     * position; other rows are never shifted, deleted or overwritten.
+     */
+    public synchronized void undoTodoDeletion(TodoDeletionUndo token){
+        if(token==null||token.owner!=this)throw new IllegalArgumentException("撤销记录不属于当前数据库");
+        if(token.terminal||token.session!=restoreSession){token.close();throw new IllegalStateException("撤销记录已使用或失效");}
+        token.terminal=true;
+        try{
+            SQLiteDatabase connection=getWritableDatabase();noteDeletionNoOuterTransaction(connection);
+            if(connection!=token.connection||!connection.isOpen())throw new IllegalStateException("数据库连接已变化");
+            tx(db->{
+                if(!Arrays.equals(token.after,todoDeletionState(db,null,-1)))throw new IllegalStateException("本机内容已变化，不能撤销这次删除");
+                long next=Math.incrementExact(revision(db));
+                db.execSQL("INSERT INTO todos(rowid,id,title,done,position) VALUES(?,?,?,?,?)",
+                    new Object[]{token.rowid,token.id,token.title,token.done?1:0,token.position});
+                if(bump(db)!=next||!Arrays.equals(token.restored,todoDeletionState(db,null,0)))
+                    throw new IllegalStateException("待办撤销回读不一致，本次修改已回滚");
+                return null;
+            });
+        }finally{token.close();}
+    }
     /** Append only, never overwrite. Caller must show preview/consent before invoking.
      * Exact same backup bytes imported at most once. Modified backup is a distinct source.
      * IDs are namespaced by backup hash; a conflicting local ID aborts the entire import.

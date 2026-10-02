@@ -73,6 +73,7 @@ jobs:
               'native-ui/full-observer/observer-stderr.log',
               'native-ui/full-observer/observer-*/PocketUiObserver.java',
               'native-ui/full-observer/observer-*/dex/classes.dex']
+          artifact_name='          name: database-api-'+'$'+'{{ matrix.api }}'
           def observer_collection(text):
               import re
               lines=[]; active=False
@@ -88,7 +89,7 @@ jobs:
                       current=[]
                   current.append(line)
               if current:steps.append(current)
-              selected=[s for s in steps if '          name: database-api-${{ matrix.api }}' in s]
+              selected=[s for s in steps if artifact_name in s]
               assert len(selected)==1,'one full-native evidence uploader required'
               step=selected[0]
               assert step[0]=='      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02','fixed artifact action'
@@ -100,7 +101,7 @@ jobs:
                   if not line.startswith('            '):break
                   paths.append(line.strip())
               assert all(paths.count(p)==1 for p in observer_paths),'required observer artifact omitted or duplicated'
-          fixture='  database:\n      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02\n        if: always()\n        with:\n          name: database-api-${{ matrix.api }}\n          path: |\n'+''.join('            '+p+'\n' for p in observer_paths)+'          if-no-files-found: error\n'
+          fixture='  database:\n      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02\n        if: always()\n        with:\n'+artifact_name+'\n          path: |\n'+''.join('            '+p+'\n' for p in observer_paths)+'          if-no-files-found: error\n'
           observer_collection(fixture)
           invalid=[fixture.replace('            '+p+'\n','',1) for p in observer_paths]
           invalid += [
@@ -571,7 +572,7 @@ jobs:
                       lost_owner(kind,title,filename)
                       click(find(text="SAVE"));find(**{"content-desc":"v12-status","text":title+"已保存，逐字节回读一致"})
                       assert shell("find","/sdcard/Download","-type","f","-name",filename).splitlines()==["/sdcard/Download/"+filename]
-                      raw=command("exec-out","cat","/sdcard/Download/"+filename,binary=True);assert 0<len(raw)<=16777216
+                      raw=command("exec-out","cat",paths[0],binary=True) if False else command("exec-out","cat","/sdcard/Download/"+filename,binary=True);assert 0<len(raw)<=16777216
                       artifact=out/filename;artifact.write_bytes(raw);ok("real_documentsui_saved_"+kind)
                       if kind=="PDF":
                           info=gate.run(["pdfinfo",artifact],capture=True).stdout

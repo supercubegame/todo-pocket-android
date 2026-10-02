@@ -311,7 +311,7 @@ def verify_native_ui(adb):
             print('FULL_NATIVE_OBSERVER_REPORT_FAILED '+repr(reporting),flush=True)
 
 
-def full_native_observer_selftest():
+def full_native_observer_selftest(native=verify_native_ui):
     """Actual phase/wrapper with observation doubles; not Android acceptance."""
     import ast
     import copy
@@ -321,7 +321,7 @@ def full_native_observer_selftest():
     from unittest.mock import patch
     primary=ValueError('native business sentinel')
     close_error=RuntimeError('native close sentinel')
-    original=inspect.getsource(verify_native_ui)
+    original=inspect.getsource(native)
     def exercise(source,mode):
         events=[];receipts=[]
         class Fake:

@@ -87,8 +87,17 @@ jobs:
            void click(View root,String value,boolean description)throws Exception{
             ui(()->{View v=unique(root,value,description);Rect r=new Rect();
              need(v.isEnabled()&&v.isShown()&&v.getGlobalVisibleRect(r)&&r.width()>0&&r.height()>0,"clickable "+value);
-             need(v.performClick(),"click handled "+value);
+             clickOnce(v,value);
             });ready();
+           }
+           static void clickOnce(View v,String value){
+            if(v instanceof CheckBox){
+             CheckBox box=(CheckBox)v;boolean before=box.isChecked();
+             box.performClick();
+             need(box.isChecked()!=before,"checkbox toggled "+value);
+            }else{
+             need(v.performClick(),"click handled "+value);
+            }
            }
            String text(View root,String value)throws Exception{
             final String[] s={null};ui(()->s[0]=((TextView)unique(root,value,true)).getText().toString());return s[0];
@@ -373,7 +382,7 @@ jobs:
           CompilationUnitTree unit=t.parse().iterator().next();for(Diagnostic<?>x:d.getDiagnostics())if(x.getKind()==Diagnostic.Kind.ERROR)throw new AssertionError(x.toString());
           String source=Files.readString(Path.of(a[0]));SourcePositions positions=Trees.instance(t).getSourcePositions();int found=0;
           for(Tree type:unit.getTypeDecls())if(type instanceof ClassTree)for(Tree member:((ClassTree)type).getMembers())
-          if(member instanceof MethodTree&&((MethodTree)member).getName().contentEquals("expected")){
+          if(member instanceof MethodTree&&((MethodTree)member).getName().contentEquals(a.length>2?a[2]:"expected")){
           Files.writeString(Path.of(a[1]),source.substring((int)positions.getStartPosition(unit,member),(int)positions.getEndPosition(unit,member)));found++;}
           if(found!=1)throw new AssertionError("one expected method required");}}}'''
               oracle='''import java.util.*;class Oracle{
@@ -411,6 +420,46 @@ jobs:
                       result=execute(method.replace(old,new))
                       assert result.returncode!=0 and "AssertionError: "+label in result.stderr,(label,result.stdout,result.stderr)
                       print("NATIVE_ORACLE_MUTANT_REJECTED",label)
+                  # Execute the actual generated click helper against explicit Android-style doubles.
+                  # CompoundButton toggles before delegating to View.performClick, whose return
+                  # reflects an OnClickListener, not successful OnCheckedChangeListener delivery.
+                  subprocess.run(["java",str(p/"Parse.java"),str(p/"TodoInstrumentation.java"),str(p/"click.txt"),"clickOnce"],check=True,timeout=30)
+                  click_method=(p/"click.txt").read_text()
+                  click_harness='''class ClickOracle{
+          static void need(boolean b,String s){if(!b)throw new AssertionError(s);}
+          static class View{boolean handled;int calls;View(boolean h){handled=h;}boolean performClick(){calls++;return handled;}}
+          static class CheckBox extends View{
+          boolean checked,toggles;CheckBox(boolean c,boolean h,boolean t){super(h);checked=c;toggles=t;}
+          boolean isChecked(){return checked;}boolean performClick(){if(toggles)checked=!checked;return super.performClick();}}
+          __METHOD__
+          static void check(View v,boolean accept,String label){
+          boolean passed=false;try{clickOnce(v,label);passed=true;}catch(AssertionError e){}
+          need(passed==accept,label);need(v.calls==1,"single_click_"+label);}
+          public static void main(String[]args){
+          check(new CheckBox(false,false,true),true,"checked_listener_only_on");
+          check(new CheckBox(true,false,true),true,"checked_listener_only_off");
+          check(new CheckBox(false,true,true),true,"checked_and_click_listener");
+          check(new View(true),true,"button_handled");
+          check(new CheckBox(false,false,false),false,"reject_no_toggle_false");
+          check(new CheckBox(false,true,false),false,"reject_no_toggle_true");
+          check(new View(false),false,"reject_unhandled_button");
+          System.out.println("NATIVE_CLICK_CONTRACT positive=4 negative=3 PASS; modeled widgets, not Android");
+          }}'''
+                  def click_execute(code):
+                      (p/"ClickOracle.java").write_text(click_harness.replace("__METHOD__",code))
+                      return subprocess.run(["java",str(p/"ClickOracle.java")],capture_output=True,text=True,timeout=30)
+                  click_result=click_execute(click_method)
+                  assert click_result.returncode==0,(click_result.stdout,click_result.stderr)
+                  print(click_result.stdout.strip())
+                  for old,new,label in (
+                      ('need(box.isChecked()!=before,"checkbox toggled "+value);',';',"reject_no_toggle_false"),
+                      ('need(v.performClick(),"click handled "+value);','v.performClick();',"reject_unhandled_button"),
+                      ('box.performClick();','box.performClick();box.performClick();',"checked_listener_only_on"),
+                  ):
+                      assert click_method.count(old)==1
+                      result=click_execute(click_method.replace(old,new))
+                      assert result.returncode!=0 and "AssertionError: "+label in result.stderr,(label,result.stdout,result.stderr)
+                      print("NATIVE_CLICK_MUTANT_REJECTED",label)
               assert sum(LABELS.values(),[])==ACCEPTED and len(ACCEPTED)==20
               print("TODO_NATIVE_HOST",json.dumps(dict(positive=2,negative=total,validator_mutants=3,java="SYNTAX_ONLY_NOT_ANDROID")))
           

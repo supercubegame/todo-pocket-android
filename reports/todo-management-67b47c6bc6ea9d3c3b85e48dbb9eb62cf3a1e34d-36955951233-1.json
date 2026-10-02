@@ -1,0 +1,84 @@
+{
+  "status": "FAIL",
+  "scope": "TODO_BACKEND_GATE_ONLY_NOT_FEATURE_ACCEPTANCE",
+  "commit": "67b47c6bc6ea9d3c3b85e48dbb9eb62cf3a1e34d",
+  "run_id": "36955951233",
+  "run_attempt": "1",
+  "devices": {
+    "26": {
+      "status": "FAIL",
+      "error": "FileNotFoundError(2, 'No such file or directory')",
+      "diagnostics": {
+        "todo-setup.log": {
+          "bytes": 2109,
+          "truncated": false,
+          "tail": "  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n\r  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\r100   169  100   169    0     0   1987      0 --:--:-- --:--:-- --:--:--  2011\n\r  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\n\r 30  129M   30 40.0M    0     0  62.1M      0  0:00:02 --:--:--  0:00:02 62.1M\r100  129M  100  129M    0     0   107M      0  0:00:01  0:00:01 --:--:--  160M\n  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n\r  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\r100   167  100   167    0     0   3143      0 --:--:-- --:--:-- --:--:--  3150\n\r100    64  100    64    0     0    374      0 --:--:-- --:--:-- --:--:--   374\n/tmp/gradle.zip: OK\nLoading package information...                                                  \rLoading local repository...                                                     \r[                                       ] 3% Loading local repository...        \r[                                       ] 3% Fetch remote repository...         \r[=                                      ] 3% Fetch remote repository...         \r[=                                      ] 4% Fetch remote repository...         \r[=                                      ] 5% Fetch remote repository...         \r[==                                     ] 5% Fetch remote repository...         \r[==                                     ] 6% Fetch remote repository...         \r[==                                     ] 7% Fetch remote repository...         \r[==                                     ] 7% Computing updates...               \r[===                                    ] 8% Computing updates...               \r[===                                    ] 10% Computing updates...              \r[=======================================] 100% Computing updates...             \r\n\n"
+        },
+        "todo-build.log": {
+          "bytes": 3268,
+          "truncated": false,
+          "tail": "\nBUILD_ATTEMPT 1\n\nWelcome to Gradle 8.9!\n\nHere are the highlights of this release:\n - Enhanced Error and Warning Messages\n - IDE Integration Improvements\n - Daemon JVM Information\n\nFor more details see https://docs.gradle.org/8.9/release-notes.html\n\nTo honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.9/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.\nDaemon will be stopped at the end of the build \n> Task :preBuild UP-TO-DATE\n> Task :preDebugBuild UP-TO-DATE\n> Task :mergeDebugNativeDebugMetadata NO-SOURCE\n> Task :javaPreCompileDebug\n> Task :generateDebugResValues\n> Task :checkDebugAarMetadata\n> Task :mapDebugSourceSetPaths\n> Task :generateDebugResources\n> Task :packageDebugResources\n> Task :mergeDebugResources\n> Task :createDebugCompatibleScreenManifests\n> Task :extractDeepLinksDebug\n> Task :parseDebugLocalResources\n> Task :processDebugMainManifest\n> Task :processDebugManifest\n> Task :mergeDebugShaders\n> Task :compileDebugShaders NO-SOURCE\n> Task :generateDebugAssets UP-TO-DATE\n> Task :mergeDebugAssets\n> Task :compressDebugAssets\n> Task :processDebugManifestForPackage\n> Task :processDebugResources\n> Task :desugarDebugFileDependencies\n> Task :l8DexDesugarLibDebug\n\n> Task :compileDebugJavaWithJavac\n/home/runner/work/todo-pocket-android/todo-pocket-android/src/main/java/com/supercubegame/pockettodo/AppDatabase.java:305: error: method equals in class String cannot be applied to given types;\n    public synchronized void registerMedia(String id,String mime,long bytes){MediaRepository.validId(id);String clean=text(mime);if(bytes<=0)throw new IllegalArgumentException(\"媒体大小无效\");tx(db->{try(Cursor c=db.rawQuery(\"SELECT mime,bytes FROM media WHERE id=?\",new String[]{id})){if(c.moveToFirst()){if(!clean.equals(c.getString(0),mime)||bytes!=c.getLong(1))throw new IllegalStateException(\"媒体标识对应的元数据冲突\");return null;}}db.execSQL(\"INSERT INTO media VALUES(?,?,?)\",new Object[]{id,clean,bytes});bump(db);return null;});}\n                                                                                                                                                                                                                                                                                                                     ^\n  required: Object\n  found:    String,String\n  reason: actual and formal argument lists differ in length\nNote: Some input files use or override a deprecated API.\nNote: Recompile with -Xlint:deprecation for details.\n1 error\n\n> Task :compileDebugJavaWithJavac FAILED\n\nFAILURE: Build failed with an exception.\n\n* What went wrong:\nExecution failed for task ':compileDebugJavaWithJavac'.\n> Compilation failed; see the compiler error output for details.\n\n* Try:\n> Run with --info option to get more log output.\n> Run with --scan to get full insights.\n\nBUILD FAILED in 41s\n20 actionable tasks: 20 executed\nBUILD_ATTEMPTS {\"scope\": \"BUILD_CONFIGURATION_RETRY_NOT_DEVICE_RETRY\", \"commit\": \"67b47c6bc6ea9d3c3b85e48dbb9eb62cf3a1e34d\", \"run_id\": \"36955951233\", \"api\": 26, \"attempts\": [{\"attempt\": 1, \"returncode\": 1, \"dependency_429_only\": false, \"retry_wait_seconds\": 0}]}\n"
+        },
+        "todo-android.log": {
+          "error": "FileNotFoundError(2, 'No such file or directory')"
+        },
+        "emulator.log": {
+          "error": "FileNotFoundError(2, 'No such file or directory')"
+        },
+        "todo-device/build.log": {
+          "error": "FileNotFoundError(2, 'No such file or directory')"
+        },
+        "todo-device/seed.log": {
+          "error": "FileNotFoundError(2, 'No such file or directory')"
+        },
+        "todo-device/result.json": {
+          "error": "FileNotFoundError(2, 'No such file or directory')"
+        }
+      }
+    },
+    "34": {
+      "status": "FAIL",
+      "error": "FileNotFoundError(2, 'No such file or directory')",
+      "diagnostics": {
+        "todo-setup.log": {
+          "bytes": 2109,
+          "truncated": false,
+          "tail": "  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n\r  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\r100   169  100   169    0     0   2752      0 --:--:-- --:--:-- --:--:--  2770\n\r  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\n\r 24  129M   24 32.2M    0     0  59.4M      0  0:00:02 --:--:--  0:00:02 59.4M\r100  129M  100  129M    0     0   106M      0  0:00:01  0:00:01 --:--:--  143M\n  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n\r  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\r100   167  100   167    0     0   3042      0 --:--:-- --:--:-- --:--:--  3092\n\r100    64  100    64    0     0    498      0 --:--:-- --:--:-- --:--:--   498\n/tmp/gradle.zip: OK\nLoading package information...                                                  \rLoading local repository...                                                     \r[                                       ] 3% Loading local repository...        \r[                                       ] 3% Fetch remote repository...         \r[=                                      ] 3% Fetch remote repository...         \r[=                                      ] 4% Fetch remote repository...         \r[=                                      ] 5% Fetch remote repository...         \r[==                                     ] 5% Fetch remote repository...         \r[==                                     ] 6% Fetch remote repository...         \r[==                                     ] 7% Fetch remote repository...         \r[==                                     ] 7% Computing updates...               \r[===                                    ] 8% Computing updates...               \r[===                                    ] 10% Computing updates...              \r[=======================================] 100% Computing updates...             \r\n\n"
+        },
+        "todo-build.log": {
+          "bytes": 3372,
+          "truncated": false,
+          "tail": "\nBUILD_ATTEMPT 1\n\nWelcome to Gradle 8.9!\n\nHere are the highlights of this release:\n - Enhanced Error and Warning Messages\n - IDE Integration Improvements\n - Daemon JVM Information\n\nFor more details see https://docs.gradle.org/8.9/release-notes.html\n\nTo honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.9/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.\nDaemon will be stopped at the end of the build \n> Task :preBuild UP-TO-DATE\n> Task :preDebugBuild UP-TO-DATE\n> Task :mergeDebugNativeDebugMetadata NO-SOURCE\n> Task :javaPreCompileDebug\n> Task :generateDebugResValues\n> Task :checkDebugAarMetadata\n> Task :mapDebugSourceSetPaths\n> Task :generateDebugResources\n> Task :packageDebugResources\n> Task :mergeDebugResources\n> Task :createDebugCompatibleScreenManifests\n> Task :extractDeepLinksDebug\n> Task :parseDebugLocalResources\n> Task :processDebugMainManifest\n> Task :processDebugManifest\n> Task :mergeDebugShaders\n> Task :compileDebugShaders NO-SOURCE\n> Task :generateDebugAssets UP-TO-DATE\n> Task :mergeDebugAssets\n> Task :compressDebugAssets\n> Task :desugarDebugFileDependencies\n> Task :processDebugJavaRes NO-SOURCE\n> Task :processDebugManifestForPackage\n> Task :processDebugResources\n> Task :checkDebugDuplicateClasses\n> Task :mergeDebugJavaResource\n> Task :l8DexDesugarLibDebug\n\n> Task :compileDebugJavaWithJavac\n/home/runner/work/todo-pocket-android/todo-pocket-android/src/main/java/com/supercubegame/pockettodo/AppDatabase.java:305: error: method equals in class String cannot be applied to given types;\n    public synchronized void registerMedia(String id,String mime,long bytes){MediaRepository.validId(id);String clean=text(mime);if(bytes<=0)throw new IllegalArgumentException(\"媒体大小无效\");tx(db->{try(Cursor c=db.rawQuery(\"SELECT mime,bytes FROM media WHERE id=?\",new String[]{id})){if(c.moveToFirst()){if(!clean.equals(c.getString(0),mime)||bytes!=c.getLong(1))throw new IllegalStateException(\"媒体标识对应的元数据冲突\");return null;}}db.execSQL(\"INSERT INTO media VALUES(?,?,?)\",new Object[]{id,clean,bytes});bump(db);return null;});}\n                                                                                                                                                                                                                                                                                                                     ^\n  required: Object\n  found:    String,String\n  reason: actual and formal argument lists differ in length\nNote: Some input files use or override a deprecated API.\nNote: Recompile with -Xlint:deprecation for details.\n1 error\n\n> Task :compileDebugJavaWithJavac FAILED\n\nFAILURE: Build failed with an exception.\n\n* What went wrong:\nExecution failed for task ':compileDebugJavaWithJavac'.\n> Compilation failed; see the compiler error output for details.\n\n* Try:\n> Run with --info option to get more log output.\n> Run with --scan to get full insights.\n\nBUILD FAILED in 40s\n22 actionable tasks: 22 executed\nBUILD_ATTEMPTS {\"scope\": \"BUILD_CONFIGURATION_RETRY_NOT_DEVICE_RETRY\", \"commit\": \"67b47c6bc6ea9d3c3b85e48dbb9eb62cf3a1e34d\", \"run_id\": \"36955951233\", \"api\": 34, \"attempts\": [{\"attempt\": 1, \"returncode\": 1, \"dependency_429_only\": false, \"retry_wait_seconds\": 0}]}\n"
+        },
+        "todo-android.log": {
+          "error": "FileNotFoundError(2, 'No such file or directory')"
+        },
+        "emulator.log": {
+          "error": "FileNotFoundError(2, 'No such file or directory')"
+        },
+        "todo-device/build.log": {
+          "error": "FileNotFoundError(2, 'No such file or directory')"
+        },
+        "todo-device/seed.log": {
+          "error": "FileNotFoundError(2, 'No such file or directory')"
+        },
+        "todo-device/result.json": {
+          "error": "FileNotFoundError(2, 'No such file or directory')"
+        }
+      }
+    }
+  },
+  "parents": {
+    "todo_host": {
+      "result": "success",
+      "outputs": {}
+    },
+    "todo_device": {
+      "result": "failure",
+      "outputs": {}
+    }
+  },
+  "native_ui": "NOT_IMPLEMENTED",
+  "release_ready": false,
+  "durable_upgrade_ready": false
+}

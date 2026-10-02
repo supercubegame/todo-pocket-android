@@ -171,6 +171,7 @@ def database_directory_selftest():
     print('DATABASE_DIRECTORY_SELFTEST positive=2 negative=4 PASS; host command contract, not Android root cause', flush=True)
 
 def parser_selftest():
+    full_native_observer_selftest()
     summary_navigation_selftest()
     database_directory_selftest()
     checks = 0
@@ -273,6 +274,158 @@ public class VerifyDerivative {
     return proof
 
 def verify_native_ui(adb):
+    """Close the one readonly observer before any later instrumentation callback."""
+    from verify_ui_observer import Observer, run_native_phase
+    out=Path('native-ui');out.mkdir(exist_ok=True)
+    folder=out/'full-observer'
+    receipt={};phase={};primary=None
+    observer=Observer(adb,SERIAL,SDK,folder,receipt)
+    def body(nodes):
+        folder.mkdir(parents=True,exist_ok=True)
+        (folder/'binding.json').write_text(json.dumps(list(observer.binding))+'\n')
+        return _verify_native_ui(adb,nodes)
+    try:
+        run_native_phase(observer,body,phase)
+    except BaseException as exc:
+        primary=exc
+        raise
+    finally:
+        try:
+            folder.mkdir(parents=True,exist_ok=True)
+            (folder/'phase.json').write_text(json.dumps(phase,indent=2)+'\n')
+            target=out/'native-result.json'
+            result=json.loads(target.read_text()) if target.is_file() else {
+                'status':'FAIL','api':API,'count':0,'checks':[],'release_ready':False}
+            result['full_native_observer']=dict(receipt=receipt,phase=phase,
+                evidence_directory='native-ui/full-observer')
+            if primary is not None:
+                result['status']='FAIL';result.setdefault('error',repr(primary))
+            else:
+                assert result['status']=='PASS' and phase['status']=='PASS'
+                assert phase['close_before_return'] is True
+            target.write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
+            print('FULL_NATIVE_OBSERVER_RESULT '+json.dumps(
+                result['full_native_observer'],ensure_ascii=False),flush=True)
+        except BaseException as reporting:
+            if primary is None:raise
+            print('FULL_NATIVE_OBSERVER_REPORT_FAILED '+repr(reporting),flush=True)
+
+
+def full_native_observer_selftest():
+    """Actual phase/wrapper with observation doubles; not Android acceptance."""
+    import ast
+    import copy
+    import inspect
+    import tempfile
+    import verify_ui_observer as bridge
+    from unittest.mock import patch
+    primary=ValueError('native business sentinel')
+    close_error=RuntimeError('native close sentinel')
+    original=inspect.getsource(verify_native_ui)
+    def exercise(source,mode):
+        events=[];receipts=[]
+        class Fake:
+            def __init__(self,adb,serial,sdk,folder,receipt):
+                assert (adb,serial,sdk)==('test-adb',SERIAL,SDK)
+                self.receipt=receipt;self.binding=('a'*40,'12','1',26,'b'*32,'c'*64)
+                self.folder=folder;receipts.append(receipt)
+            def start(self):
+                events.append('start')
+                if mode=='start':raise primary
+                self.receipt.update(status='ACTIVE',scope='CI_PERSISTENT_READONLY_UI_NOT_PRODUCT_OR_ROOT_CAUSE_PROOF',
+                    commit='a'*40,run_id='12',run_attempt='1',api=26,nonce='b'*32,
+                    dex_sha256='c'*64,starts=1,reconnects=0,reads=0,last_sequence=0,exit_code=0)
+                return self
+            def dump(self):
+                events.append('dump')
+                if mode=='dump':raise primary
+                raw='<hierarchy><node text="fresh"/></hierarchy>'
+                self.receipt['reads']+=1;self.receipt['last_sequence']+=1
+                self.receipt['last_xml_sha256']=hashlib.sha256(raw.encode()).hexdigest()
+                return raw
+            def close(self,primary_failed=False):
+                events.append(('close',primary_failed))
+                if mode in ('close','both'):raise close_error
+                self.receipt['status']='CLOSED'
+        with tempfile.TemporaryDirectory(prefix='full-native-wiring-') as tmp:
+            root=Path(tmp)
+            def body(adb,nodes):
+                assert adb=='test-adb';events.append('body')
+                if mode in ('body','both'):raise primary
+                assert nodes()[0].get('text')=='fresh'
+                assert nodes()[0].get('text')=='fresh'
+                value=dict(status='PASS',api=26,count=186,checks=['fixture'],release_ready=False)
+                (root/'native-ui/native-result.json').write_text(json.dumps(value))
+            scope=dict(globals(),Path=lambda path:root/path,_verify_native_ui=body)
+            exec(compile(source,'actual-native-wrapper','exec'),scope)
+            failure=None
+            with patch.object(bridge,'Observer',Fake):
+                try:scope['verify_native_ui']('test-adb')
+                except BaseException as exc:failure=exc
+            if mode=='ok':
+                assert failure is None,repr(failure)
+                assert events==['start','body','dump','dump',('close',False)],events
+            else:
+                assert failure is (close_error if mode=='close' else primary),('original failure lost',mode,repr(failure))
+                assert events[-1]==('close',True if mode in ('start','body','both','dump') else False)
+            result=json.loads((root/'native-ui/native-result.json').read_text())
+            phase=json.loads((root/'native-ui/full-observer/phase.json').read_text())
+            assert result['status']==('PASS' if mode=='ok' else 'FAIL')
+            assert result['full_native_observer']['phase']==phase
+            assert result['full_native_observer']['receipt']==receipts[0]
+            assert result['release_ready'] is False
+            if mode=='ok':assert phase['reads']==2 and phase['close_before_return'] is True
+            else:assert phase['status']=='FAIL' and result['error']==repr(failure)
+    for mode in ('ok','start','dump','body','close','both'):exercise(original,mode)
+    mutants=[
+        ("result['status']='FAIL';result.setdefault('error',repr(primary))",
+         "result.setdefault('error',repr(primary))",'close'),
+        ("primary=exc", "primary=None",'both'),
+    ]
+    for old,new,mode in mutants:
+        assert original.count(old)==1
+        mutant=original.replace(old,new,1)
+        exercise(mutant,'ok')
+        try:exercise(mutant,mode)
+        except AssertionError:pass
+        else:raise AssertionError('native wrapper mutant survived '+old)
+    # Inspect executable AST, not comments or a keyword elsewhere in the file.
+    tree=ast.parse(Path(__file__).read_text())
+    def wiring(tree):
+        native=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='_verify_native_ui']
+        assert len(native)==1
+        assert [a.arg for a in native[0].args.args]==['adb','nodes']
+        assert not any(isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef)) and n.name=='nodes'
+                       for n in ast.walk(native[0]))
+        assert not any(isinstance(n,ast.Constant) and n.value=='uiautomator' for n in ast.walk(native[0]))
+        wrapper=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='verify_native_ui']
+        assert len(wrapper)==1
+        body=[n for n in ast.walk(wrapper[0]) if isinstance(n,ast.FunctionDef) and n.name=='body']
+        assert len(body)==1 and ast.unparse(body[0].body[-1])=='return _verify_native_ui(adb, nodes)'
+        calls=[n for n in ast.walk(wrapper[0]) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='run_native_phase']
+        assert len(calls)==1 and ast.unparse(calls[0])=='run_native_phase(observer, body, phase)'
+        main=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='main')
+        assert any(isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='verify_native_ui'
+                   and ast.unparse(n)=='verify_native_ui(adb)' for n in ast.walk(main))
+    wiring(tree)
+    for kind in ('reader','phase','main'):
+        changed=copy.deepcopy(tree)
+        if kind=='reader':
+            f=next(n for n in changed.body if isinstance(n,ast.FunctionDef) and n.name=='_verify_native_ui')
+            f.body.insert(0,ast.parse('def nodes(): return []').body[0])
+        else:
+            fname='verify_native_ui' if kind=='phase' else 'main'
+            callname='run_native_phase' if kind=='phase' else 'verify_native_ui'
+            f=next(n for n in changed.body if isinstance(n,ast.FunctionDef) and n.name==fname)
+            for n in ast.walk(f):
+                if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id==callname:n.func.id='omitted'
+        try:wiring(changed)
+        except AssertionError:pass
+        else:raise AssertionError('full native wiring omission accepted '+kind)
+    print('FULL_NATIVE_OBSERVER_HOST 1 positive 5 negative 2 compiled behavioral mutants 3 AST wiring omissions PASS; NOT_ANDROID',flush=True)
+
+
+def _verify_native_ui(adb,nodes):
     """Only real taps/text input; independently read SQLite after force-stop, no seeding UI DB."""
     out = Path('native-ui'); out.mkdir(exist_ok=True)
     checks, shots = [], []
@@ -280,17 +433,6 @@ def verify_native_ui(adb):
     process_stops = []
     def shell(*args):
         return subprocess.check_output([str(adb), '-s', SERIAL, 'shell', *args], text=True, timeout=40)
-    def nodes():
-        last=None
-        for attempt in range(4):
-            try:
-                shell('uiautomator', 'dump', '/sdcard/pocket-window.xml')
-                return list(ET.fromstring(shell('cat', '/sdcard/pocket-window.xml')).iter('node'))
-            except (subprocess.CalledProcessError, ET.ParseError) as exc:
-                last=exc; infra_retries.append('uiautomator-snapshot')
-                print('INFRA_RETRY uiautomator snapshot attempt '+str(attempt+1)+' failed: '+repr(exc),flush=True)
-                time.sleep(1.5)
-        raise AssertionError('uiautomator snapshot failed repeatedly: '+repr(last))
     def tap_node(n):
         assert n.get('enabled')=='true', 'disabled touch target '+repr(n.attrib)
         x1,y1,x2,y2=map(int,re.findall(r'\d+',n.get('bounds')))

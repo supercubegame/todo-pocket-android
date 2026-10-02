@@ -21,11 +21,386 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/verify_todo_management.py selftest 2>&1 | tee todo-host.log
+      - name: Native receipt controls and independent state oracle
+        run: &todo_native_gate |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/todo-native-gate.py" <<'PY'
+          import copy,hashlib,inspect,json,os,re,subprocess,sys,tempfile
+          from pathlib import Path
+          sys.path.insert(0,str(Path("tools").resolve()))
+          import verify_todo_management as backend
+          LABELS={
+           "seed":"fresh_ui_database ui_created_same_title_completed exact_confirmation_identity explicit_undo_limit preview_all_state_readonly cancel_all_state_readonly cancel_preserves_composer delete_exact_all_tables_media delete_preserves_composer undo_exact_identity_done_position_rowid undo_single_use_and_composer second_delete_exact navigation_invalidates_undo_readonly deleted_restart_checkpoint".split(),
+           "deleted":"deleted_restart_state restart_has_no_undo second_identity_delete_undo undone_restart_checkpoint".split(),
+           "undone":"undone_restart_state undone_restart_no_replay".split(),
+          }
+          SCOPE="ACTUAL_NATIVE_WIDGET_CALLBACKS_SQLITE_NOT_PHYSICAL_TOUCH_KEYBOARD_OR_LMK"
+          # The emission list and acceptance list are deliberately independent.
+          ACCEPTED="fresh_ui_database ui_created_same_title_completed exact_confirmation_identity explicit_undo_limit preview_all_state_readonly cancel_all_state_readonly cancel_preserves_composer delete_exact_all_tables_media delete_preserves_composer undo_exact_identity_done_position_rowid undo_single_use_and_composer second_delete_exact navigation_invalidates_undo_readonly deleted_restart_checkpoint deleted_restart_state restart_has_no_undo second_identity_delete_undo undone_restart_checkpoint undone_restart_state undone_restart_no_replay".split()
+          JAVA = r'''
+          package ci.todos;
+          import android.app.*;
+          import android.os.*;
+          import android.content.*;
+          import android.database.*;
+          import android.database.sqlite.*;
+          import android.graphics.Rect;
+          import android.view.*;
+          import android.widget.*;
+          import com.supercubegame.pockettodo.AppDatabase;
+          import java.lang.reflect.*;
+          import java.nio.file.*;
+          import java.util.*;
+          
+          public final class TodoInstrumentation extends Instrumentation {
+           Bundle args;Activity activity;Object screen;int count;String nonce,phase;Path folder;
+           interface Action{void run()throws Exception;}
+           static void need(boolean b,String s){if(!b)throw new AssertionError(s);}
+           void pass(boolean b,String s){need(b,s);count++;System.out.println("TODO_PASS "+s);}
+           static Object field(Object o,String name)throws Exception{Field f=o.getClass().getDeclaredField(name);f.setAccessible(true);return f.get(o);}
+           void ui(Action a)throws Exception{
+            final Throwable[] error={null};runOnMainSync(()->{try{a.run();}catch(Throwable e){error[0]=e;}});
+            if(error[0]!=null)throw new AssertionError("UI action",error[0]);
+           }
+           void ready()throws Exception{
+            long deadline=SystemClock.elapsedRealtime()+10000;
+            while(true){
+             final boolean[] done={false};ui(()->done[0]=!((Boolean)field(screen,"busy")));
+             if(done[0]){waitForIdleSync();return;}
+             need(SystemClock.elapsedRealtime()<deadline,"UI async deadline");SystemClock.sleep(20);
+            }
+           }
+           void launch()throws Exception{
+            Intent intent=new Intent().setClassName(getTargetContext(),"com.supercubegame.pockettodo.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            activity=startActivitySync(intent);screen=field(activity,"screen");ready();
+           }
+           View root(){return activity.getWindow().getDecorView();}
+           View unique(View root,String value,boolean description){
+            List<View> out=new ArrayList<>();find(root,value,description,out);
+            need(out.size()==1,"unique view "+value+" count="+out.size());return out.get(0);
+           }
+           void find(View v,String value,boolean description,List<View> out){
+            if(description?value.contentEquals(v.getContentDescription()==null?"":v.getContentDescription()):
+               v instanceof TextView&&value.contentEquals(((TextView)v).getText()))out.add(v);
+            if(v instanceof ViewGroup){ViewGroup g=(ViewGroup)v;for(int i=0;i<g.getChildCount();i++)find(g.getChildAt(i),value,description,out);}
+           }
+           void click(View root,String value,boolean description)throws Exception{
+            ui(()->{View v=unique(root,value,description);Rect r=new Rect();
+             need(v.isEnabled()&&v.isShown()&&v.getGlobalVisibleRect(r)&&r.width()>0&&r.height()>0,"clickable "+value);
+             need(v.performClick(),"click handled "+value);
+            });ready();
+           }
+           String text(View root,String value)throws Exception{
+            final String[] s={null};ui(()->s[0]=((TextView)unique(root,value,true)).getText().toString());return s[0];
+           }
+           void input(String value)throws Exception{ui(()->((EditText)unique(root(),"新待办输入",true)).setText(value));}
+           void add(String title)throws Exception{input(title);click(root(),"添加",false);}
+           AlertDialog dialog()throws Exception{
+            final AlertDialog[] d={null};ui(()->d[0]=(AlertDialog)field(screen,"todoDialog"));
+            need(d[0]!=null&&d[0].isShowing(),"delete dialog visible");return d[0];
+           }
+           void remove(String id)throws Exception{click(root(),"delete-"+id,true);}
+           void confirm()throws Exception{click(dialog().getWindow().getDecorView(),"todo-delete-confirm",true);}
+           void noUndo()throws Exception{
+            ui(()->{need(field(screen,"todoUndo")==null,"no in-memory undo");List<View> nodes=new ArrayList<>();find(root(),"撤销删除",false,nodes);need(nodes.isEmpty(),"no undo control");});
+           }
+           AppDatabase db()throws Exception{return (AppDatabase)field(screen,"db");}
+           Map<String,List<List<String>>> state()throws Exception{
+            AppDatabase h=db();synchronized(h){
+             SQLiteDatabase sql=h.getReadableDatabase();sql.beginTransaction();
+             try{
+              Map<String,List<List<String>>> out=new TreeMap<>();
+              try(Cursor tables=sql.rawQuery("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",null)){
+               while(tables.moveToNext()){
+                String name=tables.getString(0);need(name.matches("[A-Za-z0-9_]+"),"table name");List<List<String>> rows=new ArrayList<>();
+                try(Cursor c=sql.rawQuery("SELECT rowid AS rowid,* FROM \""+name+"\" ORDER BY rowid",null)){
+                 rows.add(Arrays.asList(c.getColumnNames()));
+                 while(c.moveToNext()){List<String> row=new ArrayList<>();for(int i=0;i<c.getColumnCount();i++){int t=c.getType(i);row.add(t+":"+(t==0?"":t==4?android.util.Base64.encodeToString(c.getBlob(i),2):c.getString(i)));}rows.add(row);}
+                }out.put(name,rows);
+               }
+              }sql.setTransactionSuccessful();return out;
+             }finally{sql.endTransaction();}
+            }
+           }
+           static Map<String,List<List<String>>> expected(Map<String,List<List<String>>> original,String omit,int delta){
+            Map<String,List<List<String>>> out=new TreeMap<>();
+            for(Map.Entry<String,List<List<String>>> e:original.entrySet()){
+             List<List<String>> rows=new ArrayList<>();for(List<String> r:e.getValue())rows.add(new ArrayList<>(r));out.put(e.getKey(),rows);
+            }
+            if(omit!=null){
+             List<List<String>> rows=out.get("todos");int col=rows.get(0).indexOf("id"),n=0;
+             for(int i=rows.size()-1;i>0;i--)if(rows.get(i).get(col).equals("3:"+omit)){rows.remove(i);n++;}
+             need(n==1,"exact omitted row");
+            }
+            List<List<String>> rev=out.get("revision");need(rev.size()==2,"one revision");int col=rev.get(0).indexOf("value");
+            rev.get(1).set(col,"1:"+Math.addExact(Long.parseLong(rev.get(1).get(col).substring(2)),delta));return out;
+           }
+           Map<String,String> media()throws Exception{
+            Map<String,String> out=new TreeMap<>();Path base=getTargetContext().getFilesDir().toPath().resolve("media");
+            if(Files.exists(base))try(java.util.stream.Stream<Path> paths=Files.walk(base)){
+             for(Path p:(Iterable<Path>)paths::iterator){if(Files.isDirectory(p))continue;need(Files.isRegularFile(p,LinkOption.NOFOLLOW_LINKS),"media regular");
+              out.put(base.relativize(p).toString(),android.util.Base64.encodeToString(Files.readAllBytes(p),2));}
+            }return out;
+           }
+           String idAt(Map<String,List<List<String>>> s,int index){List<List<String>> r=s.get("todos");return r.get(index+1).get(r.get(0).indexOf("id")).substring(2);}
+           void save(String name,String value)throws Exception{Files.write(folder.resolve(name),value.getBytes("UTF-8"),StandardOpenOption.CREATE_NEW);}
+           String read(String name)throws Exception{return new String(Files.readAllBytes(folder.resolve(name)),"UTF-8");}
+           void seed()throws Exception{
+            need(!getTargetContext().getDatabasePath("pocket-v12.db").exists(),"no SQL-seeded live UI database");
+            need(!Files.exists(folder),"fresh native receipt directory");Files.createDirectory(folder);
+            launch();pass(state().get("todos").size()==1,"fresh_ui_database");
+            add("Same native todo");add("Same native todo");add("Keep native last");
+            Map<String,List<List<String>>> before=state();String first=idAt(before,0),target=idAt(before,1);
+            need(!first.equals(target),"different stable IDs");click(root(),"todo-"+target,true);
+            before=state();Map<String,String> assets=media();
+            List<List<String>> rows=before.get("todos");int title=rows.get(0).indexOf("title"),done=rows.get(0).indexOf("done");
+            pass(rows.size()==4&&rows.get(1).get(title).equals(rows.get(2).get(title))&&rows.get(2).get(done).equals("1:1"),"ui_created_same_title_completed");
+            input("  composer retained  ");remove(target);AlertDialog d=dialog();
+            pass(text(d.getWindow().getDecorView(),"todo-delete-details").equals("Same native todo\n状态：已完成\nID："+target),"exact_confirmation_identity");
+            pass(text(d.getWindow().getDecorView(),"todo-undo-limit").contains("重启后不可撤销"),"explicit_undo_limit");
+            pass(before.equals(state())&&assets.equals(media()),"preview_all_state_readonly");
+            click(d.getWindow().getDecorView(),"todo-delete-cancel",true);
+            pass(before.equals(state())&&assets.equals(media()),"cancel_all_state_readonly");
+            pass(text(root(),"新待办输入").equals("  composer retained  "),"cancel_preserves_composer");
+            remove(target);confirm();
+            pass(expected(before,target,1).equals(state())&&assets.equals(media()),"delete_exact_all_tables_media");
+            pass(text(root(),"新待办输入").equals("  composer retained  "),"delete_preserves_composer");
+            click(root(),"todo-undo-"+target,true);
+            pass(expected(before,null,2).equals(state())&&assets.equals(media()),"undo_exact_identity_done_position_rowid");
+            noUndo();pass(text(root(),"新待办输入").equals("  composer retained  "),"undo_single_use_and_composer");
+            // A second deletion is intentionally retained across the next instrumentation process.
+            before=state();remove(target);confirm();
+            pass(expected(before,target,1).equals(state()),"second_delete_exact");
+            click(root(),"活动",false);click(root(),"今天",false);noUndo();
+            pass(expected(before,target,1).equals(state())&&assets.equals(media()),"navigation_invalidates_undo_readonly");
+            save("deleted-state",state().toString());save("media",assets.toString());save("first-id",first);
+            pass(true,"deleted_restart_checkpoint");
+           }
+           void deleted()throws Exception{
+            launch();pass(read("deleted-state").equals(state().toString())&&read("media").equals(media().toString()),"deleted_restart_state");
+            noUndo();pass(true,"restart_has_no_undo");
+            Map<String,List<List<String>>> before=state();String first=read("first-id");remove(first);confirm();click(root(),"todo-undo-"+first,true);
+            pass(expected(before,null,2).equals(state())&&read("media").equals(media().toString()),"second_identity_delete_undo");
+            save("undone-state",state().toString());pass(true,"undone_restart_checkpoint");
+           }
+           void undone()throws Exception{
+            launch();pass(read("undone-state").equals(state().toString())&&read("media").equals(media().toString()),"undone_restart_state");
+            noUndo();pass(true,"undone_restart_no_replay");
+           }
+           @Override public void onCreate(Bundle b){super.onCreate(b);args=b;start();}
+           @Override public void onStart(){
+            Bundle result=new Bundle();java.io.ByteArrayOutputStream bytes=new java.io.ByteArrayOutputStream();java.io.PrintStream previous=System.out;
+            try(java.io.PrintStream log=new java.io.PrintStream(bytes,true,"UTF-8")){
+             System.setOut(log);String pkg=getTargetContext().getPackageName();int api=Build.VERSION.SDK_INT;nonce=args.getString("nonce");phase=args.getString("phase");
+             need(pkg.equals(args.getString("expectedPackage"))&&pkg.equals("com.supercubegame.pockettodo.v12.preview"),"target package");
+             need(api==Integer.parseInt(args.getString("expectedApi"))&&(api==26||api==34),"actual API");
+             need(android.os.Process.myUid()==getTargetContext().getApplicationInfo().uid&&android.os.Process.myUid()>=10000,"target uid");
+             need(Build.HARDWARE.contains("ranchu")||Build.HARDWARE.contains("goldfish"),"emulator only");
+             need(nonce!=null&&nonce.matches("[0-9]+-[0-9]+-(26|34)"),"nonce");
+             folder=getTargetContext().getCacheDir().toPath().resolve("native-todo-"+nonce);
+             System.out.println("TODO_TARGET "+pkg+" "+android.os.Process.myUid()+" "+api+" "+nonce+" "+phase);
+             if("diagnostic".equals(phase))throw new AssertionError("todo_diagnostic_sentinel");
+             if("seed".equals(phase))seed();else if("deleted".equals(phase))deleted();else if("undone".equals(phase))undone();else throw new AssertionError("phase");
+             System.out.println("TODO_RESULT "+phase+" "+count+" PASS");
+             result.putString("stream",bytes.toString("UTF-8"));finish(Activity.RESULT_OK,result);
+            }catch(Throwable e){
+             e.printStackTrace(new java.io.PrintStream(bytes));result.putString("stream",bytes.toString()+"\nTODO_FAILED\n");finish(Activity.RESULT_CANCELED,result);
+            }finally{System.setOut(previous);}
+           }
+          }
+          '''
+          
+          def validate(v,m,logs,api,source,run,attempt):
+              assert v["status"]=="PASS" and v["scope"]==SCOPE
+              for k,want in dict(api=api,commit=source,run_id=run,run_attempt=attempt).items():
+                  assert type(v[k]) is type(want) and v[k]==want
+                  assert type(m[k]) is type(want) and m[k]==want
+              for k in ("apk_sha256","certificate"):
+                  assert re.fullmatch("[0-9a-f]{64}",v[k]) and v[k]==m[k]
+              assert type(v["apk_bytes"]) is int and type(m["apk_bytes"]) is int and 0<v["apk_bytes"]==m["apk_bytes"]
+              assert type(v["checks"]) is int and v["checks"]==20 and v["labels"]==ACCEPTED
+              assert v["release_ready"] is False and v["cross_restart_undo"]=="NOT_SUPPORTED"
+              assert v["native_ui"]=="WIDGET_CALLBACKS_NOT_PHYSICAL_TOUCH"
+              assert v["default_test_restored"] is True and v["diagnostic_rejected"] is True
+              assert v["product_readback"]=="EXACT_BEFORE_AND_AFTER"
+              assert not any(k in v for k in ("error","restoration_error","command_failure"))
+              nonce=run+"-"+attempt+"-"+str(api)
+              # Clone the existing strict parser with this independently specified UI phase list.
+              namespace=dict(vars(backend));namespace["REQUIRED"]=LABELS
+              exec(compile(inspect.getsource(backend.observe),"<native-receipt-parser>","exec"),namespace)
+              for phase,labels in LABELS.items():
+                  assert namespace["observe"](logs[phase],backend.PACKAGE,api,nonce,phase)==labels==v[phase]["labels"]
+                  assert hashlib.sha256(logs[phase].encode()).hexdigest()==v[phase]["log_sha256"]
+              diagnostic=logs["diagnostic"]
+              assert "java.lang.AssertionError: todo_diagnostic_sentinel" in diagnostic
+              assert "TODO_FAILED" in diagnostic and "INSTRUMENTATION_CODE: 0" in diagnostic
+              assert "TODO_RESULT" not in diagnostic
+              assert len(v["stops"])==2
+              for s in v["stops"]:
+                  assert s["status"]=="PASS" and s["package"]==backend.PACKAGE
+                  assert s["scope"]=="COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK"
+                  assert type(s["force_stop_attempts"]) is int and s["force_stop_attempts"]==1
+                  c,p=s["command"],s["probes"][-1]
+                  assert type(c["returncode"]) is int and c["returncode"]==0 and c["stdout"]==c["stderr"]==""
+                  assert c["args"][-3:]==["am","force-stop",backend.PACKAGE]
+                  assert type(p["returncode"]) is int and p["returncode"]==1
+                  assert p["stdout"].strip()==p["stderr"].strip()=="" and p["args"][-2:]==["pidof",backend.PACKAGE]
+          
+          def fixture(api):
+              m=dict(api=api,commit="a"*40,run_id="123",run_attempt="1",apk_sha256="b"*64,certificate="c"*64,apk_bytes=100)
+              stop=dict(status="PASS",package=backend.PACKAGE,scope="COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",force_stop_attempts=1,
+                        command=dict(args=["am","force-stop",backend.PACKAGE],returncode=0,stdout="",stderr=""),
+                        probes=[dict(args=["pidof",backend.PACKAGE],returncode=1,stdout="",stderr="")])
+              v=dict(m,status="PASS",scope=SCOPE,checks=20,labels=ACCEPTED[:],release_ready=False,cross_restart_undo="NOT_SUPPORTED",
+                     native_ui="WIDGET_CALLBACKS_NOT_PHYSICAL_TOUCH",default_test_restored=True,diagnostic_rejected=True,
+                     product_readback="EXACT_BEFORE_AND_AFTER",stops=[copy.deepcopy(stop),copy.deepcopy(stop)])
+              logs={"diagnostic":"java.lang.AssertionError: todo_diagnostic_sentinel\nTODO_FAILED\nINSTRUMENTATION_CODE: 0"}
+              for phase,labels in LABELS.items():
+                  t="INSTRUMENTATION_RESULT: stream=TODO_TARGET "+backend.PACKAGE+" 10123 "+str(api)+" 123-1-"+str(api)+" "+phase+"\n"
+                  t+="".join("TODO_PASS "+x+"\n" for x in labels)+"TODO_RESULT "+phase+" "+str(len(labels))+" PASS\nINSTRUMENTATION_CODE: -1\n"
+                  logs[phase]=t;v[phase]=dict(labels=labels[:],log_sha256=hashlib.sha256(t.encode()).hexdigest())
+              return v,m,logs
+          
+          def selftest():
+              total=0
+              for api in (26,34):
+                  v,m,l=fixture(api);validate(v,m,l,api,"a"*40,"123","1");bad=[]
+                  for key in v:
+                      b=copy.deepcopy(v);del b[key];bad.append((b,m,l))
+                  for key in m:
+                      b=dict(m);del b[key];bad.append((v,b,l))
+                  for key,value in (("checks",20.0),("checks",True),("api",float(api)),("status","FAIL"),("commit","d"*40),
+                                    ("run_id","124"),("run_attempt","2"),("apk_bytes",True),("apk_sha256","d"*64),
+                                    ("certificate","d"*64),("native_ui","PASS"),("release_ready",0),("default_test_restored",1),
+                                    ("diagnostic_rejected",1),("command_failure",{}),("error","sentinel")):
+                      b=copy.deepcopy(v);b[key]=value;bad.append((b,m,l))
+                  for label in ACCEPTED:
+                      b=copy.deepcopy(v);b["labels"].remove(label);bad.append((b,m,l))
+                  for phase in LABELS:
+                      b=dict(l);b[phase]=b[phase].replace("INSTRUMENTATION_CODE: -1","INSTRUMENTATION_CODE: 0");bad.append((v,m,b))
+                      b=dict(l);del b[phase];bad.append((v,m,b))
+                  for code in (0,255,True):
+                      b=copy.deepcopy(v);b["stops"][0]["probes"][0]["returncode"]=code;bad.append((b,m,l))
+                  b=dict(l);b["diagnostic"]="";bad.append((v,m,b))
+                  for b,n,logs in bad:
+                      try:validate(b,n,logs,api,"a"*40,"123","1")
+                      except (AssertionError,KeyError,TypeError,IndexError):total+=1
+                      else:raise AssertionError("bad native receipt accepted")
+              # Actual compiled Python validator mutations, with otherwise valid fixtures.
+              source=inspect.getsource(validate);v,m,l=fixture(26)
+              changes=[
+                ('assert type(v["checks"]) is int and v["checks"]==20 and v["labels"]==ACCEPTED',"assert True","labels",[]),
+                ('assert type(v[k]) is type(want) and v[k]==want',"assert True","commit","d"*40),
+                ('assert v["native_ui"]=="WIDGET_CALLBACKS_NOT_PHYSICAL_TOUCH"',"assert True","native_ui","NOT_IMPLEMENTED"),
+              ]
+              for old,new,key,value in changes:
+                  assert source.count(old)==1
+                  b=copy.deepcopy(v);b[key]=value
+                  try:validate(b,m,l,26,"a"*40,"123","1")
+                  except AssertionError:pass
+                  else:raise AssertionError("mutation fixture not rejected")
+                  namespace=dict(globals());exec(compile(source.replace(old,new),"<native-validator-mutant>","exec"),namespace)
+                  namespace["validate"](b,m,l,26,"a"*40,"123","1")
+              # Parse the complete generated Java, not a hand-translated implementation.
+              parser='''import javax.tools.*;import com.sun.source.util.*;import com.sun.source.tree.*;import java.util.*;import java.nio.file.*;
+          class Parse{public static void main(String[] a)throws Exception{JavaCompiler c=ToolProvider.getSystemJavaCompiler();
+          DiagnosticCollector<JavaFileObject>d=new DiagnosticCollector<>();
+          try(StandardJavaFileManager f=c.getStandardFileManager(d,null,null)){
+          JavacTask t=(JavacTask)c.getTask(null,f,d,Arrays.asList("-proc:none"),null,f.getJavaFileObjects(a[0]));
+          CompilationUnitTree unit=t.parse().iterator().next();for(Diagnostic<?>x:d.getDiagnostics())if(x.getKind()==Diagnostic.Kind.ERROR)throw new AssertionError(x.toString());
+          String source=Files.readString(Path.of(a[0]));SourcePositions positions=Trees.instance(t).getSourcePositions();int found=0;
+          for(Tree type:unit.getTypeDecls())if(type instanceof ClassTree)for(Tree member:((ClassTree)type).getMembers())
+          if(member instanceof MethodTree&&((MethodTree)member).getName().contentEquals("expected")){
+          Files.writeString(Path.of(a[1]),source.substring((int)positions.getStartPosition(unit,member),(int)positions.getEndPosition(unit,member)));found++;}
+          if(found!=1)throw new AssertionError("one expected method required");}}}'''
+              oracle='''import java.util.*;class Oracle{
+          static void need(boolean b,String s){if(!b)throw new AssertionError(s);}
+          __METHOD__
+          static List<String> row(String...s){return new ArrayList<>(Arrays.asList(s));}
+          public static void main(String[]args){
+          Map<String,List<List<String>>> b=new TreeMap<>();
+          b.put("todos",new ArrayList<>(Arrays.asList(row("rowid","id","title","done","position"),row("1:1","3:first","3:same","1:0","1:10"),row("1:2","3:second","3:same","1:1","1:11"))));
+          b.put("revision",new ArrayList<>(Arrays.asList(row("rowid","id","value"),row("1:1","1:1","1:8"))));
+          b.put("other",new ArrayList<>(Arrays.asList(row("rowid","id"),row("1:3","3:keep"))));
+          String original=b.toString();Map<String,List<List<String>>> e=expected(b,"second",1);
+          need(e.get("todos").size()==2&&e.get("todos").get(1).get(1).equals("3:first"),"exact_delete");
+          need(e.get("revision").get(1).get(2).equals("1:9"),"revision_delta");
+          need(b.toString().equals(original),"input_immutable");
+          need(e.get("other").equals(b.get("other")),"other_preserved");
+          Map<String,List<List<String>>> u=expected(b,null,2);
+          need(u.get("todos").equals(b.get("todos"))&&u.get("revision").get(1).get(2).equals("1:10"),"undo_expected");
+          boolean refused=false;try{expected(b,"missing",1);}catch(AssertionError x){refused=true;}need(refused,"missing_target");
+          System.out.println("NATIVE_ORACLE 6 PASS");
+          }}'''
+              with tempfile.TemporaryDirectory() as tmp:
+                  p=Path(tmp);(p/"Parse.java").write_text(parser);(p/"TodoInstrumentation.java").write_text(JAVA)
+                  subprocess.run(["java",str(p/"Parse.java"),str(p/"TodoInstrumentation.java"),str(p/"method.txt")],check=True,timeout=30)
+                  method=(p/"method.txt").read_text()
+                  def execute(code):
+                      (p/"Oracle.java").write_text(oracle.replace("__METHOD__",code))
+                      return subprocess.run(["java",str(p/"Oracle.java")],capture_output=True,text=True,timeout=30)
+                  result=execute(method);assert result.returncode==0,(result.stdout,result.stderr);print(result.stdout.strip())
+                  for old,new,label in (
+                      ("if(omit!=null)","if(false)","exact_delete"),
+                      ("substring(2)),delta)","substring(2)),0)","revision_delta"),
+                      ("rows.add(new ArrayList<>(r))","rows.add(r)","input_immutable")):
+                      assert method.count(old)==1
+                      result=execute(method.replace(old,new))
+                      assert result.returncode!=0 and "AssertionError: "+label in result.stderr,(label,result.stdout,result.stderr)
+                      print("NATIVE_ORACLE_MUTANT_REJECTED",label)
+              assert sum(LABELS.values(),[])==ACCEPTED and len(ACCEPTED)==20
+              print("TODO_NATIVE_HOST",json.dumps(dict(positive=2,negative=total,validator_mutants=3,java="SYNTAX_ONLY_NOT_ANDROID")))
+          
+          def android():
+              namespace=dict(vars(backend));namespace.update(JAVA=JAVA,REQUIRED=LABELS,SCOPE=SCOPE)
+              exec(compile(inspect.getsource(backend.observe),"<native-parser>","exec"),namespace)
+              driver=inspect.getsource(backend.android)
+              assert driver.count('ROOT/"todo-device"')==1 and driver.count('native_ui="NOT_IMPLEMENTED"')==1
+              driver=driver.replace('ROOT/"todo-device"','ROOT/"todo-native"').replace('native_ui="NOT_IMPLEMENTED"','native_ui="WIDGET_CALLBACKS_NOT_PHYSICAL_TOUCH"')
+              exec(compile(driver,"<native-device-driver>","exec"),namespace)
+              namespace["android"]()
+          
+          def report():
+              import urllib.request
+              from verify_evidence import publish
+              source,run,attempt=(os.environ[k] for k in ("GITHUB_SHA","GITHUB_RUN_ID","GITHUB_RUN_ATTEMPT"))
+              needs=json.loads(os.environ["NEEDS_JSON"]);passed=all(needs.get(k,{}).get("result")=="success" for k in ("todo_host","todo_device"))
+              devices={}
+              for api in (26,34):
+                  folder=Path("collected-todos")/("todo-device-api-"+str(api));row={"status":"FAIL"};devices[str(api)]=row
+                  try:
+                      v=json.loads((folder/"todo-native/result.json").read_text());m=json.loads((folder/"todo-apk.json").read_text())
+                      logs={p:(folder/"todo-native"/(p+".log")).read_text() for p in (*LABELS,"diagnostic")}
+                      validate(v,m,logs,api,source,run,attempt);row.update(status="PASS",evidence=v,manifest=m)
+                  except (OSError,ValueError,AssertionError,KeyError,TypeError,IndexError) as e:passed=False;row["error"]=repr(e)
+                  row["diagnostics"]={}
+                  for name in ("result.json","build.log","diagnostic.log","seed.log","deleted.log","undone.log"):
+                      try:
+                          data=(folder/"todo-native"/name).read_bytes();row["diagnostics"][name]=dict(bytes=len(data),truncated=len(data)>12000,tail=data[-12000:].decode("utf-8","replace"))
+                      except OSError as e:row["diagnostics"][name]={"error":repr(e)}
+              value=dict(status="PASS" if passed else "FAIL",scope=SCOPE,commit=source,run_id=run,run_attempt=attempt,
+                         devices=devices,parents=needs,release_ready=False,durable_upgrade_ready=False,
+                         physical_touch="NOT_TESTED",keyboard="NOT_TESTED",media_fixture="NO_REFERENCED_IMAGE",category_drag="NOT_IMPLEMENTED")
+              data=(json.dumps(value,ensure_ascii=False,indent=2)+"\n").encode();Path("todo-native-report.json").write_bytes(data)
+              endpoint="https://api.github.com/repos/"+os.environ["GITHUB_REPOSITORY"]+"/"
+              def api_call(path,method="GET",body=None):
+                  request=urllib.request.Request(endpoint+path,method=method,data=None if body is None else json.dumps(body).encode(),
+                          headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json"})
+                  with urllib.request.urlopen(request,timeout=30) as response:return json.load(response)
+              print("TODO_NATIVE_REPORT_PUBLISHED",publish(api_call,"reports/todo-native-"+source+"-"+run+"-"+attempt+".json",data))
+              assert passed,"Native todo evidence missing, mismatched or failed"
+          
+          assert not sys.flags.optimize
+          {"selftest":selftest,"android":android,"report":report}[os.environ.get("NATIVE_TODO_MODE","selftest")]()
+          PY
+          python3 "$RUNNER_TEMP/todo-native-gate.py" 2>&1 | tee "todo-native-${NATIVE_TODO_MODE:-selftest}.log"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: todo-host
-          path: todo-host.log
+          path: |
+            todo-host.log
+            todo-native-selftest.log
           if-no-files-found: error
   todo_device:
     needs: todo_host
@@ -100,6 +475,10 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/verify_todo_management.py android 2>&1 | tee todo-android.log
+      - name: Real native todo controls and independent database readback
+        env:
+          NATIVE_TODO_MODE: android
+        run: *todo_native_gate
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -107,6 +486,8 @@ jobs:
           path: |
             todo-apk.json
             todo-device/
+            todo-native/
+            todo-native-android.log
             todo-setup.log
             todo-build.log
             todo-android.log
@@ -136,10 +517,20 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/verify_todo_management.py report
+      - name: Require independent native UI evidence
+        if: always()
+        env:
+          NATIVE_TODO_MODE: report
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          GH_TOKEN: ${{ github.token }}
+        run: *todo_native_gate
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: independent-todo-report
-          path: todo-report.json
+          path: |
+            todo-report.json
+            todo-native-report.json
+            todo-native-report.log
           if-no-files-found: error
           retention-days: 14

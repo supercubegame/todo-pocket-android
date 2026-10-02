@@ -49,6 +49,86 @@ public final class TodayScreen {
     private final Map<View,Boolean> paused=new IdentityHashMap<>();
     final ActivitiesScreen activities;
     private AppDatabase.RestorePlan pendingRestore;
+    private AppDatabase.TodoDeletionPlan pendingTodoDeletion;
+    private AppDatabase.TodoDeletionUndo todoUndo;
+    private AlertDialog todoDialog;
+    private Object todoView=new Object();
+
+    private boolean todoViewCurrent(Object expected){
+        return !closed&&!activity.isDestroyed()&&!activity.isFinishing()&&page==0&&todoView==expected;
+    }
+    private void clearTodoUndo(){
+        AppDatabase.TodoDeletionUndo token=todoUndo;todoUndo=null;
+        if(token!=null)token.close();
+    }
+    private void clearTodoPreview(){
+        AppDatabase.TodoDeletionPlan plan=pendingTodoDeletion;pendingTodoDeletion=null;
+        AlertDialog dialog=todoDialog;todoDialog=null;
+        if(dialog!=null)dialog.dismiss();
+        if(plan!=null)plan.close();
+    }
+    private void leaveTodoSession(){
+        todoView=new Object();clearTodoPreview();clearTodoUndo();
+    }
+    private void previewTodoDeletion(TodoRow item,Object expected){
+        if(busy||!todoViewCurrent(expected)||pendingTodoDeletion!=null)return;
+        rememberDraft();
+        work(()->db.prepareTodoDeletion(item.id),plan->{
+            if(!todoViewCurrent(expected)){plan.close();return;}
+            // Do not silently confirm an externally renamed or toggled row.
+            if(!item.title.equals(plan.title())||item.done!=plan.done()){
+                plan.close();message("待办已变化，请刷新后重新选择",true);loadTodos();return;
+            }
+            showTodoDeletion(plan,expected);
+        },null,AppDatabase.TodoDeletionPlan::close);
+    }
+    private void showTodoDeletion(AppDatabase.TodoDeletionPlan plan,Object expected){
+        if(!todoViewCurrent(expected)){plan.close();return;}
+        pendingTodoDeletion=plan;
+        LinearLayout body=column();body.setPadding(dp(20),dp(4),dp(20),dp(8));
+        TextView details=text(plan.title()+"\n状态："+(plan.done()?"已完成":"待办")+"\nID："+plan.todoId(),16,INK);
+        details.setContentDescription("todo-delete-details");body.addView(details);
+        TextView warning=text("仅删除这条普通待办。删除后可在当前界面撤销一次；继续修改数据、切换页面、重建界面或重启后不可撤销。",14,ERROR);
+        warning.setContentDescription("todo-undo-limit");body.addView(warning);
+        ScrollView scroll=new ScrollView(activity);scroll.addView(body);
+        AlertDialog dialog=new AlertDialog.Builder(activity).setTitle("删除这条待办？").setView(scroll).setNegativeButton("取消",null).setPositiveButton("确认删除",null).create();
+        todoDialog=dialog;
+        dialog.setOnDismissListener(unused->{
+            if(todoDialog==dialog)todoDialog=null;
+            if(pendingTodoDeletion==plan){pendingTodoDeletion=null;plan.close();}
+        });
+        dialog.setOnShowListener(unused->{
+            Button confirm=dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            confirm.setContentDescription("todo-delete-confirm");confirm.setMinHeight(dp(48));
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setContentDescription("todo-delete-cancel");
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setMinHeight(dp(48));
+            confirm.setOnClickListener(v->{
+                if(busy||pendingTodoDeletion!=plan||!todoViewCurrent(expected))return;
+                pendingTodoDeletion=null;clearTodoUndo();
+                dialog.setCancelable(false);confirm.setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);
+                work(()->db.confirmTodoDeletion(plan),token->{
+                    dialog.dismiss();
+                    if(!todoViewCurrent(expected)){token.close();return;}
+                    todoUndo=token;loadTodos();message("已删除，可在当前界面撤销一次",false);
+                },()->{dialog.dismiss();loadTodos();message("删除未完成，请刷新后重新选择",true);},AppDatabase.TodoDeletionUndo::close);
+            });
+        });
+        dialog.show();
+    }
+    private void renderTodoUndo(LinearLayout body){
+        final AppDatabase.TodoDeletionUndo token=todoUndo;
+        if(token==null)return;
+        final Object expected=todoView;
+        TextView hint=text("已删除："+token.title()+"\n撤销仅限当前界面一次，切页、重建或重启失效。",14,MUTED);
+        hint.setContentDescription("todo-undo-notice");body.addView(hint);
+        Button undo=button("撤销删除",()->{
+            if(busy||todoUndo!=token||!todoViewCurrent(expected))return;
+            rememberDraft();todoUndo=null;
+            work(()->{db.undoTodoDeletion(token);return true;},ignored->{loadTodos();message("已恢复原待办及原位置",false);},
+                ()->{loadTodos();message("无法撤销：数据可能已变化，原删除结果未覆盖",true);});
+        });
+        undo.setContentDescription("todo-undo-"+token.todoId());body.addView(undo,new LinearLayout.LayoutParams(-1,-2));
+    }
 
     public TodayScreen(Activity activity) {
         this.activity=activity;
@@ -56,6 +136,7 @@ public final class TodayScreen {
         activities=new ActivitiesScreen(this);
     }
     public void show(Bundle saved) {
+        leaveTodoSession();
         if(saved!=null){page=saved.getInt("page",0);filter=saved.getInt("filter",0);draft=saved.getString("draft","");activities.selected=saved.getLong("activity",0);}
         activity.getWindow().setStatusBarColor(BG);
         activity.getWindow().setNavigationBarColor(BG);
@@ -69,12 +150,12 @@ public final class TodayScreen {
         LinearLayout nav=new LinearLayout(activity);
         nav.addView(button("今天",()->navigate(0)),new LinearLayout.LayoutParams(0,dp(52),1));
         nav.addView(button("活动",()->navigate(1)),new LinearLayout.LayoutParams(0,dp(52),1));
-        nav.addView(button("导出笔记",()->((MainActivity)activity).openNoteShare()),new LinearLayout.LayoutParams(0,dp(52),1));root.addView(nav);
+        nav.addView(button("导出笔记",()->{leaveTodoSession();((MainActivity)activity).openNoteShare();}),new LinearLayout.LayoutParams(0,dp(52),1));root.addView(nav);
         refresh();
     }
-    private void navigate(int next){if(busy)return;rememberDraft();page=next;refresh();}
+    private void navigate(int next){if(busy)return;rememberDraft();leaveTodoSession();page=next;refresh();}
     void refresh(){if(page==1)activities.load();else loadTodos();}
-    LinearLayout content(){input=null;content.removeAllViews();return content;}
+    LinearLayout content(){todoView=new Object();clearTodoPreview();if(page!=0)clearTodoUndo();input=null;content.removeAllViews();return content;}
     private void rememberDraft(){if(input!=null)draft=input.getText().toString();}
     private static final class TodoRow {
         final String id,title;final boolean done;
@@ -90,6 +171,7 @@ public final class TodayScreen {
     }
     private void renderTodos(List<TodoRow> todos) {
         LinearLayout body=content();int remaining=0;for(TodoRow row:todos)if(!row.done)remaining++;
+        final Object renderedTodoView=todoView;
         TextView summary=text("还剩 "+remaining+" 件 / 共 "+todos.size()+" 件",20,INK);summary.setPadding(dp(14),dp(12),dp(14),dp(12));summary.setBackground(shape(TINT,16));body.addView(summary);
         LinearLayout tabs=new LinearLayout(activity);String[] labels={"全部","待办","已完成"};
         for(int i=0;i<labels.length;i++){final int choice=i;Button b=button(labels[i],()->{filter=choice;loadTodos();});if(i==filter){b.setBackgroundTintList(ColorStateList.valueOf(ACCENT));b.setTextColor(WHITE);}tabs.addView(b,new LinearLayout.LayoutParams(0,dp(48),1));}
@@ -101,12 +183,14 @@ public final class TodayScreen {
             LinearLayout row=new LinearLayout(activity);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(8),dp(5),dp(4),dp(5));row.setBackground(shape(WHITE,14));
             CheckBox box=new CheckBox(activity);box.setText(item.title);box.setTextSize(17);box.setTextColor(item.done?MUTED:INK);box.setMinHeight(dp(52));box.setButtonTintList(ColorStateList.valueOf(ACCENT));box.setContentDescription("todo-"+item.id);box.setChecked(item.done);
             if(item.done)box.setPaintFlags(box.getPaintFlags()|Paint.STRIKE_THRU_TEXT_FLAG);
-            box.setOnCheckedChangeListener((b,checked)->work(()->{db.editTodo(item.id,item.title,checked);return true;},ignored->loadTodos(),this::loadTodos));
+            box.setOnCheckedChangeListener((b,checked)->{clearTodoUndo();work(()->{db.editTodo(item.id,item.title,checked);return true;},ignored->loadTodos(),this::loadTodos);});
             row.addView(box,new LinearLayout.LayoutParams(0,-2,1));
-            Button edit=button("编辑",()->editor("编辑待办","编辑待办输入",item.title,false,value->db.editTodo(item.id,value,item.done),this::loadTodos));edit.setContentDescription("edit-"+item.id);row.addView(edit,new LinearLayout.LayoutParams(dp(60),dp(52)));
+            Button edit=button("编辑",()->{clearTodoUndo();editor("编辑待办","编辑待办输入",item.title,false,value->db.editTodo(item.id,value,item.done),this::loadTodos);});edit.setContentDescription("edit-"+item.id);row.addView(edit,new LinearLayout.LayoutParams(dp(60),dp(52)));
+            Button delete=button("删除",()->previewTodoDeletion(item,renderedTodoView));delete.setContentDescription("delete-"+item.id);row.addView(delete,new LinearLayout.LayoutParams(dp(60),dp(52)));
             addRow(rows,row);
         }
         if(visible==0){TextView empty=text(filter==2?"完成的事会留在这里":filter==1?"这一页已经清空，真不错":"先放进一件小事。\n活动和打卡，在「活动」里。",18,MUTED);empty.setPadding(dp(12),dp(28),dp(12),dp(16));rows.addView(empty);}
+        renderTodoUndo(body);
         LinearLayout composer=new LinearLayout(activity);composer.setGravity(Gravity.CENTER_VERTICAL);
         input=field("新待办输入",false);input.setHint("下一件小事…");input.setText(draft);input.setBackground(shape(WHITE,12));input.setPadding(dp(12),dp(8),dp(12),dp(8));
         composer.addView(input,new LinearLayout.LayoutParams(0,dp(56),1));
@@ -115,6 +199,7 @@ public final class TodayScreen {
     private void addTodo(){
         if(busy)return;String title=input.getText().toString().trim();
         if(title.isEmpty()){message("内容不能为空",true);return;}
+        clearTodoUndo();
         final String id=UUID.randomUUID().toString();
         work(()->{db.addTodo(id,title);return true;},ignored->{
             ((InputMethodManager)activity.getSystemService(Activity.INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(input.getWindowToken(),0);
@@ -175,12 +260,15 @@ public final class TodayScreen {
         dialog.show();
     }
     <T> void work(Callable<T> action,Consumer<T> success,Runnable failure){
+        work(action,success,failure,ignored->{});
+    }
+    private <T> void work(Callable<T> action,Consumer<T> success,Runnable failure,Consumer<T> abandoned){
         if(closed||busy)return;
         busy=true;pause(root);message("正在读取或保存…",false);
         final Object noticeAtStart=notice;
         io.execute(()->{
             try{T result=action.call();activity.runOnUiThread(()->{
-                if(closed||activity.isDestroyed())return;busy=false;resume();if(notice==noticeAtStart)message("已保存到本机",false);success.accept(result);
+                if(closed||activity.isDestroyed()){abandoned.accept(result);return;}busy=false;resume();if(notice==noticeAtStart)message("已保存到本机",false);success.accept(result);
             });}catch(Exception e){activity.runOnUiThread(()->{
                 if(closed||activity.isDestroyed())return;busy=false;resume();if(notice==noticeAtStart)message("未能保存或读取，原始数据未清空",true);if(failure!=null)failure.run();
             });}
@@ -198,5 +286,5 @@ public final class TodayScreen {
     int dp(int value){return Math.round(value*activity.getResources().getDisplayMetrics().density);}
     public void save(Bundle out){rememberDraft();out.putInt("page",page);out.putInt("filter",filter);out.putString("draft",draft);out.putLong("activity",activities.selected);}
     public boolean back(){if(busy)return true;if(page==1&&activities.selected!=0){activities.selected=0;activities.load();return true;}return false;}
-    public void close(){if(closed)return;closed=true;io.execute(db::close);io.shutdown();}
+    public void close(){if(closed)return;closed=true;leaveTodoSession();io.execute(db::close);io.shutdown();}
 }

@@ -63,6 +63,59 @@ jobs:
               else: raise AssertionError('budget negative control survived')
           budget(Path('.github/workflows/android.yml').read_text())
           print('BUDGET_HOST_CONTROLS 1 positive 6 negative; actual workflow 75 minutes; NOT_ANDROID_ACCEPTANCE')
+          # Canonical YAML-layout guard, separate from the artifact upload it guards.
+          # This proves collection wiring, NOT independent Android artifact acceptance.
+          observer_paths=[
+              'native-ui/full-observer/binding.json',
+              'native-ui/full-observer/phase.json',
+              'native-ui/full-observer/observer.json',
+              'native-ui/full-observer/observer-last.xml',
+              'native-ui/full-observer/observer-stderr.log',
+              'native-ui/full-observer/observer-*/PocketUiObserver.java',
+              'native-ui/full-observer/observer-*/dex/classes.dex']
+          def observer_collection(text):
+              import re
+              lines=[]; active=False
+              for line in text.splitlines():
+                  if not line.strip() or line.lstrip().startswith('#'):continue
+                  if re.match(r'^  [A-Za-z_][A-Za-z0-9_]*:',line):
+                      active=line=='  database:'
+                  if active:lines.append(line)
+              steps=[]; current=[]
+              for line in lines:
+                  if line.startswith('      - '):
+                      if current:steps.append(current)
+                      current=[]
+                  current.append(line)
+              if current:steps.append(current)
+              selected=[s for s in steps if '          name: database-api-${{ matrix.api }}' in s]
+              assert len(selected)==1,'one full-native evidence uploader required'
+              step=selected[0]
+              assert step[0]=='      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02','fixed artifact action'
+              assert step.count('        if: always()')==1,'failed native evidence must upload'
+              assert step.count('          if-no-files-found: error')==1,'missing upload cannot be ignored'
+              assert step.count('          path: |')==1,'one explicit artifact path block'
+              start=step.index('          path: |')+1;paths=[]
+              for line in step[start:]:
+                  if not line.startswith('            '):break
+                  paths.append(line.strip())
+              assert all(paths.count(p)==1 for p in observer_paths),'required observer artifact omitted or duplicated'
+          fixture='  database:\n      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02\n        if: always()\n        with:\n          name: database-api-${{ matrix.api }}\n          path: |\n'+''.join('            '+p+'\n' for p in observer_paths)+'          if-no-files-found: error\n'
+          observer_collection(fixture)
+          invalid=[fixture.replace('            '+p+'\n','',1) for p in observer_paths]
+          invalid += [
+              fixture.replace('  database:','  other:'),
+              fixture.replace('        if: always()','        if: success()'),
+              fixture.replace('          path: |','          # path: |'),
+              fixture.replace('          if-no-files-found: error','          if-no-files-found: warn'),
+              fixture.replace('            '+observer_paths[0]+'\n',('            '+observer_paths[0]+'\n')*2)]
+          for changed in invalid:
+              assert changed!=fixture,'collection fixture did not change'
+              try:observer_collection(changed)
+              except AssertionError:pass
+              else:raise AssertionError('collection omission survived')
+          observer_collection(Path('.github/workflows/android.yml').read_text())
+          print('FULL_OBSERVER_COLLECTION_CONTROLS 1 positive '+str(len(invalid))+' negative; WIRING_ONLY_NOT_ARTIFACT_ACCEPTANCE')
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -899,6 +952,13 @@ jobs:
             native-ui/native-result.json
             native-ui/codec-result.json
             native-ui/*.png
+            native-ui/full-observer/binding.json
+            native-ui/full-observer/phase.json
+            native-ui/full-observer/observer.json
+            native-ui/full-observer/observer-last.xml
+            native-ui/full-observer/observer-stderr.log
+            native-ui/full-observer/observer-*/PocketUiObserver.java
+            native-ui/full-observer/observer-*/dex/classes.dex
             build/reports/lint-results-debug.html
           if-no-files-found: error
   report:

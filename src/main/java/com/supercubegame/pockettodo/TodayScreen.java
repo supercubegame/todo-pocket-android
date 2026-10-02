@@ -51,6 +51,8 @@ public final class TodayScreen {
     private AppDatabase.RestorePlan pendingRestore;
     private AppDatabase.TodoDeletionPlan pendingTodoDeletion;
     private AppDatabase.TodoDeletionUndo todoUndo;
+    private TextView todoUndoHint;
+    private Button todoUndoButton;
     private AlertDialog todoDialog;
     private Object todoView=new Object();
 
@@ -59,7 +61,12 @@ public final class TodayScreen {
     }
     private void clearTodoUndo(){
         AppDatabase.TodoDeletionUndo token=todoUndo;todoUndo=null;
+        clearTodoUndoControls();
         if(token!=null)token.close();
+    }
+    private void clearTodoUndoControls(){
+        if(todoUndoHint!=null){todoUndoHint.setVisibility(View.GONE);todoUndoHint=null;}
+        if(todoUndoButton!=null){todoUndoButton.setVisibility(View.GONE);todoUndoButton=null;}
     }
     private void clearTodoPreview(){
         AppDatabase.TodoDeletionPlan plan=pendingTodoDeletion;pendingTodoDeletion=null;
@@ -116,18 +123,19 @@ public final class TodayScreen {
         dialog.show();
     }
     private void renderTodoUndo(LinearLayout body){
+        clearTodoUndoControls();
         final AppDatabase.TodoDeletionUndo token=todoUndo;
         if(token==null)return;
         final Object expected=todoView;
         TextView hint=text("已删除："+token.title()+"\n撤销仅限当前界面一次，切页、重建或重启失效。",14,MUTED);
-        hint.setContentDescription("todo-undo-notice");body.addView(hint);
+        hint.setContentDescription("todo-undo-notice");todoUndoHint=hint;body.addView(hint);
         Button undo=button("撤销删除",()->{
             if(busy||todoUndo!=token||!todoViewCurrent(expected))return;
-            rememberDraft();todoUndo=null;
+            rememberDraft();todoUndo=null;clearTodoUndoControls();
             work(()->{db.undoTodoDeletion(token);return true;},ignored->{loadTodos();message("已恢复原待办及原位置",false);},
                 ()->{loadTodos();message("无法撤销：数据可能已变化，原删除结果未覆盖",true);});
         });
-        undo.setContentDescription("todo-undo-"+token.todoId());body.addView(undo,new LinearLayout.LayoutParams(-1,-2));
+        undo.setContentDescription("todo-undo-"+token.todoId());todoUndoButton=undo;body.addView(undo,new LinearLayout.LayoutParams(-1,-2));
     }
 
     public TodayScreen(Activity activity) {

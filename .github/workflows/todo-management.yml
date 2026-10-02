@@ -261,7 +261,70 @@ jobs:
                   logs[phase]=t;v[phase]=dict(labels=labels[:],log_sha256=hashlib.sha256(t.encode()).hexdigest())
               return v,m,logs
           
+          def isolated_native(gate, callback):
+              base,avd=gate.BASE,gate.AVD_HOME
+              assert avd==base/"avd","unexpected emulator path relationship"
+              target=base.with_name(base.name+"-todo-native")
+              if target.exists() or target.is_symlink():
+                  raise FileExistsError("native emulator directory already exists: "+str(target))
+              try:
+                  gate.BASE=target
+                  gate.AVD_HOME=target/"avd"
+                  return callback()
+              finally:
+                  gate.BASE,gate.AVD_HOME=base,avd
+          
+          def isolation_selftest():
+              from types import SimpleNamespace
+              source=inspect.getsource(isolated_native)
+              def exercise(invoke):
+                  for fail in (False,True):
+                      with tempfile.TemporaryDirectory(prefix="todo-isolation-") as tmp:
+                          base=Path(tmp)/"pocket-avd-123-26";avd=base/"avd";avd.mkdir(parents=True)
+                          sentinel=avd/"preserve";sentinel.write_bytes(b"backend-evidence")
+                          target=base.with_name(base.name+"-todo-native")
+                          gate=SimpleNamespace(BASE=base,AVD_HOME=avd);calls=[];error=RuntimeError("native-sentinel")
+                          def callback():
+                              assert gate.BASE==target and gate.AVD_HOME==target/"avd","native_paths"
+                              gate.BASE.mkdir(parents=True,exist_ok=False);gate.AVD_HOME.mkdir()
+                              calls.append(1)
+                              if fail:raise error
+                              return "native-return"
+                          caught=None
+                          try:assert invoke(gate,callback)=="native-return"
+                          except RuntimeError as e:caught=e
+                          assert caught is (error if fail else None),"original_failure"
+                          assert calls==[1] and target.is_dir(),"single_invocation"
+                          assert gate.BASE==base and gate.AVD_HOME==avd,"restore_paths"
+                          assert sentinel.read_bytes()==b"backend-evidence","backend_preserved"
+                          for symlink in (False,True):
+                              occupied_base=base
+                              if symlink:
+                                  occupied_base=base.with_name("linked")
+                                  link=occupied_base.with_name(occupied_base.name+"-todo-native")
+                                  link.symlink_to(target,target_is_directory=True)
+                              occupied=SimpleNamespace(BASE=occupied_base,AVD_HOME=occupied_base/"avd")
+                              old=(occupied.BASE,occupied.AVD_HOME);seen=[]
+                              try:invoke(occupied,lambda:seen.append(1))
+                              except FileExistsError:pass
+                              else:raise AssertionError("occupied_refused")
+                              assert not seen and (occupied.BASE,occupied.AVD_HOME)==old,"occupied_untouched"
+              exercise(isolated_native)
+              for old,new,label in (
+                  ('base.with_name(base.name+"-todo-native")','base',"native_paths"),
+                  ('gate.AVD_HOME=target/"avd"','gate.AVD_HOME=avd',"native_paths"),
+                  ('gate.BASE,gate.AVD_HOME=base,avd','pass',"restore_paths"),
+              ):
+                  assert source.count(old)==1
+                  namespace=dict(globals());exec(compile(source.replace(old,new),"<native-isolation-mutant>","exec"),namespace)
+                  try:exercise(namespace["isolated_native"])
+                  except (AssertionError,FileExistsError) as e:
+                      assert label in str(e) or (label=="native_paths" and isinstance(e,FileExistsError)),repr(e)
+                  else:raise AssertionError("isolation mutant survived "+label)
+              print("NATIVE_ISOLATION positive=2 occupied_negative=4 compiled_mutants=3 PASS; host filesystem, not emulator")
+          
           def selftest():
+              isolation_selftest()
               total=0
               for api in (26,34):
                   v,m,l=fixture(api);validate(v,m,l,api,"a"*40,"123","1");bad=[]
@@ -358,7 +421,8 @@ jobs:
               assert driver.count('ROOT/"todo-device"')==1 and driver.count('native_ui="NOT_IMPLEMENTED"')==1
               driver=driver.replace('ROOT/"todo-device"','ROOT/"todo-native"').replace('native_ui="NOT_IMPLEMENTED"','native_ui="WIDGET_CALLBACKS_NOT_PHYSICAL_TOUCH"')
               exec(compile(driver,"<native-device-driver>","exec"),namespace)
-              namespace["android"]()
+              import emulator_gate as gate
+              isolated_native(gate,namespace["android"])
           
           def report():
               import urllib.request

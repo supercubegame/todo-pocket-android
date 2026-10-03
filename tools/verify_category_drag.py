@@ -182,9 +182,20 @@ public final class TodoInstrumentation extends Instrumentation {
  Rect handle(long id)throws Exception{
   Rect r=new Rect();ui(()->{View v=one("category-drag-"+id,true);need(v.isShown()&&v.isEnabled()&&v.getGlobalVisibleRect(r)&&r.width()>0&&r.height()>0,"visible handle");});return r;
  }
- void event(long down,int action,float x,float y){
+ static void requireInjection(boolean accepted,boolean orphan){
+  need(orphan?!accepted:accepted,orphan?"orphan UP must be rejected by Android":"valid touch injection");
+ }
+ void inject(long down,int action,float x,float y,boolean orphan){
   MotionEvent e=MotionEvent.obtain(down,SystemClock.uptimeMillis(),action,x,y,0);e.setSource(InputDevice.SOURCE_TOUCHSCREEN);
-  try{need(getUiAutomation().injectInputEvent(e,true),"injected touch "+action);}finally{e.recycle();}
+  try{requireInjection(getUiAutomation().injectInputEvent(e,true),orphan);}finally{e.recycle();}
+ }
+ void event(long down,int action,float x,float y){inject(down,action,x,y,false);}
+ void replayDetachedUp(View old,long down,float x,float y)throws Exception{
+  ui(()->{
+   need(!old.isAttachedToWindow()&&old.getAlpha()==1f&&!old.isPressed(),"detached clean replay target");
+   MotionEvent e=MotionEvent.obtain(down,SystemClock.uptimeMillis(),MotionEvent.ACTION_UP,x,y,0);e.setSource(InputDevice.SOURCE_TOUCHSCREEN);
+   try{old.dispatchTouchEvent(e);}finally{e.recycle();}
+  });waitForIdleSync();ready();
  }
  long drag(long source,long target,int terminal,boolean outside)throws Exception{
   Rect from=handle(source),to=handle(target);float x=from.exactCenterX(),y=from.exactCenterY();
@@ -226,10 +237,15 @@ public final class TodoInstrumentation extends Instrumentation {
   AppDatabase h=db();List<Long> a=h.categoryIds();need(a.size()==3,"three categories");save("ui-order",a.toString());
   pass(h.categoryName(a.get(0)).equals("Same")&&h.categoryName(a.get(1)).equals("Same")&&!a.get(0).equals(a.get(1)),"ui_same_title_categories");
   Map<String,String> images=media();Map<String,List<List<String>>> before=state(h);List<Long> b=Arrays.asList(a.get(1),a.get(2),a.get(0));
-  Rect duplicateTarget=handle(a.get(2));long previousDown=drag(a.get(0),a.get(2),MotionEvent.ACTION_UP,false);
+  Rect duplicateTarget=handle(a.get(2));View[] previousHandle={null};ui(()->previousHandle[0]=one("category-drag-"+a.get(0),true));
+  long previousDown=drag(a.get(0),a.get(2),MotionEvent.ACTION_UP,false);
   pass(h.categoryIds().equals(b)&&state(h).equals(expected(before,b,1))&&media().equals(images),"touch_forward");
   Map<String,List<List<String>>> afterForward=state(h);
-  event(previousDown,MotionEvent.ACTION_UP,duplicateTarget.exactCenterX(),duplicateTarget.exactCenterY());waitForIdleSync();ready();
+  // Android rejects orphan UP before application dispatch. Test that separately,
+  // then deliver to the retained real View explicitly; this is not injected input.
+  inject(previousDown,MotionEvent.ACTION_UP,duplicateTarget.exactCenterX(),duplicateTarget.exactCenterY(),true);
+  need(state(h).equals(afterForward)&&media().equals(images),"orphan rejection readonly");
+  replayDetachedUp(previousHandle[0],previousDown,duplicateTarget.exactCenterX(),duplicateTarget.exactCenterY());
   pass(state(h).equals(afterForward)&&media().equals(images),"touch_duplicate_up_readonly");
   before=state(h);drag(a.get(0),a.get(1),MotionEvent.ACTION_UP,false);
   pass(h.categoryIds().equals(a)&&state(h).equals(expected(before,a,1))&&media().equals(images),"touch_backward");
@@ -285,7 +301,7 @@ def validate(value, manifest, logs, api, source, run, attempt):
     assert value["release_ready"] is False
     assert value["default_test_restored"] is True and value["diagnostic_rejected"] is True
     assert value["product_readback"] == "EXACT_BEFORE_AND_AFTER"
-    assert value["native_ui"] == "INJECTED_TOUCH_CATEGORY_DRAG"
+    assert value["native_ui"] == "INJECTED_TOUCH_WITH_DETACHED_VIEW_REPLAY"
     assert not any(k in value for k in ("error", "command_failure", "restoration_error"))
     labels = sum(EXPECTED.values(), [])
     assert type(value["checks"]) is int and value["checks"] == len(labels) and value["labels"] == labels
@@ -312,7 +328,7 @@ def fixture(api):
     manifest = dict(commit="a"*40, run_id="123", run_attempt="1", api=api, apk_sha256="b"*64, certificate="c"*64, apk_bytes=100)
     value = dict(manifest, status="PASS", scope=SCOPE, checks=35, labels=sum(EXPECTED.values(), []),
                  release_ready=False, default_test_restored=True, diagnostic_rejected=True,
-                 product_readback="EXACT_BEFORE_AND_AFTER", native_ui="INJECTED_TOUCH_CATEGORY_DRAG")
+                 product_readback="EXACT_BEFORE_AND_AFTER", native_ui="INJECTED_TOUCH_WITH_DETACHED_VIEW_REPLAY")
     stop = dict(status="PASS", package=PACKAGE, scope="COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK", force_stop_attempts=1,
                 command=dict(args=["am", "force-stop", PACKAGE], returncode=0, stdout="", stderr=""),
                 probes=[dict(args=["pidof", PACKAGE], returncode=1, stdout="", stderr="")])
@@ -331,7 +347,7 @@ def driver():
     replacements = {
         'ROOT/"todo-device"': 'ROOT/"category-device"',
         'ROOT/"todo-apk.json"': 'ROOT/"category-apk.json"',
-        'native_ui="NOT_IMPLEMENTED"': 'native_ui="INJECTED_TOUCH_CATEGORY_DRAG"',
+        'native_ui="NOT_IMPLEMENTED"': 'native_ui="INJECTED_TOUCH_WITH_DETACHED_VIEW_REPLAY"',
     }
     for old, new in replacements.items():
         assert source.count(old) == 1, old
@@ -395,6 +411,44 @@ System.out.println("CATEGORY_ORACLE positive=4 negative=3 PASS; host oracle, not
         print("CATEGORY_ORACLE compiled_mutants=3 rejected at intended behavioral assertions")
 
 
+def injection_selftest():
+    """Parse and execute the actual Java injection assertion, not a translation."""
+    extract = """import javax.tools.*;import com.sun.source.util.*;import com.sun.source.tree.*;import java.nio.file.*;import java.util.*;
+class Extract{public static void main(String[]a)throws Exception{
+JavaCompiler c=ToolProvider.getSystemJavaCompiler();DiagnosticCollector<JavaFileObject>d=new DiagnosticCollector<>();
+try(StandardJavaFileManager f=c.getStandardFileManager(d,null,null)){
+JavacTask t=(JavacTask)c.getTask(null,f,d,Arrays.asList("-proc:none"),null,f.getJavaFileObjects(a[0]));
+CompilationUnitTree u=t.parse().iterator().next();for(Diagnostic<?>e:d.getDiagnostics())if(e.getKind()==Diagnostic.Kind.ERROR)throw new AssertionError(e.toString());
+String s=Files.readString(Path.of(a[0]));SourcePositions p=Trees.instance(t).getSourcePositions();int count=0;
+for(Tree type:u.getTypeDecls())if(type instanceof ClassTree)for(Tree m:((ClassTree)type).getMembers())
+if(m instanceof MethodTree&&((MethodTree)m).getName().contentEquals("requireInjection")){
+Files.writeString(Path.of(a[1]),s.substring((int)p.getStartPosition(u,m),(int)p.getEndPosition(u,m)));count++;}
+if(count!=1)throw new AssertionError("one injection assertion");}}}"""
+    harness = """class Injection{
+static void need(boolean b,String s){if(!b)throw new AssertionError(s);}
+__METHOD__
+public static void main(String[]args){
+requireInjection(true,false);requireInjection(false,true);System.out.println("INJECTION_VALID_WITNESS_PASS");
+for(boolean orphan:new boolean[]{false,true}){
+boolean rejected=false;try{requireInjection(orphan,orphan);}catch(AssertionError e){
+need(e.getMessage().equals(orphan?"orphan UP must be rejected by Android":"valid touch injection"),"failure_identity");rejected=true;}
+need(rejected,orphan?"orphan_acceptance_rejected":"valid_rejection_not_hidden");}
+System.out.println("INJECTION_ASSERTION positive=2 negative=2 PASS; assertion behavior, not Android dispatch");}}"""
+    with tempfile.TemporaryDirectory() as tmp:
+        p=Path(tmp);(p/"Extract.java").write_text(extract);(p/"TodoInstrumentation.java").write_text(JAVA)
+        subprocess.run(["java",str(p/"Extract.java"),str(p/"TodoInstrumentation.java"),str(p/"method")],check=True,timeout=30)
+        method=(p/"method").read_text()
+        def execute(code):
+            (p/"Injection.java").write_text(harness.replace("__METHOD__",code))
+            return subprocess.run(["java",str(p/"Injection.java")],capture_output=True,text=True,timeout=30)
+        result=execute(method);assert result.returncode==0,(result.stdout,result.stderr);print(result.stdout.strip())
+        for replacement,label in (("orphan||accepted","orphan_acceptance_rejected"),("!orphan||!accepted","valid_rejection_not_hidden")):
+            assert method.count("orphan?!accepted:accepted")==1
+            result=execute(method.replace("orphan?!accepted:accepted",replacement))
+            assert result.returncode!=0 and "INJECTION_VALID_WITNESS_PASS" in result.stdout and "AssertionError: "+label in result.stderr,(label,result.stdout,result.stderr)
+    print("INJECTION_ASSERTION compiled_mutants=2 rejected after valid witnesses")
+
+
 def selftest():
     assert REQUIRED == EXPECTED and [len(EXPECTED[p]) for p in ("seed", "deleted", "undone")] == [19, 14, 2]
     total = 0
@@ -420,7 +474,7 @@ def selftest():
             else:raise AssertionError("invalid receipt accepted")
     source = inspect.getsource(validate)
     for old, new, key, wrong in (
-        ('assert value["native_ui"] == "INJECTED_TOUCH_CATEGORY_DRAG"', "assert True", "native_ui", "WIDGET_CALLBACKS"),
+        ('assert value["native_ui"] == "INJECTED_TOUCH_WITH_DETACHED_VIEW_REPLAY"', "assert True", "native_ui", "WIDGET_CALLBACKS"),
         ('assert value["release_ready"] is False', "assert True", "release_ready", 0),
         ('assert type(value["checks"]) is int and value["checks"] == len(labels) and value["labels"] == labels', "assert True", "checks", 35.0),
     ):
@@ -444,6 +498,7 @@ for(Object u:t.parse()){}for(Diagnostic<?>e:d.getDiagnostics())if(e.getKind()==D
         subprocess.run(["java", str(p/"Parse.java"), str(p/"TodoInstrumentation.java")], check=True, timeout=30)
     assert callable(driver())
     oracle_selftest()
+    injection_selftest()
     report_selftest()
     print("CATEGORY_HOST "+json.dumps(dict(status="PASS", positive=2, negative=total, compiled_validator_mutants=3,
           scope="HOST_RECEIPT_AND_JAVA_SYNTAX_NOT_FEATURE_ACCEPTANCE", release_ready=False)))

@@ -31,12 +31,12 @@ jobs:
           import verify_todo_management as backend
           LABELS={
            "seed":"fresh_ui_database ui_created_same_title_completed exact_confirmation_identity explicit_undo_limit preview_all_state_readonly cancel_all_state_readonly cancel_preserves_composer delete_exact_all_tables_media delete_preserves_composer undo_exact_identity_done_position_rowid undo_single_use_and_composer second_delete_exact navigation_invalidates_undo_readonly deleted_restart_checkpoint".split(),
-           "deleted":"deleted_restart_state restart_has_no_undo second_identity_delete_undo edit_cancel_fixture_created edit_open_invalidates_undo_controls edit_cancel_readonly edit_cancel_preserves_composer edit_cancel_stale_undo_readonly order_fixture order_forward order_backward order_noop_readonly order_stale_readonly order_duplicate_readonly order_null_readonly order_missing_readonly order_bounds_readonly order_outer_readonly order_late_rollback order_delete_undo order_checkpoint undone_restart_checkpoint".split(),
-           "undone":"undone_restart_state undone_restart_no_replay order_restart order_backup".split(),
+           "deleted":"deleted_restart_state restart_has_no_undo second_identity_delete_undo edit_cancel_fixture_created edit_open_invalidates_undo_controls edit_cancel_readonly edit_cancel_preserves_composer edit_cancel_stale_undo_readonly order_fixture order_forward order_backward order_noop_readonly order_stale_readonly order_duplicate_readonly order_null_readonly order_missing_readonly order_bounds_readonly order_outer_readonly order_late_rollback order_delete_undo order_checkpoint ui_order_fixture ui_order_boundaries_readonly ui_order_down_once ui_order_stale_callbacks_readonly ui_order_up ui_order_composer ui_order_pending_readonly ui_order_completed_readonly ui_order_navigation_readonly ui_order_failure_rollback_readonly ui_order_failed_callbacks_readonly ui_order_recovery ui_order_checkpoint undone_restart_checkpoint".split(),
+           "undone":"undone_restart_state undone_restart_no_replay order_restart order_backup ui_order_restart ui_order_backup".split(),
           }
-          SCOPE="ACTUAL_NATIVE_WIDGET_CALLBACKS_AND_TODO_ORDER_BACKEND_NOT_ORDER_BUTTONS_PHYSICAL_TOUCH_OR_LMK"
+          SCOPE="ACTUAL_NATIVE_WIDGET_CALLBACKS_WITH_TODO_ORDER_BUTTONS_AND_BACKEND_NOT_PHYSICAL_TOUCH_OR_LMK"
           # The emission list and acceptance list are deliberately independent.
-          ACCEPTED="fresh_ui_database ui_created_same_title_completed exact_confirmation_identity explicit_undo_limit preview_all_state_readonly cancel_all_state_readonly cancel_preserves_composer delete_exact_all_tables_media delete_preserves_composer undo_exact_identity_done_position_rowid undo_single_use_and_composer second_delete_exact navigation_invalidates_undo_readonly deleted_restart_checkpoint deleted_restart_state restart_has_no_undo second_identity_delete_undo edit_cancel_fixture_created edit_open_invalidates_undo_controls edit_cancel_readonly edit_cancel_preserves_composer edit_cancel_stale_undo_readonly order_fixture order_forward order_backward order_noop_readonly order_stale_readonly order_duplicate_readonly order_null_readonly order_missing_readonly order_bounds_readonly order_outer_readonly order_late_rollback order_delete_undo order_checkpoint undone_restart_checkpoint undone_restart_state undone_restart_no_replay order_restart order_backup".split()
+          ACCEPTED="fresh_ui_database ui_created_same_title_completed exact_confirmation_identity explicit_undo_limit preview_all_state_readonly cancel_all_state_readonly cancel_preserves_composer delete_exact_all_tables_media delete_preserves_composer undo_exact_identity_done_position_rowid undo_single_use_and_composer second_delete_exact navigation_invalidates_undo_readonly deleted_restart_checkpoint deleted_restart_state restart_has_no_undo second_identity_delete_undo edit_cancel_fixture_created edit_open_invalidates_undo_controls edit_cancel_readonly edit_cancel_preserves_composer edit_cancel_stale_undo_readonly order_fixture order_forward order_backward order_noop_readonly order_stale_readonly order_duplicate_readonly order_null_readonly order_missing_readonly order_bounds_readonly order_outer_readonly order_late_rollback order_delete_undo order_checkpoint ui_order_fixture ui_order_boundaries_readonly ui_order_down_once ui_order_stale_callbacks_readonly ui_order_up ui_order_composer ui_order_pending_readonly ui_order_completed_readonly ui_order_navigation_readonly ui_order_failure_rollback_readonly ui_order_failed_callbacks_readonly ui_order_recovery ui_order_checkpoint undone_restart_checkpoint undone_restart_state undone_restart_no_replay order_restart order_backup ui_order_restart ui_order_backup".split()
           JAVA = r'''
           package ci.todos;
           import android.app.*;
@@ -247,6 +247,88 @@ jobs:
              pass(Arrays.equals(Files.readAllBytes(folder.resolve("order.canonical")),h.exportState())&&read("order-ids").equals(h.todoIds().toString()),"order_backup");
             }
            }
+           static void orderControls(View up,View down,boolean canUp,boolean canDown){
+            need(up.isShown()&&down.isShown(),"order controls shown");
+            need(up.isEnabled()==canUp,"order up enabled");
+            need(down.isEnabled()==canDown,"order down enabled");
+           }
+           void filteredOrder(List<String> ids,String visible,String hidden)throws Exception{
+            ui(()->{
+             for(String id:ids)for(String prefix:new String[]{"todo-up-","todo-down-"}){
+              List<View> found=new ArrayList<>();find(root(),prefix+id,true,found);need(found.isEmpty(),"filtered order absent "+prefix+id);
+             }
+             need(unique(root(),"todo-"+visible,true).isShown(),"filtered expected row");
+             List<View> found=new ArrayList<>();find(root(),"todo-"+hidden,true,found);need(found.isEmpty(),"filtered excluded row");
+            });
+           }
+           void orderButtons()throws Exception{
+            Map<String,List<List<String>>> initial=state();
+            need(initial.get("todos").size()==3,"two surviving UI-created rows");
+            final String first=idAt(initial,0),last=idAt(initial,1);
+            need(first.equals(read("first-id"))&&db().todoIds().equals(Arrays.asList(first,last)),"known original order");
+            click(root(),"todo-"+last,true);
+            pass(!db().todo(first).done&&db().todo(last).done,"ui_order_fixture");
+            input("  order keeps composer  ");
+            Map<String,List<List<String>>> before=state();Map<String,String> assets=media();
+            final View[] saved=new View[4];
+            ui(()->{
+             saved[0]=unique(root(),"todo-up-"+first,true);saved[1]=unique(root(),"todo-down-"+first,true);
+             saved[2]=unique(root(),"todo-up-"+last,true);saved[3]=unique(root(),"todo-down-"+last,true);
+             orderControls(saved[0],saved[1],false,true);orderControls(saved[2],saved[3],true,false);
+             // Deliberate callback delivery to disabled boundary controls, not physical taps.
+             saved[0].performClick();saved[3].performClick();
+            });ready();
+            pass(before.equals(state())&&assets.equals(media()),"ui_order_boundaries_readonly");
+            ui(()->{
+             Rect rect=new Rect();need(saved[1].getGlobalVisibleRect(rect)&&rect.width()>0&&rect.height()>0,"visible down button");
+             clickOnce(saved[1],"order down");saved[1].performClick();saved[2].performClick();
+            });ready();
+            pass(orderExpected(before,first,1).equals(state())&&assets.equals(media()),"ui_order_down_once");
+            before=state();ui(()->{saved[1].performClick();saved[2].performClick();});ready();
+            pass(before.equals(state())&&assets.equals(media()),"ui_order_stale_callbacks_readonly");
+            click(root(),"todo-up-"+first,true);
+            pass(orderExpected(before,first,0).equals(state())&&assets.equals(media()),"ui_order_up");
+            pass(text(root(),"新待办输入").equals("  order keeps composer  "),"ui_order_composer");
+            before=state();
+            ui(()->{saved[1]=unique(root(),"todo-down-"+first,true);saved[2]=unique(root(),"todo-up-"+last,true);});
+            click(root(),"待办",false);filteredOrder(Arrays.asList(first,last),first,last);
+            ui(()->saved[1].performClick());ready();
+            pass(before.equals(state())&&assets.equals(media())&&text(root(),"新待办输入").equals("  order keeps composer  "),"ui_order_pending_readonly");
+            click(root(),"已完成",false);filteredOrder(Arrays.asList(first,last),last,first);
+            ui(()->saved[2].performClick());ready();
+            pass(before.equals(state())&&assets.equals(media()),"ui_order_completed_readonly");
+            click(root(),"全部",false);
+            ui(()->saved[1]=unique(root(),"todo-down-"+first,true));
+            click(root(),"活动",false);ui(()->saved[1].performClick());ready();click(root(),"今天",false);
+            pass(before.equals(state())&&assets.equals(media())&&text(root(),"新待办输入").equals("  order keeps composer  "),"ui_order_navigation_readonly");
+            ui(()->{saved[1]=unique(root(),"todo-down-"+first,true);saved[2]=unique(root(),"todo-up-"+last,true);});
+            SQLiteDatabase sql=db().getWritableDatabase();
+            sql.execSQL("CREATE TRIGGER ci_ui_order_fault BEFORE UPDATE OF value ON revision BEGIN SELECT RAISE(ABORT,'ui_order_late_fault'); END");
+            try{
+             click(root(),"todo-down-"+first,true);
+             pass(before.equals(state())&&assets.equals(media())&&text(root(),"v12-status").contains("未能调整待办顺序"),"ui_order_failure_rollback_readonly");
+            }finally{sql.execSQL("DROP TRIGGER ci_ui_order_fault");}
+            ui(()->{saved[1].performClick();saved[2].performClick();});ready();
+            pass(before.equals(state())&&assets.equals(media()),"ui_order_failed_callbacks_readonly");
+            click(root(),"todo-down-"+first,true);
+            pass(orderExpected(before,first,1).equals(state())&&assets.equals(media())&&text(root(),"新待办输入").equals("  order keeps composer  "),"ui_order_recovery");
+            save("ui-order-ids",db().todoIds().toString());
+            Files.write(folder.resolve("ui-order.canonical"),db().exportState(),StandardOpenOption.CREATE_NEW);
+            db().exportBackup(folder.resolve("ui-order.zip"),new com.supercubegame.pockettodo.MediaRepository(folder.resolve("ui-order-media"),64L*1024*1024));
+            pass(db().todoIds().equals(Arrays.asList(last,first))&&assets.equals(media()),"ui_order_checkpoint");
+           }
+           void orderButtonsRestart()throws Exception{
+            List<String> ids=db().todoIds();need(ids.size()==2,"UI order restart size");
+            ui(()->{orderControls(unique(root(),"todo-up-"+ids.get(0),true),unique(root(),"todo-down-"+ids.get(0),true),false,true);
+             orderControls(unique(root(),"todo-up-"+ids.get(1),true),unique(root(),"todo-down-"+ids.get(1),true),true,false);});
+            pass(read("ui-order-ids").equals(ids.toString())&&Arrays.equals(Files.readAllBytes(folder.resolve("ui-order.canonical")),db().exportState()),"ui_order_restart");
+            String name="todo-ui-order-restored-"+nonce+".db";need(!getTargetContext().getDatabasePath(name).exists(),"fresh UI order restore");
+            try(AppDatabase h=AppDatabase.openSchema3(getTargetContext(),name)){
+             com.supercubegame.pockettodo.MediaRepository m=new com.supercubegame.pockettodo.MediaRepository(folder.resolve("ui-order-media"),64L*1024*1024);
+             try(AppDatabase.RestorePlan p=h.prepareRestore(folder.resolve("ui-order.zip"),folder.resolve("ui-order-stage"),64L*1024*1024)){h.confirmRestore(p,m);}
+             pass(Arrays.equals(Files.readAllBytes(folder.resolve("ui-order.canonical")),h.exportState())&&read("ui-order-ids").equals(h.todoIds().toString()),"ui_order_backup");
+            }
+           }
            void nodes(AccessibilityNodeInfo node,String value,boolean description,List<AccessibilityNodeInfo> out){
             CharSequence actual=description?node.getContentDescription():node.getText();
             if(value.contentEquals(actual==null?"":actual))out.add(node);
@@ -340,12 +422,14 @@ jobs:
             pass(expected(before,null,2).equals(state())&&read("media").equals(media().toString()),"second_identity_delete_undo");
             editCancel(first);
             orderBackend();
+            orderButtons();
             save("undone-state",state().toString());pass(true,"undone_restart_checkpoint");
            }
            void undone()throws Exception{
             launch();pass(read("undone-state").equals(state().toString())&&read("media").equals(media().toString()),"undone_restart_state");
             noUndo();pass(true,"undone_restart_no_replay");
             orderRestart();
+            orderButtonsRestart();
            }
            @Override public void onCreate(Bundle b){super.onCreate(b);args=b;start();}
            @Override public void onStart(){
@@ -378,7 +462,7 @@ jobs:
               for k in ("apk_sha256","certificate"):
                   assert re.fullmatch("[0-9a-f]{64}",v[k]) and v[k]==m[k]
               assert type(v["apk_bytes"]) is int and type(m["apk_bytes"]) is int and 0<v["apk_bytes"]==m["apk_bytes"]
-              assert type(v["checks"]) is int and v["checks"]==40 and v["labels"]==ACCEPTED
+              assert type(v["checks"]) is int and v["checks"]==55 and v["labels"]==ACCEPTED
               assert v["release_ready"] is False and v["cross_restart_undo"]=="NOT_SUPPORTED"
               assert v["native_ui"]=="WIDGET_CALLBACKS_NOT_PHYSICAL_TOUCH"
               assert v["default_test_restored"] is True and v["diagnostic_rejected"] is True
@@ -411,7 +495,7 @@ jobs:
               stop=dict(status="PASS",package=backend.PACKAGE,scope="COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",force_stop_attempts=1,
                         command=dict(args=["am","force-stop",backend.PACKAGE],returncode=0,stdout="",stderr=""),
                         probes=[dict(args=["pidof",backend.PACKAGE],returncode=1,stdout="",stderr="")])
-              v=dict(m,status="PASS",scope=SCOPE,checks=40,labels=ACCEPTED[:],release_ready=False,cross_restart_undo="NOT_SUPPORTED",
+              v=dict(m,status="PASS",scope=SCOPE,checks=55,labels=ACCEPTED[:],release_ready=False,cross_restart_undo="NOT_SUPPORTED",
                      native_ui="WIDGET_CALLBACKS_NOT_PHYSICAL_TOUCH",default_test_restored=True,diagnostic_rejected=True,
                      product_readback="EXACT_BEFORE_AND_AFTER",stops=[copy.deepcopy(stop),copy.deepcopy(stop)])
               logs={"diagnostic":"java.lang.AssertionError: todo_diagnostic_sentinel\nTODO_FAILED\nINSTRUMENTATION_CODE: 0"}
@@ -492,7 +576,7 @@ jobs:
                       b=copy.deepcopy(v);del b[key];bad.append((b,m,l))
                   for key in m:
                       b=dict(m);del b[key];bad.append((v,b,l))
-                  for key,value in (("checks",40.0),("checks",True),("api",float(api)),("status","FAIL"),("commit","d"*40),
+                  for key,value in (("checks",55.0),("checks",True),("api",float(api)),("status","FAIL"),("commit","d"*40),
                                     ("run_id","124"),("run_attempt","2"),("apk_bytes",True),("apk_sha256","d"*64),
                                     ("certificate","d"*64),("native_ui","PASS"),("release_ready",0),("default_test_restored",1),
                                     ("diagnostic_rejected",1),("command_failure",{}),("error","sentinel")):
@@ -512,7 +596,7 @@ jobs:
               # Actual compiled Python validator mutations, with otherwise valid fixtures.
               source=inspect.getsource(validate);v,m,l=fixture(26)
               changes=[
-                ('assert type(v["checks"]) is int and v["checks"]==40 and v["labels"]==ACCEPTED',"assert True","labels",[]),
+                ('assert type(v["checks"]) is int and v["checks"]==55 and v["labels"]==ACCEPTED',"assert True","labels",[]),
                 ('assert type(v[k]) is type(want) and v[k]==want',"assert True","commit","d"*40),
                 ('assert v["native_ui"]=="WIDGET_CALLBACKS_NOT_PHYSICAL_TOUCH"',"assert True","native_ui","NOT_IMPLEMENTED"),
               ]
@@ -721,7 +805,56 @@ jobs:
                       except AssertionError:pass
                       else:raise AssertionError("bad edit wiring accepted")
                   print("NATIVE_EDIT_WIRING positive=1 negative=3 PASS; canonical caller guard, not general Java equivalence")
-              assert sum(LABELS.values(),[])==ACCEPTED and len(ACCEPTED)==40
+                  subprocess.run(["java",str(p/"Parse.java"),str(p/"TodoInstrumentation.java"),str(p/"order-controls.txt"),"orderControls"],check=True,timeout=30)
+                  controls=(p/"order-controls.txt").read_text()
+                  controls_harness='''class OrderControlsOracle{
+          static void need(boolean b,String s){if(!b)throw new AssertionError(s);}
+          static class View{boolean shown,enabled;View(boolean s,boolean e){shown=s;enabled=e;}boolean isShown(){return shown;}boolean isEnabled(){return enabled;}}
+          __METHOD__
+          static void check(boolean us,boolean ds,boolean ue,boolean de,boolean cu,boolean cd,boolean accept,String label){
+          boolean passed=false;try{orderControls(new View(us,ue),new View(ds,de),cu,cd);passed=true;}catch(AssertionError e){}
+          need(passed==accept,label);}
+          public static void main(String[]args){
+          check(true,true,true,true,true,true,true,"middle");
+          System.out.println("ORDER_CONTROLS_VALID_WITNESS_PASS");
+          check(true,true,false,true,false,true,true,"first");
+          check(true,true,true,false,true,false,true,"last");
+          check(true,true,false,false,false,false,true,"single");
+          check(false,true,false,true,false,true,false,"hidden_up");
+          check(true,false,false,true,false,true,false,"hidden_down");
+          check(true,true,true,true,false,true,false,"wrong_up");
+          check(true,true,false,false,false,true,false,"wrong_down");
+          System.out.println("ORDER_CONTROLS positive=4 negative=4 PASS; actual Java helper with widget doubles, not Android");}}
+          '''
+                  def controls_execute(code):
+                      (p/"OrderControlsOracle.java").write_text(controls_harness.replace("__METHOD__",code))
+                      return subprocess.run(["java",str(p/"OrderControlsOracle.java")],capture_output=True,text=True,timeout=30)
+                  result=controls_execute(controls);assert result.returncode==0,(result.stdout,result.stderr);print(result.stdout.strip())
+                  for old,label in (
+                      ('need(up.isShown()&&down.isShown(),"order controls shown");',"hidden_up"),
+                      ('need(up.isEnabled()==canUp,"order up enabled");',"wrong_up"),
+                      ('need(down.isEnabled()==canDown,"order down enabled");',"wrong_down"),
+                  ):
+                      assert controls.count(old)==1
+                      result=controls_execute(controls.replace(old,";"))
+                      assert result.returncode!=0 and "ORDER_CONTROLS_VALID_WITNESS_PASS" in result.stdout and "AssertionError: "+label in result.stderr,(label,result.stdout,result.stderr)
+                      print("ORDER_CONTROLS_MUTANT_REJECTED",label)
+                  # AST pretty-print discards comments before checking the real phase callers.
+                  canonical_parser=parser.replace('source.substring((int)positions.getStartPosition(unit,member),(int)positions.getEndPosition(unit,member))','member.toString()')
+                  assert canonical_parser!=parser
+                  (p/"Parse.java").write_text(canonical_parser)
+                  for phase,call in (("deleted","orderButtons();"),("undone","orderButtonsRestart();")):
+                      subprocess.run(["java",str(p/"Parse.java"),str(p/"TodoInstrumentation.java"),str(p/"phase.txt"),phase],check=True,timeout=30)
+                      caller=(p/"phase.txt").read_text()
+                      def required_call(code):
+                          assert sum(line.strip()==call for line in code.splitlines())==1,"exact top-level phase call"
+                      required_call(caller)
+                      for bad in (caller.replace(call,";"),caller.replace(call,call+"\n"+call)):
+                          try:required_call(bad)
+                          except AssertionError:pass
+                          else:raise AssertionError("order phase omission/duplication accepted")
+                  print("ORDER_PHASE_WIRING positive=2 negative=4 PASS; AST canonical phase bodies, not whole host-step omission")
+              assert sum(LABELS.values(),[])==ACCEPTED and len(ACCEPTED)==55
               print("TODO_NATIVE_HOST",json.dumps(dict(positive=2,negative=total,validator_mutants=3,java="SYNTAX_ONLY_NOT_ANDROID")))
           
           def android():

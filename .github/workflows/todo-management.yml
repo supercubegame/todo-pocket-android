@@ -176,6 +176,12 @@ jobs:
              need(SystemClock.elapsedRealtime()<deadline,"editor accessibility window deadline");SystemClock.sleep(50);
             }
            }
+           static void readEditedText(AccessibilityNodeInfo input,String expected){
+            // refresh() bypasses the node cache; one read, no input replay or assertion retry.
+            need(input.refresh(),"edit text refresh: node obsolete");
+            CharSequence actual=input.getText();
+            need(actual!=null&&expected.contentEquals(actual),"edit text readback expected=["+expected+"] actual=["+actual+"]");
+           }
            void editCancel(String first)throws Exception{
             Map<String,List<List<String>>> initial=state();add("Edit cancellation victim");
             Map<String,List<List<String>>> withVictim=state();String victim=null;
@@ -196,8 +202,9 @@ jobs:
             pass(deleted.equals(state())&&assets.equals(media()),"edit_open_invalidates_undo_controls");
             Bundle text=new Bundle();text.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,"Do not save this edit");
             need(inputs.get(0).performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,text),"edit text action");
+            readEditedText(inputs.get(0),"Do not save this edit");
             window=editWindow(true);inputs.clear();nodes(window,"编辑待办输入",true,inputs);
-            need(inputs.size()==1&&"Do not save this edit".contentEquals(inputs.get(0).getText()),"edit text readback");
+            need(inputs.size()==1,"unique edit input after text action");
             List<AccessibilityNodeInfo> cancel=new ArrayList<>();nodes(window,"取消",false,cancel);
             need(cancel.size()==1&&cancel.get(0).isEnabled()&&cancel.get(0).isVisibleToUser(),"unique visible editor cancel");
             need(cancel.get(0).performAction(AccessibilityNodeInfo.ACTION_CLICK),"editor cancel action");editWindow(false);ready();
@@ -545,6 +552,40 @@ jobs:
                       result=hidden_execute(hidden_method.replace(old,";"))
                       assert result.returncode!=0 and "AssertionError: "+label in result.stderr and "HIDDEN_POSITIVE_PASS" in result.stdout,(label,result.stdout,result.stderr)
                       print("NATIVE_HIDDEN_MUTANT_REJECTED",label)
+                  # Compile the actual generated fresh-read helper with explicit cache doubles.
+                  subprocess.run(["java",str(p/"Parse.java"),str(p/"TodoInstrumentation.java"),str(p/"edit-read.txt"),"readEditedText"],check=True,timeout=30)
+                  edit_method=(p/"edit-read.txt").read_text()
+                  edit_harness='class EditReadOracle{\nstatic void need(boolean b,String s){if(!b)throw new AssertionError(s);}\nstatic class AccessibilityNodeInfo{\nString cached,live;boolean ok;int refreshes,reads;RuntimeException failure;\nAccessibilityNodeInfo(String c,String l,boolean o){cached=c;live=l;ok=o;}\nboolean refresh(){refreshes++;if(failure!=null)throw failure;if(ok)cached=live;return ok;}\nCharSequence getText(){reads++;return cached;}\n}\n__METHOD__\nstatic void check(String cached,String live,boolean ok,boolean accept,String label){\nAccessibilityNodeInfo n=new AccessibilityNodeInfo(cached,live,ok);boolean passed=false;String error="";\ntry{readEditedText(n,"Do not save this edit");passed=true;}catch(AssertionError e){error=e.getMessage();}\nneed(passed==accept,label);\nneed(n.refreshes==1&&n.reads==(ok?1:0),"single_fresh_read_"+label);\nif(!accept)need(error.contains(ok?"actual=["+live+"]":"node obsolete"),"failure_detail_"+label);\n}\npublic static void main(String[]args){\nreadEditedText(new AccessibilityNodeInfo("Do not save this edit","Do not save this edit",true),"Do not save this edit");\nSystem.out.println("EDIT_READ_VALID_WITNESS_PASS");\ncheck("Same native todo","Do not save this edit",true,true,"fresh_after_stale_cache");\ncheck("Do not save this edit","Do not save this edit",true,true,"already_current");\ncheck("Do not save this edit","Do not save this edit",false,false,"obsolete_even_with_expected_cache");\ncheck("Do not save this edit","Wrong value",true,false,"reject_wrong_fresh_value");\ncheck("Do not save this edit",null,true,false,"reject_null_fresh_value");\ncheck("Do not save this edit","Do not save this edit ",true,false,"reject_whitespace_difference");\nAccessibilityNodeInfo n=new AccessibilityNodeInfo("Do not save this edit","Do not save this edit",true);\nRuntimeException sentinel=new RuntimeException("refresh_failure");n.failure=sentinel;Throwable caught=null;\ntry{readEditedText(n,"Do not save this edit");}catch(Throwable e){caught=e;}\nneed(caught==sentinel&&n.refreshes==1&&n.reads==0,"refresh_failure_preserved_without_read");\nSystem.out.println("NATIVE_EDIT_READ positive=2 negative=5 PASS; modeled node cache, not Android failure reproduction");\n}}'
+                  def edit_execute(code):
+                      (p/"EditReadOracle.java").write_text(edit_harness.replace("__METHOD__",code))
+                      return subprocess.run(["java",str(p/"EditReadOracle.java")],capture_output=True,text=True,timeout=30)
+                  result=edit_execute(edit_method);assert result.returncode==0,(result.stdout,result.stderr);print(result.stdout.strip())
+                  for before,after,label in (
+                      ('need(input.refresh(),"edit text refresh: node obsolete");','need(true,"edit text refresh: node obsolete");',"fresh_after_stale_cache"),
+                      ('need(input.refresh(),"edit text refresh: node obsolete");','input.refresh();',"obsolete_even_with_expected_cache"),
+                      ('actual!=null&&expected.contentEquals(actual)','true',"reject_wrong_fresh_value"),
+                  ):
+                      assert edit_method.count(before)==1
+                      result=edit_execute(edit_method.replace(before,after))
+                      assert result.returncode!=0 and "AssertionError: "+label in result.stderr and "EDIT_READ_VALID_WITNESS_PASS" in result.stdout,(label,result.stdout,result.stderr)
+                      print("NATIVE_EDIT_READ_MUTANT_REJECTED",label)
+                  # Scope the integration guard to the real parsed caller, not comments elsewhere.
+                  subprocess.run(["java",str(p/"Parse.java"),str(p/"TodoInstrumentation.java"),str(p/"edit-cancel.txt"),"editCancel"],check=True,timeout=30)
+                  caller=(p/"edit-cancel.txt").read_text()
+                  def edit_wiring(code):
+                      action='need(inputs.get(0).performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,text),"edit text action");'
+                      read='readEditedText(inputs.get(0),"Do not save this edit");'
+                      cancel='need(cancel.get(0).performAction(AccessibilityNodeInfo.ACTION_CLICK),"editor cancel action");'
+                      assert code.count(action)==code.count(read)==code.count(cancel)==1,"single action/read/cancel"
+                      assert code.index(action)<code.index(read)<code.index(cancel),"fresh read before cancel"
+                  edit_wiring(caller)
+                  call='readEditedText(inputs.get(0),"Do not save this edit");'
+                  action='need(inputs.get(0).performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,text),"edit text action");'
+                  for bad in (caller.replace(call,""),caller.replace(action,action+action),caller.replace(action,call+action).replace(call+"\n","",1)):
+                      try:edit_wiring(bad)
+                      except AssertionError:pass
+                      else:raise AssertionError("bad edit wiring accepted")
+                  print("NATIVE_EDIT_WIRING positive=1 negative=3 PASS; canonical caller guard, not general Java equivalence")
               assert sum(LABELS.values(),[])==ACCEPTED and len(ACCEPTED)==25
               print("TODO_NATIVE_HOST",json.dumps(dict(positive=2,negative=total,validator_mutants=3,java="SYNTAX_ONLY_NOT_ANDROID")))
           

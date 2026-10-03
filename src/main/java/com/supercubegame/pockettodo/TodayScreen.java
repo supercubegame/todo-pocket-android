@@ -180,6 +180,8 @@ public final class TodayScreen {
     private void renderTodos(List<TodoRow> todos) {
         LinearLayout body=content();int remaining=0;for(TodoRow row:todos)if(!row.done)remaining++;
         final Object renderedTodoView=todoView;
+        List<String> ids=new ArrayList<>();for(TodoRow item:todos)ids.add(item.id);
+        final List<String> renderedOrder=java.util.Collections.unmodifiableList(ids);
         TextView summary=text("还剩 "+remaining+" 件 / 共 "+todos.size()+" 件",20,INK);summary.setPadding(dp(14),dp(12),dp(14),dp(12));summary.setBackground(shape(TINT,16));body.addView(summary);
         LinearLayout tabs=new LinearLayout(activity);String[] labels={"全部","待办","已完成"};
         for(int i=0;i<labels.length;i++){final int choice=i;Button b=button(labels[i],()->{filter=choice;loadTodos();});if(i==filter){b.setBackgroundTintList(ColorStateList.valueOf(ACCENT));b.setTextColor(WHITE);}tabs.addView(b,new LinearLayout.LayoutParams(0,dp(48),1));}
@@ -195,7 +197,8 @@ public final class TodayScreen {
             row.addView(box,new LinearLayout.LayoutParams(0,-2,1));
             Button edit=button("编辑",()->{clearTodoUndo();editor("编辑待办","编辑待办输入",item.title,false,value->db.editTodo(item.id,value,item.done),this::loadTodos);});edit.setContentDescription("edit-"+item.id);row.addView(edit,new LinearLayout.LayoutParams(dp(60),dp(52)));
             Button delete=button("删除",()->previewTodoDeletion(item,renderedTodoView));delete.setContentDescription("delete-"+item.id);row.addView(delete,new LinearLayout.LayoutParams(dp(60),dp(52)));
-            addRow(rows,row);
+            LinearLayout card=column();card.addView(row);
+            renderTodoOrder(card,item,renderedOrder,renderedTodoView);addRow(rows,card);
         }
         if(visible==0){TextView empty=text(filter==2?"完成的事会留在这里":filter==1?"这一页已经清空，真不错":"先放进一件小事。\n活动和打卡，在「活动」里。",18,MUTED);empty.setPadding(dp(12),dp(28),dp(12),dp(16));rows.addView(empty);}
         renderTodoUndo(body);
@@ -203,6 +206,37 @@ public final class TodayScreen {
         input=field("新待办输入",false);input.setHint("下一件小事…");input.setText(draft);input.setBackground(shape(WHITE,12));input.setPadding(dp(12),dp(8),dp(12),dp(8));
         composer.addView(input,new LinearLayout.LayoutParams(0,dp(56),1));
         composer.addView(button("添加",this::addTodo),new LinearLayout.LayoutParams(dp(68),dp(56)));body.addView(composer);
+    }
+    /** All-tab ordering only. Consume the rendered identity before enqueueing so
+     * old or sibling callbacks cannot replay even after a failed save.
+     */
+    private void requestTodoMove(String id,Object expected,List<String> order,int to,View source){
+        if(busy||filter!=0||!todoViewCurrent(expected)||!source.isAttachedToWindow()||!source.isEnabled())return;
+        int from=order.indexOf(id);
+        if(from<0||to<0||to>=order.size()||from==to)return;
+        final List<String> owned=new ArrayList<>(order);
+        rememberDraft();clearTodoPreview();clearTodoUndo();
+        todoView=new Object();final Object submitted=todoView;
+        work(()->db.moveTodo(id,owned,to),changed->{
+            if(!todoViewCurrent(submitted))return;
+            loadTodos();message(changed?"已调整待办顺序":"待办顺序未改变",false);
+        },()->{
+            if(!todoViewCurrent(submitted))return;
+            loadTodos();message("未能调整待办顺序；列表可能已变化，已重新读取。",true);
+        });
+    }
+    private void renderTodoOrder(LinearLayout card,TodoRow item,List<String> order,Object expected){
+        if(filter!=0)return;
+        int index=order.indexOf(item.id);
+        LinearLayout controls=new LinearLayout(activity);
+        Button up=button("上移",()->{}),down=button("下移",()->{});
+        up.setContentDescription("todo-up-"+item.id);down.setContentDescription("todo-down-"+item.id);
+        up.setEnabled(index>0);down.setEnabled(index>=0&&index<order.size()-1);
+        up.setOnClickListener(v->requestTodoMove(item.id,expected,order,index-1,v));
+        down.setOnClickListener(v->requestTodoMove(item.id,expected,order,index+1,v));
+        controls.addView(up,new LinearLayout.LayoutParams(0,dp(48),1));
+        controls.addView(down,new LinearLayout.LayoutParams(0,dp(48),1));
+        card.addView(controls,new LinearLayout.LayoutParams(-1,-2));
     }
     private void addTodo(){
         if(busy)return;String title=input.getText().toString().trim();

@@ -21,6 +21,230 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/verify_todo_management.py selftest 2>&1 | tee todo-host.log
+      - name: Actual source todo order models and mutation controls
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/todo-order-models.py" <<'PY'
+          import hashlib,json,os,subprocess,sys,tempfile
+          from pathlib import Path
+          sys.path.insert(0,str(Path("tools").resolve()))
+          import verify_todo_management as backend
+          
+          UI_MUTANTS=[
+           ("filter!=0||","", "readonly guard 0"),
+           ("todoView=new Object();","", "submit identity draft undo"),
+           ("!source.isAttachedToWindow()||","", "readonly guard 8"),
+           ("new ArrayList<>(order)","order","forward owned exact"),
+           ("index-1","index+1","actual up callback"),
+          ]
+          DB_MUTANTS=[
+           ('if(!ids.equals(seen))','if(false)',"stale"),
+           ('if(connection.inTransaction())','if(false)',"outer"),
+           ('||slots.get(index)!=c.getLong(1)','',"readback"),
+           ('bump(db);return true;','return true;',"forward_exact"),
+          ]
+          
+          def extracted_model(path,owner,members,prefix,suffix,model,mutants,summary,witness):
+              original=path.read_bytes()
+              extractor=backend.UI_EXTRACTOR
+              start=extractor.index('   Set<String> required=')
+              end=extractor.index('\n',start)
+              extractor=extractor[:start]+'   Set<String> required=new LinkedHashSet<>(List.of('+','.join(json.dumps(s) for s in members)+'));'+extractor[end:]
+              assert extractor.count('contentEquals("TodayScreen")')==1
+              extractor=extractor.replace('contentEquals("TodayScreen")','contentEquals('+json.dumps(owner)+')')
+              with tempfile.TemporaryDirectory(prefix="todo-order-product-") as tmp:
+                  p=Path(tmp);source=p/(owner+".java");output=p/"members.txt"
+                  source.write_bytes(original);(p/"ExtractUi.java").write_text(extractor)
+                  def extract(data):
+                      source.write_bytes(data)
+                      # Never reuse a successful extraction after a later failed parse.
+                      if output.exists():output.unlink()
+                      return subprocess.run(["java",str(p/"ExtractUi.java"),str(source),str(output)],capture_output=True,text=True,timeout=30)
+                  result=extract(original)
+                  assert result.returncode==0,(owner,result.stdout,result.stderr)
+                  actual=output.read_text()
+                  negatives=0
+                  for data,marker in (
+                      (("class "+owner+" {}").encode(),"Missing product members"),
+                      (("class WrongOwner {\n"+actual+"\n}").encode(),"Missing product members"),
+                      (("class "+owner+" {\n"+actual+"\n"+actual+"\n}").encode(),"Duplicate product member"),
+                  ):
+                      result=extract(data)
+                      assert result.returncode!=0 and marker in result.stderr and not output.exists(),(owner,marker,result.stderr)
+                      negatives+=1
+                  result=extract(original)
+                  assert result.returncode==0 and output.read_text()==actual,"exact fresh extraction after refusal"
+                  def execute(code,witness_only=False):
+                      file=p/(model+".java");file.write_text(prefix+code+suffix)
+                      return subprocess.run(["java",str(file)]+(["witness"] if witness_only else []),capture_output=True,text=True,timeout=30)
+                  result=execute(actual)
+                  assert result.returncode==0 and result.stdout.splitlines()[-1]==summary,(owner,result.stdout,result.stderr)
+                  print(result.stdout,end="")
+                  rejected=[]
+                  for old,new,label in mutants:
+                      assert actual.count(old)==1,(owner,"mutant anchor",old)
+                      changed=actual.replace(old,new,1)
+                      if owner=="TodayScreen":
+                          valid=execute(changed,True)
+                          assert valid.returncode==0 and valid.stdout.splitlines()==[witness],(label,valid.stdout,valid.stderr)
+                      result=execute(changed)
+                      assert result.returncode!=0 and witness in result.stdout.splitlines() and "AssertionError: "+label+"\n" in result.stderr,(owner,label,result.stdout,result.stderr)
+                      rejected.append(label);print("ORDER_PRODUCT_MUTANT_REJECTED",owner,label)
+                  assert path.read_bytes()==original,"product source modified by model"
+              return dict(source=str(path),source_sha256=hashlib.sha256(original).hexdigest(),members=members,
+                          extraction_negative=negatives,mutants_rejected=rejected,summary=summary)
+          
+          def main():
+              # Fixed checkout-relative paths; no fragment fallback or caller-supplied substitute.
+              root=Path("src/main/java/com/supercubegame/pockettodo")
+              results=[]
+              results.append(extracted_model(root/"TodayScreen.java","TodayScreen",
+                  ["todoViewCurrent","requestTodoMove","renderTodoOrder"],UI_PREFIX,UI_SUFFIX,"Model",UI_MUTANTS,
+                  "UI_ORDER_MODEL guards=13 functional_groups=10 PASS; actual extracted Java with explicit View/executor doubles, NOT Android",
+                  "UI_ORDER_VALID_WITNESS_PASS"))
+              results.append(extracted_model(root/"AppDatabase.java","AppDatabase",
+                  ["moveTodo","moveTodoSlot"],DB_PREFIX,DB_SUFFIX,"TodoOrderModel",DB_MUTANTS,
+                  "TODO_ORDER_MODEL positive=4 negative=11 PASS; actual extracted Java and explicit SQL doubles, NOT Android",
+                  "TODO_ORDER_VALID_WITNESS_PASS"))
+              print("ORDER_PRODUCT_MODELS "+json.dumps(dict(status="PASS",scope="ACTUAL_SOURCE_JAVA_WITH_EXPLICIT_DOUBLES_NOT_ANDROID",
+                  commit=os.environ.get("GITHUB_SHA","LOCAL"),run_id=os.environ.get("GITHUB_RUN_ID","LOCAL"),
+                  run_attempt=os.environ.get("GITHUB_RUN_ATTEMPT","LOCAL"),models=results,release_ready=False)),flush=True)
+          
+          UI_PREFIX = r'''
+          import java.util.*;import java.util.concurrent.Callable;import java.util.function.Consumer;
+          class Model {
+           static class Activity {boolean destroyed,finishing;boolean isDestroyed(){return destroyed;}boolean isFinishing(){return finishing;}}
+           static class View {boolean attached=true,enabled=true;String description;Consumer<View> click;
+            boolean isAttachedToWindow(){return attached;}boolean isEnabled(){return enabled;}void setEnabled(boolean b){enabled=b;}
+            void setContentDescription(String s){description=s;}void setOnClickListener(Consumer<View> c){click=c;}void tap(){click.accept(this);}}
+           static class Button extends View {}
+           static class LinearLayout extends View {List<View> children=new ArrayList<>();LinearLayout(Activity a){}
+            void addView(View v,LayoutParams p){children.add(v);}static class LayoutParams {LayoutParams(int a,int b,int c){}LayoutParams(int a,int b){}}}
+           static class TodoRow {String id="b";}
+           final Activity activity=new Activity();boolean busy,closed;int page,filter,loads,remembers,undos,previews,messages;
+           Object todoView=new Object();String composer="unsaved",draft="",lastMessage="";boolean lastError;
+           Callable<Boolean> pending;Consumer<Boolean> success;Runnable failure;int queued;
+           final DB db=new DB();
+           static class DB {int calls,to;String id;List<String> order;boolean fail;
+            boolean moveTodo(String i,List<String> o,int t){calls++;id=i;order=new ArrayList<>(o);to=t;if(fail)throw new IllegalStateException("stale");return true;}}
+           void rememberDraft(){remembers++;draft=composer;}void clearTodoUndo(){undos++;}void clearTodoPreview(){previews++;}
+           void loadTodos(){loads++;todoView=new Object();}void message(String s,boolean e){messages++;lastMessage=s;lastError=e;}
+           int dp(int x){return x;}Button button(String s,Runnable r){Button b=new Button();b.setOnClickListener(v->{if(!busy)r.run();});return b;}
+           void work(Callable<Boolean> a,Consumer<Boolean> b,Runnable c){queued++;busy=true;pending=a;success=b;failure=c;}
+           void finish(){try{boolean b=pending.call();busy=false;success.accept(b);}catch(Exception e){busy=false;failure.run();}}
+          '''
+          
+          UI_SUFFIX = r'''
+           static void ck(boolean b,String s){if(!b)throw new AssertionError(s);}
+           static List<String> ids(){return new ArrayList<>(List.of("a","b","c"));}
+           static void send(Model m,Object token,List<String> order,View v,int to){m.requestTodoMove("b",token,order,to,v);}
+           static void validWitness(){Model m=new Model();send(m,m.todoView,ids(),new View(),1);ck(m.queued==0&&m.undos==0,"noop witness");System.out.println("UI_ORDER_VALID_WITNESS_PASS");}
+           public static void main(String[] a){
+            validWitness();if(a.length>0)return;
+            Model m=new Model();Object old=m.todoView;List<String> input=ids();View v=new View();
+            send(m,old,input,v,2);ck(m.queued==1&&m.todoView!=old&&m.draft.equals("unsaved")&&m.undos==1&&m.previews==1,"submit identity draft undo");
+            input.clear();send(m,old,ids(),v,2);ck(m.queued==1,"busy duplicate");m.finish();
+            ck(m.db.calls==1&&m.db.id.equals("b")&&m.db.order.equals(ids())&&m.db.to==2&&m.loads==1&&!m.lastError,"forward owned exact");
+            send(m,old,ids(),v,0);ck(m.queued==1,"old replay");
+            m=new Model();send(m,m.todoView,ids(),v,0);m.finish();ck(m.db.to==0&&m.loads==1,"backward");
+            m=new Model();m.db.fail=true;old=m.todoView;send(m,old,ids(),v,2);m.finish();ck(m.loads==1&&m.lastError&&m.lastMessage.contains("未能调整待办顺序"),"failure refresh");send(m,old,ids(),v,2);ck(m.queued==1,"failure terminal");
+            m=new Model();send(m,m.todoView,ids(),v,2);m.page=1;m.finish();ck(m.loads==0&&m.messages==0,"abandoned success");
+            m=new Model();m.db.fail=true;send(m,m.todoView,ids(),v,2);m.closed=true;m.finish();ck(m.loads==0&&m.messages==0,"abandoned failure");
+            int negatives=0;
+            for(int n=0;n<13;n++){
+             m=new Model();old=m.todoView;v=new View();int to=2;List<String> order=ids();
+             switch(n){case 0:m.filter=1;break;case 1:m.filter=2;break;case 2:m.busy=true;break;case 3:m.closed=true;break;case 4:m.page=1;break;case 5:m.activity.destroyed=true;break;case 6:m.activity.finishing=true;break;case 7:old=new Object();break;case 8:v.attached=false;break;case 9:v.enabled=false;break;case 10:to=-1;break;case 11:to=3;break;case 12:order=List.of("a","c");}
+             send(m,old,order,v,to);ck(m.queued==0&&m.db.calls==0&&m.undos==0&&m.previews==0&&m.remembers==0,"readonly guard "+n);negatives++;
+            }
+            m=new Model();TodoRow row=new TodoRow();LinearLayout card=new LinearLayout(m.activity);old=m.todoView;
+            m.renderTodoOrder(card,row,ids(),old);ck(card.children.size()==1,"all renders");LinearLayout bar=(LinearLayout)card.children.get(0);ck(bar.children.size()==2,"both buttons");
+            View up=bar.children.get(0),down=bar.children.get(1);ck(up.description.equals("todo-up-b")&&down.description.equals("todo-down-b")&&up.enabled&&down.enabled,"stable button identities");
+            up.tap();m.finish();ck(m.db.to==0&&m.db.id.equals("b"),"actual up callback");down.tap();ck(m.queued==1,"sibling stale callback");
+            m=new Model();card=new LinearLayout(m.activity);m.renderTodoOrder(card,row,ids(),m.todoView);((LinearLayout)card.children.get(0)).children.get(1).tap();m.finish();ck(m.db.to==2,"actual down callback");
+            for(int f:new int[]{1,2}){m=new Model();m.filter=f;card=new LinearLayout(m.activity);m.renderTodoOrder(card,row,ids(),m.todoView);ck(card.children.isEmpty(),"filtered controls absent");}
+            m=new Model();row.id="a";card=new LinearLayout(m.activity);m.renderTodoOrder(card,row,ids(),m.todoView);bar=(LinearLayout)card.children.get(0);ck(!bar.children.get(0).enabled&&bar.children.get(1).enabled,"first boundary");
+            row.id="c";card=new LinearLayout(m.activity);m.renderTodoOrder(card,row,ids(),m.todoView);bar=(LinearLayout)card.children.get(0);ck(bar.children.get(0).enabled&&!bar.children.get(1).enabled,"last boundary");
+            System.out.println("UI_ORDER_MODEL guards="+negatives+" functional_groups=10 PASS; actual extracted Java with explicit View/executor doubles, NOT Android");
+           }
+          }
+          '''
+          
+          DB_PREFIX = r'''import java.util.*;
+          class TodoOrderModel{
+          static void need(boolean b,String s){if(!b)throw new AssertionError(s);}
+          static class Ledger{static String identifier(String id){if(id==null||id.isEmpty())throw new IllegalArgumentException();return id;}}
+          static class Row{
+          String id,title;boolean done;long position,rowid;
+          Row(String i,String t,boolean d,long p,long r){id=i;title=t;done=d;position=p;rowid=r;}
+          Row copy(){return new Row(id,title,done,position,rowid);}
+          public String toString(){return id+"|"+title+"|"+done+"|"+position+"|"+rowid;}
+          }
+          static class Cursor implements AutoCloseable{
+          List<Object[]>rows;int at=-1;Cursor(List<Object[]>r){rows=r;}
+          boolean moveToFirst(){at=0;return !rows.isEmpty();}boolean moveToNext(){return ++at<rows.size();}
+          String getString(int col){return (String)rows.get(at)[col];}long getLong(int col){return ((Number)rows.get(at)[col]).longValue();}
+          public void close(){}
+          }
+          static class SQLiteDatabase{
+          List<Row>rows=new ArrayList<>();boolean outer,late,zero,corrupt;long revision=8,changes;int writes,reads;
+          SQLiteDatabase(){rows.add(new Row("first","Same",false,0,11));rows.add(new Row("middle","Same",true,7,22));rows.add(new Row("last","Last",false,Long.MAX_VALUE,33));}
+          boolean inTransaction(){return outer;}
+          List<Row>ordered(){List<Row>out=new ArrayList<>(rows);out.sort(Comparator.comparingLong(r->r.position));return out;}
+          Cursor rawQuery(String q,String[] args){
+          if(q.equals("SELECT changes()"))return new Cursor(Collections.singletonList(new Object[]{changes}));
+          need(q.equals("SELECT id,position FROM todos ORDER BY position"),"actual_query");reads++;
+          List<Object[]>out=new ArrayList<>();for(Row r:ordered())out.add(new Object[]{r.id,r.position});
+          if(corrupt&&reads%2==0)out.get(0)[1]=99L;
+          return new Cursor(out);}
+          void execSQL(String q,Object[] args){
+          need(q.equals("UPDATE todos SET position=? WHERE id=?"),"actual_update");long next=((Number)args[0]).longValue();String id=(String)args[1];
+          need(next>=0,"nonnegative_SQL_constraint");
+          for(Row r:rows)if(!r.id.equals(id)&&r.position==next)throw new IllegalArgumentException("UNIQUE position");
+          writes++;changes=0;for(Row r:rows)if(r.id.equals(id)&&!zero){r.position=next;changes++;}
+          }
+          String snapshot(){return revision+":"+rows.toString();}
+          }
+          SQLiteDatabase sql=new SQLiteDatabase();SQLiteDatabase getWritableDatabase(){return sql;}
+          interface Work<T>{T run(SQLiteDatabase d);}
+          <T>T tx(Work<T>w){List<Row>old=new ArrayList<>();for(Row r:sql.rows)old.add(r.copy());long rev=sql.revision;
+          try{return w.run(sql);}catch(RuntimeException|Error e){sql.rows=old;sql.revision=rev;throw e;}}
+          static long bump(SQLiteDatabase d){if(d.late)throw new IllegalStateException("late sentinel");return d.revision=Math.incrementExact(d.revision);}
+          static List<String> ids(SQLiteDatabase d){List<String>out=new ArrayList<>();for(Row r:d.ordered())out.add(r.id);return out;}
+          '''
+          
+          DB_SUFFIX = r'''
+          static void reject(TodoOrderModel h,String id,List<String>seen,int to,Class<?>type,String label){
+          String before=h.sql.snapshot();Throwable error=null;try{h.moveTodo(id,seen,to);}catch(Throwable e){error=e;}
+          need(error!=null&&type.isInstance(error),label);need(h.sql.snapshot().equals(before),"readonly_"+label);
+          }
+          public static void main(String[]args){
+          List<String>a=Arrays.asList("first","middle","last"),b=Arrays.asList("middle","last","first");
+          TodoOrderModel h=new TodoOrderModel();String before=h.sql.snapshot();int writes=h.sql.writes;
+          need(!h.moveTodo("middle",a,1)&&h.sql.snapshot().equals(before)&&h.sql.writes==writes,"no_op");
+          System.out.println("TODO_ORDER_VALID_WITNESS_PASS");
+          need(h.moveTodo("first",a,2)&&ids(h.sql).equals(b)&&h.sql.snapshot().equals("9:[first|Same|false|9223372036854775807|11, middle|Same|true|0|22, last|Last|false|7|33]"),"forward_exact");
+          need(h.moveTodo("first",b,0)&&h.sql.snapshot().equals("10:[first|Same|false|0|11, middle|Same|true|7|22, last|Last|false|9223372036854775807|33]"),"backward_exact");
+          reject(h,"first",b,1,IllegalStateException.class,"stale");
+          reject(h,"first",Arrays.asList("first","first","last"),1,IllegalArgumentException.class,"duplicate");
+          reject(h,"first",null,1,IllegalArgumentException.class,"null");
+          reject(h,"first",Arrays.asList("first",null,"last"),1,IllegalArgumentException.class,"null_id");
+          reject(h,"missing",a,1,IllegalArgumentException.class,"missing");
+          reject(h,"first",a,-1,IllegalArgumentException.class,"negative_bound");
+          reject(h,"first",a,3,IllegalArgumentException.class,"upper_bound");
+          h.sql.outer=true;reject(h,"first",a,1,IllegalStateException.class,"outer");h.sql.outer=false;
+          h.sql.late=true;reject(h,"first",a,1,IllegalStateException.class,"late_rollback");h.sql.late=false;
+          h.sql.zero=true;reject(h,"first",a,1,IllegalStateException.class,"affected_rows");h.sql.zero=false;
+          h.sql.reads=0;h.sql.corrupt=true;reject(h,"first",a,1,IllegalStateException.class,"readback");h.sql.corrupt=false;
+          need(h.moveTodo("last",a,0)&&ids(h.sql).equals(Arrays.asList("last","first","middle"))&&h.sql.revision==11,"fresh_after_failures");
+          System.out.println("TODO_ORDER_MODEL positive=4 negative=11 PASS; actual extracted Java and explicit SQL doubles, NOT Android");
+          }}
+          '''
+          
+          if __name__=="__main__":
+              assert not sys.flags.optimize
+              main()
+          PY
+          python3 "$RUNNER_TEMP/todo-order-models.py" 2>&1 | tee todo-order-models.log
       - name: Native receipt controls and independent state oracle
         run: &todo_native_gate |
           set -euo pipefail
@@ -907,6 +1131,7 @@ jobs:
           name: todo-host
           path: |
             todo-host.log
+            todo-order-models.log
             todo-native-selftest.log
           if-no-files-found: error
   todo_device:

@@ -31,12 +31,12 @@ jobs:
           import verify_todo_management as backend
           LABELS={
            "seed":"fresh_ui_database ui_created_same_title_completed exact_confirmation_identity explicit_undo_limit preview_all_state_readonly cancel_all_state_readonly cancel_preserves_composer delete_exact_all_tables_media delete_preserves_composer undo_exact_identity_done_position_rowid undo_single_use_and_composer second_delete_exact navigation_invalidates_undo_readonly deleted_restart_checkpoint".split(),
-           "deleted":"deleted_restart_state restart_has_no_undo second_identity_delete_undo edit_cancel_fixture_created edit_open_invalidates_undo_controls edit_cancel_readonly edit_cancel_preserves_composer edit_cancel_stale_undo_readonly undone_restart_checkpoint".split(),
-           "undone":"undone_restart_state undone_restart_no_replay".split(),
+           "deleted":"deleted_restart_state restart_has_no_undo second_identity_delete_undo edit_cancel_fixture_created edit_open_invalidates_undo_controls edit_cancel_readonly edit_cancel_preserves_composer edit_cancel_stale_undo_readonly order_fixture order_forward order_backward order_noop_readonly order_stale_readonly order_duplicate_readonly order_null_readonly order_missing_readonly order_bounds_readonly order_outer_readonly order_late_rollback order_delete_undo order_checkpoint undone_restart_checkpoint".split(),
+           "undone":"undone_restart_state undone_restart_no_replay order_restart order_backup".split(),
           }
-          SCOPE="ACTUAL_NATIVE_WIDGET_CALLBACKS_SQLITE_NOT_PHYSICAL_TOUCH_KEYBOARD_OR_LMK"
+          SCOPE="ACTUAL_NATIVE_WIDGET_CALLBACKS_AND_TODO_ORDER_BACKEND_NOT_ORDER_BUTTONS_PHYSICAL_TOUCH_OR_LMK"
           # The emission list and acceptance list are deliberately independent.
-          ACCEPTED="fresh_ui_database ui_created_same_title_completed exact_confirmation_identity explicit_undo_limit preview_all_state_readonly cancel_all_state_readonly cancel_preserves_composer delete_exact_all_tables_media delete_preserves_composer undo_exact_identity_done_position_rowid undo_single_use_and_composer second_delete_exact navigation_invalidates_undo_readonly deleted_restart_checkpoint deleted_restart_state restart_has_no_undo second_identity_delete_undo edit_cancel_fixture_created edit_open_invalidates_undo_controls edit_cancel_readonly edit_cancel_preserves_composer edit_cancel_stale_undo_readonly undone_restart_checkpoint undone_restart_state undone_restart_no_replay".split()
+          ACCEPTED="fresh_ui_database ui_created_same_title_completed exact_confirmation_identity explicit_undo_limit preview_all_state_readonly cancel_all_state_readonly cancel_preserves_composer delete_exact_all_tables_media delete_preserves_composer undo_exact_identity_done_position_rowid undo_single_use_and_composer second_delete_exact navigation_invalidates_undo_readonly deleted_restart_checkpoint deleted_restart_state restart_has_no_undo second_identity_delete_undo edit_cancel_fixture_created edit_open_invalidates_undo_controls edit_cancel_readonly edit_cancel_preserves_composer edit_cancel_stale_undo_readonly order_fixture order_forward order_backward order_noop_readonly order_stale_readonly order_duplicate_readonly order_null_readonly order_missing_readonly order_bounds_readonly order_outer_readonly order_late_rollback order_delete_undo order_checkpoint undone_restart_checkpoint undone_restart_state undone_restart_no_replay order_restart order_backup".split()
           JAVA = r'''
           package ci.todos;
           import android.app.*;
@@ -116,7 +116,10 @@ jobs:
            }
            AppDatabase db()throws Exception{return (AppDatabase)field(screen,"db");}
            Map<String,List<List<String>>> state()throws Exception{
-            AppDatabase h=db();synchronized(h){
+            return snapshot(db());
+           }
+           static Map<String,List<List<String>>> snapshot(AppDatabase h){
+            synchronized(h){
              SQLiteDatabase sql=h.getReadableDatabase();sql.beginTransaction();
              try{
               Map<String,List<List<String>>> out=new TreeMap<>();
@@ -159,6 +162,90 @@ jobs:
             need(hint.getVisibility()==View.GONE,"undo hint hidden");
             need(button.getVisibility()==View.GONE,"undo button hidden");
             need(token==null,"undo token invalidated");
+           }
+           // Independent expected state: retain the original nonnegative unique slots,
+           // every rowid, typed cell and unrelated table. Not the product algorithm.
+           static Map<String,List<List<String>>> orderExpected(Map<String,List<List<String>>> before,String id,int to){
+            List<List<String>> rows=before.get("todos");List<String> header=rows.get(0);
+            int key=header.indexOf("id"),pos=header.indexOf("position");
+            List<List<String>> sorted=new ArrayList<>(rows.subList(1,rows.size()));
+            sorted.sort(Comparator.comparingLong(r->Long.parseLong(r.get(pos).substring(2))));
+            List<String> ids=new ArrayList<>();List<Long> slots=new ArrayList<>();
+            for(List<String> r:sorted){ids.add(r.get(key).substring(2));slots.add(Long.parseLong(r.get(pos).substring(2)));}
+            int from=ids.indexOf(id);need(from>=0&&to>=0&&to<ids.size(),"order oracle target");
+            need(new HashSet<>(ids).size()==ids.size()&&new HashSet<>(slots).size()==slots.size(),"order oracle unique");
+            Map<String,List<List<String>>> out=expected(before,null,from==to?0:1);
+            ids.add(to,ids.remove(from));
+            for(List<String> r:out.get("todos").subList(1,rows.size())){
+             int index=ids.indexOf(r.get(key).substring(2));r.set(pos,"1:"+slots.get(index));
+            }
+            return out;
+           }
+           static boolean move(AppDatabase h,String id,List<String> shown,int to)throws Exception{
+            try{
+             Object value=AppDatabase.class.getMethod("moveTodo",String.class,List.class,int.class).invoke(h,id,shown,to);
+             need(value instanceof Boolean,"moveTodo boolean contract");return (Boolean)value;
+            }catch(InvocationTargetException e){
+             Throwable cause=e.getCause();if(cause instanceof Exception)throw (Exception)cause;
+             if(cause instanceof Error)throw (Error)cause;throw new AssertionError(cause);
+            }
+           }
+           void orderReject(AppDatabase h,Class<? extends Throwable> type,Action action,String label)throws Exception{
+            Map<String,List<List<String>>> before=snapshot(h);Throwable error=null;
+            try{action.run();}catch(Throwable e){error=e;}
+            pass(error!=null&&type.isInstance(error)&&before.equals(snapshot(h)),label);
+           }
+           String orderName(){return "todo-order-"+nonce+".db";}
+           void orderBackend()throws Exception{
+            need(!getTargetContext().getDatabasePath(orderName()).exists(),"fresh order database");
+            Map<String,String> assets=media();
+            try(AppDatabase h=AppDatabase.openSchema3(getTargetContext(),orderName())){
+             h.addCategory(71,"Unchanged category");h.addActivity(72,71,0,"Unchanged activity");
+             h.createNote("order-note",72,"Unchanged note");
+             h.addTodo("order-first","Same order title");h.addTodo("order-middle","Same order title");h.addTodo("order-last","Last");
+             h.editTodo("order-middle","Same order title",true);
+             h.getWritableDatabase().execSQL("UPDATE todos SET position=7 WHERE id='order-middle'");
+             h.getWritableDatabase().execSQL("UPDATE todos SET position=? WHERE id='order-last'",new Object[]{Long.MAX_VALUE});
+             List<String> original=Arrays.asList("order-first","order-middle","order-last");
+             pass(h.todoIds().equals(original)&&h.todo("order-middle").done,"order_fixture");
+             Map<String,List<List<String>>> before=snapshot(h);
+             pass(move(h,"order-first",original,2)&&snapshot(h).equals(orderExpected(before,"order-first",2))&&assets.equals(media()),"order_forward");
+             before=snapshot(h);
+             pass(move(h,"order-first",h.todoIds(),0)&&snapshot(h).equals(orderExpected(before,"order-first",0))&&h.todoIds().equals(original),"order_backward");
+             before=snapshot(h);
+             pass(!move(h,"order-middle",h.todoIds(),1)&&before.equals(snapshot(h)),"order_noop_readonly");
+             orderReject(h,IllegalStateException.class,()->move(h,"order-first",Arrays.asList("order-middle","order-first","order-last"),1),"order_stale_readonly");
+             orderReject(h,IllegalArgumentException.class,()->move(h,"order-first",Arrays.asList("order-first","order-first","order-last"),1),"order_duplicate_readonly");
+             orderReject(h,IllegalArgumentException.class,()->move(h,"order-first",null,1),"order_null_readonly");
+             orderReject(h,IllegalArgumentException.class,()->move(h,"missing",original,1),"order_missing_readonly");
+             orderReject(h,IllegalArgumentException.class,()->move(h,"order-first",original,3),"order_bounds_readonly");
+             SQLiteDatabase sql=h.getWritableDatabase();sql.beginTransaction();
+             try{orderReject(h,IllegalStateException.class,()->move(h,"order-first",original,1),"order_outer_readonly");}finally{sql.endTransaction();}
+             before=snapshot(h);sql.execSQL("CREATE TRIGGER ci_order_fault BEFORE UPDATE OF value ON revision BEGIN SELECT RAISE(ABORT,'order_late_fault'); END");
+             Throwable fault=null;try{move(h,"order-first",original,2);}catch(Throwable e){fault=e;}
+             boolean marker=false;for(Throwable e=fault;e!=null;e=e.getCause())if(e.toString().contains("order_late_fault"))marker=true;
+             pass(marker&&before.equals(snapshot(h))&&assets.equals(media()),"order_late_rollback");sql.execSQL("DROP TRIGGER ci_order_fault");
+             before=snapshot(h);
+             AppDatabase.TodoDeletionUndo token=h.confirmTodoDeletion(h.prepareTodoDeletion("order-middle"));h.undoTodoDeletion(token);
+             pass(expected(before,null,2).equals(snapshot(h)),"order_delete_undo");
+             before=snapshot(h);need(move(h,"order-last",original,0),"final order changed");
+             need(snapshot(h).equals(orderExpected(before,"order-last",0)),"checkpoint exact order");
+             save("order-state",snapshot(h).toString());save("order-ids",h.todoIds().toString());
+             Files.write(folder.resolve("order.canonical"),h.exportState(),StandardOpenOption.CREATE_NEW);
+             h.exportBackup(folder.resolve("order.zip"),new com.supercubegame.pockettodo.MediaRepository(folder.resolve("order-media"),64L*1024*1024));
+             pass(assets.equals(media()),"order_checkpoint");
+            }
+           }
+           void orderRestart()throws Exception{
+            try(AppDatabase h=AppDatabase.openSchema3(getTargetContext(),orderName())){
+             pass(read("order-state").equals(snapshot(h).toString())&&read("order-ids").equals(h.todoIds().toString()),"order_restart");
+            }
+            String name="todo-order-restored-"+nonce+".db";need(!getTargetContext().getDatabasePath(name).exists(),"fresh order restore");
+            try(AppDatabase h=AppDatabase.openSchema3(getTargetContext(),name)){
+             com.supercubegame.pockettodo.MediaRepository m=new com.supercubegame.pockettodo.MediaRepository(folder.resolve("order-media"),64L*1024*1024);
+             try(AppDatabase.RestorePlan p=h.prepareRestore(folder.resolve("order.zip"),folder.resolve("order-stage"),64L*1024*1024)){h.confirmRestore(p,m);}
+             pass(Arrays.equals(Files.readAllBytes(folder.resolve("order.canonical")),h.exportState())&&read("order-ids").equals(h.todoIds().toString()),"order_backup");
+            }
            }
            void nodes(AccessibilityNodeInfo node,String value,boolean description,List<AccessibilityNodeInfo> out){
             CharSequence actual=description?node.getContentDescription():node.getText();
@@ -252,11 +339,13 @@ jobs:
             Map<String,List<List<String>>> before=state();String first=read("first-id");remove(first);confirm();click(root(),"todo-undo-"+first,true);
             pass(expected(before,null,2).equals(state())&&read("media").equals(media().toString()),"second_identity_delete_undo");
             editCancel(first);
+            orderBackend();
             save("undone-state",state().toString());pass(true,"undone_restart_checkpoint");
            }
            void undone()throws Exception{
             launch();pass(read("undone-state").equals(state().toString())&&read("media").equals(media().toString()),"undone_restart_state");
             noUndo();pass(true,"undone_restart_no_replay");
+            orderRestart();
            }
            @Override public void onCreate(Bundle b){super.onCreate(b);args=b;start();}
            @Override public void onStart(){
@@ -289,7 +378,7 @@ jobs:
               for k in ("apk_sha256","certificate"):
                   assert re.fullmatch("[0-9a-f]{64}",v[k]) and v[k]==m[k]
               assert type(v["apk_bytes"]) is int and type(m["apk_bytes"]) is int and 0<v["apk_bytes"]==m["apk_bytes"]
-              assert type(v["checks"]) is int and v["checks"]==25 and v["labels"]==ACCEPTED
+              assert type(v["checks"]) is int and v["checks"]==40 and v["labels"]==ACCEPTED
               assert v["release_ready"] is False and v["cross_restart_undo"]=="NOT_SUPPORTED"
               assert v["native_ui"]=="WIDGET_CALLBACKS_NOT_PHYSICAL_TOUCH"
               assert v["default_test_restored"] is True and v["diagnostic_rejected"] is True
@@ -322,7 +411,7 @@ jobs:
               stop=dict(status="PASS",package=backend.PACKAGE,scope="COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",force_stop_attempts=1,
                         command=dict(args=["am","force-stop",backend.PACKAGE],returncode=0,stdout="",stderr=""),
                         probes=[dict(args=["pidof",backend.PACKAGE],returncode=1,stdout="",stderr="")])
-              v=dict(m,status="PASS",scope=SCOPE,checks=25,labels=ACCEPTED[:],release_ready=False,cross_restart_undo="NOT_SUPPORTED",
+              v=dict(m,status="PASS",scope=SCOPE,checks=40,labels=ACCEPTED[:],release_ready=False,cross_restart_undo="NOT_SUPPORTED",
                      native_ui="WIDGET_CALLBACKS_NOT_PHYSICAL_TOUCH",default_test_restored=True,diagnostic_rejected=True,
                      product_readback="EXACT_BEFORE_AND_AFTER",stops=[copy.deepcopy(stop),copy.deepcopy(stop)])
               logs={"diagnostic":"java.lang.AssertionError: todo_diagnostic_sentinel\nTODO_FAILED\nINSTRUMENTATION_CODE: 0"}
@@ -403,7 +492,7 @@ jobs:
                       b=copy.deepcopy(v);del b[key];bad.append((b,m,l))
                   for key in m:
                       b=dict(m);del b[key];bad.append((v,b,l))
-                  for key,value in (("checks",25.0),("checks",True),("api",float(api)),("status","FAIL"),("commit","d"*40),
+                  for key,value in (("checks",40.0),("checks",True),("api",float(api)),("status","FAIL"),("commit","d"*40),
                                     ("run_id","124"),("run_attempt","2"),("apk_bytes",True),("apk_sha256","d"*64),
                                     ("certificate","d"*64),("native_ui","PASS"),("release_ready",0),("default_test_restored",1),
                                     ("diagnostic_rejected",1),("command_failure",{}),("error","sentinel")):
@@ -423,7 +512,7 @@ jobs:
               # Actual compiled Python validator mutations, with otherwise valid fixtures.
               source=inspect.getsource(validate);v,m,l=fixture(26)
               changes=[
-                ('assert type(v["checks"]) is int and v["checks"]==25 and v["labels"]==ACCEPTED',"assert True","labels",[]),
+                ('assert type(v["checks"]) is int and v["checks"]==40 and v["labels"]==ACCEPTED',"assert True","labels",[]),
                 ('assert type(v[k]) is type(want) and v[k]==want',"assert True","commit","d"*40),
                 ('assert v["native_ui"]=="WIDGET_CALLBACKS_NOT_PHYSICAL_TOUCH"',"assert True","native_ui","NOT_IMPLEMENTED"),
               ]
@@ -470,6 +559,52 @@ jobs:
                   p=Path(tmp);(p/"Parse.java").write_text(parser);(p/"TodoInstrumentation.java").write_text(JAVA)
                   subprocess.run(["java",str(p/"Parse.java"),str(p/"TodoInstrumentation.java"),str(p/"method.txt")],check=True,timeout=30)
                   method=(p/"method.txt").read_text()
+                  subprocess.run(["java",str(p/"Parse.java"),str(p/"TodoInstrumentation.java"),str(p/"order.txt"),"orderExpected"],check=True,timeout=30)
+                  order_method=(p/"order.txt").read_text()
+                  order_harness='''import java.util.*;class OrderOracle{
+          static void need(boolean b,String s){if(!b)throw new AssertionError(s);}
+          __EXPECTED__
+          __ORDER__
+          static List<String> row(String...s){return new ArrayList<>(Arrays.asList(s));}
+          static Map<String,List<List<String>>> fixture(boolean single){
+          Map<String,List<List<String>>> b=new TreeMap<>();
+          List<List<String>> rows=new ArrayList<>();rows.add(row("rowid","id","title","done","position"));
+          rows.add(row("1:11","3:first","3:same","1:0","1:0"));
+          if(!single){rows.add(row("1:22","3:middle","3:same","1:1","1:7"));rows.add(row("1:33","3:last","3:last","1:0","1:9223372036854775807"));}
+          b.put("todos",rows);b.put("revision",new ArrayList<>(Arrays.asList(row("rowid","id","value"),row("1:1","1:1","1:8"))));
+          b.put("other",new ArrayList<>(Arrays.asList(row("rowid","id"),row("1:9","3:keep"))));return b;}
+          public static void main(String[]args){
+          Map<String,List<List<String>>> single=fixture(true);
+          need(orderExpected(single,"first",0).equals(single),"single_noop");
+          System.out.println("ORDER_VALID_WITNESS_PASS");
+          Map<String,List<List<String>>> b=fixture(false);String before=b.toString();
+          need(orderExpected(b,"middle",1).equals(b),"gap_noop");
+          Map<String,List<List<String>>> forward=orderExpected(b,"first",2),want=fixture(false);
+          want.get("todos").get(1).set(4,"1:9223372036854775807");
+          want.get("todos").get(2).set(4,"1:0");want.get("todos").get(3).set(4,"1:7");
+          want.get("revision").get(1).set(2,"1:9");
+          need(forward.equals(want),"forward_exact_all_cells");need(b.toString().equals(before),"input_immutable");
+          Map<String,List<List<String>>> back=orderExpected(forward,"first",0),restored=fixture(false);
+          restored.get("revision").get(1).set(2,"1:10");
+          need(back.equals(restored),"backward_exact_all_cells");
+          for(int to:new int[]{-1,3}){boolean bad=false;try{orderExpected(b,"first",to);}catch(AssertionError e){bad=true;}need(bad,"bad_bound");}
+          boolean bad=false;try{orderExpected(b,"missing",0);}catch(AssertionError e){bad=true;}need(bad,"missing");
+          need(b.toString().equals(before),"negative_readonly");
+          System.out.println("ORDER_ORACLE positive=4 negative=3 PASS; actual Java oracle, not Android product");}}
+          '''
+                  def order_execute(code):
+                      (p/"OrderOracle.java").write_text(order_harness.replace("__EXPECTED__",method).replace("__ORDER__",code))
+                      return subprocess.run(["java",str(p/"OrderOracle.java")],capture_output=True,text=True,timeout=30)
+                  result=order_execute(order_method);assert result.returncode==0,(result.stdout,result.stderr);print(result.stdout.strip())
+                  for old,new,label in (
+                      ('from==to?0:1','0','forward_exact_all_cells'),
+                      ('"1:"+slots.get(index)','"1:"+index','gap_noop'),
+                      ('ids.add(to,ids.remove(from));',';','forward_exact_all_cells'),
+                  ):
+                      assert order_method.count(old)==1
+                      result=order_execute(order_method.replace(old,new))
+                      assert result.returncode!=0 and "ORDER_VALID_WITNESS_PASS" in result.stdout and "AssertionError: "+label in result.stderr,(label,result.stdout,result.stderr)
+                      print("ORDER_ORACLE_MUTANT_REJECTED",label)
                   def execute(code):
                       (p/"Oracle.java").write_text(oracle.replace("__METHOD__",code))
                       return subprocess.run(["java",str(p/"Oracle.java")],capture_output=True,text=True,timeout=30)
@@ -586,7 +721,7 @@ jobs:
                       except AssertionError:pass
                       else:raise AssertionError("bad edit wiring accepted")
                   print("NATIVE_EDIT_WIRING positive=1 negative=3 PASS; canonical caller guard, not general Java equivalence")
-              assert sum(LABELS.values(),[])==ACCEPTED and len(ACCEPTED)==25
+              assert sum(LABELS.values(),[])==ACCEPTED and len(ACCEPTED)==40
               print("TODO_NATIVE_HOST",json.dumps(dict(positive=2,negative=total,validator_mutants=3,java="SYNTAX_ONLY_NOT_ANDROID")))
           
           def android():

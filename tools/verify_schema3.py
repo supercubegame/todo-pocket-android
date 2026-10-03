@@ -10,6 +10,16 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+import ast
+import copy
+import inspect
+import io
+import math
+import tempfile
+import types
+import xml.etree.ElementTree as ET
+from unittest.mock import patch
+from contextlib import redirect_stdout
 
 LABELS = {
     "seed": [
@@ -210,6 +220,10 @@ def selftest():
     controls["share_picker_navigation"] = share_navigation_selftest()
     controls["signal_target_identity"] = signal_identity_selftest()
     controls["paged_exports"] = paged_observer_selftest()
+    controls["full_native_artifacts"] = evidence_selftest()
+    controls["full_native_artifacts"]["compiled_mutants"] = evidence_mutations()
+    controls["full_native_report_entry"] = report_entry_selftest()
+    controls["full_native_report_entry"]["compiled_mutants"] = report_entry_mutations()
     return controls
 
 def derivative_selftest():
@@ -1321,6 +1335,403 @@ def paged_derived_cases():
     assert all(repr(v) != repr(good) for v in bad), "derived mutation did not apply"
     return good, bad
 
+def full_observer_evidence(native, folder, api, source, run, attempt):
+    """Independent artifact reader, never call the runtime receipt validator."""
+    result = dict(status="NOT_VERIFIED", api=api, commit=source, run_id=run,
+                  run_attempt=attempt, release_ready=False,
+                  scope="FULL_NATIVE_OBSERVER_ARTIFACT_BINDING_NOT_RELEASE_OR_RECOMPILED_DEX")
+    try:
+        def exact(left, right):
+            if type(left) is not type(right):
+                return False
+            if type(left) is dict:
+                return left.keys() == right.keys() and all(exact(left[k], right[k]) for k in left)
+            if type(left) is list:
+                return len(left) == len(right) and all(exact(a, b) for a, b in zip(left, right))
+            return left == right
+        assert type(api) is int and api in (26, 34), "api context"
+        assert re.fullmatch("[0-9a-f]{40}", source), "source context"
+        assert all(type(v) is str and re.fullmatch("[1-9][0-9]*", v)
+                   for v in (run, attempt)), "run context"
+        def read(name, limit, allow_empty=False):
+            path = folder / name
+            assert not any(p.is_symlink() for p in (path, *path.parents)), "symlink artifact"
+            with path.open("rb") as stream:
+                raw = stream.read(limit + 1)
+            assert len(raw) <= limit and (allow_empty or raw), "artifact byte budget: " + name
+            return raw
+        def pairs(rows):
+            value = {}
+            for key, item in rows:
+                assert key not in value, "duplicate JSON key"
+                value[key] = item
+            return value
+        def obj(name):
+            return json.loads(read(name, 65536).decode("utf-8"), object_pairs_hook=pairs)
+        binding, phase, receipt = obj("binding.json"), obj("phase.json"), obj("observer.json")
+        assert type(binding) is list and len(binding) == 6, "binding shape"
+        assert all(type(v) is type(e) and v == e
+                   for v, e in zip(binding[:4], (source, run, attempt, api))), "binding context"
+        nonce, dex_hash = binding[4:]
+        assert type(nonce) is str and re.fullmatch("[0-9a-f]{32}", nonce), "nonce"
+        assert type(dex_hash) is str and re.fullmatch("[0-9a-f]{64}", dex_hash), "dex digest shape"
+        builds = sorted(p.name for p in folder.glob("observer-*") if p.is_dir())
+        assert builds == ["observer-" + nonce], "one nonce build"
+        dex = read("observer-" + nonce + "/dex/classes.dex", 16777216)
+        assert dex.startswith(b"dex\n") and dex[4:7].isdigit() and dex[7:8] == b"\0", "DEX header"
+        assert hashlib.sha256(dex).hexdigest() == dex_hash, "DEX bytes"
+        from verify_ui_observer import JAVA
+        java = read("observer-" + nonce + "/PocketUiObserver.java", 1048576)
+        assert java == JAVA.encode("utf-8"), "checked-out observer Java"
+        xml = read("observer-last.xml", 4194304)
+        text = xml.decode("utf-8")
+        assert "<!" not in text, "XML declarations"
+        root = ET.fromstring(text)
+        assert root.tag == "hierarchy" and list(root.iter("node")), "nonempty XML hierarchy"
+        xml_hash = hashlib.sha256(xml).hexdigest()
+        stderr = read("observer-stderr.log", 16777216, allow_empty=True)
+        assert type(native) is dict and native.get("status") == "PASS", "native parent"
+        assert type(native.get("api")) is int and native["api"] == api, "native API"
+        assert native.get("release_ready") is False and "error" not in native, "native failure"
+        assert type(native.get("count")) is int and native["count"] == 186, "native count"
+        assert type(native.get("checks")) is list and len(native["checks"]) == 186, "native checks"
+        assert all(type(v) is str and v for v in native["checks"]), "native label shape"
+        embedded = native.get("full_native_observer")
+        assert type(embedded) is dict, "required observer object"
+        assert embedded.get("evidence_directory") == "native-ui/full-observer", "evidence directory"
+        assert type(receipt) is dict and type(phase) is dict, "receipt objects"
+        assert exact(embedded.get("receipt"), receipt) and exact(embedded.get("phase"), phase), "persisted receipt agreement"
+        expected = dict(status="CLOSED", scope="CI_PERSISTENT_READONLY_UI_NOT_PRODUCT_OR_ROOT_CAUSE_PROOF",
+                        commit=source, run_id=run, run_attempt=attempt, api=api,
+                        nonce=nonce, dex_sha256=dex_hash, last_xml_sha256=xml_hash)
+        for key, value in expected.items():
+            assert type(receipt.get(key)) is type(value) and receipt[key] == value, "receipt identity: " + key
+        for key, value in dict(starts=1, reconnects=0, exit_code=0).items():
+            assert type(receipt.get(key)) is int and receipt[key] == value, "receipt lifecycle: " + key
+        assert phase.get("status") == "PASS" and phase.get("release_ready") is False, "phase status"
+        assert phase.get("scope") == "ORIGINAL_NATIVE_PHASE_OBSERVER_LIFECYCLE_NOT_PRODUCT_ACCEPTANCE", "phase scope"
+        assert exact(phase.get("binding"), binding), "phase binding"
+        assert phase.get("close_before_return") is True, "phase close"
+        reads = phase.get("reads")
+        assert type(reads) is int and reads > 0, "phase reads"
+        for key in ("reads", "last_sequence"):
+            assert type(receipt.get(key)) is int and receipt[key] == reads, "independent read count"
+        assert phase.get("last_xml_sha256") == xml_hash, "phase XML"
+        elapsed = phase.get("elapsed_seconds")
+        assert type(elapsed) in (int, float) and math.isfinite(elapsed) and 0 < elapsed < 4500, "phase time"
+        assert not any(key in value for value in (phase, receipt)
+                       for key in ("error", "close_error", "cleanup_errors")), "observer failure"
+        result.update(status="PASS", reads=reads, phase_elapsed_seconds=elapsed,
+                      nonce=nonce, dex_sha256=dex_hash, xml_sha256=xml_hash,
+                      java_sha256=hashlib.sha256(java).hexdigest(),
+                      stderr_bytes=len(stderr), stderr_sha256=hashlib.sha256(stderr).hexdigest(),
+                      native_checks=186, close_before_return=True)
+    except (AssertionError, OSError, ValueError, TypeError, KeyError, ET.ParseError) as exc:
+        result["error"] = repr(exc)
+    return result
+
+
+def evidence_selftest(checker=full_observer_evidence):
+    from verify_ui_observer import JAVA
+    positive = negative = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = Path(tmp)
+        source, run, attempt, api, nonce = "a"*40, "12", "2", 26, "b"*32
+        dex = b"dex\n035\0synthetic artifact, NOT compiled Android"
+        xml = b'<hierarchy><node text="fixture"/></hierarchy>'
+        binding = [source, run, attempt, api, nonce, hashlib.sha256(dex).hexdigest()]
+        receipt = dict(status="CLOSED", scope="CI_PERSISTENT_READONLY_UI_NOT_PRODUCT_OR_ROOT_CAUSE_PROOF",
+                       commit=source, run_id=run, run_attempt=attempt, api=api, nonce=nonce,
+                       dex_sha256=binding[5], starts=1, reconnects=0, exit_code=0, reads=2,
+                       last_sequence=2, last_xml_sha256=hashlib.sha256(xml).hexdigest())
+        phase = dict(status="PASS", release_ready=False,
+                     scope="ORIGINAL_NATIVE_PHASE_OBSERVER_LIFECYCLE_NOT_PRODUCT_ACCEPTANCE",
+                     binding=binding, reads=2, close_before_return=True,
+                     last_xml_sha256=receipt["last_xml_sha256"], elapsed_seconds=2.5)
+        native = dict(status="PASS", api=api, release_ready=False, count=186,
+                      checks=["synthetic-" + str(i) for i in range(186)],
+                      full_native_observer=dict(receipt=receipt, phase=phase,
+                                                evidence_directory="native-ui/full-observer"))
+        files = {"binding.json": json.dumps(binding).encode(), "phase.json": json.dumps(phase).encode(),
+                 "observer.json": json.dumps(receipt).encode(), "observer-last.xml": xml,
+                 "observer-stderr.log": b"", "observer-"+nonce+"/dex/classes.dex": dex,
+                 "observer-"+nonce+"/PocketUiObserver.java": JAVA.encode()}
+        def reset():
+            for name, raw in files.items():
+                path = folder/name
+                if path.is_symlink(): path.unlink()
+                path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(raw)
+        def evaluate(value, context=None):
+            return checker(value, folder, *(context or (api, source, run, attempt)))["status"] == "PASS"
+        reset()
+        assert evaluate(native), "valid artifact witness"
+        positive += 1
+        # Equal Python values are not interchangeable JSON evidence types.
+        # These must fail even when both stored and embedded copies agree.
+        for section, key, value, persist in (
+            ("receipt", "starts", 1.0, False),
+            ("receipt", "starts", True, False),
+            ("phase", "reads", 2.0, False),
+            ("phase", "close_before_return", 1, False),
+            ("phase", "binding", [source, run, attempt, 26.0, nonce, binding[5]], True),
+            ("phase", "binding", [source, run, attempt, 26.0, nonce, binding[5]], False),
+        ):
+            reset(); bad = copy.deepcopy(native)
+            bad["full_native_observer"][section][key] = value
+            if persist:
+                filename = "observer.json" if section == "receipt" else "phase.json"
+                (folder/filename).write_text(json.dumps(bad["full_native_observer"][section]))
+            assert not evaluate(bad), "type alias accepted: " + section + "." + key
+            negative += 1
+        # Every field is removed independently from persisted AND embedded copies.
+        for section in ("receipt", "phase"):
+            filename = "observer.json" if section == "receipt" else "phase.json"
+            for key in native["full_native_observer"][section]:
+                reset(); bad = copy.deepcopy(native); del bad["full_native_observer"][section][key]
+                (folder/filename).write_text(json.dumps(bad["full_native_observer"][section]))
+                assert not evaluate(bad), "missing field: " + section + "." + key
+                negative += 1
+        for name in files:
+            reset(); (folder/name).unlink()
+            assert not evaluate(native), "missing artifact: " + name
+            negative += 1
+        for context in ((34, source, run, attempt), (True, source, run, attempt),
+                        (api, "c"*40, run, attempt), (api, source, "13", attempt),
+                        (api, source, run, "3")):
+            reset(); assert not evaluate(native, context); negative += 1
+        for name, value in (
+            ("observer-last.xml", xml+b" "), ("observer-last.xml", b"<hierarchy/>"),
+            ("observer-last.xml", b"<!DOCTYPE hierarchy><hierarchy><node/></hierarchy>"),
+            ("observer-last.xml", b"\xff"), ("observer-last.xml", b"x"*4194305),
+            ("binding.json", b"null"), ("phase.json", b'{"status":"FAIL","status":"PASS"}'),
+            ("observer.json", b"[]"), ("observer-"+nonce+"/dex/classes.dex", dex+b"x"),
+            ("observer-"+nonce+"/PocketUiObserver.java", JAVA.encode()+b" ")):
+            reset(); (folder/name).write_bytes(value)
+            assert not evaluate(native), "changed artifact: " + name
+            negative += 1
+        for section, key, value in (
+            ("receipt", "starts", True), ("receipt", "starts", 2),
+            ("receipt", "reconnects", 1), ("receipt", "exit_code", False),
+            ("receipt", "reads", 3), ("receipt", "last_sequence", 3),
+            ("receipt", "error", "fixture"), ("receipt", "close_error", "fixture"),
+            ("receipt", "cleanup_errors", []), ("receipt", "status", "ACTIVE"),
+            ("phase", "reads", True), ("phase", "reads", 0),
+            ("phase", "close_before_return", 1), ("phase", "elapsed_seconds", float("nan")),
+            ("phase", "elapsed_seconds", float("inf")), ("phase", "elapsed_seconds", 0),
+            ("phase", "error", "fixture"), ("phase", "close_error", "fixture"),
+            ("phase", "release_ready", True)):
+            reset(); bad=copy.deepcopy(native); bad["full_native_observer"][section][key]=value
+            filename="observer.json" if section=="receipt" else "phase.json"
+            (folder/filename).write_text(json.dumps(bad["full_native_observer"][section]))
+            assert not evaluate(bad), "invalid field: " + section + "." + key
+            negative += 1
+        for key, value in (("full_native_observer", None), ("full_native_observer", {}),
+                           ("status", "FAIL"), ("count", 185), ("checks", []),
+                           ("release_ready", True), ("api", 34), ("error", "fixture")):
+            reset(); bad = copy.deepcopy(native); bad[key] = value
+            assert not evaluate(bad), "invalid parent: " + key
+            negative += 1
+        reset(); raw = (folder/"observer-last.xml").read_bytes()
+        outside = folder/"alternate.xml"; outside.write_bytes(raw)
+        (folder/"observer-last.xml").unlink(); (folder/"observer-last.xml").symlink_to(outside)
+        assert not evaluate(native), "symlink accepted"; negative += 1
+    return dict(positive=positive, negative=negative, scope="HOST_ARTIFACT_FIXTURES_NOT_ANDROID")
+
+
+def evidence_mutations():
+    source = inspect.getsource(full_observer_evidence)
+    variants = [
+        ('assert hashlib.sha256(dex).hexdigest() == dex_hash, "DEX bytes"', 'pass'),
+        ('receipt[key] == reads, "independent read count"', 'receipt[key] > 0, "independent read count"'),
+        ('phase.get("close_before_return") is True, "phase close"', 'bool(phase.get("close_before_return")), "phase close"'),
+        ('exact(embedded.get("receipt"), receipt) and exact(embedded.get("phase"), phase)',
+         'embedded.get("receipt") == receipt and embedded.get("phase") == phase'),
+        ('exact(phase.get("binding"), binding)', 'phase.get("binding") == binding'),
+    ]
+    for old, new in variants:
+        assert source.count(old) == 1, "mutation anchor"
+        changed = source.replace(old, new, 1); assert changed != source
+        scope = dict(globals()); exec(compile(changed, "<artifact-mutant>", "exec"), scope)
+        try: evidence_selftest(scope["full_observer_evidence"])
+        except AssertionError as exc:
+            assert str(exc) in (
+                "changed artifact: observer-"+"b"*32+"/dex/classes.dex",
+                "invalid field: receipt.reads", "invalid field: phase.close_before_return",
+                "type alias accepted: receipt.starts", "type alias accepted: phase.binding"), str(exc)
+        else: raise AssertionError("artifact validator mutant survived")
+    return len(variants)
+
+
+def report_entry_selftest(report_fn=None):
+    """Run the actual report body; unrelated suites and HTTP are host doubles."""
+    from verify_ui_observer import JAVA
+    if report_fn is None:
+        report_fn = report
+    source, run, attempt = "a"*40, "12", "2"
+    positive = negative = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        files = {}
+        for api in (26, 34):
+            prefix = f"collected/database-api-{api}/"
+            nonce = ("b" if api == 26 else "c")*32
+            dex = b"dex\n035\0HOST FIXTURE NOT ANDROID"
+            xml = b'<hierarchy><node text="fixture"/></hierarchy>'
+            binding = [source, run, attempt, api, nonce, hashlib.sha256(dex).hexdigest()]
+            receipt = dict(status="CLOSED", scope="CI_PERSISTENT_READONLY_UI_NOT_PRODUCT_OR_ROOT_CAUSE_PROOF",
+                           commit=source, run_id=run, run_attempt=attempt, api=api, nonce=nonce,
+                           dex_sha256=binding[-1], starts=1, reconnects=0, exit_code=0,
+                           reads=2, last_sequence=2, last_xml_sha256=hashlib.sha256(xml).hexdigest())
+            phase = dict(status="PASS", release_ready=False,
+                         scope="ORIGINAL_NATIVE_PHASE_OBSERVER_LIFECYCLE_NOT_PRODUCT_ACCEPTANCE",
+                         binding=binding, reads=2, close_before_return=True,
+                         last_xml_sha256=receipt["last_xml_sha256"], elapsed_seconds=2.5)
+            native = dict(status="PASS", api=api, release_ready=False, count=186,
+                          checks=["repeated-valid-label"]*186,
+                          full_native_observer=dict(receipt=receipt, phase=phase,
+                                                   evidence_directory="native-ui/full-observer"))
+            def add(name, value):
+                files[prefix+name] = value if type(value) is bytes else json.dumps(value).encode()
+            add("native-ui/native-result.json", native)
+            add("native-ui/full-observer/binding.json", binding)
+            add("native-ui/full-observer/phase.json", phase)
+            add("native-ui/full-observer/observer.json", receipt)
+            add("native-ui/full-observer/observer-last.xml", xml)
+            add("native-ui/full-observer/observer-stderr.log", b"")
+            add("native-ui/full-observer/observer-"+nonce+"/dex/classes.dex", dex)
+            add("native-ui/full-observer/observer-"+nonce+"/PocketUiObserver.java", JAVA.encode())
+            add("device-schema3-apks.txt", dict(status="PASS", product_before="d"*64,
+                product_after="d"*64, default_test_before="e"*64, default_test_after="e"*64))
+            add("device-schema3-certificates.txt", {k: "f"*64 for k in
+                ("app", "default_test", "schema3_test", "restore_test")})
+        def reset():
+            for name, value in files.items():
+                path = root/name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(value)
+        def alter_json(name, edit):
+            path = root/name
+            value = json.loads(path.read_text())
+            edit(value)
+            path.write_text(json.dumps(value))
+        def invoke():
+            # Execute the report function itself, not a second model of its
+            # aggregation. Only unrelated suites and network are host doubles.
+            published = []
+            reads = []
+            def open_request(req, timeout):
+                assert timeout == 30 and req.full_url.startswith(
+                    "https://api.github.com/repos/fixture/repo/contents/reports/schema3-")
+                if req.method == "PUT":
+                    body = json.loads(req.data)
+                    assert body["branch"] == "evidence"
+                    published.append(base64.b64decode(body["content"]))
+                    response = {"commit": {"sha": "1"*40}}
+                elif published:
+                    reads.append(req.full_url)
+                    response = {"content": base64.b64encode(published[-1]).decode(),
+                                "html_url": "https://example.invalid/fixture-only"}
+                else:
+                    raise urllib.error.HTTPError(req.full_url, 404, "host fixture", {}, None)
+                return io.BytesIO(json.dumps(response).encode())
+            green = lambda *args, **kwargs: {"status": "PASS"}
+            scope = dict(report_fn.__globals__)
+            scope.update(Path=lambda value: root/value, selftest=lambda: {"scope": "HOST_STUBS"},
+                         native_schema3=green, share_ui_observe=green, paged_observe=green,
+                         registration=green, observe=green, derivative_summary=green,
+                         LABELS={"seed": [], "reopen": [], "restore_seed": [], "restore_reopen": []},
+                         full_observer_evidence=full_observer_evidence,
+                         os=types.SimpleNamespace(environ={"GITHUB_SHA": source, "GITHUB_RUN_ID": run,
+                             "GITHUB_RUN_ATTEMPT": attempt, "GITHUB_REPOSITORY": "fixture/repo",
+                             "GH_TOKEN": "host-fixture-not-a-secret"}),
+                         urllib=types.SimpleNamespace(error=urllib.error, request=types.SimpleNamespace(
+                             Request=urllib.request.Request, urlopen=open_request)))
+            runner = types.FunctionType(report_fn.__code__, scope)
+            module = types.ModuleType("verify_note_management")
+            module.aggregate = green
+            error = None
+            with patch.dict(sys.modules, {"verify_note_management": module}), redirect_stdout(io.StringIO()):
+                try:
+                    runner()
+                except AssertionError as exc:
+                    error = str(exc)
+            assert len(published) == len(reads) == 1, "report not published and read back"
+            return json.loads(published[0]), error
+        reset()
+        doc, error = invoke()
+        assert error is None and doc["status"] == "PASS" and doc["release_ready"] is False, "valid report witness"
+        positive += 1
+        def rejected(label):
+            nonlocal negative
+            doc, error = invoke()
+            assert doc["status"] == "NOT_VERIFIED" and error == (
+                "schema3 suite absent or failed; read published evidence"), "report accepted: " + label
+            negative += 1
+        for api in (26, 34):
+            prefix = f"collected/database-api-{api}/native-ui/"
+            reset()
+            alter_json(prefix+"native-result.json", lambda v: v.pop("full_native_observer"))
+            rejected("missing observer " + str(api))
+            for name in files:
+                if name.startswith(prefix+"full-observer/"):
+                    reset(); (root/name).unlink()
+                    rejected("missing raw " + name)
+            reset()
+            alter_json(prefix+"full-observer/binding.json", lambda v: v.__setitem__(2, "3"))
+            rejected("wrong attempt " + str(api))
+            reset()
+            alter_json(prefix+"native-result.json", lambda v: v["full_native_observer"]["receipt"].__setitem__("starts", True))
+            rejected("embedded type alias " + str(api))
+        reset()
+        # A failed unrelated suite must not be overridden by observer success.
+        alter_json("collected/database-api-26/device-schema3-apks.txt",
+                   lambda v: v.__setitem__("status", "FAIL"))
+        rejected("unrelated suite failure")
+        reset()
+        doc, error = invoke()
+        assert error is None and doc["status"] == "PASS", "positive after negatives"
+        positive += 1
+    return {"positive": positive, "negative": negative,
+            "scope": "ACTUAL_REPORT_BODY_OTHER_SUITES_AND_HTTP_DOUBLED_NOT_ANDROID"}
+
+
+def report_entry_mutations():
+    original = inspect.getsource(report)
+    tree = ast.parse(original)
+    function = tree.body[0]
+    target = []
+    for node in ast.walk(function):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            if isinstance(node.value.func, ast.Name) and node.value.func.id == "full_observer_evidence":
+                target.append(node)
+    assert len(target) == 1, "report hook must be one executable assignment"
+    variants = []
+    for mode in ("remove", "force_pass"):
+        changed = copy.deepcopy(tree)
+        class Mutate(ast.NodeTransformer):
+            def visit_Assign(self, node):
+                if node.lineno != target[0].lineno:
+                    return node
+                if mode == "remove":
+                    return ast.copy_location(ast.Pass(), node)
+                node.value = ast.parse('{"status": "PASS"}', mode="eval").body
+                return node
+        changed = Mutate().visit(changed)
+        ast.fix_missing_locations(changed)
+        assert ast.dump(tree) != ast.dump(changed), "report mutation not applied"
+        scope = dict(report.__globals__)
+        exec(compile(changed, "<report-hook-mutant>", "exec"), scope)
+        try:
+            report_entry_selftest(scope["report"])
+        except AssertionError as exc:
+            # The valid report witness must have passed before this rejection.
+            assert str(exc) == "report accepted: missing observer 26", str(exc)
+        else:
+            raise AssertionError("report hook mutant survived")
+        variants.append(mode)
+    return variants
+
+
 def report():
     controls = selftest()
     source, run = os.environ["GITHUB_SHA"], os.environ["GITHUB_RUN_ID"]
@@ -1330,6 +1741,9 @@ def report():
         devices[str(api)] = {}
         path = folder / "native-ui/native-result.json"
         native = json.loads(path.read_text()) if path.exists() else {}
+        devices[str(api)]["full_native_observer"] = full_observer_evidence(
+            native, folder / "native-ui/full-observer", api, source, run,
+            os.environ["GITHUB_RUN_ATTEMPT"])
         devices[str(api)]["default_ui"] = native_schema3(native, api)
         devices[str(api)]["markdown_ui"] = share_ui_observe(native.get("markdown_ui"), api, source, run)
         path = folder / "native-ui/codec-result.json"

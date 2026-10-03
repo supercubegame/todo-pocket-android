@@ -116,6 +116,43 @@ public final class AppDatabase extends SQLiteOpenHelper {
     private static List<Long> categoryIds(SQLiteDatabase db){List<Long> out=new ArrayList<>();try(Cursor c=db.rawQuery("SELECT id FROM categories ORDER BY position,id",null)){while(c.moveToNext())out.add(c.getLong(0));}return out;}
     public synchronized List<Long> categoryIds(){return Collections.unmodifiableList(categoryIds(getReadableDatabase()));}
     public synchronized void moveCategory(long id,int to){tx(db->{List<Long> ids=categoryIds(db);int from=ids.indexOf(id);if(from<0||to<0||to>=ids.size())throw new IllegalArgumentException("分类位置无效");ids.add(to,ids.remove(from));for(int i=0;i<ids.size();i++)db.execSQL("UPDATE categories SET position=? WHERE id=?",new Object[]{i,ids.get(i)});bump(db);return null;});}
+    /** Reorder the exact category identities shown to the caller. The legacy
+     * button API remains available; UI callers should pass their displayed order.
+     * Membership/order guard, write, readback and revision share one transaction.
+     * This is not a full-content/ABA token or a schema change.
+     */
+    public synchronized boolean moveCategory(long id,List<Long> expectedOrder,int to){
+        Ledger.positive(id);
+        if(expectedOrder==null||expectedOrder.isEmpty())throw new IllegalArgumentException("缺少分类顺序");
+        List<Long> seen=new ArrayList<>(expectedOrder);Set<Long> unique=new HashSet<>();
+        for(Long key:seen)if(key==null||key<=0||!unique.add(key))throw new IllegalArgumentException("分类标识无效或重复");
+        if(!seen.contains(id)||to<0||to>=seen.size())throw new IllegalArgumentException("分类位置无效");
+        SQLiteDatabase connection=getWritableDatabase();
+        if(connection.inTransaction())throw new IllegalStateException("请在当前操作结束后调整分类顺序");
+        return tx(db->{
+            List<Long> ids=categoryIds(db);
+            if(!ids.equals(seen))throw new IllegalStateException("分类列表已变化，请刷新后重新排序");
+            int from=ids.indexOf(id);
+            if(from==to)return false;
+            ids.add(to,ids.remove(from));
+            for(int i=0;i<ids.size();i++){
+                db.execSQL("UPDATE categories SET position=? WHERE id=?",new Object[]{i,ids.get(i)});
+                try(Cursor changed=db.rawQuery("SELECT changes()",null)){
+                    if(!changed.moveToFirst()||changed.getLong(0)!=1)throw new IllegalStateException("分类排序目标已变化");
+                }
+            }
+            int index=0;
+            try(Cursor c=db.rawQuery("SELECT id,position FROM categories ORDER BY position,id",null)){
+                while(c.moveToNext()){
+                    if(index>=ids.size()||c.getLong(0)!=ids.get(index)||c.getLong(1)!=index)
+                        throw new IllegalStateException("分类排序回读不一致，本次修改已回滚");
+                    index++;
+                }
+            }
+            if(index!=ids.size())throw new IllegalStateException("分类数量已变化，本次修改已回滚");
+            bump(db);return true;
+        });
+    }
     public synchronized void addApplication(long id,String name,String packageName){Ledger.positive(id);String clean=text(name);if(packageName==null||(!packageName.isEmpty()&&!packageName.matches("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")))throw new IllegalArgumentException("应用包名无效");tx(db->{db.execSQL("INSERT INTO applications VALUES(?,?,?)",new Object[]{id,clean,packageName});bump(db);return null;});}
     public synchronized void addActivity(long id,long category,long application,String title){Ledger.positive(id);Ledger.positive(category);if(application<0)throw new IllegalArgumentException("应用标识无效");String clean=text(title);tx(db->{exists(db,"categories",category);if(application!=0)exists(db,"applications",application);db.execSQL("INSERT INTO activities(id,category_id,application_id,title) VALUES(?,?,?,?)",new Object[]{id,category,application==0?null:application,clean});bump(db);return null;});}
     private void orderedStrings(String table,long activity,List<String> values,boolean deduplicate){if(values==null)throw new IllegalArgumentException("缺少有序内容");List<String> clean=new ArrayList<>();for(String value:values){String s=text(value);if(!deduplicate||!clean.contains(s))clean.add(s);}tx(db->{exists(db,"activities",activity);db.delete(table,"activity_id=?",new String[]{Long.toString(activity)});for(int i=0;i<clean.size();i++)db.execSQL("INSERT INTO "+table+" VALUES(?,?,?)",new Object[]{activity,i,clean.get(i)});bump(db);return null;});}

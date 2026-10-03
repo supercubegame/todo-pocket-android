@@ -376,6 +376,58 @@ public final class AppDatabase extends SQLiteOpenHelper {
     public synchronized void editTodo(String id,String title,boolean done){Ledger.identifier(id);String clean=text(title);tx(db->{exists(db,"todos",id);db.execSQL("UPDATE todos SET title=?,done=? WHERE id=?",new Object[]{clean,done?1:0,id});bump(db);return null;});}
     public synchronized Todo todo(String id){Ledger.identifier(id);try(Cursor c=getReadableDatabase().rawQuery("SELECT title,done FROM todos WHERE id=?",new String[]{id})){if(!c.moveToFirst())throw new IllegalArgumentException("待办不存在");return new Todo(id,c.getString(0),c.getInt(1)!=0);}}
     public synchronized List<String> todoIds(){List<String> ids=new ArrayList<>();try(Cursor c=getReadableDatabase().rawQuery("SELECT id FROM todos ORDER BY position",null)){while(c.moveToNext())ids.add(c.getString(0));}return Collections.unmodifiableList(ids);}
+    /** Reorder the exact complete todo identity list shown on the All tab.
+     * Reuse existing nonnegative UNIQUE position slots, including gaps and MAX_VALUE.
+     * No delete/reinsert, schema change, renumbering, or title/completion writes.
+     * Membership/order guard, write, exact readback and revision share one transaction.
+     * This is not a full-content/ABA token. UI owns filter and rendered-session guards.
+     */
+    public synchronized boolean moveTodo(String id,List<String> expectedOrder,int to){
+        Ledger.identifier(id);
+        if(expectedOrder==null||expectedOrder.isEmpty())throw new IllegalArgumentException("缺少当前待办顺序");
+        List<String> seen=new ArrayList<>(expectedOrder);Set<String> unique=new HashSet<>();
+        for(String key:seen)if(!unique.add(Ledger.identifier(key)))throw new IllegalArgumentException("待办顺序含重复标识");
+        if(!seen.contains(id)||to<0||to>=seen.size())throw new IllegalArgumentException("待办位置无效");
+        SQLiteDatabase connection=getWritableDatabase();
+        if(connection.inTransaction())throw new IllegalStateException("请在当前操作完成后调整待办顺序");
+        return tx(db->{
+            List<String> ids=new ArrayList<>();List<Long> slots=new ArrayList<>();
+            try(Cursor c=db.rawQuery("SELECT id,position FROM todos ORDER BY position",null)){
+                while(c.moveToNext()){ids.add(c.getString(0));slots.add(c.getLong(1));}
+            }
+            if(!ids.equals(seen))throw new IllegalStateException("待办列表已变化，请刷新后重新排序");
+            int from=ids.indexOf(id);
+            if(from==to)return false;
+            long spare=0;
+            for(long occupied:slots){
+                if(occupied>spare)break;
+                if(occupied==spare)spare=Math.incrementExact(spare);
+            }
+            moveTodoSlot(db,id,spare);
+            if(from<to){
+                for(int i=from+1;i<=to;i++)moveTodoSlot(db,ids.get(i),slots.get(i-1));
+            }else{
+                for(int i=from-1;i>=to;i--)moveTodoSlot(db,ids.get(i),slots.get(i+1));
+            }
+            moveTodoSlot(db,id,slots.get(to));
+            ids.add(to,ids.remove(from));int index=0;
+            try(Cursor c=db.rawQuery("SELECT id,position FROM todos ORDER BY position",null)){
+                while(c.moveToNext()){
+                    if(index>=ids.size()||!ids.get(index).equals(c.getString(0))||slots.get(index)!=c.getLong(1))
+                        throw new IllegalStateException("待办排序回读不一致，本次修改已回滚");
+                    index++;
+                }
+            }
+            if(index!=ids.size())throw new IllegalStateException("待办数量已变化，本次修改已回滚");
+            bump(db);return true;
+        });
+    }
+    private static void moveTodoSlot(SQLiteDatabase db,String id,long position){
+        db.execSQL("UPDATE todos SET position=? WHERE id=?",new Object[]{position,id});
+        try(Cursor c=db.rawQuery("SELECT changes()",null)){
+            if(!c.moveToFirst()||c.getLong(0)!=1)throw new IllegalStateException("待办排序目标已变化，本次修改已回滚");
+        }
+    }
     /** In-memory, single-attempt ordinary-todo preview. No schema or media changes.
      * All token state is guarded by the owning helper monitor. Closing a helper
      * changes restoreSession, so reopening that same helper cannot revive a token.

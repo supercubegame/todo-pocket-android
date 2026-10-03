@@ -362,6 +362,7 @@ class ParseTodo{public static void main(String[] args)throws Exception{
     backend_host_observer_selftest()
     backend_product_selftest()
     backend_report_entry_selftest()
+    installed_readback_selftest()
 
 
 # Embedded into the approved existing gate; no new repository file.
@@ -965,6 +966,76 @@ BACKEND_MODEL_SUFFIX = r'''
 '''
 
 
+def installed_readback(run, prefix, package, expected, records):
+    """Observe the original single exec-out read; no retry, repair or fallback."""
+    record = dict(status="FAIL", expected_bytes=len(expected),
+                  expected_sha256=hashlib.sha256(expected).hexdigest(),
+                  method="SINGLE_EXEC_OUT_CAT_EXACT_BYTES", budget_seconds=30)
+    records.append(record)
+    try:
+        paths = re.findall(r"^package:(\S+)\s*$", run(prefix+["shell", "pm", "path", package]), re.M)
+        record["paths"] = paths
+        assert len(paths) == 1, "One installed product APK path required"
+        actual = run(prefix+["exec-out", "cat", paths[0]], 30, True)
+        record.update(actual_bytes=len(actual), actual_sha256=hashlib.sha256(actual).hexdigest(),
+                      exact=actual == expected)
+        assert actual == expected, "Installed product readback differs: "+json.dumps(record, sort_keys=True)
+        record["status"] = "PASS"
+        return actual
+    except BaseException as exc:
+        record["error"] = repr(exc)
+        raise
+
+
+def installed_readback_selftest(checker=None):
+    checker = installed_readback if checker is None else checker
+    payload = bytes(range(256))*3+b"\x00\r\n\xff"
+    prefix = ["fixture-adb", "-s", "emulator-5554"]
+    remote = "/data/app/fixture/base.apk"
+    for mode in ("exact", "short", "wrong", "extra", "empty", "timeout", "exit255", "missing", "multiple"):
+        calls = [];records = []
+        sentinel = subprocess.TimeoutExpired(["fixture"],30) if mode=="timeout" else RuntimeError("exit255 sentinel")
+        def run(args, timeout=60, binary=False):
+            calls.append((args,timeout,binary))
+            if len(calls)==1:
+                assert args==prefix+["shell","pm","path",PACKAGE] and timeout==60 and not binary
+                return "" if mode=="missing" else "package:"+remote+"\n"+("package:/data/app/other/base.apk\n" if mode=="multiple" else "")
+            assert len(calls)==2 and args==prefix+["exec-out","cat",remote] and timeout==30 and binary
+            if mode in ("timeout","exit255"):raise sentinel
+            return payload[:-1] if mode=="short" else b"X"+payload[1:] if mode=="wrong" else payload+b"x" if mode=="extra" else b"" if mode=="empty" else payload
+        caught=None
+        try:actual=checker(run,prefix,PACKAGE,payload,records)
+        except BaseException as exc:caught=exc
+        assert len(records)==1 and len(calls)==(1 if mode in ("missing","multiple") else 2), "single read protocol"
+        record=records[0]
+        assert record["method"]=="SINGLE_EXEC_OUT_CAT_EXACT_BYTES" and record["budget_seconds"]==30
+        assert record["expected_bytes"]==len(payload) and record["expected_sha256"]==hashlib.sha256(payload).hexdigest()
+        if mode=="exact":
+            assert caught is None and actual==payload and record["status"]=="PASS" and record["exact"] is True
+            assert record["actual_bytes"]==len(payload) and record["actual_sha256"]==record["expected_sha256"]
+        else:
+            assert caught is not None and record["status"]=="FAIL" and record["error"]==repr(caught), "failure preserved"
+            if mode in ("timeout","exit255"):assert caught is sentinel, "original exception identity"
+            if mode in ("short","wrong","extra","empty"):
+                size={"short":len(payload)-1,"wrong":len(payload),"extra":len(payload)+1,"empty":0}[mode]
+                assert type(caught) is AssertionError and str(caught).startswith("Installed product readback differs:")
+                assert record["actual_bytes"]==size and record["exact"] is False, "actual mismatch diagnostics"
+                assert record["actual_sha256"]!=record["expected_sha256"]
+    if checker is not installed_readback:return
+    source=inspect.getsource(installed_readback)
+    for old,new in [
+        ('assert actual == expected, "Installed product readback differs: "+json.dumps(record, sort_keys=True)', 'pass'),
+        ('actual_bytes=len(actual)', 'actual_bytes=len(expected)'),
+        ('paths[0]], 30, True)', 'paths[0]], 60, True)'),
+    ]:
+        assert source.count(old)==1
+        namespace=dict(globals());exec(compile(source.replace(old,new,1),"<installed-readback-mutant>","exec"),namespace)
+        try:installed_readback_selftest(namespace["installed_readback"])
+        except AssertionError:pass
+        else:raise AssertionError("Installed readback mutant survived")
+    print("TODO_INSTALLED_READBACK host_positive=1 negative=8 compiled_mutants=3 PASS; original exec-out retained, NOT_ROOT_CAUSE_FIX")
+
+
 def android():
     assert os.environ.get("GITHUB_ACTIONS") == "true"
     import emulator_gate as gate
@@ -1002,9 +1073,7 @@ def android():
             run(prefix+["install", "-r", "-t", path], 120)
         require_registration(adb, gate, "todo-before", "V12DeviceTest")
         def installed():
-            paths = re.findall(r"^package:(\S+)\s*$", run(prefix+["shell", "pm", "path", gate.PKG]), re.M)
-            assert len(paths) == 1
-            return run(prefix+["exec-out", "cat", paths[0]], 30, True)
+            return installed_readback(run, prefix, gate.PKG, product, result.setdefault("installed_readbacks", []))
         assert installed() == product
         key = debug_key(cert);nonce = result["run_id"]+"-"+result["run_attempt"]+"-"+str(gate.API)
         with tempfile.TemporaryDirectory(prefix="todo-runner-", dir=ROOT/"build") as tmp:

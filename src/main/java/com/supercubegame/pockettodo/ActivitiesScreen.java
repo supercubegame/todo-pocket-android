@@ -11,7 +11,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** Native category/path/check-in workbench with activity-specific calendar ledger.
- * Category drag, schedules and application catalog remain subsequent work.
+ * Category touch sorting retains accessible buttons; schedules/catalog remain later work.
  * Writes go through validated AppDatabase APIs; UI read queries never mutate raw SQL.
  */
 public final class ActivitiesScreen {
@@ -33,7 +33,7 @@ public final class ActivitiesScreen {
         NoteSummary(String id,String title,String text){this.id=id;this.title=title;this.text=text;}
     }
     private static final class Detail {String title,status;List<String> path;LocalDate day;final List<NoteSummary> notes=new ArrayList<>();}
-    void load(){if(backupPanel)renderBackup();else if(selected==0)loadCategories();else if(historyPanel)loadHistory(selected);else loadDetail(selected);}
+    void load(){if(categorySession!=null)categorySession.alive=false;if(backupPanel)renderBackup();else if(selected==0)loadCategories();else if(historyPanel)loadHistory(selected);else loadDetail(selected);}
     private long nextId(String table){
         // Only fixed internal table names, and one UI writer on the shared executor.
         if(!table.equals("categories")&&!table.equals("activities"))throw new IllegalArgumentException();
@@ -52,6 +52,9 @@ public final class ActivitiesScreen {
     }
     private void renderCategories(List<Category> categories){
         LinearLayout body=host.content();body.addView(host.text("长期的事，慢慢积累",22,TodayScreen.INK));
+        List<Long> shown=new ArrayList<>();for(Category cat:categories)shown.add(cat.id);
+        CategorySession session=new CategorySession(shown);categorySession=session;
+        List<android.view.View> groups=new ArrayList<>();
         LinearLayout top=new LinearLayout(host.activity);
         top.addView(host.button("新建分类",()->host.editor("新建分类","分类名称","",false,value->host.db.addCategory(nextId("categories"),value),this::load)),new LinearLayout.LayoutParams(0,host.dp(48),1));
         top.addView(host.button("备份 / 恢复",()->{backupPanel=true;load();}),new LinearLayout.LayoutParams(0,host.dp(48),1));body.addView(top);
@@ -59,18 +62,99 @@ public final class ActivitiesScreen {
         if(categories.isEmpty()){TextView empty=host.text("建一个自己的分类。\n例如：每日打卡、农场、提现。",18,TodayScreen.MUTED);empty.setPadding(0,host.dp(24),0,0);list.addView(empty);}
         for(int index=0;index<categories.size();index++){
             Category cat=categories.get(index);final int position=index;
-            LinearLayout group=host.column();group.setPadding(host.dp(12),host.dp(12),host.dp(12),host.dp(12));group.setBackground(host.shape(TodayScreen.WHITE,16));
-            TextView name=host.text(cat.name,21,TodayScreen.INK);name.setContentDescription("category-name-"+cat.id);group.addView(name);
+            LinearLayout group=host.column();group.setPadding(host.dp(12),host.dp(12),host.dp(12),host.dp(12));group.setBackground(host.shape(TodayScreen.WHITE,16));groups.add(group);
+            LinearLayout heading=new LinearLayout(host.activity);heading.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            TextView name=host.text(cat.name,21,TodayScreen.INK);name.setContentDescription("category-name-"+cat.id);heading.addView(name,new LinearLayout.LayoutParams(0,-2,1));
+            heading.addView(categoryHandle(cat.id,session,list,groups),new LinearLayout.LayoutParams(host.dp(96),host.dp(48)));group.addView(heading);
             LinearLayout actions=new LinearLayout(host.activity);
             Button add=host.button("添加活动",()->host.editor("新建活动","活动名称","",false,value->host.db.addActivity(nextId("activities"),cat.id,0,value),this::load));add.setContentDescription("category-add-"+cat.id);
             Button rename=host.button("改名",()->host.editor("分类改名","分类名称",cat.name,false,value->host.db.renameCategory(cat.id,value),this::load));rename.setContentDescription("category-rename-"+cat.id);
-            Button up=host.button("上移",()->move(cat.id,position-1));up.setContentDescription("category-up-"+cat.id);up.setEnabled(index>0);
-            Button down=host.button("下移",()->move(cat.id,position+1));down.setContentDescription("category-down-"+cat.id);down.setEnabled(index<categories.size()-1);
+            Button up=host.button("上移",()->moveCategory(cat.id,position-1,session,list));up.setContentDescription("category-up-"+cat.id);up.setEnabled(index>0);
+            Button down=host.button("下移",()->moveCategory(cat.id,position+1,session,list));down.setContentDescription("category-down-"+cat.id);down.setEnabled(index<categories.size()-1);
             for(Button b:new Button[]{add,rename,up,down})actions.addView(b,new LinearLayout.LayoutParams(0,host.dp(48),1));group.addView(actions);
             if(cat.items.isEmpty())group.addView(host.text("还没有活动",16,TodayScreen.MUTED));
             for(Item item:cat.items){Button open=host.button(item.title,()->{selected=item.id;load();});open.setContentDescription("activity-"+item.id);group.addView(open,new LinearLayout.LayoutParams(-1,-2));}
             host.addRow(list,group);
         }
+    }
+    /** One rendered order, shared by touch handles and accessible move buttons.
+     * A detached/replaced page or one submitted write makes its callbacks terminal.
+     */
+    private static final class CategorySession {
+        final List<Long> order;
+        boolean alive=true,submitted;
+        CategorySession(List<Long> order){this.order=new ArrayList<>(order);}
+    }
+    private CategorySession categorySession;
+    private boolean categoryCurrent(CategorySession session,android.view.View anchor){
+        return categorySession==session&&session.alive&&!session.submitted&&selected==0&&!backupPanel
+            &&anchor.isAttachedToWindow()&&anchor.isEnabled()
+            &&!host.activity.isFinishing()&&!host.activity.isDestroyed();
+    }
+    private void moveCategory(long id,int position,CategorySession session,android.view.View anchor){
+        if(!categoryCurrent(session,anchor)||position<0||position>=session.order.size()
+            ||!session.order.contains(id)||session.order.indexOf(id)==position)return;
+        session.submitted=true;
+        host.work(()->host.db.moveCategory(id,session.order,position),changed->load(),()->{
+            host.message("未能调整分类顺序；列表可能已变化，请重新进入活动页。",true);
+        });
+    }
+    /** Touch state belongs to this handle, not to a name or a mutable row index.
+     * No SQL runs until one valid UP; cancellation and out-of-list UP are read-only.
+     */
+    private Button categoryHandle(long id,CategorySession session,LinearLayout list,List<android.view.View> groups){
+        Button handle=host.button("长按拖动",()->host.message("按住这里，再拖到目标分类。也可使用上下移按钮。",false));
+        handle.setContentDescription("category-drag-"+id);
+        class Touch implements android.view.View.OnTouchListener,Runnable,android.view.View.OnAttachStateChangeListener {
+            boolean pending,active;float startX,startY;int pointer;
+            void clear(){
+                pending=false;active=false;handle.removeCallbacks(this);handle.setPressed(false);handle.setAlpha(1f);
+                if(handle.getParent()!=null)handle.getParent().requestDisallowInterceptTouchEvent(false);
+            }
+            @Override public void run(){
+                if(!pending||!categoryCurrent(session,handle)){clear();return;}
+                active=true;handle.setAlpha(0.6f);
+                handle.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+            }
+            @Override public boolean onTouch(android.view.View view,android.view.MotionEvent event){
+                int action=event.getActionMasked();
+                if(action==android.view.MotionEvent.ACTION_DOWN){
+                    clear();
+                    if(!categoryCurrent(session,handle)||event.getPointerCount()!=1)return false;
+                    pending=true;pointer=event.getPointerId(0);startX=event.getRawX();startY=event.getRawY();
+                    handle.setPressed(true);
+                    if(handle.getParent()!=null)handle.getParent().requestDisallowInterceptTouchEvent(true);
+                    if(!handle.postDelayed(this,android.view.ViewConfiguration.getLongPressTimeout()))clear();
+                    return true;
+                }
+                if(!pending)return false;
+                if(!categoryCurrent(session,handle)||event.getPointerCount()!=1||event.getPointerId(0)!=pointer
+                    ||action==android.view.MotionEvent.ACTION_CANCEL||action==android.view.MotionEvent.ACTION_POINTER_DOWN
+                    ||action==android.view.MotionEvent.ACTION_POINTER_UP){clear();return true;}
+                if(action==android.view.MotionEvent.ACTION_MOVE){
+                    int slop=android.view.ViewConfiguration.get(host.activity).getScaledTouchSlop();
+                    if(!active&&(Math.abs(event.getRawX()-startX)>slop||Math.abs(event.getRawY()-startY)>slop))clear();
+                    return true;
+                }
+                if(action==android.view.MotionEvent.ACTION_UP){
+                    boolean drop=active;float x=event.getRawX(),y=event.getRawY();clear();
+                    if(!drop){handle.performClick();return true;}
+                    android.graphics.Rect visible=new android.graphics.Rect();
+                    if(!list.getGlobalVisibleRect(visible)||!visible.contains((int)x,(int)y))return true;
+                    int destination=-1;
+                    for(int i=0;i<groups.size();i++){
+                        android.graphics.Rect row=new android.graphics.Rect();
+                        if(groups.get(i).getGlobalVisibleRect(row)&&row.contains((int)x,(int)y)){destination=i;break;}
+                    }
+                    moveCategory(id,destination,session,handle);return true;
+                }
+                clear();return true;
+            }
+            @Override public void onViewAttachedToWindow(android.view.View view){}
+            @Override public void onViewDetachedFromWindow(android.view.View view){session.alive=false;clear();}
+        }
+        Touch touch=new Touch();handle.setOnTouchListener(touch);handle.addOnAttachStateChangeListener(touch);
+        return handle;
     }
     private void renderBackup(){
         LinearLayout body=host.content();body.addView(host.text("备份与恢复",24,TodayScreen.INK));
@@ -85,7 +169,6 @@ public final class ActivitiesScreen {
         }));
         body.addView(host.button("返回活动",()->{backupPanel=false;load();}));
     }
-    private void move(long id,int position){host.work(()->{host.db.moveCategory(id,position);return true;},ignored->load(),null);}
     private void loadDetail(long id){
         host.work(()->{
             // One consistent read transaction, no revision changes or image decoding.

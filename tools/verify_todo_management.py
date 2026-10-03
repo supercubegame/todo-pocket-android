@@ -359,6 +359,9 @@ class ParseTodo{public static void main(String[] args)throws Exception{
     report_selftest()
     ui_host_observer_selftest()
     ui_product_selftest()
+    backend_host_observer_selftest()
+    backend_product_selftest()
+    backend_report_entry_selftest()
 
 
 # Embedded into the approved existing gate; no new repository file.
@@ -606,6 +609,362 @@ UI_MODEL_SUFFIX = r'''
 '''
 
 
+# Actual members are extracted at runtime; SQLite/helper collaborators below are models.
+BACKEND_SOURCE = "src/main/java/com/supercubegame/pockettodo/AppDatabase.java"
+BACKEND_SCOPE = "ACTUAL_APPDATABASE_TODO_MEMBERS_MODELED_SQLITE_TX_NOT_ANDROID_OR_MEDIA"
+BACKEND_MARKER = "TODO_BACKEND_MODEL "
+BACKEND_LABELS = """preview_exact preview_readonly cancel_terminal missing_target foreign_preview
+delete_exact delete_terminal foreign_undo undo_exact undo_terminal stale_delete stale_readonly
+stale_undo stale_undo_readonly stale_undo_revision closed_preview closed_undo late_delete
+late_delete_model_rollback late_delete_terminal late_undo late_undo_model_rollback
+delete_side_effect delete_side_effect_rollback undo_side_effect undo_side_effect_rollback
+outer_preview outer_delete""".split()
+BACKEND_MUTANTS = [
+    ("delete_guard", "stale_delete", "if(!Arrays.equals(plan.before,todoDeletionState(db,null,-1)))", "if(false)"),
+    ("undo_guard", "stale_undo_revision", "if(!Arrays.equals(token.after,todoDeletionState(db,null,-1)))", "if(false)"),
+    ("delete_readback", "delete_side_effect", "if(bump(db)!=next||!Arrays.equals(expected,todoDeletionState(db,null,-1)))", "if(bump(db)!=next)"),
+    ("undo_readback", "undo_side_effect", "if(bump(db)!=next||!Arrays.equals(token.restored,todoDeletionState(db,null,0)))", "if(bump(db)!=next)"),
+]
+
+
+def validate_backend_host(text, source, run, attempt, digest):
+    lines = [line[len(BACKEND_MARKER):] for line in text.splitlines() if line.startswith(BACKEND_MARKER)]
+    assert len(lines) == 1, "Missing or duplicate actual-product backend host evidence"
+    value = json.loads(lines[0])
+    for key, expected in dict(status="PASS", scope=BACKEND_SCOPE, commit=source, run_id=run,
+                              run_attempt=attempt, source_sha256=digest).items():
+        assert type(value[key]) is str and value[key] == expected, "Backend host binding "+key
+    assert type(value["checks"]) is int and value["checks"] == 28, "Backend host count"
+    assert value["labels"] == BACKEND_LABELS, "Backend host labels"
+    assert value["mutants_rejected"] == ["delete_guard", "undo_guard", "delete_readback", "undo_readback"]
+    assert value["missing_members_rejected"] is True and value["release_ready"] is False
+    assert re.fullmatch("[0-9a-f]{64}", value["source_sha256"])
+    return value
+
+
+def backend_host_observer_selftest():
+    good = dict(status="PASS", scope=BACKEND_SCOPE, commit="a"*40, run_id="123", run_attempt="1",
+                source_sha256="b"*64, checks=28, labels=BACKEND_LABELS[:],
+                mutants_rejected=["delete_guard", "undo_guard", "delete_readback", "undo_readback"],
+                missing_members_rejected=True, release_ready=False)
+    def log(value):
+        return BACKEND_MARKER+json.dumps(value)+"\n"
+    args = ("a"*40, "123", "1", "b"*64)
+    def accepts(checker, text):
+        try:
+            checker(text, *args)
+        except (AssertionError, KeyError, TypeError, ValueError):
+            return False
+        return True
+    assert validate_backend_host(log(good), *args) == good
+    bad = ["", log(good)+log(good)]
+    for key in good:
+        value = copy.deepcopy(good);del value[key];bad.append(log(value))
+    for key in ("status", "scope", "commit", "run_id", "run_attempt", "source_sha256"):
+        value = copy.deepcopy(good);value[key] = "wrong";bad.append(log(value))
+    for count in (0, 27, 29, True, 28.0):
+        bad.append(log(dict(good, checks=count)))
+    for label in BACKEND_LABELS:
+        value = copy.deepcopy(good);value["labels"].remove(label);bad.append(log(value))
+    for name in good["mutants_rejected"]:
+        value = copy.deepcopy(good);value["mutants_rejected"].remove(name);bad.append(log(value))
+    for key in ("missing_members_rejected", "release_ready"):
+        for replacement in (not good[key], int(good[key])):
+            value = copy.deepcopy(good);value[key] = replacement;bad.append(log(value))
+    bad.append(log(dict(good, labels=BACKEND_LABELS[::-1])))
+    for text in bad:
+        assert not accepts(validate_backend_host, text), "Incomplete backend host evidence accepted"
+    validator = inspect.getsource(validate_backend_host)
+    witnesses = [
+        ('assert len(lines) == 1, "Missing or duplicate actual-product backend host evidence"', 'assert True', log(good)+log(good)),
+        ('assert type(value["checks"]) is int and value["checks"] == 28, "Backend host count"', 'assert True', log(dict(good, checks=True))),
+        ('assert value["labels"] == BACKEND_LABELS, "Backend host labels"', 'assert True', log(dict(good, labels=BACKEND_LABELS[:-1]))),
+    ]
+    for old, new, witness in witnesses:
+        assert validator.count(old) == 1
+        namespace = dict(globals())
+        exec(compile(validator.replace(old, new, 1), "<backend-host-mutant>", "exec"), namespace)
+        checker = namespace["validate_backend_host"]
+        assert checker(log(good), *args) == good, "Mutant failed valid witness"
+        assert not accepts(validate_backend_host, witness) and accepts(checker, witness), "Non-discriminating witness"
+    print("TODO_BACKEND_HOST_OBSERVER "+json.dumps(dict(positive=1, negative=len(bad),
+          validator_mutants=3, scope="HOST_RECEIPT_CONTROLS_NOT_ANDROID")))
+
+
+def backend_product_selftest():
+    product = ROOT/BACKEND_SOURCE
+    original = product.read_bytes()
+    # Reuse the existing JDK AST parser, adding nested-class selection explicitly.
+    start = UI_EXTRACTOR.index('   Set<String> required=')
+    end = UI_EXTRACTOR.index('\n', start)
+    extractor = UI_EXTRACTOR[:start]+'''   Set<String> required=new LinkedHashSet<>(List.of("TodoDeletionPlan","TodoDeletionUndo","todoDeletionState","prepareTodoDeletion","confirmTodoDeletion","undoTodoDeletion"));'''+UI_EXTRACTOR[end:]
+    extractor = extractor.replace('contentEquals("TodayScreen")', 'contentEquals("AppDatabase")')
+    old = 'String name=member instanceof MethodTree?'
+    assert extractor.count(old) == 1
+    extractor = extractor.replace(old, 'String name=member instanceof ClassTree?((ClassTree)member).getSimpleName().toString():member instanceof MethodTree?', 1)
+    java = shutil.which("java") or "java"
+    with tempfile.TemporaryDirectory(prefix="todo-backend-product-") as tmp:
+        folder = Path(tmp);source = folder/"AppDatabase.java";source.write_bytes(original)
+        (folder/"ExtractUi.java").write_text(extractor, encoding="utf-8")
+        extracted = folder/"members.txt"
+        def extract():
+            return subprocess.run([java, str(folder/"ExtractUi.java"), str(source), str(extracted)],
+                                  capture_output=True, text=True, timeout=30)
+        p = extract()
+        assert p.returncode == 0, "Actual backend AST extraction failed\n"+p.stdout+p.stderr
+        fragment = extracted.read_text(encoding="utf-8")
+        # The same parser must refuse missing members instead of testing stale fragments.
+        source.write_text("class AppDatabase {}", encoding="utf-8")
+        p = extract()
+        assert p.returncode != 0 and "Missing product members" in p.stderr
+        def run_model(code):
+            source.write_text(BACKEND_MODEL_PREFIX+code+BACKEND_MODEL_SUFFIX, encoding="utf-8")
+            return subprocess.run([java, str(source)], capture_output=True, text=True, timeout=30)
+        p = run_model(fragment)
+        assert p.returncode == 0, p.stdout+p.stderr
+        labels = [line.removeprefix("BACKEND_PASS ") for line in p.stdout.splitlines() if line.startswith("BACKEND_PASS ")]
+        assert labels == BACKEND_LABELS and p.stdout.splitlines()[-1] == "BACKEND_CHECKS 28 PASS MODEL_NOT_ANDROID"
+        print(p.stdout, end="")
+        rejected = []
+        for name, label, old, new in BACKEND_MUTANTS:
+            assert fragment.count(old) == 1, "Backend mutant anchor "+name
+            p = run_model(fragment.replace(old, new, 1))
+            assert p.returncode != 0 and "AssertionError: "+label+"\n" in p.stderr, (name, p.stdout, p.stderr)
+            # All four must compile and pass the complete ordinary preview/delete/undo witness.
+            observed = [line.removeprefix("BACKEND_PASS ") for line in p.stdout.splitlines() if line.startswith("BACKEND_PASS ")]
+            assert observed[:10] == BACKEND_LABELS[:10], "Mutant failed before valid behavioral witness "+name
+            rejected.append(name)
+        assert product.read_bytes() == original, "Host model changed product source"
+    value = dict(status="PASS", scope=BACKEND_SCOPE, commit=os.environ.get("GITHUB_SHA", "LOCAL"),
+                 run_id=os.environ.get("GITHUB_RUN_ID", "LOCAL"), run_attempt=os.environ.get("GITHUB_RUN_ATTEMPT", "LOCAL"),
+                 source_sha256=hashlib.sha256(original).hexdigest(), checks=len(labels), labels=labels,
+                 mutants_rejected=rejected, missing_members_rejected=True, release_ready=False)
+    print(BACKEND_MARKER+json.dumps(value), flush=True)
+
+
+def backend_report_entry_selftest(report_fn=None):
+    """Run the actual report body; network/publisher are explicit doubles, devices use existing valid fixtures."""
+    import contextlib
+    import io
+    import types
+    from unittest.mock import patch
+    report_fn = report if report_fn is None else report_fn
+    fixtures = {}
+    real_validate = validate
+    def capture(value, manifest, logs, api, *args):
+        real_validate(value, manifest, logs, api, *args)
+        fixtures.setdefault(api, copy.deepcopy((value, manifest, logs)))
+    with patch.dict(globals(), validate=capture), contextlib.redirect_stdout(io.StringIO()):
+        report_selftest()
+    assert set(fixtures) == {26, 34}
+    fake = types.ModuleType("verify_evidence");published = []
+    def publish(api, path, data):
+        published.append((path, json.loads(data)))
+        return {"scope": "HOST_PUBLISHER_DOUBLE_NOT_REMOTE_READBACK"}
+    fake.publish = publish
+    with tempfile.TemporaryDirectory(prefix="todo-backend-report-") as tmp:
+        root = Path(tmp)
+        for path in (UI_SOURCE, BACKEND_SOURCE):
+            product = root/path;product.parent.mkdir(parents=True, exist_ok=True);product.write_bytes(b"explicit host source binding fixture")
+        digest = hashlib.sha256(b"explicit host source binding fixture").hexdigest()
+        ui = dict(status="PASS", scope=UI_SCOPE, commit="a"*40, run_id="123", run_attempt="1",
+                  source_sha256=digest, checks=29, labels=UI_LABELS[:],
+                  mutants_rejected=[m[0] for m in UI_MUTANTS], missing_members_rejected=True, release_ready=False)
+        backend = dict(status="PASS", scope=BACKEND_SCOPE, commit="a"*40, run_id="123", run_attempt="1",
+                       source_sha256=digest, checks=28, labels=BACKEND_LABELS[:],
+                       mutants_rejected=[m[0] for m in BACKEND_MUTANTS], missing_members_rejected=True, release_ready=False)
+        for api, (value, manifest, logs) in fixtures.items():
+            base = root/"collected-todos"/("todo-device-api-"+str(api));device = base/"todo-device";device.mkdir(parents=True)
+            (base/"todo-apk.json").write_text(json.dumps(manifest))
+            (device/"result.json").write_text(json.dumps(value))
+            for phase, text in logs.items():(device/(phase+".log")).write_text(text)
+        log = root/"collected-todos/todo-host/todo-host.log";log.parent.mkdir(parents=True)
+        good = BACKEND_MARKER+json.dumps(backend)+"\n"
+        cases = [(good, True), ("", False), (good+good, False)]
+        for key, replacement in (("source_sha256", "b"*64), ("commit", "c"*40), ("run_id", "122"),
+                                 ("run_attempt", "2"), ("checks", 28.0), ("labels", BACKEND_LABELS[:-1]),
+                                 ("mutants_rejected", [m[0] for m in BACKEND_MUTANTS][:-1])):
+            cases.append((BACKEND_MARKER+json.dumps(dict(backend, **{key: replacement}))+"\n", False))
+        env = dict(GITHUB_SHA="a"*40, GITHUB_RUN_ID="123", GITHUB_RUN_ATTEMPT="1",
+                   GITHUB_REPOSITORY="fixture/repo", NEEDS_JSON=json.dumps({"todo_host":{"result":"success"},"todo_device":{"result":"success"}}))
+        with patch.dict(globals(), ROOT=root), patch.dict(sys.modules, verify_evidence=fake), patch.dict(os.environ, env):
+            for text, accepted in cases:
+                log.write_text(UI_MARKER+json.dumps(ui)+"\n"+text)
+                published.clear()
+                with contextlib.redirect_stdout(io.StringIO()):
+                    try:
+                        report_fn();passed = True
+                    except AssertionError as exc:
+                        assert str(exc) == "Todo backend evidence missing, mismatched or failed; native UI not accepted"
+                        passed = False
+                output = json.loads((root/"todo-report.json").read_text())
+                assert passed == accepted and output["status"] == ("PASS" if accepted else "FAIL"), "Backend report accepted missing or wrong evidence"
+                assert all(row["status"] == "PASS" for row in output["devices"].values())
+                assert output["ui_host_model"]["status"] == "PASS"
+                assert output["backend_host_model"]["status"] == ("PASS" if accepted else "FAIL")
+                assert len(published) == 1 and published[0][1] == output, "Failure lost its report"
+    print("TODO_BACKEND_REPORT_ENTRY "+json.dumps(dict(positive=1, negative=len(cases)-1,
+          scope="ACTUAL_REPORT_BODY_HOST_FIXTURES_PUBLISHER_DOUBLE_NOT_ANDROID")))
+
+
+BACKEND_MODEL_PREFIX = r'''
+import java.io.*;
+import java.util.*;
+import java.nio.charset.StandardCharsets;
+public class AppDatabase {
+ Object restoreSession=new Object();
+ SQLiteDatabase sql=new SQLiteDatabase();
+ static final String[] SNAPSHOT_TABLES={"revision","categories","applications","activities","paths","tags","batches","ledger","checkins","media","notes","blocks","fields","field_options","field_values","field_notes","todos","legacy_imports"};
+ interface Work<T>{T run(SQLiteDatabase d);}
+ SQLiteDatabase getReadableDatabase(){return sql;}
+ SQLiteDatabase getWritableDatabase(){return sql;}
+ void close(){restoreSession=new Object();sql.open=false;}
+ <T>T tx(Work<T> w){sql.beginTransaction();try{T v=w.run(sql);sql.setTransactionSuccessful();return v;}finally{sql.endTransaction();}}
+ static long revision(SQLiteDatabase d){return (Long)d.tables.get("revision").get(0)[2];}
+ static long bump(SQLiteDatabase d){
+  if(d.late)throw new IllegalStateException("late sentinel");
+  long n=Math.incrementExact(revision(d));d.tables.get("revision").get(0)[2]=n;
+  if(d.sideEffect)d.tables.get("categories").get(0)[2]="unexpected";
+  return n;
+ }
+ static void noteDeletionNoOuterTransaction(SQLiteDatabase d){if(d.inTransaction())throw new IllegalStateException("outer");}
+ static void tableSet(SQLiteDatabase d){if(!d.tables.keySet().equals(new HashSet<>(Arrays.asList(SNAPSHOT_TABLES))))throw new IllegalArgumentException("tables");}
+ static class Ledger {static void identifier(String s){if(s==null||s.trim().isEmpty())throw new IllegalArgumentException("id");}}
+ static class LimitedBytes extends ByteArrayOutputStream{
+  public synchronized void write(int b){if(count>=8388608)throw new IllegalArgumentException("limit");super.write(b);}
+  public synchronized void write(byte[] b,int o,int l){if(l>8388608-count)throw new IllegalArgumentException("limit");super.write(b,o,l);}
+ }
+ static void utf8(DataOutputStream o,String s)throws IOException{byte[] b=s.getBytes(StandardCharsets.UTF_8);o.writeInt(b.length);o.write(b);}
+ static void blob(DataOutputStream o,byte[] b)throws IOException{o.writeInt(b.length);o.write(b);}
+ static Object cell(Cursor c,int i){return c.rows.get(c.at)[i];}
+ static final class Cursor implements AutoCloseable{
+  final String[] names;final List<Object[]> rows;int at=-1;
+  Cursor(String[] n,List<Object[]> r){names=n;rows=r;}
+  boolean moveToFirst(){at=0;return at<rows.size();}
+  boolean moveToNext(){return ++at<rows.size();}
+  String getString(int i){return (String)rows.get(at)[i];}
+  int getInt(int i){return ((Number)rows.get(at)[i]).intValue();}
+  long getLong(int i){return ((Number)rows.get(at)[i]).longValue();}
+  int getColumnCount(){return names.length;}
+  String[] getColumnNames(){return names;}
+  int getCount(){return rows.size();}
+  int getColumnIndexOrThrow(String n){for(int i=0;i<names.length;i++)if(names[i].equals(n))return i;throw new IllegalArgumentException(n);}
+  int getType(int i){Object v=rows.get(at)[i];return v==null?0:v instanceof Long?1:v instanceof String?3:4;}
+  public void close(){}
+ }
+ static final class SQLiteDatabase{
+  Map<String,List<Object[]>> tables=new LinkedHashMap<>(),saved;
+  boolean transaction,success,open=true,late,sideEffect;
+  SQLiteDatabase(){
+   for(String t:SNAPSHOT_TABLES)tables.put(t,new ArrayList<>());
+   tables.get("revision").add(new Object[]{1L,1L,7L});
+   tables.get("categories").add(new Object[]{1L,1L,"category",0L});
+   tables.get("todos").add(new Object[]{3L,"first","Same",0L,10L});
+   tables.get("todos").add(new Object[]{8L,"target","Same",1L,11L});
+   tables.get("todos").add(new Object[]{9L,"last","Last",0L,12L});
+  }
+  boolean inTransaction(){return transaction;}
+  boolean isOpen(){return open;}
+  int getVersion(){return 3;}
+  void beginTransaction(){if(transaction||!open)throw new IllegalStateException("connection");transaction=true;success=false;saved=new LinkedHashMap<>();for(String t:tables.keySet()){List<Object[]> r=new ArrayList<>();for(Object[] row:tables.get(t))r.add(row.clone());saved.put(t,r);}}
+  void setTransactionSuccessful(){success=true;}
+  void endTransaction(){if(!success)tables=saved;transaction=false;}
+  Cursor rawQuery(String q,String[] args){
+   if(q.equals("SELECT title,done,position,rowid FROM todos WHERE id=?")){
+    List<Object[]> out=new ArrayList<>();for(Object[] r:tables.get("todos"))if(r[1].equals(args[0]))out.add(new Object[]{r[2],r[3],r[4],r[0]});
+    return new Cursor(new String[]{"title","done","position","rowid"},out);
+   }
+   if(q.startsWith("SELECT rowid,* FROM ")&&q.endsWith(" ORDER BY rowid")){
+    String t=q.substring(20,q.length()-15);
+    String[] names=t.equals("todos")?new String[]{"rowid","id","title","done","position"}:
+      t.equals("revision")?new String[]{"id","id","value"}:
+      t.equals("categories")?new String[]{"id","id","name","position"}:new String[]{"rowid","id"};
+    if(!tables.containsKey(t))throw new AssertionError("query table "+t);
+    return new Cursor(names,tables.get(t));
+   }throw new AssertionError("query "+q);
+  }
+  int delete(String table,String where,String[] args){
+   if(!transaction)throw new AssertionError("delete outside tx");
+   if(!table.equals("todos")||!where.equals("id=?"))throw new AssertionError("delete query");
+   int old=tables.get(table).size();tables.get(table).removeIf(r->r[1].equals(args[0]));return old-tables.get(table).size();
+  }
+  void execSQL(String q,Object[] values){
+   if(!transaction||!q.equals("INSERT INTO todos(rowid,id,title,done,position) VALUES(?,?,?,?,?)"))throw new AssertionError("insert query");
+   for(Object[] r:tables.get("todos"))if(r[0].equals(values[0])||r[1].equals(values[1])||r[4].equals(values[4]))throw new IllegalArgumentException("collision");
+   Object[] row=values.clone();row[3]=((Number)row[3]).longValue();tables.get("todos").add(row);
+   tables.get("todos").sort(Comparator.comparingLong(r->(Long)r[0]));
+  }
+ }
+'''
+
+BACKEND_MODEL_SUFFIX = r'''
+ static java.util.Map<String,String> rows(AppDatabase h,String omit,long rev){
+  java.util.Map<String,String> result=new java.util.TreeMap<>();
+  for(String table:h.sql.tables.keySet()){
+   java.util.List<String> values=new java.util.ArrayList<>();
+   for(Object[] original:h.sql.tables.get(table)){
+    if(table.equals("todos")&&java.util.Objects.equals(original[1],omit))continue;
+    Object[] row=original.clone();if(table.equals("revision")&&rev>=0)row[2]=rev;
+    values.add(java.util.Arrays.deepToString(row));
+   }
+   result.put(table,values.toString());
+  }
+  return result;
+ }
+ static int checks;
+ interface Attempt{void run();}
+ static void ok(boolean v,String name){if(!v)throw new AssertionError(name);checks++;System.out.println("BACKEND_PASS "+name);}
+ static void reject(Attempt a,String name){boolean bad=false;try{a.run();}catch(IllegalStateException|IllegalArgumentException e){bad=true;}ok(bad,name);}
+ static byte[] state(AppDatabase h){return todoDeletionState(h.sql,null,-1);}
+ public static void main(String[] args){
+  AppDatabase h=new AppDatabase();byte[] before=state(h);
+  TodoDeletionPlan p=h.prepareTodoDeletion("target");
+  ok(p.todoId().equals("target")&&p.title().equals("Same")&&p.done()&&p.position()==11,"preview_exact");
+  ok(Arrays.equals(before,state(h)),"preview_readonly");
+  p.close();reject(()->h.confirmTodoDeletion(p),"cancel_terminal");
+  reject(()->h.prepareTodoDeletion("missing"),"missing_target");
+  TodoDeletionPlan fresh=h.prepareTodoDeletion("target");AppDatabase other=new AppDatabase();
+  reject(()->other.confirmTodoDeletion(fresh),"foreign_preview");
+  byte[] expected=todoDeletionState(h.sql,"target",8),shape=todoDeletionState(h.sql,null,0);
+  java.util.Map<String,String> directDeleted=rows(h,"target",8),directRestored=rows(h,null,9);
+  TodoDeletionUndo u=h.confirmTodoDeletion(fresh);
+  ok(Arrays.equals(expected,state(h))&&revision(h.sql)==8&&rows(h,null,-1).equals(directDeleted),"delete_exact");
+  reject(()->h.confirmTodoDeletion(fresh),"delete_terminal");
+  reject(()->other.undoTodoDeletion(u),"foreign_undo");
+  h.undoTodoDeletion(u);
+  ok(Arrays.equals(shape,todoDeletionState(h.sql,null,0))&&revision(h.sql)==9&&rows(h,null,-1).equals(directRestored),"undo_exact");
+  reject(()->h.undoTodoDeletion(u),"undo_terminal");
+  AppDatabase stale=new AppDatabase();TodoDeletionPlan sp=stale.prepareTodoDeletion("target");
+  stale.sql.tables.get("categories").get(0)[2]="external";byte[] changed=state(stale);
+  reject(()->stale.confirmTodoDeletion(sp),"stale_delete");ok(Arrays.equals(changed,state(stale)),"stale_readonly");
+  AppDatabase su=new AppDatabase();TodoDeletionUndo ut=su.confirmTodoDeletion(su.prepareTodoDeletion("target"));
+  su.sql.tables.get("categories").get(0)[2]="external";byte[] changedUndo=state(su);
+  reject(()->su.undoTodoDeletion(ut),"stale_undo");ok(Arrays.equals(changedUndo,state(su)),"stale_undo_readonly");
+  AppDatabase revisionOnly=new AppDatabase();TodoDeletionUndo revToken=revisionOnly.confirmTodoDeletion(revisionOnly.prepareTodoDeletion("target"));
+  revisionOnly.sql.tables.get("revision").get(0)[2]=9L;
+  reject(()->revisionOnly.undoTodoDeletion(revToken),"stale_undo_revision");
+  AppDatabase closing=new AppDatabase();TodoDeletionPlan cp=closing.prepareTodoDeletion("target");closing.close();
+  reject(()->closing.confirmTodoDeletion(cp),"closed_preview");
+  AppDatabase cu=new AppDatabase();TodoDeletionUndo cut=cu.confirmTodoDeletion(cu.prepareTodoDeletion("target"));cu.close();
+  reject(()->cu.undoTodoDeletion(cut),"closed_undo");
+  AppDatabase late=new AppDatabase();TodoDeletionPlan lp=late.prepareTodoDeletion("target");byte[] lb=state(late);late.sql.late=true;
+  reject(()->late.confirmTodoDeletion(lp),"late_delete");
+  ok(Arrays.equals(lb,state(late)),"late_delete_model_rollback");late.sql.late=false;
+  reject(()->late.confirmTodoDeletion(lp),"late_delete_terminal");
+  AppDatabase lu=new AppDatabase();TodoDeletionUndo lut=lu.confirmTodoDeletion(lu.prepareTodoDeletion("target"));byte[] lub=state(lu);lu.sql.late=true;
+  reject(()->lu.undoTodoDeletion(lut),"late_undo");ok(Arrays.equals(lub,state(lu)),"late_undo_model_rollback");
+  AppDatabase side=new AppDatabase();TodoDeletionPlan sidep=side.prepareTodoDeletion("target");byte[] sideb=state(side);side.sql.sideEffect=true;
+  reject(()->side.confirmTodoDeletion(sidep),"delete_side_effect");ok(Arrays.equals(sideb,state(side)),"delete_side_effect_rollback");
+  AppDatabase sidu=new AppDatabase();TodoDeletionUndo sidut=sidu.confirmTodoDeletion(sidu.prepareTodoDeletion("target"));byte[] sidub=state(sidu);sidu.sql.sideEffect=true;
+  reject(()->sidu.undoTodoDeletion(sidut),"undo_side_effect");ok(Arrays.equals(sidub,state(sidu)),"undo_side_effect_rollback");
+  AppDatabase nested=new AppDatabase();TodoDeletionPlan np=nested.prepareTodoDeletion("target");nested.sql.beginTransaction();
+  reject(()->nested.prepareTodoDeletion("target"),"outer_preview");reject(()->nested.confirmTodoDeletion(np),"outer_delete");nested.sql.endTransaction();
+  System.out.println("BACKEND_CHECKS "+checks+" PASS MODEL_NOT_ANDROID");
+ }
+}
+'''
+
+
 def android():
     assert os.environ.get("GITHUB_ACTIONS") == "true"
     import emulator_gate as gate
@@ -810,6 +1169,12 @@ def report():
         host = validate_ui_host(log, source, run, attempt, hashlib.sha256((ROOT/UI_SOURCE).read_bytes()).hexdigest())
     except (OSError, ValueError, AssertionError, KeyError, TypeError) as e:
         passed = False;host["error"] = repr(e)
+    backend_host = {"status": "FAIL"}
+    try:
+        log = (ROOT/"collected-todos/todo-host/todo-host.log").read_text(encoding="utf-8")
+        backend_host = validate_backend_host(log, source, run, attempt, hashlib.sha256((ROOT/BACKEND_SOURCE).read_bytes()).hexdigest())
+    except (OSError, ValueError, AssertionError, KeyError, TypeError) as e:
+        passed = False;backend_host["error"] = repr(e)
     devices = {}
     for api in (26, 34):
         folder = ROOT/"collected-todos"/("todo-device-api-"+str(api))
@@ -832,7 +1197,7 @@ def report():
                 row["diagnostics"][name] = dict(error=repr(e))
     value = dict(status="PASS" if passed else "FAIL", scope="TODO_BACKEND_GATE_ONLY_NOT_FEATURE_ACCEPTANCE",
                  commit=source, run_id=run, run_attempt=attempt, devices=devices, parents=needs,
-                 native_ui="NOT_IMPLEMENTED", ui_host_model=host, release_ready=False, durable_upgrade_ready=False)
+                 native_ui="NOT_IMPLEMENTED", ui_host_model=host, backend_host_model=backend_host, release_ready=False, durable_upgrade_ready=False)
     data = (json.dumps(value, ensure_ascii=False, indent=2)+"\n").encode()
     (ROOT/"todo-report.json").write_bytes(data)
     endpoint = "https://api.github.com/repos/"+os.environ["GITHUB_REPOSITORY"]+"/"

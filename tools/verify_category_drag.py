@@ -21,12 +21,12 @@ PACKAGE = runner.PACKAGE
 SCOPE = "CATEGORY_GUARDED_ORDER_AND_INJECTED_TOUCH_NOT_PHYSICAL_PHONE_OR_ALL_LIFECYCLES"
 REQUIRED = {
     "seed": "backend_fixture move_forward move_backward no_op_readonly stale_refused stale_readonly duplicate_refused duplicate_readonly null_refused null_readonly missing_refused missing_readonly bounds_refused bounds_readonly outer_refused outer_readonly late_fault late_rollback backend_checkpoint".split(),
-    "deleted": "backend_restart backend_backup ui_same_title_categories touch_forward touch_backward touch_same_readonly touch_cancel_readonly touch_outside_readonly buttons_retained ui_checkpoint".split(),
+    "deleted": "backend_restart backend_backup ui_same_title_categories touch_forward touch_duplicate_up_readonly touch_backward touch_same_readonly touch_cancel_readonly touch_outside_readonly touch_short_readonly touch_early_move_readonly touch_navigation_readonly buttons_retained ui_checkpoint".split(),
     "undone": "ui_restart ui_backup".split(),
 }
 EXPECTED = {
     "seed": ["backend_fixture", "move_forward", "move_backward", "no_op_readonly", "stale_refused", "stale_readonly", "duplicate_refused", "duplicate_readonly", "null_refused", "null_readonly", "missing_refused", "missing_readonly", "bounds_refused", "bounds_readonly", "outer_refused", "outer_readonly", "late_fault", "late_rollback", "backend_checkpoint"],
-    "deleted": ["backend_restart", "backend_backup", "ui_same_title_categories", "touch_forward", "touch_backward", "touch_same_readonly", "touch_cancel_readonly", "touch_outside_readonly", "buttons_retained", "ui_checkpoint"],
+    "deleted": ["backend_restart", "backend_backup", "ui_same_title_categories", "touch_forward", "touch_duplicate_up_readonly", "touch_backward", "touch_same_readonly", "touch_cancel_readonly", "touch_outside_readonly", "touch_short_readonly", "touch_early_move_readonly", "touch_navigation_readonly", "buttons_retained", "ui_checkpoint"],
     "undone": ["ui_restart", "ui_backup"],
 }
 JAVA = r'''
@@ -186,12 +186,38 @@ public final class TodoInstrumentation extends Instrumentation {
   MotionEvent e=MotionEvent.obtain(down,SystemClock.uptimeMillis(),action,x,y,0);e.setSource(InputDevice.SOURCE_TOUCHSCREEN);
   try{need(getUiAutomation().injectInputEvent(e,true),"injected touch "+action);}finally{e.recycle();}
  }
- void drag(long source,long target,int terminal,boolean outside)throws Exception{
+ long drag(long source,long target,int terminal,boolean outside)throws Exception{
   Rect from=handle(source),to=handle(target);float x=from.exactCenterX(),y=from.exactCenterY();
   float endX=outside?1:to.exactCenterX(),endY=outside?1:to.exactCenterY();long down=SystemClock.uptimeMillis();
   event(down,MotionEvent.ACTION_DOWN,x,y);SystemClock.sleep(ViewConfiguration.getLongPressTimeout()+100);
   for(int i=1;i<=20;i++){event(down,MotionEvent.ACTION_MOVE,x+(endX-x)*i/20,y+(endY-y)*i/20);SystemClock.sleep(16);}
-  event(down,terminal,endX,endY);waitForIdleSync();ready();
+  event(down,terminal,endX,endY);waitForIdleSync();ready();return down;
+ }
+ void incomplete(long source,long target,boolean earlyMove)throws Exception{
+  Rect from=handle(source),to=handle(target);long down=SystemClock.uptimeMillis();
+  event(down,MotionEvent.ACTION_DOWN,from.exactCenterX(),from.exactCenterY());
+  if(earlyMove){
+   int slop=ViewConfiguration.get(activity).getScaledTouchSlop();
+   need(Math.abs(to.exactCenterY()-from.exactCenterY())>slop,"early move crosses touch slop");
+   event(down,MotionEvent.ACTION_MOVE,to.exactCenterX(),to.exactCenterY());
+   need(SystemClock.uptimeMillis()-down<ViewConfiguration.getLongPressTimeout(),"early move fixture before long press");
+   SystemClock.sleep(ViewConfiguration.getLongPressTimeout()+100);
+  }
+  event(down,MotionEvent.ACTION_UP,to.exactCenterX(),to.exactCenterY());
+  if(!earlyMove)need(SystemClock.uptimeMillis()-down<ViewConfiguration.getLongPressTimeout(),"short press fixture before long press");
+  waitForIdleSync();ready();
+ }
+ void navigateDuringDrag(long source,long target)throws Exception{
+  Rect from=handle(source),to=handle(target);View[] old={null};
+  ui(()->old[0]=one("category-drag-"+source,true));long down=SystemClock.uptimeMillis();
+  event(down,MotionEvent.ACTION_DOWN,from.exactCenterX(),from.exactCenterY());
+  SystemClock.sleep(ViewConfiguration.getLongPressTimeout()+100);
+  ui(()->need(old[0].getAlpha()==0.6f,"navigation fixture has active drag"));
+  click("今天",false);
+  ui(()->need(!old[0].isAttachedToWindow()&&old[0].getAlpha()==1f&&!old[0].isPressed(),"navigation detached and cleared old handle"));
+  event(down,MotionEvent.ACTION_UP,to.exactCenterX(),to.exactCenterY());
+  waitForIdleSync();ready();click("活动",false);
+  ui(()->need(one("category-drag-"+source,true)!=old[0],"navigation rebuilt handle"));
  }
  void deleted()throws Exception{
   try(AppDatabase h=AppDatabase.openSchema3(getTargetContext(),name())){pass(state(h).toString().equals(read("backend-state")),"backend_restart");backup(h,"backend");}
@@ -200,13 +226,19 @@ public final class TodoInstrumentation extends Instrumentation {
   AppDatabase h=db();List<Long> a=h.categoryIds();need(a.size()==3,"three categories");save("ui-order",a.toString());
   pass(h.categoryName(a.get(0)).equals("Same")&&h.categoryName(a.get(1)).equals("Same")&&!a.get(0).equals(a.get(1)),"ui_same_title_categories");
   Map<String,String> images=media();Map<String,List<List<String>>> before=state(h);List<Long> b=Arrays.asList(a.get(1),a.get(2),a.get(0));
-  drag(a.get(0),a.get(2),MotionEvent.ACTION_UP,false);
+  Rect duplicateTarget=handle(a.get(2));long previousDown=drag(a.get(0),a.get(2),MotionEvent.ACTION_UP,false);
   pass(h.categoryIds().equals(b)&&state(h).equals(expected(before,b,1))&&media().equals(images),"touch_forward");
+  Map<String,List<List<String>>> afterForward=state(h);
+  event(previousDown,MotionEvent.ACTION_UP,duplicateTarget.exactCenterX(),duplicateTarget.exactCenterY());waitForIdleSync();ready();
+  pass(state(h).equals(afterForward)&&media().equals(images),"touch_duplicate_up_readonly");
   before=state(h);drag(a.get(0),a.get(1),MotionEvent.ACTION_UP,false);
   pass(h.categoryIds().equals(a)&&state(h).equals(expected(before,a,1))&&media().equals(images),"touch_backward");
   before=state(h);drag(a.get(1),a.get(1),MotionEvent.ACTION_UP,false);pass(state(h).equals(before)&&media().equals(images),"touch_same_readonly");
   drag(a.get(0),a.get(2),MotionEvent.ACTION_CANCEL,false);pass(state(h).equals(before)&&media().equals(images),"touch_cancel_readonly");
   drag(a.get(0),a.get(2),MotionEvent.ACTION_UP,true);pass(state(h).equals(before)&&media().equals(images),"touch_outside_readonly");
+  incomplete(a.get(0),a.get(2),false);pass(state(h).equals(before)&&media().equals(images),"touch_short_readonly");
+  incomplete(a.get(0),a.get(2),true);pass(state(h).equals(before)&&media().equals(images),"touch_early_move_readonly");
+  navigateDuringDrag(a.get(0),a.get(2));pass(state(h).equals(before)&&media().equals(images),"touch_navigation_readonly");
   click("category-down-"+a.get(0),true);List<Long> c=Arrays.asList(a.get(1),a.get(0),a.get(2));
   pass(h.categoryIds().equals(c)&&state(h).equals(expected(before,c,1))&&media().equals(images),"buttons_retained");
   save("ui-state",state(h).toString());save("ui-media",media().toString());pass(true,"ui_checkpoint");
@@ -278,7 +310,7 @@ def validate(value, manifest, logs, api, source, run, attempt):
 
 def fixture(api):
     manifest = dict(commit="a"*40, run_id="123", run_attempt="1", api=api, apk_sha256="b"*64, certificate="c"*64, apk_bytes=100)
-    value = dict(manifest, status="PASS", scope=SCOPE, checks=31, labels=sum(EXPECTED.values(), []),
+    value = dict(manifest, status="PASS", scope=SCOPE, checks=35, labels=sum(EXPECTED.values(), []),
                  release_ready=False, default_test_restored=True, diagnostic_rejected=True,
                  product_readback="EXACT_BEFORE_AND_AFTER", native_ui="INJECTED_TOUCH_CATEGORY_DRAG")
     stop = dict(status="PASS", package=PACKAGE, scope="COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK", force_stop_attempts=1,
@@ -364,7 +396,7 @@ System.out.println("CATEGORY_ORACLE positive=4 negative=3 PASS; host oracle, not
 
 
 def selftest():
-    assert REQUIRED == EXPECTED and sum(map(len, EXPECTED.values())) == 31
+    assert REQUIRED == EXPECTED and [len(EXPECTED[p]) for p in ("seed", "deleted", "undone")] == [19, 14, 2]
     total = 0
     for api in (26, 34):
         value, manifest, logs = fixture(api)
@@ -374,7 +406,7 @@ def selftest():
             bad = copy.deepcopy(value);del bad[key];cases.append((bad, manifest, logs))
         for key in manifest:
             bad = dict(manifest);del bad[key];cases.append((value, bad, logs))
-        for key, wrong in (("checks", 31.0), ("checks", True), ("release_ready", 0), ("api", float(api)), ("default_test_restored", 1),
+        for key, wrong in (("checks", 35.0), ("checks", True), ("release_ready", 0), ("api", float(api)), ("default_test_restored", 1),
                            ("commit", "d"*40), ("run_id", "999"), ("run_attempt", "2"), ("apk_sha256", "d"*64),
                            ("native_ui", "WIDGET_CALLBACKS"), ("status", "FAIL"), ("error", "sentinel")):
             bad = copy.deepcopy(value);bad[key] = wrong;cases.append((bad, manifest, logs))
@@ -390,7 +422,7 @@ def selftest():
     for old, new, key, wrong in (
         ('assert value["native_ui"] == "INJECTED_TOUCH_CATEGORY_DRAG"', "assert True", "native_ui", "WIDGET_CALLBACKS"),
         ('assert value["release_ready"] is False', "assert True", "release_ready", 0),
-        ('assert type(value["checks"]) is int and value["checks"] == len(labels) and value["labels"] == labels', "assert True", "checks", 31.0),
+        ('assert type(value["checks"]) is int and value["checks"] == len(labels) and value["labels"] == labels', "assert True", "checks", 35.0),
     ):
         assert source.count(old) == 1
         namespace = dict(globals());exec(compile(source.replace(old, new), "<category-validator-mutant>", "exec"), namespace)
@@ -412,6 +444,7 @@ for(Object u:t.parse()){}for(Diagnostic<?>e:d.getDiagnostics())if(e.getKind()==D
         subprocess.run(["java", str(p/"Parse.java"), str(p/"TodoInstrumentation.java")], check=True, timeout=30)
     assert callable(driver())
     oracle_selftest()
+    report_selftest()
     print("CATEGORY_HOST "+json.dumps(dict(status="PASS", positive=2, negative=total, compiled_validator_mutants=3,
           scope="HOST_RECEIPT_AND_JAVA_SYNTAX_NOT_FEATURE_ACCEPTANCE", release_ready=False)))
 
@@ -452,6 +485,82 @@ def report():
         with urllib.request.urlopen(request, timeout=30) as response:return json.load(response)
     print("CATEGORY_REPORT", publish(api_call, "reports/category-drag-"+source+"-"+run+"-"+attempt+".json", data))
     assert passed, "Category feature missing, failed or evidence incomplete"
+
+
+def report_selftest():
+    """Exercise the real report entry; only network publication is doubled."""
+    import contextlib
+    import io
+    import types
+    import urllib.request
+    from unittest.mock import patch
+
+    cases = ("good", "missing_device", "missing_log", "wrong_commit", "wrong_attempt",
+             "wrong_apk", "float_count", "no_native", "failed_parent", "missing_diagnostic")
+    def exercise(invoke, case):
+        namespace = invoke.__globals__;oldroot = namespace["ROOT"]
+        published = []
+        fake = types.ModuleType("verify_evidence")
+        def publish(api, path, data):
+            published.append((path, data))
+            return "EXPLICIT_LOCAL_PUBLISHER_DOUBLE"
+        fake.publish = publish
+        parents = {"category_host": {"result": "success"}, "category_device": {"result": "success"}}
+        if case == "failed_parent":parents["category_device"]["result"] = "failure"
+        env = dict(GITHUB_SHA="a"*40, GITHUB_RUN_ID="123", GITHUB_RUN_ATTEMPT="1",
+                   GITHUB_REPOSITORY="explicit/test", GH_TOKEN="local-publisher-double", NEEDS_JSON=json.dumps(parents))
+        try:
+            with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, env), patch.dict(sys.modules, {"verify_evidence": fake}), \
+                 patch.object(urllib.request, "urlopen", side_effect=AssertionError("selftest network forbidden")):
+                namespace["ROOT"] = Path(tmp)
+                for api in (26, 34):
+                    value, manifest, logs = fixture(api)
+                    folder = Path(tmp)/"collected-category"/("category-device-api-"+str(api))
+                    (folder/"category-device").mkdir(parents=True)
+                    if api == 34:
+                        if case == "missing_device":continue
+                        if case == "missing_log":del logs["deleted"]
+                        if case == "wrong_commit":manifest["commit"] = "d"*40
+                        if case == "wrong_attempt":manifest["run_attempt"] = "2"
+                        if case == "wrong_apk":manifest["apk_sha256"] = "d"*64
+                        if case == "float_count":value["checks"] = float(value["checks"])
+                        if case == "no_native":value["native_ui"] = "WIDGET_CALLBACKS"
+                        if case == "missing_diagnostic":logs["diagnostic"] = ""
+                    (folder/"category-apk.json").write_text(json.dumps(manifest))
+                    (folder/"category-device/result.json").write_text(json.dumps(value))
+                    for name, text in logs.items():(folder/"category-device"/(name+".log")).write_text(text)
+                error = None
+                try:
+                    with contextlib.redirect_stdout(io.StringIO()):invoke()
+                except AssertionError as e:error = e
+                saved = json.loads((Path(tmp)/"category-report.json").read_text())
+                assert saved["status"] == ("PASS" if case == "good" else "NOT_VERIFIED"), "report_overall"
+                assert (error is None) == (case == "good"), "report_failure_exit"
+                if error is not None:assert str(error) == "Category feature missing, failed or evidence incomplete", "report_primary_error"
+                assert saved["commit"] == "a"*40 and saved["run_id"] == "123" and saved["run_attempt"] == "1", "report_identity"
+                assert saved["release_ready"] is False and saved["durable_upgrade_ready"] is False, "report_not_release"
+                assert len(published) == 1 and json.loads(published[0][1]) == saved, "report_published_exactly_once"
+                assert published[0][0] == "reports/category-drag-"+"a"*40+"-123-1.json", "report_publication_identity"
+                assert saved["devices"]["26"]["status"] == "PASS", "report_preserves_valid_device"
+                assert saved["devices"]["34"]["status"] == ("PASS" if case in ("good", "failed_parent") else "NOT_VERIFIED"), "report_device_status"
+        finally:
+            namespace["ROOT"] = oldroot
+    for case in cases:exercise(report, case)
+    source = inspect.getsource(report);rejected = []
+    for old, new, case, label in (
+        ('passed = all(needs.get(k, {}).get("result") == "success" for k in ("category_host", "category_device"))',
+         "passed = True", "failed_parent", "report_overall"),
+        ('validate(value, manifest, logs, api, source, run, attempt)', "pass", "wrong_apk", "report_overall"),
+        ('assert passed, "Category feature missing, failed or evidence incomplete"', "pass", "failed_parent", "report_failure_exit"),
+    ):
+        assert source.count(old) == 1, "report mutation anchor"
+        namespace = dict(globals());exec(compile(source.replace(old, new), "<category-report-mutant>", "exec"), namespace)
+        invoke = namespace["report"];exercise(invoke, "good")
+        try:exercise(invoke, case)
+        except AssertionError as e:assert str(e) == label, (label, repr(e));rejected.append((case, label))
+        else:raise AssertionError("report mutant survived")
+    assert len(cases) == 10 and len(rejected) == 3
+    print("CATEGORY_REPORT_ENTRY positive=1 negative=9 compiled_mutants=3 PASS; actual entry with explicit artifacts and network doubles")
 
 
 if __name__ == "__main__":

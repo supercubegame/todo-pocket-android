@@ -435,6 +435,146 @@ public final class AppDatabase extends SQLiteOpenHelper {
     public synchronized List<String> fieldValue(long activity,String id){SQLiteDatabase db=getReadableDatabase();exists(db,"activities",activity);exists(db,"fields",id);List<String> values=new ArrayList<>();try(Cursor c=db.rawQuery("SELECT value FROM field_values WHERE activity_id=? AND field_id=? ORDER BY position",new String[]{Long.toString(activity),id})){while(c.moveToNext())values.add(c.getString(0));}return Collections.unmodifiableList(values);}
     public synchronized void createFieldNote(String noteId,long activity,String fieldId,String title){Ledger.identifier(noteId);String clean=text(title);tx(db->{exists(db,"activities",activity);if(fieldDefinition(db,fieldId).archived)throw new IllegalStateException("不能向归档字段添加笔记");db.execSQL("INSERT INTO notes VALUES(?,?,?)",new Object[]{noteId,activity,clean});db.execSQL("INSERT INTO field_notes VALUES(?,?)",new Object[]{noteId,fieldId});bump(db);return null;});}
     public synchronized List<String> fieldNoteIds(long activity,String fieldId){SQLiteDatabase db=getReadableDatabase();exists(db,"activities",activity);exists(db,"fields",fieldId);List<String> ids=new ArrayList<>();try(Cursor c=db.rawQuery("SELECT n.id FROM notes n JOIN field_notes f ON f.note_id=n.id WHERE n.activity_id=? AND f.field_id=? ORDER BY n.rowid",new String[]{Long.toString(activity),fieldId})){while(c.moveToNext())ids.add(c.getString(0));}return Collections.unmodifiableList(ids);}
+    /** In-memory single-attempt edit. A helper close, connection change or any
+     * business-state change invalidates the plan. Old unguarded APIs stay intact.
+     * No schema change, persistent token or ABA/concurrency-history guarantee.
+     */
+    public static final class FieldEditPlan implements AutoCloseable {
+        private final AppDatabase owner;
+        private final Object session;
+        private final SQLiteDatabase connection;
+        private final long activity;
+        private final CustomFields.Definition definition;
+        private final List<String> values;
+        private byte[] before;
+        private boolean terminal;
+        private FieldEditPlan(AppDatabase owner,SQLiteDatabase connection,long activity,
+                              CustomFields.Definition definition,List<String> values,byte[] before){
+            this.owner=owner;session=owner.restoreSession;this.connection=connection;
+            this.activity=activity;this.definition=definition;
+            this.values=Collections.unmodifiableList(new ArrayList<>(values));this.before=before;
+        }
+        public long activityId(){return activity;}
+        public CustomFields.Definition definition(){return definition;}
+        public List<String> values(){return values;}
+        @Override public void close(){synchronized(owner){terminal=true;before=null;}}
+    }
+    private static List<String> fieldValues(SQLiteDatabase db,long activity,String id){
+        List<String> values=new ArrayList<>();
+        try(Cursor c=db.rawQuery("SELECT value FROM field_values WHERE activity_id=? AND field_id=? ORDER BY position",new String[]{Long.toString(activity),id})){
+            while(c.moveToNext())values.add(c.getString(0));
+        }
+        return values;
+    }
+    public synchronized FieldEditPlan prepareFieldEdit(long activity,String id){
+        Ledger.positive(activity);Ledger.identifier(id);
+        SQLiteDatabase db=getReadableDatabase();noteDeletionNoOuterTransaction(db);db.beginTransaction();
+        try{
+            exists(db,"activities",activity);CustomFields.Definition definition=fieldDefinition(db,id);
+            FieldEditPlan plan=new FieldEditPlan(this,db,activity,definition,fieldValues(db,activity,id),noteDeletionState(db));
+            db.setTransactionSuccessful();return plan;
+        }finally{db.endTransaction();}
+    }
+    private void fieldEditAttempt(FieldEditPlan plan,Work<Void> action){
+        if(plan==null||plan.owner!=this)throw new IllegalArgumentException("字段编辑不属于当前数据库");
+        if(plan.terminal||plan.session!=restoreSession){plan.close();throw new IllegalStateException("字段编辑已取消、使用或失效，请重新打开");}
+        plan.terminal=true;
+        try{
+            SQLiteDatabase connection=getWritableDatabase();noteDeletionNoOuterTransaction(connection);
+            if(connection!=plan.connection||!connection.isOpen())throw new IllegalStateException("数据库连接已变化，请重新打开字段");
+            tx(db->{
+                if(!Arrays.equals(plan.before,noteDeletionState(db)))throw new IllegalStateException("本机内容已变化，请重新打开字段");
+                return action.run(db);
+            });
+        }finally{plan.close();}
+    }
+    /** Build the complete expected typed snapshot before writing. Unrelated rows,
+     * rowids, field-note links and option order must survive the readback unchanged.
+     * Replacement values use SQLite's ordinary maximum-remaining-rowid + 1 rule;
+     * overflow is refused instead of asking SQLite to choose a random rowid.
+     */
+    private static byte[] fieldEditExpected(SQLiteDatabase db,FieldEditPlan plan,List<String> values,String name,Boolean archived,long next){
+        tableSet(db);
+        try{
+            LimitedBytes bytes=new LimitedBytes();DataOutputStream out=new DataOutputStream(bytes);
+            out.writeInt(0x4e444c31);out.writeInt(db.getVersion());out.writeInt(SNAPSHOT_TABLES.length);
+            for(String table:SNAPSHOT_TABLES)try(Cursor c=db.rawQuery("SELECT rowid,* FROM "+table+" ORDER BY rowid",null)){
+                List<Object[]> rows=new ArrayList<>();List<int[]> types=new ArrayList<>();
+                while(c.moveToNext()){
+                    Object[] row=new Object[c.getColumnCount()];int[] tags=new int[row.length];
+                    for(int i=0;i<row.length;i++){row[i]=cell(c,i);tags[i]=c.getType(i);}
+                    rows.add(row);types.add(tags);
+                }
+                if(table.equals("field_values")&&values!=null){
+                    int owner=c.getColumnIndexOrThrow("activity_id"),field=c.getColumnIndexOrThrow("field_id");
+                    int position=c.getColumnIndexOrThrow("position"),value=c.getColumnIndexOrThrow("value");
+                    for(int i=rows.size()-1;i>=0;i--)if(Long.valueOf(plan.activity).equals(rows.get(i)[owner])&&plan.definition.id.equals(rows.get(i)[field])){
+                        rows.remove(i);types.remove(i);
+                    }
+                    long rowid=rows.isEmpty()?0:(Long)rows.get(rows.size()-1)[0];
+                    for(int i=0;i<values.size();i++){
+                        rowid=Math.incrementExact(rowid);
+                        Object[] row=new Object[c.getColumnCount()];int[] tags=new int[row.length];
+                        row[0]=rowid;tags[0]=Cursor.FIELD_TYPE_INTEGER;
+                        row[owner]=plan.activity;tags[owner]=Cursor.FIELD_TYPE_INTEGER;
+                        row[field]=plan.definition.id;tags[field]=Cursor.FIELD_TYPE_STRING;
+                        row[position]=(long)i;tags[position]=Cursor.FIELD_TYPE_INTEGER;
+                        row[value]=values.get(i);tags[value]=Cursor.FIELD_TYPE_STRING;
+                        rows.add(row);types.add(tags);
+                    }
+                }else if(table.equals("fields")&&(name!=null||archived!=null)){
+                    int id=c.getColumnIndexOrThrow("id"),column=c.getColumnIndexOrThrow(name!=null?"name":"archived"),matched=0;
+                    for(Object[] row:rows)if(plan.definition.id.equals(row[id])){
+                        row[column]=name!=null?name:Long.valueOf(archived?1:0);matched++;
+                    }
+                    if(matched!=1)throw new IllegalStateException("字段标识已变化");
+                }else if(table.equals("revision")){
+                    if(rows.size()!=1)throw new IllegalStateException("数据库修订记录不完整");
+                    rows.get(0)[c.getColumnIndexOrThrow("value")]=next;
+                }
+                utf8(out,table);out.writeInt(c.getColumnCount());for(String column:c.getColumnNames())utf8(out,column);out.writeInt(rows.size());
+                for(int r=0;r<rows.size();r++)for(int i=0;i<rows.get(r).length;i++){
+                    Object value=rows.get(r)[i];out.writeByte(types.get(r)[i]);
+                    if(value instanceof Long)out.writeLong((Long)value);
+                    else if(value instanceof String)utf8(out,(String)value);
+                    else if(value instanceof byte[])blob(out,(byte[])value);
+                }
+            }
+            out.flush();return bytes.toByteArray();
+        }catch(IOException e){throw new IllegalStateException("无法读取字段编辑状态",e);}
+    }
+    private static void fieldEditReadback(SQLiteDatabase db,byte[] expected,long next){
+        if(bump(db)!=next||!Arrays.equals(expected,noteDeletionState(db)))
+            throw new IllegalStateException("字段编辑回读不一致，本次修改已回滚");
+    }
+    public synchronized void confirmFieldValue(FieldEditPlan plan,List<String> input){
+        fieldEditAttempt(plan,db->{
+            if(input==null||Ledger.hasNull(input))throw new IllegalArgumentException("无效字段值");
+            CustomFields.Definition f=fieldDefinition(db,plan.definition.id);
+            if(f.archived)throw new IllegalStateException("已归档字段只读");
+            CustomFields validator=new CustomFields();validator.define(f.id,f.name,f.type.name(),f.options);
+            validator.put(plan.activity,f.id,new ArrayList<>(input));List<String> values=validator.value(plan.activity,f.id);
+            long next=Math.incrementExact(revision(db));byte[] expected=fieldEditExpected(db,plan,values,null,null,next);
+            db.delete("field_values","activity_id=? AND field_id=?",new String[]{Long.toString(plan.activity),f.id});
+            for(int i=0;i<values.size();i++)db.execSQL("INSERT INTO field_values VALUES(?,?,?,?)",new Object[]{plan.activity,f.id,i,values.get(i)});
+            fieldEditReadback(db,expected,next);return null;
+        });
+    }
+    public synchronized void confirmFieldRename(FieldEditPlan plan,String name){
+        fieldEditAttempt(plan,db->{
+            String clean=ActivityModel.title(name);long next=Math.incrementExact(revision(db));
+            byte[] expected=fieldEditExpected(db,plan,null,clean,null,next);
+            db.execSQL("UPDATE fields SET name=? WHERE id=?",new Object[]{clean,plan.definition.id});
+            fieldEditReadback(db,expected,next);return null;
+        });
+    }
+    public synchronized void confirmFieldArchive(FieldEditPlan plan,boolean archived){
+        fieldEditAttempt(plan,db->{
+            long next=Math.incrementExact(revision(db));byte[] expected=fieldEditExpected(db,plan,null,null,archived,next);
+            db.execSQL("UPDATE fields SET archived=? WHERE id=?",new Object[]{archived?1:0,plan.definition.id});
+            fieldEditReadback(db,expected,next);return null;
+        });
+    }
     public static final class Todo {
         public final String id,title;public final boolean done;
         private Todo(String id,String title,boolean done){this.id=id;this.title=title;this.done=done;}
@@ -634,7 +774,6 @@ public final class AppDatabase extends SQLiteOpenHelper {
     public synchronized long importLegacy(byte[] bytes){
         LegacyImport.Plan plan=LegacyImport.preview(bytes);
         return tx(db->{try(Cursor c=db.rawQuery("SELECT item_count FROM legacy_imports WHERE source_id=?",new String[]{plan.sourceId()})){if(c.moveToFirst())return 0L;}
-            db.execSQL("INSERT INTO legacy_imports VALUES(?,?)",new Object[]{plan.sourceId(),plan.todos().size()});long position=nextTodoPosition(db);
             for(TodoModel.Item item:plan.todos()){String id="legacy-"+plan.sourceId()+"-"+item.id;db.execSQL("INSERT INTO todos VALUES(?,?,?,?)",new Object[]{id,item.title,item.done?1:0,position});position=Math.incrementExact(position);}
             bump(db);return (long)plan.todos().size();});
     }

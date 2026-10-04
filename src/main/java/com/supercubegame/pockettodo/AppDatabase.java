@@ -155,6 +155,74 @@ public final class AppDatabase extends SQLiteOpenHelper {
     }
     public synchronized void addApplication(long id,String name,String packageName){Ledger.positive(id);String clean=text(name);if(packageName==null||(!packageName.isEmpty()&&!packageName.matches("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")))throw new IllegalArgumentException("应用包名无效");tx(db->{db.execSQL("INSERT INTO applications VALUES(?,?,?)",new Object[]{id,clean,packageName});bump(db);return null;});}
     public synchronized void addActivity(long id,long category,long application,String title){Ledger.positive(id);Ledger.positive(category);if(application<0)throw new IllegalArgumentException("应用标识无效");String clean=text(title);tx(db->{exists(db,"categories",category);if(application!=0)exists(db,"applications",application);db.execSQL("INSERT INTO activities(id,category_id,application_id,title) VALUES(?,?,?,?)",new Object[]{id,category,application==0?null:application,clean});bump(db);return null;});}
+    /** Single-attempt selection. Catalog reuse creates only a new activity row.
+     * Full typed state is compared in the insert transaction; cancel is read-only.
+     * In-memory helper/session/connection scope, not a persistent undo or ABA log.
+     */
+    public static final class ApplicationActivityPlan implements AutoCloseable {
+        private final AppDatabase owner;
+        private final Object session;
+        private final SQLiteDatabase connection;
+        private final long category,application;
+        private final String categoryName,applicationName;
+        private byte[] before;
+        private boolean terminal;
+        private ApplicationActivityPlan(AppDatabase owner,SQLiteDatabase connection,long category,long application,
+                                        String categoryName,String applicationName,byte[] before){
+            this.owner=owner;this.session=owner.restoreSession;this.connection=connection;
+            this.category=category;this.application=application;
+            this.categoryName=categoryName;this.applicationName=applicationName;this.before=before;
+        }
+        public long categoryId(){return category;}
+        public long applicationId(){return application;}
+        public String categoryName(){return categoryName;}
+        public String applicationName(){return applicationName;}
+        @Override public void close(){synchronized(owner){terminal=true;before=null;}}
+    }
+    public synchronized ApplicationActivityPlan prepareApplicationActivity(long category,long application){
+        Ledger.positive(category);
+        if(application<0)throw new IllegalArgumentException("应用标识无效");
+        SQLiteDatabase db=getReadableDatabase();noteDeletionNoOuterTransaction(db);db.beginTransaction();
+        try{
+            String cat,app="不关联应用";
+            try(Cursor c=db.rawQuery("SELECT name FROM categories WHERE id=?",new String[]{Long.toString(category)})){
+                if(!c.moveToFirst())throw new IllegalArgumentException("分类不存在");cat=c.getString(0);
+            }
+            if(application!=0)try(Cursor c=db.rawQuery("SELECT name FROM applications WHERE id=?",new String[]{Long.toString(application)})){
+                if(!c.moveToFirst())throw new IllegalArgumentException("应用不存在");app=c.getString(0);
+            }
+            ApplicationActivityPlan plan=new ApplicationActivityPlan(this,db,category,application,cat,app,noteDeletionState(db));
+            db.setTransactionSuccessful();return plan;
+        }finally{db.endTransaction();}
+    }
+    public synchronized long confirmApplicationActivity(ApplicationActivityPlan plan,String title){
+        if(plan==null||plan.owner!=this)throw new IllegalArgumentException("应用选择不属于当前数据库");
+        if(plan.terminal||plan.session!=restoreSession){plan.close();throw new IllegalStateException("选择已取消、使用或失效，请重新选择");}
+        plan.terminal=true;
+        try{
+            String clean=text(title);
+            SQLiteDatabase connection=getWritableDatabase();noteDeletionNoOuterTransaction(connection);
+            if(connection!=plan.connection||!connection.isOpen())throw new IllegalStateException("数据库连接已变化，请重新选择");
+            return tx(db->{
+                if(!Arrays.equals(plan.before,noteDeletionState(db)))throw new IllegalStateException("本机内容已变化，请重新选择应用");
+                long id;
+                try(Cursor c=db.rawQuery("SELECT MAX(id) FROM activities",null)){
+                    if(!c.moveToFirst())throw new IllegalStateException("无法分配活动标识");
+                    id=c.isNull(0)?1:Math.incrementExact(c.getLong(0));
+                }
+                Ledger.positive(id);
+                db.execSQL("INSERT INTO activities(id,category_id,application_id,title) VALUES(?,?,?,?)",
+                    new Object[]{id,plan.category,plan.application==0?null:plan.application,clean});
+                try(Cursor c=db.rawQuery("SELECT category_id,application_id,title,archived FROM activities WHERE id=?",new String[]{Long.toString(id)})){
+                    if(!c.moveToFirst()||c.getLong(0)!=plan.category
+                        ||(plan.application==0?!c.isNull(1):c.isNull(1)||c.getLong(1)!=plan.application)
+                        ||!clean.equals(c.getString(2))||c.getLong(3)!=0||c.moveToNext())
+                        throw new IllegalStateException("活动关联回读不一致，本次修改已回滚");
+                }
+                bump(db);return id;
+            });
+        }finally{plan.close();}
+    }
     private void orderedStrings(String table,long activity,List<String> values,boolean deduplicate){if(values==null)throw new IllegalArgumentException("缺少有序内容");List<String> clean=new ArrayList<>();for(String value:values){String s=text(value);if(!deduplicate||!clean.contains(s))clean.add(s);}tx(db->{exists(db,"activities",activity);db.delete(table,"activity_id=?",new String[]{Long.toString(activity)});for(int i=0;i<clean.size();i++)db.execSQL("INSERT INTO "+table+" VALUES(?,?,?)",new Object[]{activity,i,clean.get(i)});bump(db);return null;});}
     private List<String> orderedStrings(String table,long activity){SQLiteDatabase db=getReadableDatabase();exists(db,"activities",activity);List<String> out=new ArrayList<>();try(Cursor c=db.rawQuery("SELECT text FROM "+table+" WHERE activity_id=? ORDER BY position",new String[]{Long.toString(activity)})){while(c.moveToNext())out.add(c.getString(0));}return Collections.unmodifiableList(out);}
     public synchronized void savePath(long activity,List<String> steps){orderedStrings("paths",activity,steps,false);}
@@ -179,7 +247,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
         if(expectedTitle==null)throw new IllegalArgumentException("缺少原笔记标题");
         return tx(db->{
             String current;
-            try(Cursor c=db.rawQuery("SELECT activity_id,title FROM notes WHERE id=?",new String[]{id})){
+            try(Cursor c=db.rawQuery("SELECT activity_id,title FROM notes WHERE id=?",new String[]{id,Long.toString(activity)})){
                 if(!c.moveToFirst()||c.getLong(0)!=activity)throw new IllegalArgumentException("所选笔记不存在或不属于当前活动");
                 current=c.getString(1);
             }

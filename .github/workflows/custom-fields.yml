@@ -21,12 +21,204 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/verify_custom_fields.py selftest 2>&1 | tee fields-host.log
+      - name: Current-source field UI model and witnessed mutations
+        run: |
+          set -euo pipefail
+          python3 - <<'FIELD_UI_PY' 2>&1 | tee fields-ui-host.log
+          from pathlib import Path
+          import hashlib,json,os,subprocess,tempfile
+          assert not __import__("sys").flags.optimize
+          root=Path.cwd()
+          product=root/"src/main/java/com/supercubegame/pockettodo"
+          def clean(s):
+              return "\n".join(line for line in s.splitlines() if not line.startswith(("package ","import ")))
+          HARNESS=r'''
+          import java.util.*;import java.math.*;import java.net.*;import java.time.*;import java.time.format.*;import java.util.function.*;
+          class Harness {
+           static int checks;
+           static void need(boolean b,String message){if(!b)throw new AssertionError(message);checks++;System.out.println("FIELD_UI_CHECK "+checks+" "+message.split(" ")[0]);}
+           static TodayScreen h;static FieldScreen screen;
+           static View one(String key){View v=find(h.root,key);need(v!=null,"view "+key);return v;}
+           static View find(View v,String k){if(k.equals(v.key))return v;for(View c:v.children){View x=find(c,k);if(x!=null)return x;}return null;}
+           static void click(String k){one(k).performClick();}
+           static void text(String k,String s){((EditText)one(k)).setText(s);}
+           static void drain(){while(!h.queue.isEmpty())h.queue.remove().run();}
+           static void open(){h=new TodayScreen();screen=new FieldScreen(h,1,()->h.content());screen.open(h.root);drain();}
+           static void create(){click("field-new");text("field-name","Same");click("field-create");drain();}
+           static String id(){return h.db.defs.keySet().iterator().next();}
+           static void edit(){click("field-edit-"+id());drain();}
+           public static void main(String[]a){
+            open();need(h.db.writes==0,"open_readonly");System.out.println("FIELD_UI_RENDER_WITNESS");
+            click("field-new");click("field-create");need(h.db.writes==0&&!((TextView)one("field-validation")).text.isEmpty(),"blank_create");
+            text("field-name","Same");View create=one("field-create");create.performClick();create.performClick();need(h.queue.size()==1,"create_pending_once");drain();need(h.db.defs.size()==1&&h.db.writes==1,"create_once");
+            create.performClick();drain();need(h.db.writes==1,"detached_create");
+            System.out.println("FIELD_UI_CREATE_WITNESS");
+            edit();text("field-value-input","New");View save=one("field-save");save.performClick();save.performClick();need(h.queue.size()==1,"save_pending_once");drain();
+            need(h.db.writes==2&&h.db.value.equals(List.of("New")),"save_exact");
+            save.performClick();drain();need(h.db.writes==2,"detached_save");
+            edit();AppDatabase.FieldEditPlan canceled=h.db.last;text("field-value-input","Discard");click("field-cancel");drain();need(canceled.closed&&h.db.writes==2,"cancel_closes");
+            edit();AppDatabase.FieldEditPlan detach=h.db.last;View old=one("field-save");h.content();old.performClick();drain();need(detach.closed&&h.db.writes==2,"detach_closes");
+            open();create();click("field-edit-"+id());need(h.queue.size()==1,"prepare_queued");h.content();drain();need(h.db.last.closed&&h.db.writes==1,"stale_prepare_closes");
+            open();create();edit();h.activity.destroyed=true;one("field-save").performClick();need(h.queue.isEmpty()&&h.db.writes==1,"destroyed_readonly");h.activity.destroyed=false;
+            one("field-save").setEnabled(false);one("field-save").performClick();need(h.queue.isEmpty(),"disabled_readonly");one("field-save").setEnabled(true);
+            text("field-value-input","Pending");one("field-save").performClick();h.content();drain();need(h.db.writes==1&&h.db.last.closed,"queued_detach_readonly");
+            open();create();edit();h.db.fail=true;save=one("field-save");save.performClick();drain();need(h.db.last.closed&&!save.enabled&&h.db.writes==1,"failed_terminal");h.db.fail=false;save.performClick();drain();need(h.db.writes==1,"failed_replay");
+            click("field-cancel");drain();click("field-rename-"+id());drain();text("field-name"," ");click("field-rename-save");need(h.db.writes==1,"blank_rename");
+            text("field-name","Renamed");click("field-rename-save");drain();need(h.db.defs.get(id()).name.equals("Renamed")&&h.db.writes==2,"rename");
+            click("field-archive-"+id());drain();need(h.db.writes==2,"archive_preview");click("field-archive-confirm");drain();need(h.db.defs.get(id()).archived&&h.db.writes==3,"archive");need(!one("field-edit-"+id()).enabled,"archived_disabled");
+            open();create();edit();h.db.readFail=true;save=one("field-save");save.performClick();drain();need(h.db.writes==2&&!save.enabled,"refresh_failure_terminal");save.performClick();drain();need(h.db.writes==2,"refresh_failure_no_replay");
+            
+            for(CustomFields.Type type:CustomFields.Type.values()){
+             open();click("field-new");click("field-type-"+type.name());text("field-name","Same");
+             if(type==CustomFields.Type.SELECT||type==CustomFields.Type.MULTI_SELECT){
+              text("field-options","a\na");click("field-create");need(h.db.writes==0,"duplicate_options");
+              text("field-options","a\nb");
+             }
+             click("field-create");drain();need(h.db.defs.get(id()).type==type,"exact_type");
+             edit();String bad="",good="";List<String>expected;
+             switch(type){
+              case TEXT:good="Text";break;
+              case LONG_TEXT:good="Line one\nLine two";break;
+              case NUMBER:bad="NaN";good="-12.50";break;
+              case DATE:bad="2026-02-30";good="2026-10-05";break;
+              case SELECT:case MULTI_SELECT:bad="missing";good="b";break;
+              case LINK:bad="javascript:alert(1)";good="https://example.com/path?q=1";break;
+              case BOOLEAN:bad="yes";good="false";break;
+             }
+             if(!bad.isEmpty()){
+              text("field-value-input",bad);click("field-save");need(h.db.writes==1&&h.queue.isEmpty()&&!h.db.last.closed&&!((TextView)one("field-validation")).text.isEmpty(),"invalid_ui_"+type);
+             }
+             text("field-value-input",good);expected=List.of(good);
+             if(type==CustomFields.Type.SELECT){click("field-choice-a");expected=List.of("a");}
+             if(type==CustomFields.Type.BOOLEAN){click("field-choice-true");expected=List.of("true");}
+             if(type==CustomFields.Type.MULTI_SELECT){
+              click("field-choice-a");click("field-choice-b");click("field-choice-b");expected=List.of("a","b");
+             }
+             click("field-save");drain();need(h.db.writes==2&&h.db.value.equals(expected),"typed_save_"+type);
+             edit();text("field-value-input","");click("field-save");drain();need(h.db.writes==3&&h.db.value.isEmpty(),"typed_clear_"+type);
+            }
+            System.out.println("FIELD_TYPED_UI_PASS all8 invalid6 clear8 choice3");
+          
+          System.out.println("FIELD_UI_HOST_PASS checks="+checks);
+           }
+          }
+          class View {
+           String key="";boolean enabled=true,attached=true;OnClickListener listener;List<View>children=new ArrayList<>();List<OnAttachStateChangeListener> attaches=new ArrayList<>();
+           interface OnClickListener{void onClick(View v);}interface OnAttachStateChangeListener{void onViewAttachedToWindow(View v);void onViewDetachedFromWindow(View v);}
+           void setContentDescription(String s){key=s;}void setOnClickListener(OnClickListener l){listener=l;}
+           boolean performClick(){if(listener!=null){listener.onClick(this);return true;}return false;}
+           boolean isAttachedToWindow(){return attached;}boolean isEnabled(){return enabled;}void setEnabled(boolean b){enabled=b;}
+           void addOnAttachStateChangeListener(OnAttachStateChangeListener l){attaches.add(l);}
+           void detach(){attached=false;for(OnAttachStateChangeListener l:attaches)l.onViewDetachedFromWindow(this);for(View c:children)c.detach();}
+           void setPadding(int a,int b,int c,int d){}void setBackground(Object o){}
+          }
+          class TextView extends View {String text="";void setText(String s){text=s;}CharSequence getText(){return text;}void setMaxLines(int n){}}
+          class EditText extends TextView {void setHint(String s){}}
+          class Button extends TextView{}
+          class LinearLayout extends View{
+           LinearLayout(Object context){}void addView(View v){children.add(v);}void addView(View v,LayoutParams p){children.add(v);}
+           static class LayoutParams{LayoutParams(int a,int b){}LayoutParams(int a,int b,int c){}}
+          }
+          class ScrollView extends LinearLayout{ScrollView(Object c){super(c);}void setFillViewport(boolean b){}}
+          class Activity{boolean finishing,destroyed;boolean isFinishing(){return finishing;}boolean isDestroyed(){return destroyed;}}
+          class TodayScreen{
+           static final int INK=1,MUTED=2,ERROR=3,WHITE=4;Activity activity=new Activity();AppDatabase db=new AppDatabase();LinearLayout root=new LinearLayout(activity);Queue<Runnable>queue=new ArrayDeque<>();
+           boolean busy,closed;Map<View,Boolean>paused=new IdentityHashMap<>();
+           int dp(int n){return n;}Object shape(int a,int b){return new Object();}
+           LinearLayout column(){return new LinearLayout(activity);}
+           LinearLayout content(){root.detach();root=column();return root;}
+           TextView text(String s,int a,int b){TextView v=new TextView();v.setText(s);return v;}
+           EditText field(String s,boolean m){EditText v=new EditText();v.key=s;return v;}
+           Button button(String s,Runnable r){Button b=new Button();b.setText(s);b.setOnClickListener(v->r.run());return b;}
+           void addRow(LinearLayout p,View v){p.addView(v);}void message(String s,boolean e){}
+           void pause(View v){paused.put(v,v.enabled);v.enabled=false;for(View c:v.children)pause(c);}
+           void resume(){paused.forEach((v,b)->v.enabled=b);paused.clear();}
+           <T>void work(Supplier<T>run,Consumer<T>done,Runnable failure){
+            if(closed||busy)return;busy=true;pause(root);
+            queue.add(()->{T result;try{result=run.get();}catch(RuntimeException e){if(closed||activity.destroyed)return;busy=false;resume();if(failure!=null)failure.run();return;}
+             if(closed||activity.destroyed)return;busy=false;resume();done.accept(result);});
+           }
+          }
+          class ActivityModel{static String title(String s){if(s==null||s.trim().isEmpty())throw new IllegalArgumentException();return s.trim();}}
+          class Cursor implements AutoCloseable{
+           List<String>rows;int i=-1;Cursor(List<String>r){rows=r;}boolean moveToFirst(){i=0;return !rows.isEmpty();}boolean moveToNext(){return ++i<rows.size();}String getString(int c){return rows.get(i);}public void close(){}
+          }
+          class SQLiteDatabase {
+           AppDatabase owner;SQLiteDatabase(AppDatabase o){owner=o;}void beginTransaction(){}void endTransaction(){}void setTransactionSuccessful(){}
+           Cursor rawQuery(String q,String[]a){if(owner.readFail)throw new IllegalStateException("read");
+            if(q.equals("SELECT title FROM activities WHERE id=?"))return new Cursor(List.of("Activity"));
+            if(q.equals("SELECT id FROM fields ORDER BY rowid"))return new Cursor(new ArrayList<>(owner.defs.keySet()));
+            throw new AssertionError(q);}
+          }
+          class AppDatabase {
+           Map<String,CustomFields.Definition>defs=new LinkedHashMap<>();List<String>value=List.of();int writes;boolean fail,readFail;FieldEditPlan last;
+           static class FieldEditPlan{CustomFields.Definition def;List<String>values;boolean closed;void close(){closed=true;}CustomFields.Definition definition(){return def;}List<String>values(){return values;}}
+           SQLiteDatabase getReadableDatabase(){return new SQLiteDatabase(this);}
+           CustomFields.Definition fieldDefinition(String id){return defs.get(id);}List<String>fieldValue(long a,String id){return value;}
+           void defineField(String id,String n,String t,List<String>o){if(defs.containsKey(id))throw new IllegalArgumentException();defs.put(id,new CustomFields.Definition(id,n,CustomFields.Type.valueOf(t),o,false));writes++;}
+           FieldEditPlan prepareFieldEdit(long a,String id){last=new FieldEditPlan();last.def=defs.get(id);last.values=new ArrayList<>(value);return last;}
+           void attempt(FieldEditPlan p){if(p.closed)throw new IllegalStateException("closed");p.close();if(fail)throw new IllegalStateException("fail");writes++;}
+           void confirmFieldValue(FieldEditPlan p,List<String>v){attempt(p);value=new ArrayList<>(v);}
+           void confirmFieldRename(FieldEditPlan p,String n){attempt(p);CustomFields.Definition d=p.def;defs.put(d.id,new CustomFields.Definition(d.id,n,d.type,d.options,d.archived));}
+           void confirmFieldArchive(FieldEditPlan p,boolean a){attempt(p);CustomFields.Definition d=p.def;defs.put(d.id,new CustomFields.Definition(d.id,d.name,d.type,d.options,a));}
+          }
+          '''
+          LEDGER=r'''
+          class Ledger {
+           static String identifier(String s){if(s==null||s.trim().isEmpty())throw new IllegalArgumentException();return s;}
+           static void positive(long n){if(n<=0)throw new IllegalArgumentException();}
+           static boolean hasNull(List<?>s){for(Object v:s)if(v==null)return true;return false;}
+           static LocalDate validDate(LocalDate date){return date;}
+          }
+          '''
+          
+          raw=(product/"FieldScreen.java").read_bytes()
+          fields=(product/"CustomFields.java").read_bytes()
+          code=clean(raw.decode()).replace("android.database.sqlite.SQLiteDatabase","SQLiteDatabase")
+          model=clean(fields.decode()).replace("public final class CustomFields","final class CustomFields")
+          with tempfile.TemporaryDirectory() as d:
+              f=Path(d)/"Harness.java"
+              def execute(candidate):
+                  f.write_text(HARNESS+LEDGER+model+candidate)
+                  return subprocess.run(["java",str(f)],capture_output=True,text=True,timeout=30)
+              good=execute(code)
+              assert good.returncode==0,(good.stdout,good.stderr)
+              lines=good.stdout.splitlines()
+              checks=[x for x in lines if x.startswith("FIELD_UI_CHECK ")]
+              assert len(checks)==211 and [int(x.split()[1]) for x in checks]==list(range(1,212)),checks
+              assert lines.count("FIELD_UI_RENDER_WITNESS")==1 and lines.count("FIELD_UI_CREATE_WITNESS")==1
+              assert lines.count("FIELD_TYPED_UI_PASS all8 invalid6 clear8 choice3")==1
+              assert lines[-1]=="FIELD_UI_HOST_PASS checks=211",lines
+              print(good.stdout,end="")
+              killed=[]
+              for old,new,count,label in (
+                  ("control.isEnabled()","true",1,"disabled_readonly"),
+                  ("&&!host.activity.isDestroyed()","&&true",2,"destroyed_readonly"),
+                  ("if(!current(p)){plan.close();return;}","if(!current(p)){return;}",1,"stale_prepare_closes"),
+                  ("void close(){alive=false;if(plan!=null){plan.close();plan=null;}}","void close(){alive=false;}",1,"detach_closes"),
+              ):
+                  assert code.count(old)==count and old!=new,(old,code.count(old))
+                  candidate=code.replace(old,new)
+                  result=execute(candidate)
+                  target=[i for i,line in enumerate(lines) if line.split()[-1:]==[label]]
+                  assert len(target)==1,(label,target)
+                  assert result.returncode==1 and "java.lang.AssertionError: "+label in result.stderr,(label,result.stdout,result.stderr)
+                  assert result.stdout.splitlines()==lines[:target[0]],(label,result.stdout,lines[:target[0]])
+                  assert "FIELD_UI_CREATE_WITNESS" in result.stdout
+                  killed.append(label)
+                  print("FIELD_UI_COMPILED_WITNESSED_MUTANT "+label)
+              print("FIELDS_UI_HOST "+json.dumps(dict(status="PASS",assertions=len(checks),compiled_witnessed_mutants=killed,
+                  field_screen_sha256=hashlib.sha256(raw).hexdigest(),custom_fields_sha256=hashlib.sha256(fields).hexdigest(),
+                  commit=os.environ.get("GITHUB_SHA","LOCAL"),scope="ACTUAL_FIELDSCREEN_CUSTOMFIELDS_WITH_ANDROID_DB_LEDGER_ACTIVITYMODEL_DOUBLES_NOT_DEVICE",
+                  not_covered=["sqlite_atomicity","host_abandoned_completion","date_policy_range","physical_gestures"],release_ready=False)))
+          FIELD_UI_PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: fields-host
           path: |
             fields-host.log
+            fields-ui-host.log
           if-no-files-found: error
   fields_device:
     needs: fields_host

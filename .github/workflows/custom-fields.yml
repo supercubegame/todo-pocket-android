@@ -99,7 +99,35 @@ jobs:
             }
             System.out.println("FIELD_TYPED_UI_PASS all8 invalid6 clear8 choice3");
           
+            // Host can discard the success callback. Page detachment must own cleanup
+            // independently, both before the worker starts and after it returns.
+            open();create();click("field-edit-"+id());h.content();h.closed=true;drain();
+            need(h.db.last!=null&&h.db.last.closed&&h.db.writes==1,"abandoned_before_prepare");
+            for(boolean destroyed:new boolean[]{false,true}){
+             open();create();click("field-edit-"+id());
+             h.afterRun=()->{need(h.db.last!=null&&!h.db.last.closed,"pending_live_witness");h.content();if(destroyed)h.activity.destroyed=true;else h.closed=true;};
+             drain();need(h.db.last.closed&&h.db.writes==1,"abandoned_after_prepare_"+destroyed);
+            }
+            open();create();click("field-edit-"+id());h.afterRun=()->h.activity.finishing=true;drain();
+            need(h.db.last.closed&&h.db.writes==1,"finishing_prepare_closes");
+            for(boolean destroyed:new boolean[]{false,true}){
+             open();create();click("field-edit-"+id());
+             java.util.concurrent.CountDownLatch ready=new java.util.concurrent.CountDownLatch(1),release=new java.util.concurrent.CountDownLatch(1);
+             h.afterRun=()->{ready.countDown();await(release);};
+             java.util.concurrent.atomic.AtomicReference<Throwable>failure=new java.util.concurrent.atomic.AtomicReference<>();
+             Runnable task=h.queue.remove();Thread worker=new Thread(()->{try{task.run();}catch(Throwable e){failure.set(e);}});
+             worker.start();await(ready);
+             need(h.db.last!=null&&!h.db.last.closed,"threaded_pending_witness");
+             h.content();if(destroyed)h.activity.destroyed=true;else h.closed=true;
+             release.countDown();try{worker.join(5000);}catch(InterruptedException e){throw new AssertionError(e);}
+             need(!worker.isAlive()&&failure.get()==null&&h.db.last.closed&&h.db.writes==1,"threaded_abandoned_"+destroyed);
+            }
+          
           System.out.println("FIELD_UI_HOST_PASS checks="+checks);
+           }
+           static void await(java.util.concurrent.CountDownLatch latch){
+            try{if(!latch.await(5,java.util.concurrent.TimeUnit.SECONDS))throw new AssertionError("latch_timeout");}
+            catch(InterruptedException e){throw new AssertionError(e);}
            }
           }
           class View {
@@ -123,7 +151,7 @@ jobs:
           class Activity{boolean finishing,destroyed;boolean isFinishing(){return finishing;}boolean isDestroyed(){return destroyed;}}
           class TodayScreen{
            static final int INK=1,MUTED=2,ERROR=3,WHITE=4;Activity activity=new Activity();AppDatabase db=new AppDatabase();LinearLayout root=new LinearLayout(activity);Queue<Runnable>queue=new ArrayDeque<>();
-           boolean busy,closed;Map<View,Boolean>paused=new IdentityHashMap<>();
+           boolean busy,closed;Runnable afterRun;Map<View,Boolean>paused=new IdentityHashMap<>();
            int dp(int n){return n;}Object shape(int a,int b){return new Object();}
            LinearLayout column(){return new LinearLayout(activity);}
            LinearLayout content(){root.detach();root=column();return root;}
@@ -136,6 +164,7 @@ jobs:
            <T>void work(Supplier<T>run,Consumer<T>done,Runnable failure){
             if(closed||busy)return;busy=true;pause(root);
             queue.add(()->{T result;try{result=run.get();}catch(RuntimeException e){if(closed||activity.destroyed)return;busy=false;resume();if(failure!=null)failure.run();return;}
+             if(afterRun!=null){Runnable hook=afterRun;afterRun=null;hook.run();}
              if(closed||activity.destroyed)return;busy=false;resume();done.accept(result);});
            }
           }
@@ -185,17 +214,19 @@ jobs:
               assert good.returncode==0,(good.stdout,good.stderr)
               lines=good.stdout.splitlines()
               checks=[x for x in lines if x.startswith("FIELD_UI_CHECK ")]
-              assert len(checks)==211 and [int(x.split()[1]) for x in checks]==list(range(1,212)),checks
+              assert len(checks)==245 and [int(x.split()[1]) for x in checks]==list(range(1,246)),checks
               assert lines.count("FIELD_UI_RENDER_WITNESS")==1 and lines.count("FIELD_UI_CREATE_WITNESS")==1
               assert lines.count("FIELD_TYPED_UI_PASS all8 invalid6 clear8 choice3")==1
-              assert lines[-1]=="FIELD_UI_HOST_PASS checks=211",lines
+              assert lines[-1]=="FIELD_UI_HOST_PASS checks=245",lines
               print(good.stdout,end="")
               killed=[]
               for old,new,count,label in (
                   ("control.isEnabled()","true",1,"disabled_readonly"),
                   ("&&!host.activity.isDestroyed()","&&true",2,"destroyed_readonly"),
-                  ("if(!current(p)){plan.close();return;}","if(!current(p)){return;}",1,"stale_prepare_closes"),
-                  ("void close(){alive=false;if(plan!=null){plan.close();plan=null;}}","void close(){alive=false;}",1,"detach_closes"),
+                  ("if(!current(p)){plan.close();return;}","if(!current(p)){return;}",1,"finishing_prepare_closes"),
+                  ("if(plan!=null){plan.close();plan=null;}","if(plan!=null){plan=null;}",1,"detach_closes"),
+                  ("if(!alive){value.close();return;}","if(!alive){return;}",1,"abandoned_before_prepare"),
+                  ("pending=value;","pending=null;",1,"abandoned_after_prepare_false"),
               ):
                   assert code.count(old)==count and old!=new,(old,code.count(old))
                   candidate=code.replace(old,new)
@@ -210,7 +241,7 @@ jobs:
               print("FIELDS_UI_HOST "+json.dumps(dict(status="PASS",assertions=len(checks),compiled_witnessed_mutants=killed,
                   field_screen_sha256=hashlib.sha256(raw).hexdigest(),custom_fields_sha256=hashlib.sha256(fields).hexdigest(),
                   commit=os.environ.get("GITHUB_SHA","LOCAL"),scope="ACTUAL_FIELDSCREEN_CUSTOMFIELDS_WITH_ANDROID_DB_LEDGER_ACTIVITYMODEL_DOUBLES_NOT_DEVICE",
-                  not_covered=["sqlite_atomicity","host_abandoned_completion","date_policy_range","physical_gestures"],release_ready=False)))
+                  not_covered=["sqlite_atomicity","host_abandoned_without_detachment","real_android_lifecycle","date_policy_range","physical_gestures"],release_ready=False)))
           FIELD_UI_PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()

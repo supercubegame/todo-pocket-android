@@ -25,8 +25,22 @@ final class FieldScreen {
         volatile boolean alive=true;
         boolean submitted;
         AppDatabase.FieldEditPlan plan;
+        private AppDatabase.FieldEditPlan pending;
         Page(LinearLayout root){this.root=root;}
-        void close(){alive=false;if(plan!=null){plan.close();plan=null;}}
+        // The host may discard a success callback after shutdown. Register the
+        // worker result before returning, so detachment owns it in either order.
+        synchronized void prepared(AppDatabase.FieldEditPlan value){
+            if(!alive){value.close();return;}
+            pending=value;
+        }
+        synchronized void handoff(AppDatabase.FieldEditPlan value){
+            if(pending==value)pending=null;
+        }
+        synchronized void close(){
+            alive=false;
+            if(pending!=null){pending.close();pending=null;}
+            if(plan!=null){plan.close();plan=null;}
+        }
     }
     FieldScreen(TodayScreen host,long activity,Runnable back){
         this.host=host;this.activity=activity;this.back=back;
@@ -182,7 +196,11 @@ final class FieldScreen {
     private void prepare(Page p,View control,CustomFields.Definition shown,int mode){
         if(!canSubmit(p,control))return;
         p.submitted=true;
-        host.work(()->host.db.prepareFieldEdit(activity,shown.id),plan->{
+        host.work(()->{
+            AppDatabase.FieldEditPlan result=host.db.prepareFieldEdit(activity,shown.id);
+            p.prepared(result);return result;
+        },plan->{
+            p.handoff(plan);
             if(!current(p)){plan.close();return;}
             CustomFields.Definition f=plan.definition();
             if(!f.name.equals(shown.name)||f.archived!=shown.archived||f.type!=shown.type||!f.options.equals(shown.options)){

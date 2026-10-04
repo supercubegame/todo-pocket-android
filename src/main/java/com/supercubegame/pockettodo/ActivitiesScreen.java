@@ -57,8 +57,8 @@ public final class ActivitiesScreen {
         List<android.view.View> groups=new ArrayList<>();
         LinearLayout top=new LinearLayout(host.activity);
         top.addView(host.button("新建分类",()->host.editor("新建分类","分类名称","",false,value->host.db.addCategory(nextId("categories"),value),this::load)),new LinearLayout.LayoutParams(0,host.dp(48),1));
-        top.addView(host.button("备份 / 恢复",()->{backupPanel=true;load();}),new LinearLayout.LayoutParams(0,host.dp(48),1));body.addView(top);
-        body.addView(host.button("应用目录",()->{if(categoryCurrent(session,top))new AppCatalog(host,0,this::load).open(top);}),new LinearLayout.LayoutParams(-1,-2));
+        top.addView(host.button("备份 / 恢复",()->{backupPanel=true;load();}),new LinearLayout.LayoutParams(0,host.dp(48),1));
+        top.addView(host.button("应用目录",()->{if(categoryCurrent(session,top))new AppCatalog(host,0,this::load).open(top);}),new LinearLayout.LayoutParams(0,host.dp(48),1));body.addView(top);
         ScrollView scroll=new ScrollView(host.activity);LinearLayout list=host.column();scroll.addView(list);body.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         if(categories.isEmpty()){TextView empty=host.text("建一个自己的分类。\n例如：每日打卡、农场、提现。",18,TodayScreen.MUTED);empty.setPadding(0,host.dp(24),0,0);list.addView(empty);}
         for(int index=0;index<categories.size();index++){
@@ -66,6 +66,8 @@ public final class ActivitiesScreen {
             LinearLayout group=host.column();group.setPadding(host.dp(12),host.dp(12),host.dp(12),host.dp(12));group.setBackground(host.shape(TodayScreen.WHITE,16));groups.add(group);
             LinearLayout heading=new LinearLayout(host.activity);heading.setGravity(android.view.Gravity.CENTER_VERTICAL);
             TextView name=host.text(cat.name,21,TodayScreen.INK);name.setContentDescription("category-name-"+cat.id);heading.addView(name,new LinearLayout.LayoutParams(0,-2,1));
+            Button reuse=host.button("选应用",()->{if(categoryCurrent(session,group))new AppCatalog(host,cat.id,this::load).open(group);});
+            reuse.setContentDescription("category-app-add-"+cat.id);heading.addView(reuse,new LinearLayout.LayoutParams(host.dp(64),host.dp(48)));
             heading.addView(categoryHandle(cat.id,session,list,groups),new LinearLayout.LayoutParams(host.dp(96),host.dp(48)));group.addView(heading);
             LinearLayout actions=new LinearLayout(host.activity);
             Button add=host.button("添加活动",()->host.editor("新建活动","活动名称","",false,value->host.db.addActivity(nextId("activities"),cat.id,0,value),this::load));add.setContentDescription("category-add-"+cat.id);
@@ -73,8 +75,6 @@ public final class ActivitiesScreen {
             Button up=host.button("上移",()->moveCategory(cat.id,position-1,session,list));up.setContentDescription("category-up-"+cat.id);up.setEnabled(index>0);
             Button down=host.button("下移",()->moveCategory(cat.id,position+1,session,list));down.setContentDescription("category-down-"+cat.id);down.setEnabled(index<categories.size()-1);
             for(Button b:new Button[]{add,rename,up,down})actions.addView(b,new LinearLayout.LayoutParams(0,host.dp(48),1));group.addView(actions);
-            Button reuse=host.button("从应用目录添加",()->{if(categoryCurrent(session,group))new AppCatalog(host,cat.id,this::load).open(group);});
-            reuse.setContentDescription("category-app-add-"+cat.id);group.addView(reuse,new LinearLayout.LayoutParams(-1,-2));
             if(cat.items.isEmpty())group.addView(host.text("还没有活动",16,TodayScreen.MUTED));
             for(Item item:cat.items){Button open=host.button(item.title,()->{selected=item.id;load();});open.setContentDescription("activity-"+item.id);group.addView(open,new LinearLayout.LayoutParams(-1,-2));}
             host.addRow(list,group);
@@ -127,7 +127,7 @@ public final class ActivitiesScreen {
                     pending=true;pointer=event.getPointerId(0);startX=event.getRawX();startY=event.getRawY();
                     handle.setPressed(true);
                     if(handle.getParent()!=null)handle.getParent().requestDisallowInterceptTouchEvent(true);
-                    if(!handle.postDelayed(this,android.view.ViewConfiguration.getLongPressTimeout()))clear();
+                    if(!handle.postDelayed(this,android.view/ViewConfiguration.getLongPressTimeout()))clear();
                     return true;
                 }
                 if(!pending)return false;

@@ -407,7 +407,7 @@ closed_refused new_session_recovery discard_db_readonly empty_draft blank_commit
 commit_cleanup commit_once committed_draft_cleared commit_terminal canonical_stale_commit
 canonical_stale_recovery canonical_stale_draft stale_db_preserved stored_base_stale
 stale_draft_retained draft_cas_save draft_cas_discard draft_cas_recover newer_draft_retained
-late_failure late_failure_model_rollback late_failure_keeps_draft cleanup_conflict_reported
+late_failure late_failure_model_rollback late_sql_draft_retained cleanup_conflict_reported
 cleanup_failure_not_db_failure cleanup_keeps_newer_draft stale_shown_blocks wrong_owner
 missing_note missing_block outer_transaction new_block_commit append_preserves_existing
 comparison_and_save_model_transaction""".split()
@@ -1030,6 +1030,7 @@ def device_android():
     from verify_schema3 import certificate, require_registration
     from verify_paged_exports import debug_key
     from verify_process_control import stop_verified
+    from verify_todo_management import installed_readback
     out = ROOT/"draft-device";out.mkdir(exist_ok=True)
     result = {"status":"FAIL","scope":DEVICE_SCOPE,"api":gate.API,
               "commit":os.environ["GITHUB_SHA"],"run_id":os.environ["GITHUB_RUN_ID"],
@@ -1062,9 +1063,7 @@ def device_android():
         for path in (app,test):run(prefix+["install","-r","-t",path],120)
         require_registration(adb,gate,"draft-before","V12DeviceTest")
         def installed():
-            rows=re.findall(r"^package:(\S+)\s*$",run(prefix+["shell","pm","path",gate.PKG]),re.M)
-            assert len(rows)==1
-            return run(prefix+["exec-out","cat",rows[0]],30,True)
+            return installed_readback(run,prefix,gate.PKG,product,result.setdefault("installed_readbacks",[]))
         assert installed()==product
         key=debug_key(cert)
         nonce=result["run_id"]+"-"+result["run_attempt"]+"-"+str(gate.API)
@@ -1128,6 +1127,89 @@ def device_android():
         print("NOTE_DRAFT_DEVICE "+json.dumps(result,ensure_ascii=False),flush=True)
 
 
+def installed_pull_selftest():
+    """Execute both actual draft callbacks with filesystem/ADB doubles, not Android."""
+    import ast
+    import inspect
+    import textwrap
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    import verify_adb_transfer as transfer
+    import verify_todo_management as shared
+    source = Path(__file__).read_text()
+    workflow = (ROOT/".github/workflows/note-drafts.yml").read_text()
+    start, end = "          # DRAFT_NATIVE_BEGIN\n", "          # DRAFT_NATIVE_END\n"
+    assert workflow.count(start) == workflow.count(end) == 1
+    native = textwrap.dedent(workflow.split(start, 1)[1].split(end, 1)[0])
+    trees = [ast.parse(source), ast.parse(native)]
+    callbacks = []
+    for tree, owner, expected_count in zip(trees, ("device_android", "native"), (3, 6)):
+        outer = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == owner)
+        imports = [n for n in ast.walk(outer if owner == "device_android" else tree)
+                   if isinstance(n, ast.ImportFrom) and n.module == "verify_todo_management"]
+        assert len(imports) == 1
+        namespace = {}
+        exec(compile(ast.Module(body=imports, type_ignores=[]), "<draft-shared-import>", "exec"), namespace)
+        assert namespace.get("installed_readback") is shared.installed_readback
+        found = [n for n in ast.walk(outer) if isinstance(n, ast.FunctionDef) and n.name == "installed"]
+        assert len(found) == 1
+        callback = found[0]
+        calls = [n for n in ast.walk(outer) if isinstance(n, ast.Call)
+                 and isinstance(n.func, ast.Name) and n.func.id == "installed"]
+        assert len(calls) == expected_count, "Every original APK checkpoint must remain"
+        # No independent installed APK stream left hidden beside the new callback.
+        for node in ast.walk(outer):
+            if isinstance(node, ast.Call):
+                literals = [x.value for x in ast.walk(node) if isinstance(x, ast.Constant)]
+                assert not ("exec-out" in literals and "cat" in literals and "run-as" not in literals)
+        if owner == "native":
+            command = next(n for n in outer.body if isinstance(n, ast.FunctionDef) and n.name == "command")
+            traced = [n for n in ast.walk(command) if isinstance(n, ast.Call)
+                      and isinstance(n.func, ast.Name) and n.func.id == "run_adb_traced"]
+            assert len(traced) == 1 and {k.arg for k in traced[0].keywords} == {"binary", "receipt", "runner"}
+        def checker(run, prefix, package, expected, records, node=callback, kind=owner):
+            # Native command already owns its unchanged 40-second traced-command budget.
+            # The shared transfer owns the original 30-second exact-file budget.
+            def command(*args, binary=False):
+                return run(prefix+list(args), binary=binary)
+            scope = dict(namespace, run=run, prefix=prefix, gate=SimpleNamespace(PKG=package),
+                         product=expected, result={"installed_readbacks": records}, command=command)
+            exec(compile(ast.Module(body=[node], type_ignores=[]), "<actual-draft-installed>", "exec"), scope)
+            return scope["installed"]()
+        assert shared.shared_pull_contracts(checker) == 16
+        callbacks.append(checker)
+    # Same actual callbacks/checker for genuine and compiled mutants. Every mutant
+    # must first pass the exact positive witness before its negative is exercised.
+    original = transfer.pull_exact
+    text = inspect.getsource(original)
+    changes = [
+        ("actual == expected and opened.st_size == len(expected)", "True"),
+        ("if result.returncode != 0:", "if False:"),
+        ("if clock() >= deadline:", "if False:"),
+        ("if elapsed >= 30:", "if False:"),
+        ("actual_bytes=len(actual)", "actual_bytes=len(expected)"),
+    ]
+    caught = 0
+    for old, new in changes:
+        assert text.count(old) == 1 and old != new
+        scope = dict(vars(transfer))
+        exec(compile(text.replace(old, new, 1), "<draft-pull-mutant>", "exec"), scope)
+        with patch.object(transfer, "pull_exact", scope["pull_exact"]):
+            for checker in callbacks:
+                assert shared.shared_pull_contracts(checker, ("exact",)) == 1
+                try:
+                    shared.shared_pull_contracts(checker)
+                except AssertionError:
+                    caught += 1
+                else:
+                    raise AssertionError("Draft callback accepted weakened installed transfer")
+    assert caught == 10
+    print("DRAFT_INSTALLED_PULL "+json.dumps(dict(status="PASS", callbacks=2,
+        positive=2, negative=30, compiled_mutants=5, witnessed_rejections=caught,
+        scope="ACTUAL_DRAFT_CALLBACKS_HOST_FILES_AND_ADB_DOUBLES_NOT_ANDROID",
+        release_ready=False)), flush=True)
+
+
 if __name__ == "__main__":
     import sys
     if sys.argv[1:] == ["selftest"]:
@@ -1135,6 +1217,7 @@ if __name__ == "__main__":
         session_selftest()
         ui_model_selftest()
         device_observer_selftest()
+        installed_pull_selftest()
     elif sys.argv[1:] == ["android"]:
         device_android()
     else:

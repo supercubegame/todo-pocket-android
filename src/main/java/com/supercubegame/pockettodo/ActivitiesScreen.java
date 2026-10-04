@@ -127,7 +127,7 @@ public final class ActivitiesScreen {
                     pending=true;pointer=event.getPointerId(0);startX=event.getRawX();startY=event.getRawY();
                     handle.setPressed(true);
                     if(handle.getParent()!=null)handle.getParent().requestDisallowInterceptTouchEvent(true);
-                    if(!handle.postDelayed(this,android.view/ViewConfiguration.getLongPressTimeout()))clear();
+                    if(!handle.postDelayed(this,android.view.ViewConfiguration.getLongPressTimeout()))clear();
                     return true;
                 }
                 if(!pending)return false;

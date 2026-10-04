@@ -500,6 +500,7 @@ jobs:
           import emulator_gate as gate
           from verify_process_control import stop_verified,capture_crash_logs,capture_adb_connection,run_adb_traced
           from verify_ui_observer import Observer
+          from verify_todo_management import installed_readback
           LABELS='fixture_text_image cancel_unsaved_readonly explicit_save_readonly restart_no_autorestore recover_cancel_readonly recover_confirm_readonly discard_cancel_readonly discard_confirm_readonly empty_draft_saved empty_recovered_body_rejected commit_exact_one_revision restart_committed'.split()
           LABELS+='new_slot_save_readonly new_slot_restart_saved existing_slot_isolation new_slot_recover_readonly new_slot_commit_append new_slot_cleanup_readonly new_slot_restart_cleaned'.split()
           LABELS+='same_title_fixture same_title_first_saved same_title_second_saved same_title_first_recovered same_title_first_discarded same_title_second_recovered'.split()
@@ -647,6 +648,11 @@ jobs:
                       raise RuntimeError('native draft command failed')
                   return p.stdout
               def shell(*args):return command('shell','-n','-T',*args)
+              def installed():
+                  def query(args):
+                      assert args[:3]==prefix
+                      return command(*args[3:])
+                  return installed_readback(query,prefix,gate.PKG,product,result.setdefault('installed_readbacks',[]))
               def nodes():
                   raw=observer.dump();(out/'last-window.xml').write_text(raw)
                   return list(ET.fromstring(raw).iter('node'))
@@ -737,8 +743,7 @@ jobs:
                   apks=list(Path('build/outputs/apk/debug').glob('*.apk'));assert len(apks)==1
                   product=apks[0].read_bytes();assert hashlib.sha256(product).hexdigest()==manifest['apk_sha256']
                   command('install','-r','-t',str(apks[0]))
-                  installed=shell('pm','path',gate.PKG).strip();assert installed.startswith('package:') and '\n' not in installed
-                  assert command('exec-out','cat',installed[8:],binary=True)==product
+                  assert installed()==product
                   # Fix synthetic key input, not product text or the expected whitespace.
                   # Only this fresh emulator is affected and it is destroyed after the test.
                   result['input_fixture']={}
@@ -804,7 +809,7 @@ jobs:
                   assert find(**{'content-desc':'note-text-'+block}).get('text')=='Committed'
                   touch('note-edit-'+block);status('暂无已保存草稿；正文不能为空。')
                   assert seek('note-draft-recover').get('enabled')=='false' and state()==after
-                  assert command('exec-out','cat',installed[8:],binary=True)==product
+                  assert installed()==product
                   shot();ok('restart_committed')
                   # Append after the original twelve checks; no new canonical fixture mutation.
                   button(False);ready();old_drafts=drafts()
@@ -832,11 +837,11 @@ jobs:
                   tap('加入文字');status('暂无已保存草稿；正文不能为空。')
                   assert seek('文字内容').get('text')=='' and seek('note-draft-recover').get('enabled')=='false'
                   assert drafts()==cleaned and state()==appended
-                  assert command('exec-out','cat',installed[8:],binary=True)==product
+                  assert installed()==product
                   shot();ok('new_slot_cleanup_readonly')
                   result['new_slot_cleaned_stop']=restart_new_slot(
                       lambda:stop_verified(adb,gate.SERIAL,gate.PKG),reopen_editor,tap,status,seek,drafts,state,cleaned,appended,False)
-                  assert command('exec-out','cat',installed[8:],binary=True)==product
+                  assert installed()==product
                   ok('new_slot_restart_cleaned')
                   # All canonical fixtures exist BEFORE either new draft is saved.
                   # Creating the sibling later would invalidate the first draft's full-state base.
@@ -888,13 +893,13 @@ jobs:
                   assert seek('文字内容').get('text')=='' and drafts()==discarded
                   touch('note-draft-recover');find(text='恢复草稿？');button(True);status('已恢复到输入框；点击保存才会修改正文。')
                   assert seek('文字内容').get('text')=='  Second note draft  ' and drafts()==discarded and state()==twins
-                  assert command('exec-out','cat',installed[8:],binary=True)==product
+                  assert installed()==product
                   shot();ok('same_title_second_recovered')
                   # Kill with the second draft still open; first slot is a tombstone.
                   result['same_title_restart_stop']=restart_twins(
                       lambda:stop_verified(adb,gate.SERIAL,gate.PKG),reopen_editor,choose_twin,tap,status,seek,
                       touch,button,ready,lambda:find(text='恢复草稿？'),drafts,state,discarded,twins,ok)
-                  assert command('exec-out','cat',installed[8:],binary=True)==product
+                  assert installed()==product
                   shot()
                   observer.close();result['status']='PASS'
               except Exception:

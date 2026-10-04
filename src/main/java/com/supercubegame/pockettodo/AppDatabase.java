@@ -247,7 +247,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
         if(expectedTitle==null)throw new IllegalArgumentException("缺少原笔记标题");
         return tx(db->{
             String current;
-            try(Cursor c=db.rawQuery("SELECT activity_id,title FROM notes WHERE id=?",new String[]{id,Long.toString(activity)})){
+            try(Cursor c=db.rawQuery("SELECT activity_id,title FROM notes WHERE id=?",new String[]{id})){
                 if(!c.moveToFirst()||c.getLong(0)!=activity)throw new IllegalArgumentException("所选笔记不存在或不属于当前活动");
                 current=c.getString(1);
             }

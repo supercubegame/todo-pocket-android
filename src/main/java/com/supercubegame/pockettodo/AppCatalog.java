@@ -96,7 +96,7 @@ final class AppCatalog {
                         host.db.addApplication(id,title,packageName);
                     }
                     return true;
-                },ignored->{if(current(p))renderAfterCreate(p);},()->{
+                },ignored->{if(current(p))renderAfterCreate(p,create);},()->{
                     if(current(p)){p.submitted=false;validation.setText("未能添加：包名可能已存在，或存储未完成。请检查后重试。");}
                 });
             });
@@ -117,9 +117,9 @@ final class AppCatalog {
             host.addRow(body,row);
         }
     }
-    private void renderAfterCreate(Page p){
+    private void renderAfterCreate(Page p,Button create){
         host.work(this::entries,items->{if(current(p))render(items);},()->{
-            if(current(p)){p.submitted=false;host.message("应用已添加，但目录读取失败。请返回后重新打开，不要重复添加。",true);}
+            if(current(p)){p.submitted=false;create.setEnabled(false);host.message("应用已添加，但目录读取失败。请返回后重新打开，不要重复添加。",true);}
         });
     }
     private void choose(Page p,View control,Entry item){

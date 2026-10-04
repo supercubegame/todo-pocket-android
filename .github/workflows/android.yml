@@ -786,6 +786,7 @@ jobs:
       contents: write
       actions: read
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: export-probe-api-*
@@ -798,6 +799,7 @@ jobs:
           python3 - <<'PY'
           import base64,json,os,tempfile,urllib.request,urllib.error
           from pathlib import Path
+          from tools.verify_evidence import initial_evidence_read
           source,run=os.environ['GITHUB_SHA'],os.environ['GITHUB_RUN_ID']
           def log_tail(path):
               try:
@@ -838,13 +840,13 @@ jobs:
             'devices':devices,'logs':logs,'log_controls':controls,'release_ready':False,'durable_upgrade_ready':False}
           data=(json.dumps(doc,ensure_ascii=False,indent=2)+'\n').encode()
           endpoint='https://api.github.com/repos/'+os.environ['GITHUB_REPOSITORY']+'/'
-          def api(path,method='GET',body=None):
+          def api(path,method='GET',body=None,timeout=30):
             req=urllib.request.Request(endpoint+path,method=method,data=None if body is None else json.dumps(body).encode(),
               headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
-            with urllib.request.urlopen(req,timeout=30) as response:return json.load(response)
+            with urllib.request.urlopen(req,timeout=timeout) as response:return json.load(response)
           path='reports/export-probe-early-'+source+'-'+run+'.json'
           body={'message':'Record early export diagnostics, not acceptance','branch':'evidence','content':base64.b64encode(data).decode()}
-          try:body['sha']=api('contents/'+path+'?ref=evidence')['sha']
+          try:body['sha']=initial_evidence_read(api,path,emit=lambda row: print('EVIDENCE_INITIAL_READ '+json.dumps(row),flush=True))['sha']
           except urllib.error.HTTPError as exc:
             if exc.code!=404:raise
           written=api('contents/'+path,'PUT',body)

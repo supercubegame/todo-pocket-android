@@ -159,7 +159,194 @@ def bind_infrastructure():
         exec(compile(s,filename,"exec"),globals())
 bind_infrastructure()
 
+def catalog_ui_selftest():
+    """Compile current AppCatalog, never a copied product; UI/DB doubles only."""
+    files={
+    "android/view/View.java":r'''package android.view;
+    import java.util.*;
+    public class View {
+     public boolean attached,enabled=true;public String description="";
+     public List<View> children=new ArrayList<>();
+     public interface OnClickListener{void onClick(View v);}
+     public interface OnAttachStateChangeListener{void onViewAttachedToWindow(View v);void onViewDetachedFromWindow(View v);}
+     public OnClickListener click;public List<OnAttachStateChangeListener> listeners=new ArrayList<>();
+     public boolean isAttachedToWindow(){return attached;}public boolean isEnabled(){return enabled;}
+     public void setEnabled(boolean b){enabled=b;}public void setContentDescription(String s){description=s;}
+     public void setOnClickListener(OnClickListener l){click=l;}
+     public boolean performClick(){if(click==null)return false;click.onClick(this);return true;}
+     public void addOnAttachStateChangeListener(OnAttachStateChangeListener l){listeners.add(l);}
+     public void attach(boolean yes){attached=yes;for(View v:new ArrayList<>(children))v.attach(yes);for(OnAttachStateChangeListener l:listeners){if(yes)l.onViewAttachedToWindow(this);else l.onViewDetachedFromWindow(this);}}
+     public void setPadding(int a,int b,int c,int d){}public void setBackground(Object o){}
+     public View find(String s){if(description.equals(s))return this;for(View v:children){View x=v.find(s);if(x!=null)return x;}return null;}
+    }''',
+    "android/widget/LinearLayout.java":r'''package android.widget;import android.view.View;
+    public class LinearLayout extends View{
+     public LinearLayout(Object c){} public static class LayoutParams{public LayoutParams(int a,int b){}public LayoutParams(int a,int b,int c){}}
+     public void addView(View v){children.add(v);if(attached)v.attach(true);}
+     public void addView(View v,LayoutParams p){addView(v);}
+     public void removeAllViews(){for(View v:children)v.attach(false);children.clear();}
+    }''',
+    "android/widget/TextView.java":r'''package android.widget;import android.view.View;
+    public class TextView extends View{public String text="";public TextView(Object c){}public void setText(String s){text=s;}public CharSequence getText(){return text;}}''',
+    "android/widget/EditText.java":r'''package android.widget;public class EditText extends TextView{public EditText(Object c){super(c);}public void setHint(String s){}}''',
+    "android/widget/Button.java":r'''package android.widget;public class Button extends TextView{public Button(Object c){super(c);}}''',
+    "android/widget/ScrollView.java":r'''package android.widget;public class ScrollView extends LinearLayout{public ScrollView(Object c){super(c);}public void setFillViewport(boolean b){}}''',
+    "android/database/Cursor.java":r'''package android.database;import java.util.*;
+    public class Cursor implements AutoCloseable{
+     List<Object[]>rows;int i=-1;public Cursor(List<Object[]>r){rows=r;}
+     public boolean moveToNext(){return ++i<rows.size();}public boolean moveToFirst(){i=0;return !rows.isEmpty();}
+     public long getLong(int c){return((Number)rows.get(i)[c]).longValue();}public String getString(int c){return(String)rows.get(i)[c];}
+     public boolean isNull(int c){return rows.get(i)[c]==null;}public void close(){}
+    }''',
+    "com/supercubegame/pockettodo/TodayScreen.java":r'''package com.supercubegame.pockettodo;
+    import android.view.View;import android.widget.*;import java.util.*;import java.util.concurrent.Callable;import java.util.function.Consumer;
+    class TodayScreen{
+     static final int INK=1,MUTED=2,ERROR=3,WHITE=4;
+     static class Activity{boolean finishing,destroyed;boolean isFinishing(){return finishing;}boolean isDestroyed(){return destroyed;}}
+     Activity activity=new Activity();AppDatabase db=new AppDatabase();LinearLayout outer=new LinearLayout(activity);
+     ArrayDeque<Runnable> queue=new ArrayDeque<>();boolean busy;String message;
+     TodayScreen(){outer.attach(true);}
+     <T>void work(Callable<T>a,Consumer<T>s,Runnable f){
+      if(busy)throw new AssertionError("unexpected concurrent work");busy=true;
+      queue.add(()->{T x;try{x=a.call();}catch(Exception e){busy=false;if(f!=null)f.run();return;}busy=false;s.accept(x);});
+     }
+     void drain(){int n=0;while(!queue.isEmpty()){if(++n>20)throw new AssertionError("queue cycle");queue.remove().run();}}
+     LinearLayout content(){outer.removeAllViews();return outer;}LinearLayout column(){return new LinearLayout(activity);}
+     TextView text(String s,int size,int color){TextView v=new TextView(activity);v.setText(s);return v;}
+     EditText field(String key,boolean multi){EditText v=new EditText(activity);v.setContentDescription(key);return v;}
+     Button button(String s,Runnable r){Button v=new Button(activity);v.setText(s);v.setOnClickListener(w->{if(!busy)r.run();});return v;}
+     int dp(int n){return n;}Object shape(int c,int r){return null;}
+     void addRow(LinearLayout p,View v){p.addView(v);}void message(String s,boolean e){message=s;}
+     View one(String s){View v=outer.find(s);if(v==null)throw new AssertionError("missing "+s);return v;}
+     void text(String s,String v){((EditText)one(s)).setText(v);}
+    }''',
+    "com/supercubegame/pockettodo/AppDatabase.java":r'''package com.supercubegame.pockettodo;
+    import android.database.Cursor;import java.util.*;
+    class AppDatabase{
+     TreeMap<Long,String[]>apps=new TreeMap<>();int writes,links,attempts;boolean fail,failRead;
+     class SQL{Cursor rawQuery(String q,String[]args){
+      List<Object[]>r=new ArrayList<>();if(q.equals("SELECT MAX(id) FROM applications"))r.add(new Object[]{apps.isEmpty()?null:apps.lastKey()});
+      else if(q.equals("SELECT id,name,package_name FROM applications ORDER BY id")){if(failRead)throw new IllegalStateException("read failed");for(Map.Entry<Long,String[]>e:apps.entrySet())r.add(new Object[]{e.getKey(),e.getValue()[0],e.getValue()[1]});}
+      else throw new AssertionError(q);return new Cursor(r);
+     }}
+     SQL getReadableDatabase(){return new SQL();}
+     void addApplication(long id,String name,String pkg){for(String[]a:apps.values())if(!pkg.isEmpty()&&a[1].equals(pkg))throw new IllegalArgumentException("duplicate");apps.put(id,new String[]{name,pkg});writes++;}
+     static class ApplicationActivityPlan implements AutoCloseable{
+      long category,app;String name;boolean terminal;public void close(){terminal=true;}
+      long applicationId(){return app;}String categoryName(){return "Category";}String applicationName(){return name;}
+     }
+     ApplicationActivityPlan last;
+     ApplicationActivityPlan prepareApplicationActivity(long c,long a){ApplicationActivityPlan p=new ApplicationActivityPlan();p.category=c;p.app=a;p.name=apps.get(a)[0];last=p;return p;}
+     long confirmApplicationActivity(ApplicationActivityPlan p,String title){attempts++;if(p.terminal)throw new IllegalStateException();p.close();if(fail)throw new IllegalStateException("late");links++;writes++;return links;}
+    }''',
+    "com/supercubegame/pockettodo/Test.java":r'''package com.supercubegame.pockettodo;
+    import android.view.View;import android.widget.*;import java.lang.reflect.*;
+    public class Test{
+     static int checked;static void need(boolean b,String s){if(!b)throw new AssertionError(s);checked++;System.out.println("CATALOG_UI_CHECK "+s);}
+     static TodayScreen fresh(long category){
+      TodayScreen h=new TodayScreen();if(category!=0)h.db.addApplication(10,"Same","");
+      View anchor=new View();h.outer.addView(anchor);
+      new AppCatalog(h,category,()->h.content()).open(anchor);h.drain();return h;
+     }
+     static View submit(TodayScreen h){h.one("catalog-app-10").performClick();h.drain();return h.one("catalog-create-activity");}
+     public static void main(String[]args)throws Exception{
+      TodayScreen h=fresh(0);
+      need(h.db.writes==0&&h.one("catalog-name").isAttachedToWindow(),"open_readonly");
+      System.out.println("VALID_CATALOG_RENDER_WITNESS");
+      h.text("catalog-name"," ");h.text("catalog-package","example.test");h.one("catalog-create-app").performClick();
+      need(h.queue.isEmpty()&&h.db.writes==0&&!((TextView)h.one("catalog-validation")).text.isEmpty(),"invalid_name");
+      h.text("catalog-name","Same");h.text("catalog-package","bad package");h.one("catalog-create-app").performClick();need(h.queue.isEmpty(),"invalid_package");
+      h.text("catalog-package","example.test");View old=h.one("catalog-create-app");old.performClick();old.performClick();
+      need(h.queue.size()==1,"pending_once");h.drain();need(h.db.writes==1&&h.db.apps.get(1L)[0].equals("Same"),"one_app");
+      old.performClick();need(h.queue.isEmpty(),"detached_create");
+      h.text("catalog-name","Same");h.text("catalog-package","example.test");h.one("catalog-create-app").performClick();h.drain();
+      need(h.db.writes==1&&!((TextView)h.one("catalog-validation")).text.isEmpty(),"duplicate_visible");
+      h.text("catalog-package","");h.one("catalog-create-app").performClick();h.drain();need(h.db.apps.size()==2&&h.db.writes==2,"same_name_distinct");
+      h=fresh(1);View pick=h.one("catalog-app-10");h.one("catalog-back").performClick();pick.performClick();need(h.queue.isEmpty()&&h.db.links==0,"detached_picker");
+      h=fresh(1);View create=submit(h);h.text("catalog-activity-title"," ");create.performClick();need(h.queue.isEmpty()&&h.db.links==0,"invalid_activity");
+      h.text("catalog-activity-title","Linked");create.performClick();create.performClick();need(h.queue.size()==1,"activity_pending_once");h.drain();
+      need(h.db.links==1&&h.db.attempts==1,"one_link");create.performClick();need(h.queue.isEmpty(),"old_confirm");
+      h=fresh(1);create=submit(h);h.one("catalog-back").performClick();create.performClick();
+      need(h.db.last.terminal&&h.queue.isEmpty()&&h.db.links==0,"cancel_closes_plan");
+      h=fresh(1);create=submit(h);h.db.fail=true;create.performClick();h.drain();create.performClick();
+      need(h.db.links==0&&h.db.attempts==1&&h.queue.isEmpty()&&!create.isEnabled(),"failure_terminal");
+      h=fresh(1);pick=h.one("catalog-app-10");pick.performClick();h.content();h.drain();
+      need(h.db.last.terminal&&h.outer.children.isEmpty(),"stale_completion_closes");
+      h=fresh(1);create=submit(h);h.activity.finishing=true;create.performClick();need(h.queue.isEmpty(),"finishing_readonly");
+      h.activity.finishing=false;h.activity.destroyed=true;create.performClick();need(h.queue.isEmpty(),"destroyed_readonly");
+      h=fresh(1);create=submit(h);create.setEnabled(false);create.performClick();need(h.queue.isEmpty(),"disabled_readonly");
+      h=fresh(1);create=submit(h);create.attached=false;create.performClick();need(h.queue.isEmpty(),"detached_control");
+      h=fresh(0);h.text("catalog-name","Same");h.text("catalog-package","");old=h.one("catalog-create-app");old.performClick();h.db.failRead=true;h.drain();old.performClick();
+      need(h.db.writes==1&&h.queue.isEmpty()&&!old.isEnabled(),"refresh_failure_no_duplicate");
+      System.out.println("CATALOG_UI_MODEL "+checked+" scenarios PASS HOST_DOUBLES_ONLY");
+     }
+    }''',
+    "Compile.java":r'''import javax.tools.*;import java.nio.file.*;import java.util.*;
+    class Compile{public static void main(String[]a)throws Exception{List<String>x=new ArrayList<>(List.of("-d",a[0]));try(var s=Files.walk(Path.of(a[0]))){s.filter(p->p.toString().endsWith(".java")&&!p.getFileName().toString().equals("Compile.java")).forEach(p->x.add(p.toString()));}if(ToolProvider.getSystemJavaCompiler().run(null,null,null,x.toArray(new String[0]))!=0)System.exit(1);}}'''
+    }
+
+    expected = (
+        "open_readonly", "invalid_name", "invalid_package", "pending_once", "one_app",
+        "detached_create", "duplicate_visible", "same_name_distinct", "detached_picker",
+        "invalid_activity", "activity_pending_once", "one_link", "old_confirm",
+        "cancel_closes_plan", "failure_terminal", "stale_completion_closes",
+        "finishing_readonly", "destroyed_readonly", "disabled_readonly",
+        "detached_control", "refresh_failure_no_duplicate",
+    )
+    assert len(expected)==21 and len(set(expected))==len(expected)
+    path=ROOT/"src/main/java/com/supercubegame/pockettodo/AppCatalog.java"
+    source=path.read_text()
+    mutations=(
+        ("&&control.isEnabled();","&&true;","disabled_readonly"),
+        ("if(!current(p)){plan.close();return;}","if(false){plan.close();return;}","stale_completion_closes"),
+        ("if(plan!=null){plan.close();plan=null;}","if(plan!=null){plan=null;}","cancel_closes_plan"),
+        ("&&!host.activity.isDestroyed();","&&true;","destroyed_readonly"),
+        ("p.submitted=false;create.setEnabled(false);host.message","p.submitted=false;host.message","refresh_failure_no_duplicate"),
+    )
+    with tempfile.TemporaryDirectory(prefix="catalog-ui-model-") as tmp:
+        root=Path(tmp)
+        for name,content in files.items():
+            target=root/name
+            target.parent.mkdir(parents=True,exist_ok=True)
+            target.write_text(content)
+        product=root/"com/supercubegame/pockettodo/AppCatalog.java"
+        def execute(code):
+            product.write_text(code)
+            compiled=subprocess.run(["java",str(root/"Compile.java"),tmp],
+                capture_output=True,text=True,timeout=30)
+            assert compiled.returncode==0,("catalog model compile failed",compiled.stdout,compiled.stderr)
+            return subprocess.run(["java","-cp",tmp,"com.supercubegame.pockettodo.Test"],
+                capture_output=True,text=True,timeout=30)
+        def records(result):
+            return tuple(re.findall(r"^CATALOG_UI_CHECK ([a-z_]+)$",result.stdout,re.M))
+        good=execute(source)
+        assert good.returncode==0 and not good.stderr,(good.stdout,good.stderr)
+        assert records(good)==expected,("catalog model omitted/reordered cases",good.stdout)
+        assert good.stdout.splitlines().count("VALID_CATALOG_RENDER_WITNESS")==1
+        assert good.stdout.splitlines()[-1]=="CATALOG_UI_MODEL "+str(len(expected))+" scenarios PASS HOST_DOUBLES_ONLY"
+        print(good.stdout.strip(),flush=True)
+        witnessed=[]
+        for old,new,label in mutations:
+            assert source.count(old)==1,(old,source.count(old))
+            changed=source.replace(old,new,1)
+            assert changed!=source
+            result=execute(changed)
+            assert result.returncode==1,("mutant did not fail by Java assertion",label,result.returncode,result.stdout,result.stderr)
+            assert result.stdout.splitlines().count("VALID_CATALOG_RENDER_WITNESS")==1
+            assert records(result)==expected[:expected.index(label)],("mutant failed before its intended assertion",label,result.stdout,result.stderr)
+            assert "AssertionError: "+label+"\n" in result.stderr,(label,result.stdout,result.stderr)
+            witnessed.append(label)
+            print("WITNESSED_UI_MUTANT_REJECTED "+label,flush=True)
+    receipt=dict(status="PASS",checks=len(expected),labels=list(expected),
+        compiled_witnessed_mutants=len(witnessed),mutants=witnessed,
+        product_source_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+        scope="ACTUAL_APPCATALOG_JAVA_WITH_UI_DB_DOUBLES_NOT_ANDROID_SQLITE_GESTURES_OR_LIFECYCLE",
+        release_ready=False)
+    print("CATALOG_UI_HOST "+json.dumps(receipt,sort_keys=True),flush=True)
+    return receipt
+
 def selftest():
+    catalog_ui_selftest()
     assert REQUIRED == EXPECTED
     assert [len(EXPECTED[p]) for p in ("seed", "deleted", "undone")] == [16,16,2]
     rejected = 0

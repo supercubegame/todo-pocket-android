@@ -967,16 +967,24 @@ BACKEND_MODEL_SUFFIX = r'''
 
 
 def installed_readback(run, prefix, package, expected, records):
-    """Observe the original single exec-out read; no retry, repair or fallback."""
+    """One installed-path query and one primary exact-byte pull; no retry/fallback."""
+    from verify_adb_transfer import pull_exact
     record = dict(status="FAIL", expected_bytes=len(expected),
                   expected_sha256=hashlib.sha256(expected).hexdigest(),
-                  method="SINGLE_EXEC_OUT_CAT_EXACT_BYTES", budget_seconds=30)
+                  method="ADB_PULL_SINGLE_PRIMARY_EXACT_BYTES", budget_seconds=30)
     records.append(record)
     try:
+        assert len(prefix) == 3 and prefix[1:] == ["-s", "emulator-5554"], "Explicit emulator prefix required"
         paths = re.findall(r"^package:(\S+)\s*$", run(prefix+["shell", "pm", "path", package]), re.M)
         record["paths"] = paths
         assert len(paths) == 1, "One installed product APK path required"
-        actual = run(prefix+["exec-out", "cat", paths[0]], 30, True)
+        transfer = {};record["transfer"] = transfer
+        try:
+            actual = pull_exact(prefix[0], prefix[2], paths[0], expected, transfer)
+        finally:
+            for key in ("actual_bytes", "actual_sha256"):
+                if key in transfer: record[key] = transfer[key]
+            record["exact"] = transfer.get("status") == "PASS"
         record.update(actual_bytes=len(actual), actual_sha256=hashlib.sha256(actual).hexdigest(),
                       exact=actual == expected)
         assert actual == expected, "Installed product readback differs: "+json.dumps(record, sort_keys=True)
@@ -987,53 +995,103 @@ def installed_readback(run, prefix, package, expected, records):
         raise
 
 
-def installed_readback_selftest(checker=None):
-    checker = installed_readback if checker is None else checker
+def shared_pull_contracts(checker, modes=None):
+    import verify_adb_transfer as transfer
+    from unittest.mock import patch
     payload = bytes(range(256))*3+b"\x00\r\n\xff"
     prefix = ["fixture-adb", "-s", "emulator-5554"]
     remote = "/data/app/fixture/base.apk"
-    for mode in ("exact", "short", "wrong", "extra", "empty", "timeout", "exit255", "missing", "multiple"):
-        calls = [];records = []
-        sentinel = subprocess.TimeoutExpired(["fixture"],30) if mode=="timeout" else RuntimeError("exit255 sentinel")
+    modes = modes or ("exact", "short", "wrong", "extra", "empty", "timeout",
+                      "exit255", "missing", "multiple", "path_error", "invalid_path",
+                      "directory", "symlink", "missing_file", "late", "lateverify")
+    for mode in modes:
+        queries = []; pulls = []; records = []
+        sentinel = (subprocess.TimeoutExpired(["fixture"], 30, output=b"partial", stderr=b"timeout")
+                    if mode == "timeout" else RuntimeError("path query sentinel"))
         def run(args, timeout=60, binary=False):
-            calls.append((args,timeout,binary))
-            if len(calls)==1:
-                assert args==prefix+["shell","pm","path",PACKAGE] and timeout==60 and not binary
-                return "" if mode=="missing" else "package:"+remote+"\n"+("package:/data/app/other/base.apk\n" if mode=="multiple" else "")
-            assert len(calls)==2 and args==prefix+["exec-out","cat",remote] and timeout==30 and binary
-            if mode in ("timeout","exit255"):raise sentinel
-            return payload[:-1] if mode=="short" else b"X"+payload[1:] if mode=="wrong" else payload+b"x" if mode=="extra" else b"" if mode=="empty" else payload
-        caught=None
-        try:actual=checker(run,prefix,PACKAGE,payload,records)
-        except BaseException as exc:caught=exc
-        assert len(records)==1 and len(calls)==(1 if mode in ("missing","multiple") else 2), "single read protocol"
-        record=records[0]
-        assert record["method"]=="SINGLE_EXEC_OUT_CAT_EXACT_BYTES" and record["budget_seconds"]==30
-        assert record["expected_bytes"]==len(payload) and record["expected_sha256"]==hashlib.sha256(payload).hexdigest()
-        if mode=="exact":
-            assert caught is None and actual==payload and record["status"]=="PASS" and record["exact"] is True
-            assert record["actual_bytes"]==len(payload) and record["actual_sha256"]==record["expected_sha256"]
+            queries.append((args, timeout, binary))
+            assert len(queries) == 1, "path query retried or exec-out used"
+            assert args == prefix+["shell", "pm", "path", PACKAGE] and timeout == 60 and not binary
+            if mode == "path_error": raise sentinel
+            path = "/sdcard/base.apk" if mode == "invalid_path" else remote
+            return "" if mode == "missing" else "package:"+path+"\n"+("package:/data/app/other/base.apk\n" if mode == "multiple" else "")
+        def invoke(command, **kwargs):
+            pulls.append(command)
+            assert len(pulls) == 1, "installed transfer retried"
+            assert command[:6] == prefix+["pull", "-Z", remote] and len(command) == 7
+            assert kwargs == dict(stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, timeout=30)
+            target = Path(command[-1])
+            assert target.parent.is_dir() and not target.exists() and not target.is_symlink()
+            if mode == "timeout":
+                target.write_bytes(payload[:7]); raise sentinel
+            if mode == "directory": target.mkdir()
+            elif mode == "symlink":
+                sibling = target.parent/"other"; sibling.write_bytes(payload); target.symlink_to(sibling)
+            elif mode != "missing_file":
+                value = payload[:-1] if mode == "short" else b"X"+payload[1:] if mode == "wrong" else payload+b"x" if mode == "extra" else b"" if mode == "empty" else payload
+                target.write_bytes(value)
+            return subprocess.CompletedProcess(command, 255 if mode == "exit255" else 0, b"out", b"err")
+        ticks = iter([0, 0, 31] if mode == "late" else [0, 0, 1, 31] if mode == "lateverify" else [0, 0, 1, 2])
+        caught = None
+        with patch.object(transfer.subprocess, "run", invoke), patch.object(transfer.time, "monotonic", lambda: next(ticks)):
+            try: actual = checker(run, prefix, PACKAGE, payload, records)
+            except BaseException as exc: caught = exc
+        assert len(records) == len(queries) == 1, "single path query and retained receipt"
+        assert len(pulls) == (0 if mode in ("missing", "multiple", "path_error", "invalid_path") else 1), "single primary pull"
+        assert all(not Path(command[-1]).parent.exists() for command in pulls), "temporary file leaked"
+        record = records[0]
+        assert record["method"] == "ADB_PULL_SINGLE_PRIMARY_EXACT_BYTES" and record["budget_seconds"] == 30
+        assert record["expected_bytes"] == len(payload) and record["expected_sha256"] == hashlib.sha256(payload).hexdigest()
+        if mode == "exact":
+            assert caught is None and actual == payload and record["status"] == "PASS" and record["exact"] is True, repr(caught)
+            assert record["actual_bytes"] == len(payload) and record["actual_sha256"] == record["expected_sha256"]
+            assert record["transfer"]["status"] == "PASS" and record["transfer"]["attempts"] == 1
         else:
-            assert caught is not None and record["status"]=="FAIL" and record["error"]==repr(caught), "failure preserved"
-            if mode in ("timeout","exit255"):assert caught is sentinel, "original exception identity"
-            if mode in ("short","wrong","extra","empty"):
-                size={"short":len(payload)-1,"wrong":len(payload),"extra":len(payload)+1,"empty":0}[mode]
-                assert type(caught) is AssertionError and str(caught).startswith("Installed product readback differs:")
-                assert record["actual_bytes"]==size and record["exact"] is False, "actual mismatch diagnostics"
-                assert record["actual_sha256"]!=record["expected_sha256"]
-    if checker is not installed_readback:return
-    source=inspect.getsource(installed_readback)
-    for old,new in [
-        ('assert actual == expected, "Installed product readback differs: "+json.dumps(record, sort_keys=True)', 'pass'),
-        ('actual_bytes=len(actual)', 'actual_bytes=len(expected)'),
-        ('paths[0]], 30, True)', 'paths[0]], 60, True)'),
-    ]:
-        assert source.count(old)==1
-        namespace=dict(globals());exec(compile(source.replace(old,new,1),"<installed-readback-mutant>","exec"),namespace)
-        try:installed_readback_selftest(namespace["installed_readback"])
-        except AssertionError:pass
-        else:raise AssertionError("Installed readback mutant survived")
-    print("TODO_INSTALLED_READBACK host_positive=1 negative=8 compiled_mutants=3 PASS; original exec-out retained, NOT_ROOT_CAUSE_FIX")
+            assert caught is not None and record["status"] == "FAIL" and record["error"] == repr(caught), "failure preserved"
+            if mode in ("timeout", "path_error"): assert caught is sentinel, "original exception identity"
+            if mode in ("short", "wrong", "extra", "empty"):
+                size = {"short":len(payload)-1, "wrong":len(payload), "extra":len(payload)+1, "empty":0}[mode]
+                assert type(caught) is AssertionError and str(caught) == "installed product bytes differ from built APK"
+                assert record["actual_bytes"] == size and record["exact"] is False, "actual mismatch diagnostics"
+                assert record["actual_sha256"] != record["expected_sha256"]
+            if mode == "exit255":
+                assert type(caught) is subprocess.CalledProcessError and (caught.returncode, caught.stdout, caught.stderr) == (255, b"out", b"err")
+            if mode == "timeout":
+                assert record["transfer"]["stdout_tail"] == "partial" and record["transfer"]["stderr_tail"] == "timeout"
+            if mode in ("late", "lateverify"): assert type(caught) is TimeoutError
+            if mode in ("directory", "symlink"): assert type(caught) is AssertionError and "regular file" in str(caught)
+            if mode == "missing_file": assert type(caught) is FileNotFoundError
+            if pulls:
+                assert record["transfer"]["status"] == "FAIL" and record["transfer"]["error"] == repr(caught)
+    return len(modes)
+
+
+def installed_readback_selftest():
+    import verify_adb_transfer as transfer
+    from unittest.mock import patch
+    checker = installed_readback
+    count = shared_pull_contracts(checker)
+    original = transfer.pull_exact
+    source = inspect.getsource(original)
+    changes = [
+        ("actual == expected and opened.st_size == len(expected)", "True"),
+        ("if result.returncode != 0:", "if False:"),
+        ("if clock() >= deadline:", "if False:"),
+        ("if elapsed >= 30:", "if False:"),
+        ("actual_bytes=len(actual)", "actual_bytes=len(expected)"),
+    ]
+    for old, new in changes:
+        assert source.count(old) == 1 and old != new
+        namespace = dict(vars(transfer))
+        exec(compile(source.replace(old, new, 1), "<shared-pull-helper-mutant>", "exec"), namespace)
+        with patch.object(transfer, "pull_exact", namespace["pull_exact"]):
+            shared_pull_contracts(checker, ("exact",))
+            try: shared_pull_contracts(checker)
+            except AssertionError: pass
+            else: raise AssertionError("Shared pull mutant survived: "+old)
+    print("SHARED_INSTALLED_PULL host_positive=1 negative="+str(count-1)+" compiled_mutants="+str(len(changes))+" valid_witnesses="+str(len(changes))+" PASS; HOST_ONLY_NOT_ANDROID")
+
 
 
 def android():

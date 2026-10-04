@@ -774,6 +774,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
     public synchronized long importLegacy(byte[] bytes){
         LegacyImport.Plan plan=LegacyImport.preview(bytes);
         return tx(db->{try(Cursor c=db.rawQuery("SELECT item_count FROM legacy_imports WHERE source_id=?",new String[]{plan.sourceId()})){if(c.moveToFirst())return 0L;}
+            db.execSQL("INSERT INTO legacy_imports VALUES(?,?)",new Object[]{plan.sourceId(),plan.todos().size()});long position=nextTodoPosition(db);
             for(TodoModel.Item item:plan.todos()){String id="legacy-"+plan.sourceId()+"-"+item.id;db.execSQL("INSERT INTO todos VALUES(?,?,?,?)",new Object[]{id,item.title,item.done?1:0,position});position=Math.incrementExact(position);}
             bump(db);return (long)plan.todos().size();});
     }

@@ -198,6 +198,10 @@ public final class ActivitiesScreen {
         LinearLayout body=host.content();LinearLayout toolbar=new LinearLayout(host.activity);
         toolbar.addView(host.button("返回分类",()->{selected=0;load();}),new LinearLayout.LayoutParams(0,host.dp(48),1));
         toolbar.addView(host.button("日历账本",()->new CalendarScreen(host,id,d.title,this::load).load()),new LinearLayout.LayoutParams(0,host.dp(48),1));body.addView(toolbar);
+        FieldScreen fields=new FieldScreen(host,id,this::load);
+        Button fieldEntry=host.button("字段",()->{});fieldEntry.setContentDescription("activity-fields-"+id);
+        fieldEntry.setOnClickListener(v->{if(selected==id&&!backupPanel&&!historyPanel)fields.open(fieldEntry);});
+        toolbar.addView(fieldEntry,new LinearLayout.LayoutParams(0,host.dp(48),1));
         ScrollView scroll=new ScrollView(host.activity);LinearLayout details=host.column();scroll.addView(details);body.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         details.addView(host.text(d.title,26,TodayScreen.INK));
         TextView note=host.text("手动记录，不会替你操作其他应用",14,TodayScreen.MUTED);note.setPadding(0,host.dp(6),0,host.dp(18));details.addView(note);

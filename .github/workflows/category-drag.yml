@@ -1,0 +1,230 @@
+name: Independent category drag verification
+on:
+  push:
+    branches: [feature/v1.2-activity-notes-ledger]
+  pull_request:
+    branches: [main, feature/v1.1-edit-backup]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  category_host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Use Java 17
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+      - name: Validate evidence refusal and generated Java syntax
+        run: |
+          set -euo pipefail
+          python3 tools/verify_category_drag.py selftest 2>&1 | tee category-host.log
+      - name: Execute actual generated touch callers with explicit host doubles
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' 2>&1 | tee category-caller.log
+          """Host caller model, not Android touch acceptance."""
+          from pathlib import Path
+          import importlib.util,subprocess,tempfile,sys
+          sys.path.insert(0,str(Path('tools').resolve()))
+          path=Path('tools/verify_category_drag.py')
+          spec=importlib.util.spec_from_file_location("category",path)
+          gate=importlib.util.module_from_spec(spec);spec.loader.exec_module(gate)
+          extract=r'''
+          import javax.tools.*;import com.sun.source.util.*;import com.sun.source.tree.*;import java.nio.file.*;import java.util.*;
+          class Extract{public static void main(String[]a)throws Exception{
+          JavaCompiler c=ToolProvider.getSystemJavaCompiler();DiagnosticCollector<JavaFileObject>d=new DiagnosticCollector<>();
+          try(StandardJavaFileManager f=c.getStandardFileManager(d,null,null)){
+          JavacTask t=(JavacTask)c.getTask(null,f,d,Arrays.asList("-proc:none"),null,f.getJavaFileObjects(a[0]));
+          CompilationUnitTree u=t.parse().iterator().next();for(Diagnostic<?>e:d.getDiagnostics())if(e.getKind()==Diagnostic.Kind.ERROR)throw new AssertionError(e.toString());
+          String s=Files.readString(Path.of(a[0]));SourcePositions p=Trees.instance(t).getSourcePositions();
+          Set<String>wanted=new HashSet<>(Arrays.asList("requireInjection","inject","event","replayDetachedUp"));StringBuilder out=new StringBuilder();
+          for(Tree type:u.getTypeDecls())if(type instanceof ClassTree)for(Tree m:((ClassTree)type).getMembers())
+          if(m instanceof MethodTree&&wanted.remove(((MethodTree)m).getName().toString()))out.append(s.substring((int)p.getStartPosition(u,m),(int)p.getEndPosition(u,m))).append("\n");
+          if(!wanted.isEmpty())throw new AssertionError(wanted);Files.writeString(Path.of(a[1]),out.toString());}}}
+          '''
+          harness=r'''
+          class Wiring{
+          static void need(boolean b,String s){if(!b)throw new AssertionError(s);}
+          interface Action{void run()throws Exception;}
+          void ui(Action a)throws Exception{a.run();}
+          void ready(){}void waitForIdleSync(){}
+          static class SystemClock{static long uptimeMillis(){return 200;}}
+          static class InputDevice{static final int SOURCE_TOUCHSCREEN=4098;}
+          static class MotionEvent{
+           static final int ACTION_UP=1;static MotionEvent last;long down;int action,source,recycled;float x,y;
+           static MotionEvent obtain(long d,long t,int a,float x,float y,int meta){need(t==200&&meta==0,"event constructor");MotionEvent e=new MotionEvent();e.down=d;e.action=a;e.x=x;e.y=y;return last=e;}
+           void setSource(int s){source=s;}void recycle(){recycled++;}
+          }
+          static class View{
+           boolean attached,fail;int calls;
+           boolean isAttachedToWindow(){return attached;}float getAlpha(){return 1f;}boolean isPressed(){return false;}
+           boolean dispatchTouchEvent(MotionEvent e){calls++;need(e.action==1&&e.down==100&&e.source==4098&&e.x==12&&e.y==34,"dispatch payload");if(fail)throw new IllegalStateException("view sentinel");return true;}
+          }
+          static class Automation{
+           boolean accepted=true;int calls;
+           boolean injectInputEvent(MotionEvent e,boolean sync){calls++;need(sync&&e.down==100&&e.source==4098&&e.x==12&&e.y==34,"inject payload");return accepted;}
+          }
+          Automation automation=new Automation();Automation getUiAutomation(){return automation;}
+          __METHODS__
+          public static void main(String[]args)throws Exception{
+          Wiring h=new Wiring();h.event(100,0,12,34);
+          need(h.automation.calls==1&&MotionEvent.last.recycled==1,"normal_once_recycled");System.out.println("CALLER_VALID_WITNESS_PASS");
+          h.automation.accepted=false;h.inject(100,1,12,34,true);
+          need(h.automation.calls==2&&MotionEvent.last.recycled==1,"orphan_once_recycled");
+          View view=new View();h.replayDetachedUp(view,100,12,34);
+          need(view.calls==1&&h.automation.calls==2&&MotionEvent.last.recycled==1,"direct_replay_once_recycled");
+          view.fail=true;boolean failed=false;try{h.replayDetachedUp(view,100,12,34);}catch(IllegalStateException e){need(e.getMessage().equals("view sentinel"),"original exception");failed=true;}
+          need(failed&&view.calls==2&&MotionEvent.last.recycled==1,"replay_exception_recycled");
+          failed=false;try{h.event(100,0,12,34);}catch(AssertionError e){need(e.getMessage().equals("valid touch injection"),"normal error");failed=true;}
+          need(failed&&h.automation.calls==3&&MotionEvent.last.recycled==1,"normal_failure_not_hidden");
+          h.automation.accepted=true;failed=false;try{h.inject(100,1,12,34,true);}catch(AssertionError e){need(e.getMessage().equals("orphan UP must be rejected by Android"),"orphan error");failed=true;}
+          need(failed&&h.automation.calls==4&&MotionEvent.last.recycled==1,"orphan_success_not_hidden");
+          view.fail=false;view.attached=true;failed=false;try{h.replayDetachedUp(view,100,12,34);}catch(AssertionError e){need(e.getMessage().equals("detached clean replay target"),"attached error");failed=true;}
+          need(failed&&view.calls==2,"attached_replay_refused");
+          System.out.println("CALLER_MODEL positive=4 negative=3 PASS; modeled dispatch not Android");}}
+          '''
+          with tempfile.TemporaryDirectory() as tmp:
+              p=Path(tmp);(p/"Extract.java").write_text(extract);(p/"TodoInstrumentation.java").write_text(gate.JAVA)
+              subprocess.run(["java",str(p/"Extract.java"),str(p/"TodoInstrumentation.java"),str(p/"members")],check=True,timeout=30)
+              members=(p/"members").read_text()
+              def run(code):
+                  (p/"Wiring.java").write_text(harness.replace("__METHODS__",code))
+                  return subprocess.run(["java",str(p/"Wiring.java")],capture_output=True,text=True,timeout=30)
+              result=run(members);assert result.returncode==0,(result.stdout,result.stderr);print(result.stdout)
+              for old,new,label in (
+                  ("old.dispatchTouchEvent(e)","Boolean.valueOf(true)","direct_replay_once_recycled"),
+                  ("!old.isAttachedToWindow()","true","attached_replay_refused"),
+              ):
+                  assert members.count(old)==1,(old,"mutation target must be unique")
+                  result=run(members.replace(old,new))
+                  assert result.returncode!=0 and "CALLER_VALID_WITNESS_PASS" in result.stdout and "AssertionError: "+label in result.stderr,(label,result.stdout,result.stderr)
+                  print("CALLER_MUTANT_REJECTED",label)
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: category-host
+          path: |
+            category-host.log
+            category-caller.log
+          if-no-files-found: error
+  category_device:
+    needs: category_host
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [26, 34]
+    env:
+      TEST_API: ${{ matrix.api }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Fixed Android build setup
+        run: |
+          set -euo pipefail
+          exec > >(tee category-setup.log) 2>&1
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip.sha256 -o /tmp/gradle.sha256
+          echo "$(cat /tmp/gradle.sha256)  /tmp/gradle.zip" | sha256sum -c -
+          unzip -q /tmp/gradle.zip -d /tmp
+          echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+      - name: Reuse unchanged configuration-only build guard
+        env:
+          BUILD_429_EXECUTE: "true"
+          BUILD_LOG: "category-build.log"
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          lines=Path('.github/workflows/android.yml').read_text().splitlines()
+          anchor='        run: &verified_build |'
+          assert lines.count(anchor)==1
+          body=[]
+          for line in lines[lines.index(anchor)+1:]:
+              if line and not line.startswith('          '):break
+              body.append(line[10:] if line else '')
+          script='\n'.join(body)+'\n'
+          assert script.startswith("set -euo pipefail\npython3 - <<'PY'\n") and script.endswith('PY\n')
+          assert 'selftest()' in script and 'rate_limited_configuration' in script
+          subprocess.run(['bash','-n'],input=script,text=True,check=True)
+          subprocess.run(['bash','-euo','pipefail','-c',script],check=True,timeout=900)
+          PY
+      - name: Freeze independent APK identity
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os,re,subprocess
+          from pathlib import Path
+          apks=list(Path('build/outputs/apk/debug').glob('*.apk'))
+          assert len(apks)==1
+          apk=apks[0];tools=Path(os.environ['ANDROID_HOME'])/'build-tools/35.0.0'
+          def run(args):return subprocess.check_output(list(map(str,args)),text=True,timeout=30)
+          badging=run([tools/'aapt','dump','badging',apk])
+          assert "name='com.supercubegame.pockettodo.v12.preview'" in badging
+          assert "versionCode='3'" in badging and "sdkVersion:'26'" in badging and "targetSdkVersion:'34'" in badging
+          assert 'uses-permission:' not in run([tools/'aapt','dump','permissions',apk])
+          certs=re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([0-9a-f]{64})$',run([tools/'apksigner','verify','--verbose','--print-certs',apk]),re.M)
+          assert len(certs)==1
+          data=apk.read_bytes()
+          receipt=dict(commit=os.environ['GITHUB_SHA'],run_id=os.environ['GITHUB_RUN_ID'],
+                       run_attempt=os.environ['GITHUB_RUN_ATTEMPT'],api=int(os.environ['TEST_API']),
+                       apk_sha256=hashlib.sha256(data).hexdigest(),apk_bytes=len(data),certificate=certs[0])
+          Path('category-apk.json').write_text(json.dumps(receipt,indent=2)+'\n')
+          PY
+      - name: Actual category order, injected drag, restart and backup
+        run: |
+          set -euo pipefail
+          python3 tools/verify_category_drag.py android 2>&1 | tee category-android.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: category-device-api-${{ matrix.api }}
+          path: |
+            category-apk.json
+            category-device/
+            category-android.log
+            category-setup.log
+            category-build.log
+            emulator.log
+          if-no-files-found: error
+          retention-days: 14
+  category_report:
+    needs: [category_host, category_device]
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: category-*
+          path: collected-category
+      - name: Publish current source device evidence and original failure
+        if: always()
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 tools/verify_category_drag.py report 2>&1 | tee category-report.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: independent-category-report
+          path: |
+            category-report.json
+            category-report.log
+          if-no-files-found: error
+          retention-days: 14

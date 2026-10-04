@@ -6,18 +6,24 @@ android {
     compileSdk 35
     buildToolsVersion '35.0.0'
     defaultConfig {
-        applicationId 'com.supercubegame.pockettodo.safe'
+        applicationId 'com.supercubegame.pockettodo.v12'
         minSdk 26
         targetSdk 34
-        versionCode 2
-        versionName '1.1'
+        versionCode 3
+        versionName '1.2'
+        // One explicit runner per test APK; host restores the default test bytes.
+        testInstrumentationRunner (providers.gradleProperty('pocketSchema3RestoreRunner').orElse('false').get() == 'true'
+            ? 'com.supercubegame.pockettodo.Schema3RestoreTests'
+            : providers.gradleProperty('pocketSchema3Runner').orElse('false').get() == 'true'
+                ? 'com.supercubegame.pockettodo.Schema3DeviceTest'
+                : 'com.supercubegame.pockettodo.V12DeviceTest')
     }
     buildTypes {
         debug { applicationIdSuffix '.preview' }
-        // No signing configuration: release delivery is blocked until a durable key is configured.
         release { minifyEnabled false }
     }
     compileOptions {
+        coreLibraryDesugaringEnabled true
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
@@ -25,4 +31,9 @@ android {
         abortOnError true
         checkReleaseBuilds true
     }
+}
+dependencies {
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
+    // Fixed Apache-2.0 PDFBox-Android: own generated fragments + exact ActualText.
+    implementation 'com.tom-roush:pdfbox-android:2.0.27.0'
 }

@@ -36,6 +36,45 @@ jobs:
           assert 'V1.2 Android phase is not wired' in result.stderr, 'Unexpected failure is not proof of release guard'
           print('PASS unfinished V1.2 delivery explicitly blocked')
           PY
+      - name: Current-source export image navigation host controls
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' 2>&1 | tee -a core.log
+          import ast,subprocess,tempfile
+          from pathlib import Path
+          text=Path('.github/workflows/android.yml').read_text()
+          marker='          cat > "$RUNNER_TEMP/export_native_probe.py" <<'+"'PY'"+'\n'
+          assert text.count(marker)==1,'one canonical native export driver required'
+          body=text.split(marker,1)[1].split('          PY\n',1)[0]
+          lines=body.splitlines()
+          assert all(not line or line.startswith('          ') for line in lines)
+          source='\n'.join(line[10:] if line else '' for line in lines)+'\n'
+          def wiring(source):
+              tree=ast.parse(source)
+              native=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='standalone_native')
+              calls=[n for n in ast.walk(native) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='reveal_image_control']
+              assert len(calls)==1,'real native fixture must reveal its exact second image'
+              expected=ast.parse('reveal_image_control("note-image-edit-"+images[1][1],gate.PKG,images[1][0],nodes,shell,navigation)',mode='eval').body
+              assert ast.dump(calls[0])==ast.dump(expected),'navigation must use exact fixture image and note identities'
+          wiring(source)
+          fixture='def standalone_native(adb,gate):\n    reveal_image_control("note-image-edit-"+images[1][1],gate.PKG,images[1][0],nodes,shell,navigation)\n'
+          wiring(fixture)
+          for bad in (fixture.replace('    reveal_image_control','    # reveal_image_control'),
+                      fixture.replace('images[1][1]','images[0][1]'),
+                      fixture.replace('images[1][0]','images[0][0]'),
+                      fixture.replace('gate.PKG','"foreign"')):
+              if bad.splitlines()[-1].lstrip().startswith('#'):bad+='    pass\n'
+              assert bad!=fixture
+              compile(bad,'wiring-negative-fixture','exec')
+              try:wiring(bad)
+              except AssertionError:pass
+              else:raise AssertionError('navigation caller omission or wrong identity survived')
+          print('IMAGE_NAVIGATION_WIRING_CONTROLS 1 positive 4 negative HOST_ONLY',flush=True)
+          with tempfile.TemporaryDirectory() as folder:
+              path=Path(folder)/'export_native_probe.py';path.write_text(source)
+              subprocess.run(['python3',str(path)],check=True,timeout=30)
+          print('CURRENT_SOURCE_IMAGE_NAVIGATION_WIRING PASS; HOST_ONLY_NOT_DEVICE_ACCEPTANCE',flush=True)
+          PY
       - name: Require approved full-regression budget
         run: |
           set -euo pipefail
@@ -387,6 +426,182 @@ jobs:
                   assert len(calls) == len(answers)
               print("ABSENCE_ADAPTER_CONTROLS 2 positive 13 negative HOST_ONLY", flush=True)
 
+          def reveal_image_control(desc, package, note_id, read_nodes, shell, record, clock=None, pause=None):
+              """Navigate only this two-image fixture; never retry a failed command or tap."""
+              import re
+              import time
+              clock = time.monotonic if clock is None else clock
+              pause = time.sleep if pause is None else pause
+              assert isinstance(desc, str) and desc.startswith("note-image-edit-") and len(desc) > len("note-image-edit-")
+              assert isinstance(note_id, str) and note_id
+              deadline = clock() + 20
+              record.update(target=desc, note_id=note_id, swipes=[], status="SEARCHING", budget_seconds=20)
+              previous = None
+              current = []
+              def bounds(node):
+                  match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
+                  assert match is not None, "invalid navigation bounds"
+                  x1, y1, x2, y2 = map(int, match.groups())
+                  assert x2 > x1 and y2 > y1, "empty navigation bounds"
+                  return x1, y1, x2, y2
+              while clock() < deadline:
+                  current = read_nodes()
+                  if clock() >= deadline:
+                      raise TimeoutError("image observation exceeded original 20 second budget")
+                  record["last_nodes"] = [dict(n.attrib) for n in current]
+                  owners = [n for n in current if n.get("content-desc") == "note-selected-id"]
+                  assert len(owners) == 1 and owners[0].get("package") == package and owners[0].get("text") == note_id, "image navigation note owner changed"
+                  found = [n for n in current if n.get("content-desc") == desc]
+                  assert len(found) <= 1, "ambiguous image navigation target"
+                  scrolls = [n for n in current if n.get("class") == "android.widget.ScrollView" and n.get("package") == package]
+                  assert len(scrolls) == 1 and scrolls[0].get("enabled") == "true", "one enabled note scroll container required"
+                  x1, y1, x2, y2 = bounds(scrolls[0])
+                  if found:
+                      n = found[0]
+                      assert n.get("package") == package and n.get("enabled") == "true" and n.get("clickable") == "true", "image target cannot be clicked"
+                      a, b, c, d = bounds(n)
+                      assert x1 <= a < c <= x2 and y1 <= b < d <= y2, "image target outside note viewport"
+                      record["status"] = "VISIBLE"
+                      return n
+                  assert scrolls[0].get("scrollable") == "true", "missing target in non-scrollable note"
+                  fingerprint = tuple(tuple(sorted(n.attrib.items())) for n in current)
+                  if fingerprint == previous:
+                      pause(min(.25, max(0, deadline - clock())))
+                      continue
+                  # Finite navigation, not assertion retry: only swipe when the target is absent.
+                  assert len(record["swipes"]) < 6, "image navigation swipe limit reached"
+                  assert x2-x1 >= 8 and y2-y1 >= 8, "note viewport too small for safe swipe"
+                  x = (x1+x2)//2
+                  top = y1+(y2-y1)//4
+                  bottom = y2-(y2-y1)//4
+                  remaining = deadline-clock()
+                  if remaining <= 0:
+                      raise TimeoutError("image navigation exceeded original 20 second budget")
+                  action = {"args": ["input", "swipe", str(x), str(bottom), str(x), str(top), "350"],
+                            "timeout_seconds": remaining}
+                  record["swipes"].append(action)
+                  shell(*action["args"], timeout=remaining)
+                  previous = fingerprint
+                  pause(min(.25, max(0, deadline-clock())))
+              raise AssertionError("missing image target within 20 seconds: "+repr(record))
+
+
+          def image_navigation_selftest(navigate=reveal_image_control, mutations=True):
+              """Host XML/command doubles only; device acceptance stays in the export matrix."""
+              import ast
+              import inspect
+              import subprocess
+              import textwrap
+              from xml.etree.ElementTree import Element
+              package = "fixture.package"
+              desc = "note-image-edit-second"
+              def node(**values):
+                  return Element("node", dict(values))
+              owner = node(**{"content-desc": "note-selected-id", "package": package, "text": "note-exact"})
+              scroll = node(**{"class": "android.widget.ScrollView", "package": package, "enabled": "true",
+                               "scrollable": "true", "bounds": "[18,288][302,578]"})
+              target = node(**{"content-desc": desc, "package": package, "enabled": "true", "clickable": "true",
+                               "bounds": "[136,296][214,344]"})
+              sibling = node(**dict(target.attrib, **{"content-desc": "note-image-edit-first"}))
+              def changed(n, **attrs):
+                  return node(**dict(n.attrib, **attrs))
+              def exercise(frames, expected_swipes, failure=None, shell_error=None, read_delay=0):
+                  ticks = [0.0]; commands = []; reads = [0]; record = {}
+                  def read():
+                      ticks[0] += read_delay
+                      # Visibility changes only after an actual issued swipe, not after a poll.
+                      frame = frames[min(len(commands), len(frames)-1)]
+                      reads[0] += 1
+                      assert reads[0] <= 100, "unbounded navigation reads"
+                      return frame
+                  def send(*args, **kwargs):
+                      assert args == ("input", "swipe", "160", "506", "160", "360", "350"), "wrong viewport-derived swipe"
+                      assert 0 < kwargs["timeout"] <= 20
+                      commands.append(args)
+                      if shell_error is not None:
+                          raise shell_error
+                  def sleep(seconds):
+                      assert 0 <= seconds <= .25
+                      ticks[0] += seconds
+                  caught = None; value = None
+                  try:
+                      value = navigate(desc, package, "note-exact", read, send, record, lambda: ticks[0], sleep)
+                  except (AssertionError, TimeoutError, subprocess.CalledProcessError) as exc:
+                      caught = exc
+                  if failure is None:
+                      assert caught is None, repr(caught)
+                      assert value is target and record["status"] == "VISIBLE", "wrong image returned"
+                  else:
+                      assert type(caught) is failure, "expected "+failure.__name__+" but got "+repr(caught)
+                      if shell_error is not None:
+                          assert caught is shell_error, "original command failure replaced"
+                  assert len(commands) == expected_swipes, "wrong action count"
+                  return record
+              # These independent fixtures include the exact failed 320x640 viewport geometry.
+              exercise([[owner, scroll, sibling, target]], 0)
+              exercise([[owner, scroll, sibling], [owner, scroll, target]], 1)
+              exercise([[owner, scroll, sibling],
+                        [owner, scroll, changed(sibling, text="middle")], [owner, scroll, target]], 2)
+              positives = 3
+              negatives = 0
+              bad_frames = [
+                  [owner, scroll, target, target],
+                  [changed(owner, text="other-note"), scroll, target],
+                  [owner, owner, scroll, target],
+                  [changed(owner, package="foreign"), scroll, target],
+                  [scroll, target],
+                  [owner, scroll, changed(target, enabled="false")],
+                  [owner, scroll, changed(target, clickable="false")],
+                  [owner, scroll, changed(target, package="foreign")],
+                  [owner, scroll, changed(target, bounds="[1,1][1,20]")],
+                  [owner, scroll, changed(target, bounds="[-1,296][214,344]")],
+                  [owner, scroll, changed(target, bounds="[136,280][214,344]")],
+                  [owner, scroll, scroll, target],
+                  [owner, target],
+                  [owner, changed(scroll, enabled="false"), target],
+                  [owner, changed(scroll, bounds="broken"), target],
+                  [owner, changed(scroll, scrollable="false"), sibling],
+                  [owner, changed(scroll, bounds="[18,288][20,290]"), sibling],
+              ]
+              for frame in bad_frames:
+                  exercise([frame], 0, AssertionError); negatives += 1
+              exercise([[owner, scroll, sibling]], 1, AssertionError); negatives += 1
+              exercise([[owner, scroll, sibling],
+                        [changed(owner, text="other-note"), scroll, target]], 1, AssertionError); negatives += 1
+              exercise([[owner, scroll, target]], 0, TimeoutError, read_delay=20); negatives += 1
+              failure = subprocess.CalledProcessError(255, ["fixture-adb"], output="original", stderr="transport")
+              exercise([[owner, scroll, sibling]], 1, subprocess.CalledProcessError, shell_error=failure); negatives += 1
+              moving = [[owner, scroll, changed(sibling, text=str(i))] for i in range(7)]
+              exercise(moving, 6, AssertionError); negatives += 1
+              assert positives == 3 and negatives == 22
+              if mutations:
+                  source = textwrap.dedent(inspect.getsource(navigate))
+                  variants = [
+                      ('if fingerprint == previous:', 'if True:'),
+                      ('len(found) <= 1', 'len(found) <= 2'),
+                      ('owners[0].get("text") == note_id', 'True'),
+                      ('n.get("enabled") == "true"', 'True'),
+                  ]
+                  for old, new in variants:
+                      assert source.count(old) == 1, "mutation anchor ambiguous"
+                      changed_source = source.replace(old, new, 1)
+                      namespace = {}
+                      exec(compile(ast.parse(changed_source), "compiled-image-navigation-mutant", "exec"), namespace)
+                      mutant = namespace["reveal_image_control"]
+                      # A valid visible target must still succeed before the mutant is rejected.
+                      commands = []
+                      assert mutant(desc, package, "note-exact", lambda: [owner, scroll, target],
+                                    lambda *a, **kw: commands.append(a), {}, lambda: 0, lambda _: None) is target
+                      assert commands == []
+                      try:
+                          image_navigation_selftest(mutant, mutations=False)
+                      except AssertionError:
+                          pass
+                      else:
+                          raise AssertionError("compiled navigation mutation survived")
+                  print("IMAGE_NAVIGATION_CONTROLS 3 positive 22 negative 4 compiled witnessed mutants HOST_ONLY", flush=True)
+
+
           def standalone_native(adb,gate):
               """Fresh synthetic UI fixture; actual DocumentsUI, no product reflection/DB writes."""
               import hashlib,json,os,re,sqlite3,subprocess,time,zipfile,io
@@ -537,7 +752,12 @@ jobs:
                   for i in range(2):tap("加入图片");tap("加入合成图");ready()
                   stop();images=state()[0]["blocks"]
                   assert len(images)==2 and all(r[3]=="IMAGE" and r[7]==0 for r in images)
-                  note();touch("note-image-edit-"+images[1][1]);touch("image-caption");shell("input","text","PRIVATE_EXPORT_SENTINEL")
+                  note()
+                  navigation={}
+                  result["image_navigation"]=navigation
+                  control=reveal_image_control("note-image-edit-"+images[1][1],gate.PKG,images[1][0],
+                                               nodes,shell,navigation)
+                  click(control);touch("image-caption");shell("input","text","PRIVATE_EXPORT_SENTINEL")
                   touch("image-private");tap("保存");ready()
                   note()
                   content="BEGIN_"+("a"*74)+"\n"+"\n".join("ROW%03d"%i for i in range(90))
@@ -669,6 +889,7 @@ jobs:
           }
           '''
           if __name__ == "__main__":
+              image_navigation_selftest()
               absence_selftest()
           PY
           python3 -m py_compile "$RUNNER_TEMP/export_native_probe.py"

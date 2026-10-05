@@ -732,7 +732,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
     private static void moveTodoSlot(SQLiteDatabase db,String id,long position){
         db.execSQL("UPDATE todos SET position=? WHERE id=?",new Object[]{position,id});
         try(Cursor c=db.rawQuery("SELECT changes()",null)){
-            if(!c.moveToFirst()||c.getLong(0)!=1)throw new IllegalStateException("待办排序目标已变化");
+            if(!c.moveToFirst()||c.getLong(0)!=1)throw new IllegalStateException("待办排序目标已变化，本次修改已回滚");
         }
     }
     /** In-memory, single-attempt ordinary-todo preview. No schema or media changes.
@@ -971,7 +971,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
             // Validate historical values even for archived definitions; do not reopen archive.
             try(Cursor owners=db.rawQuery("SELECT DISTINCT activity_id FROM field_values WHERE field_id=?",new String[]{f.id})){while(owners.moveToNext()){
                 long activity=owners.getLong(0);List<String> values=new ArrayList<>();try(Cursor c=db.rawQuery("SELECT value FROM field_values WHERE activity_id=? AND field_id=? ORDER BY position",new String[]{Long.toString(activity),f.id})){while(c.moveToNext())values.add(c.getString(0));}
-                validator.put(activity,f.id,values);require(validator.value(activity,id).equals(values),"字段值重复或非规范");
+                validator.put(activity,f.id,values);require(validator.value(activity,f.id).equals(values),"字段值重复或非规范");
             }}
         }}
         Set<Long> batchRevisions=new HashSet<>();try(Cursor c=db.rawQuery("SELECT id,payload,revision,undone FROM batches",null)){while(c.moveToNext()){

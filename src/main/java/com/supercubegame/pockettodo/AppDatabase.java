@@ -575,6 +575,105 @@ public final class AppDatabase extends SQLiteOpenHelper {
             fieldEditReadback(db,expected,next);return null;
         });
     }
+    /** Field-note writes consume the same full-state, owner/session/connection
+     * plan as field edits. Unlink removes only the relationship, never the note,
+     * its blocks or registered media. Archived fields are history-only here.
+     */
+    public synchronized void confirmFieldNoteCreate(FieldEditPlan plan,String noteId,String title){
+        fieldNoteAttempt(plan,noteId,title,0);
+    }
+    public synchronized void confirmFieldNoteLink(FieldEditPlan plan,String noteId){
+        fieldNoteAttempt(plan,noteId,null,1);
+    }
+    public synchronized void confirmFieldNoteUnlink(FieldEditPlan plan,String noteId){
+        fieldNoteAttempt(plan,noteId,null,2);
+    }
+    private void fieldNoteAttempt(FieldEditPlan plan,String noteId,String title,int operation){
+        fieldEditAttempt(plan,db->{
+            Ledger.identifier(noteId);
+            String clean=operation==0?text(title):null;
+            if(fieldDefinition(db,plan.definition.id).archived)throw new IllegalStateException("已归档字段笔记只读");
+            long next=Math.incrementExact(revision(db));
+            byte[] expected=fieldNoteExpected(plan.before,plan.activity,plan.definition.id,noteId,clean,operation,next);
+            if(operation==0)db.execSQL("INSERT INTO notes(id,activity_id,title) VALUES(?,?,?)",new Object[]{noteId,plan.activity,clean});
+            if(operation==2){
+                if(db.delete("field_notes","note_id=? AND field_id=?",new String[]{noteId,plan.definition.id})!=1)
+                    throw new IllegalStateException("笔记关联已变化，本次修改已回滚");
+            }else db.execSQL("INSERT INTO field_notes(note_id,field_id) VALUES(?,?)",new Object[]{noteId,plan.definition.id});
+            fieldEditReadback(db,expected,next);return null;
+        });
+    }
+    /** Transform the frozen pre-write bytes, not a post-write SQL result.
+     * The independent device oracle builds its expectations from typed tables.
+     * Preserve every unrelated cell/type/rowid, and reject rowid overflow.
+     */
+    private static byte[] fieldNoteExpected(byte[] before,long activity,String field,String note,String title,int operation,long next){
+        if(operation<0||operation>2)throw new IllegalArgumentException("未知字段笔记操作");
+        try{
+            DataInputStream in=new DataInputStream(new ByteArrayInputStream(before));
+            LimitedBytes bytes=new LimitedBytes();DataOutputStream out=new DataOutputStream(bytes);
+            int magic=in.readInt(),version=in.readInt(),count=in.readInt();
+            require(magic==0x4e444c31&&count==SNAPSHOT_TABLES.length,"字段笔记预览格式无效");
+            out.writeInt(magic);out.writeInt(version);out.writeInt(count);
+            for(String expectedTable:SNAPSHOT_TABLES){
+                String table=readText(in);require(table.equals(expectedTable),"字段笔记预览表顺序无效");
+                int columns=in.readInt();require(columns>0&&columns<=in.available()/4,"字段笔记预览列无效");
+                List<String> names=new ArrayList<>();for(int i=0;i<columns;i++)names.add(readText(in));
+                int size=in.readInt();require(size>=0&&size<=in.available()/columns,"字段笔记预览行无效");
+                List<Object[]> rows=new ArrayList<>();List<int[]> tags=new ArrayList<>();
+                for(int r=0;r<size;r++){
+                    Object[] row=new Object[columns];int[] types=new int[columns];
+                    for(int i=0;i<columns;i++){
+                        int type=in.readUnsignedByte();types[i]=type;
+                        if(type==Cursor.FIELD_TYPE_INTEGER)row[i]=in.readLong();
+                        else if(type==Cursor.FIELD_TYPE_STRING)row[i]=readText(in);
+                        else if(type==Cursor.FIELD_TYPE_BLOB)row[i]=readBlob(in);
+                        else require(type==Cursor.FIELD_TYPE_NULL,"字段笔记预览值类型无效");
+                    }
+                    rows.add(row);tags.add(types);
+                }
+                if(table.equals("notes")){
+                    require(names.equals(Arrays.asList("rowid","id","activity_id","title")),"笔记列已变化");
+                    int matches=0;
+                    for(Object[] row:rows)if(note.equals(row[1])){
+                        if(operation==0)throw new IllegalArgumentException("笔记标识已存在");
+                        if(!Long.valueOf(activity).equals(row[2]))throw new IllegalArgumentException("笔记不属于当前活动");
+                        matches++;
+                    }
+                    if(operation==0){
+                        long rowid=Math.incrementExact(rows.isEmpty()?0:(Long)rows.get(rows.size()-1)[0]);
+                        rows.add(new Object[]{rowid,note,activity,title});
+                        tags.add(new int[]{1,3,1,3});
+                    }else if(matches!=1)throw new IllegalArgumentException("笔记不存在或不属于当前活动");
+                }else if(table.equals("field_notes")){
+                    require(names.equals(Arrays.asList("rowid","note_id","field_id")),"字段笔记列已变化");
+                    int matches=0;
+                    for(int r=rows.size()-1;r>=0;r--)if(note.equals(rows.get(r)[1])){
+                        if(operation!=2)throw new IllegalStateException("笔记已有字段关联，请先解除原关联");
+                        if(!field.equals(rows.get(r)[2]))throw new IllegalStateException("笔记不属于当前字段");
+                        matches++;rows.remove(r);tags.remove(r);
+                    }
+                    if(operation==2){
+                        if(matches!=1)throw new IllegalStateException("笔记关联不存在");
+                    }else{
+                        long rowid=Math.incrementExact(rows.isEmpty()?0:(Long)rows.get(rows.size()-1)[0]);
+                        rows.add(new Object[]{rowid,note,field});tags.add(new int[]{1,3,3});
+                    }
+                }else if(table.equals("revision")){
+                    require(names.equals(Arrays.asList("rowid","id","value"))&&rows.size()==1,"修订记录无效");
+                    rows.get(0)[2]=next;
+                }
+                utf8(out,table);out.writeInt(columns);for(String name:names)utf8(out,name);out.writeInt(rows.size());
+                for(int r=0;r<rows.size();r++)for(int i=0;i<columns;i++){
+                    Object value=rows.get(r)[i];out.writeByte(tags.get(r)[i]);
+                    if(value instanceof Long)out.writeLong((Long)value);
+                    else if(value instanceof String)utf8(out,(String)value);
+                    else if(value instanceof byte[])blob(out,(byte[])value);
+                }
+            }
+            require(in.available()==0,"字段笔记预览存在尾随数据");out.flush();return bytes.toByteArray();
+        }catch(IOException e){throw new IllegalStateException("无法读取字段笔记预览",e);}
+    }
     public static final class Todo {
         public final String id,title;public final boolean done;
         private Todo(String id,String title,boolean done){this.id=id;this.title=title;this.done=done;}
@@ -633,7 +732,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
     private static void moveTodoSlot(SQLiteDatabase db,String id,long position){
         db.execSQL("UPDATE todos SET position=? WHERE id=?",new Object[]{position,id});
         try(Cursor c=db.rawQuery("SELECT changes()",null)){
-            if(!c.moveToFirst()||c.getLong(0)!=1)throw new IllegalStateException("待办排序目标已变化，本次修改已回滚");
+            if(!c.moveToFirst()||c.getLong(0)!=1)throw new IllegalStateException("待办排序目标已变化");
         }
     }
     /** In-memory, single-attempt ordinary-todo preview. No schema or media changes.
@@ -872,7 +971,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
             // Validate historical values even for archived definitions; do not reopen archive.
             try(Cursor owners=db.rawQuery("SELECT DISTINCT activity_id FROM field_values WHERE field_id=?",new String[]{f.id})){while(owners.moveToNext()){
                 long activity=owners.getLong(0);List<String> values=new ArrayList<>();try(Cursor c=db.rawQuery("SELECT value FROM field_values WHERE activity_id=? AND field_id=? ORDER BY position",new String[]{Long.toString(activity),f.id})){while(c.moveToNext())values.add(c.getString(0));}
-                validator.put(activity,f.id,values);require(validator.value(activity,f.id).equals(values),"字段值重复或非规范");
+                validator.put(activity,f.id,values);require(validator.value(activity,id).equals(values),"字段值重复或非规范");
             }}
         }}
         Set<Long> batchRevisions=new HashSet<>();try(Cursor c=db.rawQuery("SELECT id,payload,revision,undone FROM batches",null)){while(c.moveToNext()){

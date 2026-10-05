@@ -320,8 +320,18 @@ final class FieldScreen {
         body.addView(host.text("仅显示当前活动的关联。解除关联不会删除笔记、正文或图片。",14,TodayScreen.MUTED));
         if(notes.linked.isEmpty())body.addView(host.text("还没有关联笔记。",17,TodayScreen.MUTED));
         for(NoteRow note:notes.linked){
-            TextView title=host.text(note.title+" · "+note.id,17,TodayScreen.INK);
-            title.setContentDescription("field-note-"+note.id);body.addView(title);
+            Button title=button(body,note.title+" · "+note.id,"field-note-"+note.id);
+            title.setOnClickListener(v->{
+                if(!canSubmit(p,title))return;
+                p.submitted=true;
+                Page loading=begin("打开笔记");
+                Runnable returnToNotes=()->{
+                    Page next=begin("字段笔记");loadNotes(next,f.id);
+                };
+                Button leaveNote=button(loading.root,"返回字段笔记","field-note-open-back");
+                leaveNote.setOnClickListener(unused->{if(canSubmit(loading,leaveNote))returnToNotes.run();});
+                new NoteEditorScreen(host,activity,note.title,returnToNotes).load(note.id);
+            });
             Button unlink=button(body,"解除关联","field-note-unlink-"+note.id);unlink.setEnabled(!f.archived);
             unlink.setOnClickListener(v->prepareNote(p,unlink,f,note,2));
         }

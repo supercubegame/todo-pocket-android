@@ -226,13 +226,12 @@ jobs:
             System.out.println("FIELD_TYPED_UI_PASS all8 invalid6 clear8 choice3");
           
             // Host can discard the success callback. Page detachment must own cleanup
-            // independently, both before the worker starts and after it returns.
-            open();create();click("field-edit-"+id());h.content();h.closed=true;drain();
-            need(h.db.last!=null&&h.db.last.closed&&h.db.writes==1,"abandoned_before_prepare");
+            // both before and after the worker obtains the plan.
+            open();create();click("field-edit-"+id());h.closed=true;h.content();drain();
+            need(h.db.last.closed&&h.db.writes==1,"abandoned_before_prepare");
             for(boolean destroyed:new boolean[]{false,true}){
-             open();create();click("field-edit-"+id());
-             h.afterRun=()->{need(h.db.last!=null&&!h.db.last.closed,"pending_live_witness");h.content();if(destroyed)h.activity.destroyed=true;else h.closed=true;};
-             drain();need(h.db.last.closed&&h.db.writes==1,"abandoned_after_prepare_"+destroyed);
+             open();create();click("field-edit-"+id());h.afterRun=()->{h.content();if(destroyed)h.activity.destroyed=true;else h.closed=true;};drain();
+             need(h.db.last.closed&&h.db.writes==1,"abandoned_after_prepare_"+destroyed);
             }
             open();create();click("field-edit-"+id());h.afterRun=()->h.activity.finishing=true;drain();
             need(h.db.last.closed&&h.db.writes==1,"finishing_prepare_closes");
@@ -289,6 +288,18 @@ jobs:
             click("field-notes-"+field);drain();need(!one("field-note-new").enabled&&!one("field-note-link").enabled&&!one("field-note-unlink-"+added).enabled,"notes_archived_disabled");
             int before=h.db.writes;one("field-note-new").performClick();drain();need(h.db.writes==before,"notes_archived_readonly");
             System.out.println("FIELD_NOTES_UI_WITNESS");
+            need(checks==296,"stage2_management_exact_count");
+            View selected=one("field-note-"+added);
+            selected.performClick();selected.performClick();drain();
+            need(NoteEditorScreen.calls==1&&NoteEditorScreen.note.equals(added)&&NoteEditorScreen.owner==1,"notes_open_exact_id");
+            need(h.db.writes==before,"notes_open_readonly");
+            selected.performClick();drain();need(NoteEditorScreen.calls==1,"notes_open_detached");
+            NoteEditorScreen.back.run();drain();
+            need(find(h.root,"field-note-"+added)!=null&&!one("field-note-new").enabled,"notes_return_current_archive");
+            NoteEditorScreen.fail=true;click("field-note-"+added);drain();
+            click("field-note-open-back");drain();
+            need(find(h.root,"field-note-"+added)!=null&&h.db.writes==before,"notes_open_failure_return");
+            NoteEditorScreen.fail=false;
            }
            static void await(java.util.concurrent.CountDownLatch latch){
             try{if(!latch.await(5,java.util.concurrent.TimeUnit.SECONDS))throw new AssertionError("latch_timeout");}
@@ -334,6 +345,11 @@ jobs:
            }
           }
           class ActivityModel{static String title(String s){if(s==null||s.trim().isEmpty())throw new IllegalArgumentException();return s.trim();}}
+          class NoteEditorScreen{
+           static int calls;static long owner;static String note;static Runnable back;static boolean fail;TodayScreen host;
+           NoteEditorScreen(TodayScreen h,long a,String t,Runnable r){host=h;owner=a;back=r;}
+           void load(String id){calls++;note=id;host.work(()->{if(fail)throw new IllegalStateException();return true;},ignored->host.content(),null);}
+          }
           class Cursor implements AutoCloseable{
            List<String>rows;List<String[]>cells;int i=-1;Cursor(List<String>r){rows=r;}boolean moveToFirst(){i=0;return !rows.isEmpty();}boolean moveToNext(){return ++i<(cells==null?rows.size():cells.size());}String getString(int c){return cells==null?rows.get(i):cells.get(i)[c];}boolean isNull(int c){return getString(c)==null;}public void close(){}
           }
@@ -387,10 +403,10 @@ jobs:
               assert good.returncode==0,(good.stdout,good.stderr)
               lines=good.stdout.splitlines()
               checks=[x for x in lines if x.startswith("FIELD_UI_CHECK ")]
-              assert len(checks)==296 and [int(x.split()[1]) for x in checks]==list(range(1,297)),checks
+              assert len(checks)==306 and [int(x.split()[1]) for x in checks]==list(range(1,307)),checks
               assert lines.count("FIELD_UI_RENDER_WITNESS")==1 and lines.count("FIELD_UI_CREATE_WITNESS")==1
               assert lines.count("FIELD_TYPED_UI_PASS all8 invalid6 clear8 choice3")==1
-              assert lines[-1]=="FIELD_UI_HOST_PASS checks=296",lines
+              assert lines[-1]=="FIELD_UI_HOST_PASS checks=306",lines
               print(good.stdout,end="")
               killed=[]
               for old,new,count,label in (
@@ -403,6 +419,7 @@ jobs:
                   ("host.db.confirmFieldNoteUnlink(plan,note)","host.db.confirmFieldNoteLink(plan,note)",1,"notes_unlink_body"),
                   ('if(!p.alive){plan.close();throw new IllegalStateException("笔记页面已关闭");}','if(false){plan.close();throw new IllegalStateException("笔记页面已关闭");}',1,"notes_queued_detach"),
                   ("plan.close();p.plan=null;loadNotes(p,field);","p.plan=null;loadNotes(p,field);",1,"notes_cancel_readonly"),
+                  (".load(note.id);",".load(note.title);",1,"notes_open_exact_id"),
               ):
                   assert code.count(old)==count and old!=new,(old,code.count(old))
                   candidate=code.replace(old,new)
@@ -419,6 +436,114 @@ jobs:
                   commit=os.environ.get("GITHUB_SHA","LOCAL"),scope="ACTUAL_FIELDSCREEN_CUSTOMFIELDS_WITH_ANDROID_DB_LEDGER_ACTIVITYMODEL_DOUBLES_NOT_DEVICE",
                   not_covered=["sqlite_atomicity","host_abandoned_without_detachment","real_android_lifecycle","date_policy_range","physical_gestures"],release_ready=False)))
           FIELD_UI_PY
+      - name: Current-source exact note loader and witnessed mutations
+        run: |
+          set -euo pipefail
+          python3 - <<'NOTE_ENTRY_PY' 2>&1 | tee fields-entry-host.log
+          from pathlib import Path
+          import subprocess,tempfile
+          
+          def check_editor(editor):
+              """Actual Java members; Android, IO and DB are explicit synchronous doubles."""
+              extract=r'''import javax.tools.*;import com.sun.source.util.*;import com.sun.source.tree.*;import java.nio.file.*;import java.util.*;
+          class Extract{public static void main(String[]a)throws Exception{
+          JavaCompiler c=ToolProvider.getSystemJavaCompiler();DiagnosticCollector<JavaFileObject>d=new DiagnosticCollector<>();
+          try(StandardJavaFileManager f=c.getStandardFileManager(d,null,null)){
+          JavacTask t=(JavacTask)c.getTask(null,f,d,Arrays.asList("-proc:none"),null,f.getJavaFileObjects(a[0]));
+          CompilationUnitTree u=t.parse().iterator().next();for(Diagnostic<?>e:d.getDiagnostics())if(e.getKind()==Diagnostic.Kind.ERROR)throw new AssertionError(e.toString());
+          String s=Files.readString(Path.of(a[0]));SourcePositions p=Trees.instance(t).getSourcePositions();StringBuilder out=new StringBuilder();int count=0;
+          for(Tree type:u.getTypeDecls())if(type instanceof ClassTree)for(Tree m:((ClassTree)type).getMembers())
+          if(m instanceof MethodTree&&((MethodTree)m).getName().contentEquals(a[2])){
+          out.append(s.substring((int)p.getStartPosition(u,m),(int)p.getEndPosition(u,m))).append("\n");count++;}
+          if(count!=Integer.parseInt(a[3]))throw new AssertionError("member count "+a[2]+" "+count);Files.writeString(Path.of(a[1]),out.toString());}}}'''
+              harness=r'''import java.util.*;import java.nio.file.*;import java.io.*;import java.util.function.*;
+          class Check {
+           static void need(boolean b,String s){if(!b)throw new AssertionError(s);}
+           static final class Block{final String id,text;final Kind kind=Kind.TEXT;final String assetId="";Block(String i,String t){id=i;text=t;}}
+           enum Kind{TEXT,IMAGE}
+           static final class NoteDocument{static final class Kind{static final Check.Kind IMAGE=Check.Kind.IMAGE;}}
+           static final class android{static final class graphics{static final class Bitmap{}}}
+           static final class MediaRepository{MediaRepository(Path p,long n){}Path path(String s){return Path.of(s);}}
+           static final class Ledger{static String identifier(String s){if(s==null||s.isEmpty())throw new IllegalArgumentException();return s;}}
+           static final class Cursor implements AutoCloseable{
+            List<String[]> rows;int i=-1;Cursor(List<String[]>r){rows=r;}boolean moveToNext(){return ++i<rows.size();}String getString(int n){return rows.get(i)[n];}public void close(){}
+           }
+           static final class DB{
+            Map<String,String[]> notes=new LinkedHashMap<>();List<String> read=new ArrayList<>();
+            DB getReadableDatabase(){return this;}
+            Cursor rawQuery(String sql,String[]args){
+             need(sql.equals("SELECT id,title FROM notes WHERE activity_id=? ORDER BY rowid")&&args.length==1,"owner_query");
+             List<String[]> rows=new ArrayList<>();notes.forEach((id,n)->{if(n[0].equals(args[0]))rows.add(new String[]{id,n[1]});});return new Cursor(rows);
+            }
+            List<Block> noteBlocks(String id){read.add(id);return List.of(new Block(id+"-body",notes.get(id)[2]));}
+           }
+           interface Work<T>{T run()throws Exception;}
+           static final class Activity{File getFilesDir(){return new File(".");}}
+           static final class Host{
+            DB db=new DB();Activity activity=new Activity();Throwable failure;
+            <T>void work(Work<T> run,Consumer<T> done,Runnable fail){
+             failure=null;try{done.accept(run.run());}catch(Exception e){failure=e;}
+            }
+           }
+           static final class Editor{
+            Host host;long activityId=1;String selectedNote;State rendered;
+            Editor(Host h){host=h;}
+            static final class State{String noteId;List<String>ids=new ArrayList<>(),titles=new ArrayList<>();List<Block>blocks=new ArrayList<>();MediaRepository media;Map<String,android.graphics.Bitmap>previews=new HashMap<>();}
+            android.graphics.Bitmap decodePreview(Path p)throws IOException{return null;}
+            void render(State s){rendered=s;selectedNote=s.noteId;}
+            __LOAD__
+           }
+           static void body(Editor e,String id,String text){
+            need(e.host.failure==null&&e.rendered!=null&&id.equals(e.rendered.noteId)&&e.rendered.blocks.size()==1&&
+             e.rendered.blocks.get(0).id.equals(id+"-body")&&e.rendered.blocks.get(0).text.equals(text),"exact_note_body");
+           }
+           public static void main(String[]a){
+            Host h=new Host();h.db.notes.put("first",new String[]{"1","Same","First body"});
+            h.db.notes.put("second",new String[]{"1","Same","Second private body"});
+            h.db.notes.put("foreign",new String[]{"2","Same","Foreign body"});
+            Editor e=new Editor(h);e.load();body(e,"first","First body");
+            e.load("first");body(e,"first","First body");System.out.println("EDITOR_DEFAULT_WITNESS");
+            e.load("second");body(e,"second","Second private body");
+            need(h.db.read.equals(List.of("first","first","second")),"exact_read_target");
+            e.load();body(e,"second","Second private body");
+            for(String bad:List.of("missing","foreign")){
+             StateWitness witness=new StateWitness(e);e.load(bad);
+             need(h.failure instanceof IllegalStateException&&e.rendered==witness.state&&h.db.read.size()==witness.reads,"missing_or_foreign_no_fallback");
+            }
+            for(String bad:new String[]{null,""}){
+             String before=e.selectedNote;int reads=h.db.read.size();boolean no=false;
+             try{e.load(bad);}catch(IllegalArgumentException x){no=true;}
+             need(no&&Objects.equals(before,e.selectedNote)&&reads==h.db.read.size(),"invalid_id_readonly");
+            }
+            System.out.println("EDITOR_SELECTION positive=8 PASS; actual loader, IO/DB/render doubles");
+           }
+           static final class StateWitness{Editor.State state;int reads;StateWitness(Editor e){state=e.rendered;reads=e.host.db.read.size();}}
+          }'''
+              # A source-name adapter only: Java's actual loader still executes.
+              harness=harness.replace("for(NoteDocument.Block b:s.blocks)","for(Block b:s.blocks)")
+              with tempfile.TemporaryDirectory() as tmp:
+                  p=Path(tmp);(p/"Extract.java").write_text(extract)
+                  def members(text,name,count):
+                      (p/"Source.java").write_text(text)
+                      result=subprocess.run(["java",str(p/"Extract.java"),str(p/"Source.java"),str(p/"members"),name,str(count)],capture_output=True,text=True,timeout=30)
+                      assert result.returncode==0,(result.stdout,result.stderr)
+                      return (p/"members").read_text()
+                  def execute(template,code,marker,name):
+                      (p/(name+".java")).write_text(template.replace(marker,code))
+                      return subprocess.run(["java",str(p/(name+".java"))],capture_output=True,text=True,timeout=30)
+                  load=members(editor,"load",2).replace("NoteDocument.Block","Block")
+                  result=execute(harness,load,"__LOAD__","Check")
+                  assert result.returncode==0,(result.stdout,result.stderr);print(result.stdout.strip())
+                  for old,new,label in (
+                      ("selectedNote=noteId;","selectedNote=null;","exact_note_body"),
+                      ('if(requested!=null&&!s.ids.contains(requested))','if(false)',"missing_or_foreign_no_fallback"),
+                  ):
+                      assert load.count(old)==1
+                      result=execute(harness,load.replace(old,new),"__LOAD__","Check")
+                      assert result.returncode==1 and "EDITOR_DEFAULT_WITNESS" in result.stdout and "AssertionError: "+label in result.stderr,(result.stdout,result.stderr)
+                  print("EDITOR_SELECTION compiled_witnessed_product_mutants=2 PASS")
+          check_editor(Path("src/main/java/com/supercubegame/pockettodo/NoteEditorScreen.java").read_text())
+          NOTE_ENTRY_PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -427,6 +552,7 @@ jobs:
             fields-host.log
             fields-ui-host.log
             fields-notes-host.log
+            fields-entry-host.log
           if-no-files-found: error
   fields_device:
     needs: fields_host

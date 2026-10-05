@@ -11,11 +11,13 @@ SCOPE="FIELD_STAGE1_EIGHT_TYPES_GUARDED_EDITS_NOT_FIELD_NOTE_UI_OR_FULL_RELEASE"
 assert hashlib.sha256(Path(shared.__file__).read_bytes()).hexdigest()=="9b1b435b21b630e1230f1e112a794962825665982ceabdbb41cc68583ce3d70d","review changed shared adapter"
 TYPES=("TEXT","LONG_TEXT","NUMBER","DATE","SELECT","MULTI_SELECT","LINK","BOOLEAN")
 EXPECTED={
- "seed":["backend_fixture"]+[action+"_"+kind for kind in TYPES for action in ("prepare","value","replay","invalid","consumed")]+
+ "seed":[action+"_"+kind for kind in TYPES for action in ("create","create_duplicate")]+["create_late_rollback","backend_fixture"]+[action+"_"+kind for kind in TYPES for action in ("prepare","value","replay","invalid","consumed")]+
  ["cancel_readonly","same_revision_stale_readonly","rename_stable_id","archive_preserves_history","archived_value_readonly",
   "unarchive_preserves_history","late_rollback","failed_plan_consumed","outer_transaction_readonly","missing_activity_readonly","missing_field_readonly","backend_checkpoint"],
- "deleted":["backend_restart","backend_backup","ui_open_readonly"]+[action+"_"+kind for kind in TYPES for action in ("ui_value","ui_replay")]+
- ["ui_cancel_readonly","ui_rename_stable_id","ui_archive_history","ui_checkpoint"],
+ "deleted":["backend_restart","backend_backup","ui_open_readonly"]+sum(
+  [["ui_blank_"+kind]+(["ui_duplicate_options_"+kind] if "SELECT" in kind else [])+
+   [action+"_"+kind for action in ("ui_create","ui_create_replay","ui_value","ui_replay","ui_clear")] for kind in TYPES],[])+
+ ["ui_cancel_readonly","ui_rename_stable_id","ui_archive_history","ui_restore_history","ui_checkpoint"],
  "undone":["ui_restart","ui_backup"],
 }
 REQUIRED=copy.deepcopy(EXPECTED)
@@ -69,6 +71,22 @@ CASES=r'''
   for(int i=1;i<rows.size();i++)if(rows.get(i).get(id).equals("3:"+field)){rows.get(i).set(col,value);changed++;}
   need(changed==1,"oracle field identity");revision(out);return out;
  }
+ static long nextRow(List<List<String>> rows){
+  long last=0;
+  if(rows.size()>1){last=Long.MIN_VALUE;for(int i=1;i<rows.size();i++)last=Math.max(last,Long.parseLong(rows.get(i).get(0).substring(2)));}
+  return Math.incrementExact(last);
+ }
+ static Map<String,List<List<String>>> expectedCreate(Map<String,List<List<String>>> before,String id,String name,String type,List<String> options){
+  Map<String,List<List<String>>> out=copy(before);
+  List<List<String>> definitions=out.get("fields"),choices=out.get("field_options");
+  need(definitions.get(0).equals(Arrays.asList("rowid","id","name","type","archived")),"oracle create schema");
+  need(choices.get(0).equals(Arrays.asList("rowid","field_id","id","position")),"oracle options schema");
+  for(int i=1;i<definitions.size();i++)need(!definitions.get(i).get(1).equals("3:"+id),"oracle fresh identity");
+  definitions.add(new ArrayList<>(Arrays.asList("1:"+nextRow(definitions),"3:"+id,"3:"+name,"3:"+type,"1:0")));
+  int position=0;
+  for(String option:options)choices.add(new ArrayList<>(Arrays.asList("1:"+nextRow(choices),"3:"+id,"3:"+option,"1:"+(position++))));
+  revision(out);return out;
+ }
  static List<String> good(String type){
   switch(type){
    case "TEXT":return Arrays.asList("Alpha");
@@ -99,10 +117,20 @@ CASES=r'''
    h.addCategory(1,"Same");h.addActivity(1,1,0,"Same");h.addActivity(2,1,0,"Same");h.addTodo("keep","Keep");
    for(String type:TYPES){
     String id="field-"+type;
+    List<String> options=type.contains("SELECT")?Arrays.asList("choice-a","choice-b"):Collections.emptyList();
+    Map<String,List<List<String>>> initial=state(h),wanted=expectedCreate(initial,id,"Same",type,options);
     h.defineField(id,"Same",type,type.contains("SELECT")?Arrays.asList("choice-a","choice-b"):Collections.emptyList());
+    pass(state(h).equals(wanted),"create_"+type);
+    readonly(h,IllegalArgumentException.class,()->h.defineField(id,"Different",type,options),"create_duplicate_"+type);
     h.putField(2,id,good(type));
+    if(type.equals("TEXT"))h.createFieldNote("linked-note",1,"field-TEXT","Keep");
    }
-   h.createFieldNote("linked-note",1,"field-TEXT","Keep");
+   h.getWritableDatabase().execSQL("CREATE TRIGGER create_fault BEFORE UPDATE OF value ON revision BEGIN SELECT RAISE(ABORT,'create_late_fault'); END");
+   Map<String,List<List<String>>> creationBefore=state(h);Throwable creationFailure=null;
+   try{h.defineField("failed-create","Same","SELECT",Arrays.asList("a","b"));}catch(Throwable t){creationFailure=t;}
+   boolean createSentinel=false;for(Throwable t=creationFailure;t!=null;t=t.getCause())if(String.valueOf(t.getMessage()).contains("create_late_fault"))createSentinel=true;
+   pass(createSentinel&&state(h).equals(creationBefore),"create_late_rollback");
+   h.getWritableDatabase().execSQL("DROP TRIGGER create_fault");
    pass(h.count("fields")==8&&h.count("field_notes")==1,"backend_fixture");
    for(String type:TYPES){
     String id="field-"+type;Map<String,List<List<String>>> before=state(h);Object p=prepare(h,1,id);
@@ -153,13 +181,28 @@ CASES=r'''
   Map<String,List<List<String>>> before=state(h);openFields();
   pass(state(h).equals(before),"ui_open_readonly");
   for(String type:TYPES){
-   click("field-new",true);click("field-type-"+type,true);text("field-name","Same");
+   click("field-new",true);before=state(h);click("field-create",true);
+   boolean[] blank={false};ui(()->blank[0]=((TextView)one("field-validation",true)).getText().length()>0);
+   pass(blank[0]&&state(h).equals(before),"ui_blank_"+type);
+   click("field-type-"+type,true);text("field-name","Same");
+   if(type.contains("SELECT")){
+    text("field-options","choice-a\nchoice-a");before=state(h);click("field-create",true);
+    boolean[] visible={false};ui(()->visible[0]=((TextView)one("field-validation",true)).getText().length()>0);
+    pass(visible[0]&&state(h).equals(before),"ui_duplicate_options_"+type);
+   }
    if(type.contains("SELECT"))text("field-options","choice-a\nchoice-b");
-   click("field-create",true);
+   before=state(h);final View[] createButton={null};
+   ui(()->{createButton[0]=one("field-create",true);need(createButton[0].isEnabled()&&createButton[0].performClick(),"create first callback");createButton[0].performClick();});ready();
    String id;try(Cursor c=h.getReadableDatabase().rawQuery("SELECT id FROM fields WHERE type=?",new String[]{type})){
     need(c.moveToFirst(),"created type "+type);id=c.getString(0);need(!c.moveToNext(),"one type "+type);
    }
    need(h.fieldDefinition(id).name.equals("Same")&&!h.fieldDefinition(id).archived,"created exact definition");
+   // Only the opaque new UUID is discovered after saving. Name/type/options,
+   // rowids/revision and all unrelated cells come from the frozen input state.
+   need(id.startsWith("field-")&&UUID.fromString(id.substring(6)).toString().equals(id.substring(6)),"canonical UI field UUID");
+   pass(state(h).equals(expectedCreate(before,id,"Same",type,type.contains("SELECT")?Arrays.asList("choice-a","choice-b"):Collections.emptyList())),"ui_create_"+type);
+   before=state(h);ui(()->createButton[0].performClick());ready();pass(state(h).equals(before),"ui_create_replay_"+type);
+   if(type.equals("TEXT"))h.createFieldNote("create-keep",2,id,"Keep other owner");
    click("field-edit-"+id,true);text("field-value-input",String.join("\n",bad(type)));
    // Text inputs legitimately contain newlines; use a invalid numeric/date/choice/link/boolean case only.
    if(!type.equals("TEXT")&&!type.equals("LONG_TEXT")){
@@ -172,6 +215,11 @@ CASES=r'''
    pass(state(h).equals(expectedValue(before,1,id,good(type))),"ui_value_"+type);
    before=state(h);ui(()->old[0].performClick());ready();
    pass(state(h).equals(before),"ui_replay_"+type);
+   click("field-edit-"+id,true);text("field-value-input","");before=state(h);click("field-save",true);
+   pass(state(h).equals(expectedValue(before,1,id,Collections.emptyList())),"ui_clear_"+type);
+   // Restore the old nonempty archive/restart fixture; clearing must not weaken it.
+   click("field-edit-"+id,true);text("field-value-input",String.join("\n",good(type)));before=state(h);click("field-save",true);
+   need(state(h).equals(expectedValue(before,1,id,good(type))),"restore original value after clear");
   }
   String id;try(Cursor c=h.getReadableDatabase().rawQuery("SELECT id FROM fields WHERE type='TEXT'",null)){need(c.moveToFirst(),"text id");id=c.getString(0);}
   h.createFieldNote("ui-linked",1,id,"Keep");click("field-edit-"+id,true);text("field-value-input","Discard");
@@ -180,6 +228,10 @@ CASES=r'''
   pass(state(h).equals(expectedDefinition(before,id,"name","3:Renamed UI")),"ui_rename_stable_id");
   before=state(h);click("field-archive-"+id,true);click("field-archive-confirm",true);
   pass(state(h).equals(expectedDefinition(before,id,"archived","1:1")),"ui_archive_history");
+  before=state(h);click("field-archive-"+id,true);click("field-archive-confirm",true);
+  pass(state(h).equals(expectedDefinition(before,id,"archived","1:0")),"ui_restore_history");
+  before=state(h);click("field-archive-"+id,true);click("field-archive-confirm",true);
+  need(state(h).equals(expectedDefinition(before,id,"archived","1:1")),"restore original archived restart fixture");
   save("ui-state",state(h).toString());save("ui-media",media().toString());
   pass(h.fieldNoteIds(1,id).equals(Arrays.asList("ui-linked"))&&h.fieldValue(2,id).isEmpty(),"ui_checkpoint");
  }
@@ -194,7 +246,7 @@ JavaCompiler c=ToolProvider.getSystemJavaCompiler();DiagnosticCollector<JavaFile
 try(StandardJavaFileManager f=c.getStandardFileManager(d,null,null)){
 JavacTask t=(JavacTask)c.getTask(null,f,d,Arrays.asList("-proc:none"),null,f.getJavaFileObjects(a[0]));
 CompilationUnitTree u=t.parse().iterator().next();for(Diagnostic<?>e:d.getDiagnostics())if(e.getKind()==Diagnostic.Kind.ERROR)throw new AssertionError(e.toString());
-String s=Files.readString(Path.of(a[0]));SourcePositions p=Trees.instance(t).getSourcePositions();Set<String>w=new HashSet<>(Arrays.asList("need","copy","revision","expectedValue","expectedDefinition"));StringBuilder out=new StringBuilder();
+String s=Files.readString(Path.of(a[0]));SourcePositions p=Trees.instance(t).getSourcePositions();Set<String>w=new HashSet<>(Arrays.asList("need","copy","revision","expectedValue","expectedDefinition","nextRow","expectedCreate"));StringBuilder out=new StringBuilder();
 for(Tree type:u.getTypeDecls())if(type instanceof ClassTree)for(Tree m:((ClassTree)type).getMembers())
 if(m instanceof MethodTree&&w.remove(((MethodTree)m).getName().toString()))out.append(s.substring((int)p.getStartPosition(u,m),(int)p.getEndPosition(u,m))).append("\n");
 if(!w.isEmpty())throw new AssertionError(w);Files.writeString(Path.of(a[1]),out.toString());}}}'''
@@ -236,6 +288,71 @@ System.out.println("FIELD_ORACLE_PASS");}}'''
             code=methods.replace(old,new,1);result=execute(code)
             assert result.returncode==1 and "FIELD_ORACLE_VALID_WITNESS" in result.stdout and "AssertionError: "+label in result.stderr,(label,result.stdout,result.stderr)
         print("FIELD_ORACLE compiled_witnessed_mutants=4 PASS; Java oracle, not Android")
+        creation_oracle_selftest(methods)
+
+def creation_oracle_selftest(methods):
+    harness=r'''import java.util.*;import java.lang.reflect.*;
+class CreateOracle{
+__METHODS__
+static List<String> r(String...s){return new ArrayList<>(Arrays.asList(s));}
+static void check(boolean ok,String label){if(!ok)throw new AssertionError(label);System.out.println("CREATE_CHECK "+label);}
+@SuppressWarnings("unchecked")
+static Map<String,List<List<String>>> create(Map<String,List<List<String>>> before,String type,List<String> options)throws Exception{
+ Method m;
+ try{m=CreateOracle.class.getDeclaredMethod("expectedCreate",Map.class,String.class,String.class,String.class,List.class);}
+ catch(NoSuchMethodException e){throw new AssertionError("missing_creation_oracle");}
+ return (Map<String,List<List<String>>>)m.invoke(null,before,"new-id","Same",type,options);
+}
+public static void main(String[]args)throws Exception{
+ Map<String,List<List<String>>> b=new TreeMap<>();
+ b.put("revision",new ArrayList<>(Arrays.asList(r("rowid","id","value"),r("1:1","1:1","1:9"))));
+ b.put("fields",new ArrayList<>(Arrays.asList(r("rowid","id","name","type","archived"),r("1:7","3:old","3:Same","3:TEXT","1:0"),r("1:9","3:other","3:Same","3:SELECT","1:0"))));
+ b.put("field_options",new ArrayList<>(Arrays.asList(r("rowid","field_id","id","position"),r("1:12","3:other","3:a","1:0"))));
+ b.put("field_values",new ArrayList<>(Arrays.asList(r("rowid","activity_id","field_id","position","value"),r("1:2","1:1","3:old","1:0","3:Keep"))));
+ b.put("field_notes",new ArrayList<>(Arrays.asList(r("rowid","note_id","field_id"),r("1:4","3:note","3:old"))));
+ b.put("notes",new ArrayList<>(Arrays.asList(r("rowid","id","activity_id","title"),r("1:6","3:note","1:1","3:Keep"))));
+ check(copy(b).equals(b),"positive_copy");System.out.println("CREATE_ORACLE_WITNESS");
+ String frozen=b.toString();
+ Map<String,List<List<String>>> got=create(b,"MULTI_SELECT",Arrays.asList("b","a"));
+ check(got.get("fields").equals(Arrays.asList(b.get("fields").get(0),b.get("fields").get(1),b.get("fields").get(2),r("1:10","3:new-id","3:Same","3:MULTI_SELECT","1:0"))),"definition_exact");
+ check(got.get("field_options").equals(Arrays.asList(b.get("field_options").get(0),b.get("field_options").get(1),r("1:13","3:new-id","3:b","1:0"),r("1:14","3:new-id","3:a","1:1"))),"options_exact");
+ check(got.get("revision").get(1).equals(r("1:1","1:1","1:10")),"revision_once");
+ check(b.toString().equals(frozen),"input_unchanged");
+ for(String table:Arrays.asList("field_values","field_notes","notes"))check(got.get(table).equals(b.get(table)),"preserve_"+table);
+ Map<String,List<List<String>>> plain=create(b,"TEXT",Collections.emptyList());
+ check(plain.get("field_options").equals(b.get("field_options")),"no_phantom_options");
+ Map<String,List<List<String>>> empty=copy(b);empty.get("fields").subList(1,empty.get("fields").size()).clear();empty.get("field_options").subList(1,empty.get("field_options").size()).clear();
+ Map<String,List<List<String>>> fresh=create(empty,"SELECT",Arrays.asList("x"));
+ check(fresh.get("fields").get(1).get(0).equals("1:1")&&fresh.get("field_options").get(1).equals(r("1:1","3:new-id","3:x","1:0")),"empty_rowids");
+ System.out.println("CREATE_ORACLE_PASS");
+}}'''
+    with tempfile.TemporaryDirectory() as tmp:
+        f=Path(tmp)/"CreateOracle.java"
+        def execute(code):
+            f.write_text(harness.replace("__METHODS__",code))
+            return subprocess.run(["java",str(f)],capture_output=True,text=True,timeout=30)
+        good=execute(methods);assert good.returncode==0,(good.stdout,good.stderr)
+        lines=good.stdout.splitlines();assert lines[-1]=="CREATE_ORACLE_PASS";print(good.stdout,end="")
+        for old,new,label in (
+            ('"1:"+nextRow(definitions)','"1:1"',"definition_exact"),
+            ('"1:"+(position++)','"1:0"',"options_exact"),
+            ('"3:"+option','"3:wrong"',"options_exact"),
+            ('Math.incrementExact(Long.parseLong(rows.get(1).get(col).substring(2)))','Long.parseLong(rows.get(1).get(col).substring(2))',"revision_once"),
+            ('revision(out);return out;\n }\n','out.get("field_notes").clear();revision(out);return out;\n }\n',"preserve_field_notes"),
+        ):
+            # The final mutant targets only the end of expectedCreate.
+            count=methods.count(old)
+            if label=="preserve_field_notes":
+                assert count>=1;at=methods.index("static Map<String,List<List<String>>> expectedCreate")
+                prefix,body=methods[:at],methods[at:];assert body.count(old)==1;candidate=prefix+body.replace(old,new)
+            else:
+                assert count==1,(old,count);candidate=methods.replace(old,new)
+            result=execute(candidate)
+            target=lines.index("CREATE_CHECK "+label)
+            assert result.returncode==1 and "AssertionError: "+label in result.stderr,(label,result.stdout,result.stderr)
+            assert result.stdout.splitlines()==lines[:target] and "CREATE_ORACLE_WITNESS" in result.stdout
+            print("CREATE_ORACLE_COMPILED_WITNESSED_MUTANT "+label)
+        print("CREATE_ORACLE mutations=5 PASS; fixed expected cells, not Android")
 
 
 for marker in (" static Map<String,List<List<String>>> expected(", " void save(", " void seed(", " @Override public void onCreate"):
@@ -263,8 +380,8 @@ bind()
 
 def selftest():
     assert not sys.flags.optimize
-    assert REQUIRED==EXPECTED and [len(EXPECTED[p]) for p in ("seed","deleted","undone")]==[53,23,2]
-    assert len(set(sum(EXPECTED.values(),[])))==78
+    assert REQUIRED==EXPECTED and [len(EXPECTED[p]) for p in ("seed","deleted","undone")]==[70,58,2]
+    assert len(set(sum(EXPECTED.values(),[])))==130
     rejected=0
     for api in (26,34):
         v,m,l=fixture(api);validate(v,m,l,api,"a"*40,"123","1")
@@ -273,7 +390,7 @@ def selftest():
             bad=copy.deepcopy(v);del bad[key];cases.append((bad,m,l))
         for key in m:
             bad=copy.deepcopy(m);del bad[key];cases.append((v,bad,l))
-        for key,wrong in (("checks",78.0),("checks",True),("release_ready",0),("api",float(api)),
+        for key,wrong in (("checks",130.0),("checks",True),("checks",78),("release_ready",0),("api",float(api)),
                           ("commit","d"*40),("run_id","999"),("run_attempt","2"),("apk_sha256","d"*64),
                           ("native_ui","WIDGET_CALLBACKS"),("status","FAIL"),("error","sentinel")):
             bad=copy.deepcopy(v);bad[key]=wrong;cases.append((bad,m,l))
@@ -287,7 +404,7 @@ def selftest():
     report_selftest()
     oracle_selftest()
     assert callable(driver())
-    print("FIELDS_HOST "+json.dumps(dict(status="PASS",positive=2,negative=rejected,device_checks=78,
+    print("FIELDS_HOST "+json.dumps(dict(status="PASS",positive=2,negative=rejected,device_checks=130,
         scope="HOST_REPORT_AND_ORACLE_NOT_ANDROID",release_ready=False)))
 
 if __name__=="__main__":

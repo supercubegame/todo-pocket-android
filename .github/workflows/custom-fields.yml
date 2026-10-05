@@ -21,6 +21,132 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/verify_custom_fields.py selftest 2>&1 | tee fields-host.log
+      - name: Current-source field-note byte transform and witnessed mutations
+        run: |
+          set -euo pipefail
+          python3 - src/main/java/com/supercubegame/pockettodo/AppDatabase.java <<'FIELD_NOTES_PY' 2>&1 | tee fields-notes-host.log
+          from pathlib import Path
+          import copy, struct, subprocess, tempfile, sys
+          assert not sys.flags.optimize
+          product=Path(sys.argv[1])
+          tables="revision categories applications activities paths tags batches ledger checkins media notes blocks fields field_options field_values field_notes todos legacy_imports".split()
+          def encode(data):
+              def text(value):
+                  b=value.encode("utf-8");return struct.pack(">i",len(b))+b
+              b=struct.pack(">iii",0x4e444c31,3,len(tables))
+              for name in tables:
+                  columns,rows=data[name]
+                  b+=text(name)+struct.pack(">i",len(columns))+b"".join(text(c) for c in columns)+struct.pack(">i",len(rows))
+                  for row in rows:
+                      assert len(row)==len(columns)
+                      for x in row:
+                          if x is None:b+=b"\0"
+                          elif isinstance(x,int):b+=b"\1"+struct.pack(">q",x)
+                          elif isinstance(x,str):b+=b"\3"+text(x)
+                          else:b+=b"\4"+struct.pack(">i",len(x))+x
+              return b
+          base={name:(["rowid"],[]) for name in tables}
+          base.update({
+           "revision":(["id","id","value"],[[1,1,17]]),
+           "notes":(["rowid","id","activity_id","title"],[[2,"plain",1,"Same"],[5,"linked",1,"Same"],[9,"foreign",2,"Same"]]),
+           "field_notes":(["rowid","note_id","field_id"],[[4,"linked","target"],[7,"foreign","target"]]),
+           "blocks":(["rowid","note_id","id","position","kind","text","asset_id","caption","private"],[[3,"linked","body",0,"TEXT","keep private body",None,"",1],[6,"plain","image",0,"IMAGE","","asset","keep caption",0]]),
+           "media":(["rowid","id","mime","bytes"],[[11,"asset","image/png",512]]),
+           "batches":(["rowid","id","payload","revision","undone"],[[13,"batch",b"\0\1\xff",12,0]]),
+           "field_values":(["rowid","activity_id","field_id","position","value"],[[8,1,"target",0,"keep value"]])
+          })
+          def expected(op):
+              d=copy.deepcopy(base);d["revision"][1][0][2]=18
+              if op==0:
+                  d["notes"][1].append([10,"new",1,"New"])
+                  d["field_notes"][1].append([8,"new","target"])
+              elif op==1:d["field_notes"][1].append([8,"plain","target"])
+              else:d["field_notes"]=(base["field_notes"][0],[[7,"foreign","target"]])
+              return d
+          cases=[
+           ("create",0,"new",base,expected(0),""),
+           ("link",1,"plain",base,expected(1),""),
+           ("unlink",2,"linked",base,expected(2),""),
+           ("cross_owner",1,"foreign",base,None,"IllegalArgumentException"),
+           ("duplicate_id",0,"plain",base,None,"IllegalArgumentException"),
+           ("already_linked",1,"linked",base,None,"IllegalStateException"),
+           ("missing",1,"absent",base,None,"IllegalArgumentException"),
+           ("missing_link",2,"plain",base,None,"IllegalStateException"),
+          ]
+          wrong=copy.deepcopy(base);wrong["field_notes"][1][0][2]="other"
+          cases.append(("wrong_field",2,"linked",wrong,None,"IllegalStateException"))
+          overflow=copy.deepcopy(base);overflow["notes"][1][-1][0]=2**63-1
+          cases.append(("note_overflow",0,"new",overflow,None,"ArithmeticException"))
+          overflow=copy.deepcopy(base);overflow["field_notes"][1][-1][0]=2**63-1
+          cases.append(("link_overflow",1,"plain",overflow,None,"ArithmeticException"))
+          extract=r'''
+          import java.nio.file.*;import java.util.*;import javax.tools.*;import com.sun.source.tree.*;import com.sun.source.util.*;
+          class Extract {
+           public static void main(String[] a)throws Exception{
+            JavaCompiler c=ToolProvider.getSystemJavaCompiler();var fm=c.getStandardFileManager(null,null,null);
+            var ds=new DiagnosticCollector<JavaFileObject>();
+            JavacTask t=(JavacTask)c.getTask(null,fm,ds,List.of("-proc:none"),null,fm.getJavaFileObjects(a[0]));
+            var units=t.parse();String s=Files.readString(Path.of(a[0]));var p=Trees.instance(t).getSourcePositions();
+            Set<String>w=new HashSet<>(List.of("fieldNoteExpected","utf8","readText","readBlob","blob","LimitedBytes","require","STATE_LIMIT","SNAPSHOT_TABLES"));
+            StringBuilder out=new StringBuilder();
+            for(var u:units)for(Tree top:u.getTypeDecls())if(top instanceof ClassTree cl)for(Tree m:cl.getMembers()){
+             String n=m instanceof MethodTree mt?mt.getName().toString():m instanceof ClassTree ct?ct.getSimpleName().toString():m instanceof VariableTree vt?vt.getName().toString():"";
+             if(w.remove(n))out.append(s.substring((int)p.getStartPosition(u,m),(int)p.getEndPosition(u,m))).append("\n");
+            }
+            if(!w.isEmpty()||ds.getDiagnostics().stream().anyMatch(x->x.getKind()==Diagnostic.Kind.ERROR))throw new AssertionError("missing/malformed product "+w);
+            Files.writeString(Path.of(a[1]),out.toString());
+           }
+          }'''
+          harness=r'''
+          import java.io.*;import java.nio.*;import java.nio.charset.*;import java.nio.file.*;import java.util.*;
+          class NoteModel {
+           static class Cursor {static final int FIELD_TYPE_NULL=0,FIELD_TYPE_INTEGER=1,FIELD_TYPE_STRING=3,FIELD_TYPE_BLOB=4;}
+          __PRODUCT__
+           public static void main(String[] a)throws Exception{
+            System.out.println("COMPILED_PRODUCT");
+            for(String line:Files.readAllLines(Path.of(a[0],"cases"))){
+             String[] v=line.split("\\|",-1);if(a.length>1&&!v[0].equals(a[1]))continue;
+             byte[] before=Files.readAllBytes(Path.of(a[0],v[0]+".before")),frozen=before.clone(),result=null;Throwable caught=null;
+             try{result=fieldNoteExpected(before,1,"target",v[2],"New",Integer.parseInt(v[1]),18);}catch(Throwable x){caught=x;}
+             if(!Arrays.equals(before,frozen))throw new AssertionError(v[0]+" mutated_input");
+             if(v[3].isEmpty()){
+              if(caught!=null)throw new AssertionError(v[0]+" unexpected",caught);
+              if(!Arrays.equals(result,Files.readAllBytes(Path.of(a[0],v[0]+".after"))))throw new AssertionError(v[0]+" exact_state");
+             }else if(caught==null||!caught.getClass().getSimpleName().equals(v[3]))throw new AssertionError(v[0]+" refusal",caught);
+             System.out.println("PASS "+v[0]);
+            }
+           }
+          }'''
+          with tempfile.TemporaryDirectory() as tmp:
+              p=Path(tmp);(p/"Extract.java").write_text(extract)
+              subprocess.run(["java",str(p/"Extract.java"),str(product),str(p/"members")],check=True,timeout=30)
+              members=(p/"members").read_text()
+              assert "fieldNoteExpected" in members
+              (p/"cases").write_text("\n".join("|".join((name,str(op),note,error)) for name,op,note,before,after,error in cases))
+              for name,op,note,before,after,error in cases:
+                  (p/(name+".before")).write_bytes(encode(before))
+                  if after is not None:(p/(name+".after")).write_bytes(encode(after))
+              def run(code,case=None):
+                  (p/"NoteModel.java").write_text(harness.replace("__PRODUCT__",code))
+                  return subprocess.run(["java",str(p/"NoteModel.java"),str(p),*([case] if case else [])],capture_output=True,text=True,timeout=30)
+              good=run(members)
+              assert good.returncode==0,(good.stdout,good.stderr)
+              assert good.stdout.splitlines()==["COMPILED_PRODUCT"]+["PASS "+x[0] for x in cases]
+              mutants=[
+                ("new Object[]{rowid,note,activity,title}","new Object[]{rowid,note,activity+1,title}","unlink","create"),
+                ("new Object[]{rowid,note,field}","new Object[]{rowid,note,\"other\"}","unlink","link"),
+                ('if(note.equals(rows.get(r)[1]))','if(operation==2?field.equals(rows.get(r)[2]):note.equals(rows.get(r)[1]))',"create","unlink"),
+                ('if(!Long.valueOf(activity).equals(row[2]))','if(false)',"create","cross_owner"),
+              ]
+              for old,new,witness,target in mutants:
+                  assert members.count(old)==1,(old,members.count(old))
+                  bad=members.replace(old,new);assert bad!=members
+                  control=run(bad,witness);assert control.returncode==0,(control.stdout,control.stderr)
+                  assert control.stdout.splitlines()==["COMPILED_PRODUCT","PASS "+witness]
+                  rejected=run(bad,target)
+                  assert rejected.returncode==1 and rejected.stdout.splitlines()==["COMPILED_PRODUCT"] and "AssertionError: "+target+" " in rejected.stderr,(rejected.stdout,rejected.stderr)
+              print("FIELD_NOTE_PRODUCT positives=11 compiled_witnessed_product_mutants=4 PASS; exact extracted byte-transform only, not SQLite or Android")
+          FIELD_NOTES_PY
       - name: Current-source field UI model and witnessed mutations
         run: |
           set -euo pipefail
@@ -250,6 +376,7 @@ jobs:
           path: |
             fields-host.log
             fields-ui-host.log
+            fields-notes-host.log
           if-no-files-found: error
   fields_device:
     needs: fields_host

@@ -734,7 +734,7 @@ def selftest():
             bad=copy.deepcopy(v);bad[key]=wrong;cases.append((bad,m,l))
         for phase,labels in EXPECTED.items():
             for label in labels:
-                bad=dict(l);bad[phase]=bad[phase].replace("TODO_PASS "+label+"\n","");cases.append((v,bad,l))
+                bad=dict(l);bad[phase]=bad[phase].replace("TODO_PASS "+label+"\n","");cases.append((v,m,bad))
         for value,manifest,logs in cases:
             try:validate(value,manifest,logs,api,"a"*40,"123","1")
             except (AssertionError,KeyError,TypeError):rejected+=1

@@ -660,7 +660,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
                         rows.add(new Object[]{rowid,note,field});tags.add(new int[]{1,3,3});
                     }
                 }else if(table.equals("revision")){
-                    require(names.equals(Arrays.asList("rowid","id","value"))&&rows.size()==1,"修订记录无效");
+                    require(names.equals(Arrays.asList("id","id","value"))&&rows.size()==1,"修订记录无效");
                     rows.get(0)[2]=next;
                 }
                 utf8(out,table);out.writeInt(columns);for(String name:names)utf8(out,name);out.writeInt(rows.size());

@@ -323,7 +323,7 @@ CASES=r'''
    h.defineField("notes-field","Same","TEXT",Collections.emptyList());h.defineField("notes-other","Same","TEXT",Collections.emptyList());
    h.createNote("plain",1,"Same");h.createNote("foreign",2,"Same");
    h.createFieldNote("keep-link",1,"notes-other","Same");h.createFieldNote("foreign-link",2,"notes-field","Same");
-   h.saveNote("plain",Arrays.asList(NoteDocument.Block.text("text","Keep body",true)));
+   h.saveNote("plain",Arrays.asList(com.supercubegame.pockettodo.NoteDocument.Block.text("text","Keep body",true)));
    h.putField(1,"notes-field",Arrays.asList("Keep value"));h.addTodo("notes-keep","Keep");
    pass(h.fieldNoteIds(1,"notes-field").isEmpty()&&h.fieldNoteIds(2,"notes-field").equals(Arrays.asList("foreign-link"))&&h.noteBlocks("plain").size()==1,"notes_fixture");
    Map<String,List<List<String>>> before=state(h);Object create=prepare(h,1,"notes-field");
@@ -372,7 +372,7 @@ CASES=r'''
   pass(state(h).equals(before),"ui_notes_archive_readonly");click("field-notes-back",true);
   click("field-archive-"+field,true);click("field-archive-confirm",true);
   h.createNote("ui-plain",1,"Same");h.createNote("ui-foreign",2,"Same");
-  h.saveNote("ui-plain",Arrays.asList(NoteDocument.Block.text("plain-text","Keep linked content",false)));
+  h.saveNote("ui-plain",Arrays.asList(com.supercubegame.pockettodo.NoteDocument.Block.text("plain-text","Keep linked content",false)));
   before=state(h);click("field-notes-"+field,true);
   ui(()->{View root=one("field-notes-page",true);one("field-note-ui-linked",true);need(noteKeyCount(root,"field-note-create-keep")==0,"other owner hidden");});
   pass(state(h).equals(before)&&h.fieldNoteIds(1,field).equals(Arrays.asList("ui-linked")),"ui_notes_list_scope");

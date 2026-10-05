@@ -13,7 +13,8 @@ TYPES=("TEXT","LONG_TEXT","NUMBER","DATE","SELECT","MULTI_SELECT","LINK","BOOLEA
 EXPECTED={
  "seed":[action+"_"+kind for kind in TYPES for action in ("create","create_duplicate")]+["create_late_rollback","backend_fixture"]+[action+"_"+kind for kind in TYPES for action in ("prepare","value","replay","invalid","consumed")]+
  ["cancel_readonly","same_revision_stale_readonly","rename_stable_id","archive_preserves_history","archived_value_readonly",
-  "unarchive_preserves_history","late_rollback","failed_plan_consumed","outer_transaction_readonly","missing_activity_readonly","missing_field_readonly","backend_checkpoint"],
+  "unarchive_preserves_history","late_rollback","failed_plan_consumed","outer_transaction_readonly","missing_activity_readonly","missing_field_readonly"]+
+ ["session_"+op+"_"+action for op in ("value","rename","archive") for action in ("foreign","owner","reopen","old","consumed","fresh")]+["backend_checkpoint"],
  "deleted":["backend_restart","backend_backup","ui_open_readonly"]+sum(
   [["ui_blank_"+kind]+(["ui_duplicate_options_"+kind] if "SELECT" in kind else [])+
    [action+"_"+kind for action in ("ui_create","ui_create_replay","ui_value","ui_replay","ui_clear")] for kind in TYPES],[])+
@@ -111,6 +112,47 @@ CASES=r'''
    default:throw new AssertionError(type);
   }
  }
+ void sessionChange(AppDatabase h,Object plan,String op,boolean fresh)throws Exception{
+  if(op.equals("value"))values(h,plan,Arrays.asList(fresh?"Fresh":"Owner"));
+  else if(op.equals("rename"))rename(h,plan,fresh?"Fresh":"Owner");
+  else archive(h,plan,!fresh);
+ }
+ Map<String,List<List<String>>> sessionExpected(Map<String,List<List<String>>> before,String op,boolean fresh){
+  if(op.equals("value"))return expectedValue(before,1,"session-field",Arrays.asList(fresh?"Fresh":"Owner"));
+  if(op.equals("rename"))return expectedDefinition(before,"session-field","name","3:"+(fresh?"Fresh":"Owner"));
+  return expectedDefinition(before,"session-field","archived",fresh?"1:0":"1:1");
+ }
+ void sessionCases()throws Exception{
+  // Separate real database: keep all original restart/backup fixtures intact.
+  String sessionName=name()+"-sessions";
+  need(!getTargetContext().getDatabasePath(sessionName).exists(),"fresh session database");
+  try(AppDatabase h=AppDatabase.openSchema3(getTargetContext(),sessionName)){
+   h.addCategory(1,"Same");h.addActivity(1,1,0,"Same");h.addActivity(2,1,0,"Same");
+   h.defineField("session-field","Same","TEXT",Collections.emptyList());
+   h.defineField("keep-field","Same","TEXT",Collections.emptyList());
+   h.putField(1,"session-field",Arrays.asList("Initial"));h.putField(2,"session-field",Arrays.asList("Other owner"));
+   h.putField(1,"keep-field",Arrays.asList("Other field"));h.createFieldNote("session-note",1,"session-field","Keep");
+   h.addTodo("session-keep","Keep");
+   for(String op:Arrays.asList("value","rename","archive")){
+    Object owned=prepare(h,1,"session-field");Map<String,List<List<String>>> before=state(h);
+    try(AppDatabase foreign=AppDatabase.openSchema3(getTargetContext(),sessionName)){
+     need(foreign!=h&&foreign.getReadableDatabase()!=h.getReadableDatabase()&&state(foreign).equals(before),"independent helper same database");
+     readonly(foreign,IllegalArgumentException.class,()->sessionChange(foreign,owned,op,false),"session_"+op+"_foreign");
+    }
+    // A foreign refusal must not consume the owner's valid plan.
+    sessionChange(h,owned,op,false);pass(state(h).equals(sessionExpected(before,op,false)),"session_"+op+"_owner");
+    Object old=prepare(h,1,"session-field");before=state(h);
+    android.database.sqlite.SQLiteDatabase connection=h.getReadableDatabase();
+    h.close();
+    need(!connection.isOpen(),"old connection closed");
+    pass(h.getReadableDatabase()!=connection&&state(h).equals(before),"session_"+op+"_reopen");
+    readonly(h,IllegalStateException.class,()->sessionChange(h,old,op,true),"session_"+op+"_old");
+    readonly(h,IllegalStateException.class,()->sessionChange(h,old,op,true),"session_"+op+"_consumed");
+    Object fresh=prepare(h,1,"session-field");before=state(h);
+    sessionChange(h,fresh,op,true);pass(state(h).equals(sessionExpected(before,op,true)),"session_"+op+"_fresh");
+   }
+  }
+ }
  void seed()throws Exception{
   need(!Files.exists(folder)&&!getTargetContext().getDatabasePath(name()).exists(),"fresh backend");Files.createDirectory(folder);
   try(AppDatabase h=AppDatabase.openSchema3(getTargetContext(),name())){
@@ -167,6 +209,8 @@ CASES=r'''
    finally{h.getWritableDatabase().endTransaction();}
    readonly(h,IllegalArgumentException.class,()->prepare(h,99,"field-TEXT"),"missing_activity_readonly");
    readonly(h,IllegalArgumentException.class,()->prepare(h,1,"missing"),"missing_field_readonly");
+   Map<String,List<List<String>>> originalFixture=state(h);sessionCases();
+   need(state(h).equals(originalFixture),"session tests preserve original backend fixture");
    save("backend-state",state(h).toString());pass(h.fieldNoteIds(1,"field-TEXT").equals(Arrays.asList("linked-note")),"backend_checkpoint");
   }
  }
@@ -227,7 +271,7 @@ CASES=r'''
   click("field-rename-"+id,true);text("field-name","Renamed UI");before=state(h);click("field-rename-save",true);
   pass(state(h).equals(expectedDefinition(before,id,"name","3:Renamed UI")),"ui_rename_stable_id");
   before=state(h);click("field-archive-"+id,true);click("field-archive-confirm",true);
-  pass(state(h).equals(expectedDefinition(before,id,"archived","1:1")),"ui_archive_history");
+  pass(state(h).equals(expectedDefinition(before,id,"field-TEXT","archived","1:1")),"ui_archive_history");
   before=state(h);click("field-archive-"+id,true);click("field-archive-confirm",true);
   pass(state(h).equals(expectedDefinition(before,id,"archived","1:0")),"ui_restore_history");
   before=state(h);click("field-archive-"+id,true);click("field-archive-confirm",true);
@@ -477,8 +521,8 @@ bind()
 
 def selftest():
     assert not sys.flags.optimize
-    assert REQUIRED==EXPECTED and [len(EXPECTED[p]) for p in ("seed","deleted","undone")]==[70,58,2]
-    assert len(set(sum(EXPECTED.values(),[])))==130
+    assert REQUIRED==EXPECTED and [len(EXPECTED[p]) for p in ("seed","deleted","undone")]==[88,58,2]
+    assert len(set(sum(EXPECTED.values(),[])))==148
     rejected=0
     for api in (26,34):
         v,m,l=fixture(api);validate(v,m,l,api,"a"*40,"123","1")
@@ -487,7 +531,7 @@ def selftest():
             bad=copy.deepcopy(v);del bad[key];cases.append((bad,m,l))
         for key in m:
             bad=copy.deepcopy(m);del bad[key];cases.append((v,bad,l))
-        for key,wrong in (("checks",130.0),("checks",True),("checks",78),("release_ready",0),("api",float(api)),
+        for key,wrong in (("checks",148.0),("checks",True),("checks",78),("checks",130),("release_ready",0),("api",float(api)),
                           ("commit","d"*40),("run_id","999"),("run_attempt","2"),("apk_sha256","d"*64),
                           ("native_ui","WIDGET_CALLBACKS"),("status","FAIL"),("error","sentinel")):
             bad=copy.deepcopy(v);bad[key]=wrong;cases.append((bad,m,l))
@@ -502,7 +546,7 @@ def selftest():
     oracle_selftest()
     session_selftest()
     assert callable(driver())
-    print("FIELDS_HOST "+json.dumps(dict(status="PASS",positive=2,negative=rejected,device_checks=130,
+    print("FIELDS_HOST "+json.dumps(dict(status="PASS",positive=2,negative=rejected,device_checks=148,
         scope="HOST_REPORT_AND_ORACLE_NOT_ANDROID",release_ready=False)))
 
 if __name__=="__main__":

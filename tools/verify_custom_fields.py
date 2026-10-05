@@ -124,7 +124,7 @@ CASES=r'''
  }
  void sessionCases()throws Exception{
   // Separate real database: keep all original restart/backup fixtures intact.
-  String sessionName=name()+"-sessions";
+  String sessionName=name().replace(".db","-sessions.db");
   need(!getTargetContext().getDatabasePath(sessionName).exists(),"fresh session database");
   try(AppDatabase h=AppDatabase.openSchema3(getTargetContext(),sessionName)){
    h.addCategory(1,"Same");h.addActivity(1,1,0,"Same");h.addActivity(2,1,0,"Same");
@@ -408,7 +408,7 @@ JavaCompiler c=ToolProvider.getSystemJavaCompiler();DiagnosticCollector<JavaFile
 try(StandardJavaFileManager f=c.getStandardFileManager(d,null,null)){
 JavacTask t=(JavacTask)c.getTask(null,f,d,Arrays.asList("-proc:none"),null,f.getJavaFileObjects(a[0]));
 CompilationUnitTree u=t.parse().iterator().next();for(Diagnostic<?>e:d.getDiagnostics())if(e.getKind()==Diagnostic.Kind.ERROR)throw new AssertionError(e.toString());
-String s=Files.readString(Path.of(a[0]));SourcePositions p=Trees.instance(t).getSourcePositions();Set<String>w=new HashSet<>(Arrays.asList("FieldEditPlan","fieldEditAttempt"));StringBuilder out=new StringBuilder();
+String s=Files.readString(Path.of(a[0]));SourcePositions p=Trees.instance(t).getSourcePositions();Set<String>w=new HashSet<>(Arrays.asList("FieldEditPlan","fieldEditAttempt","validName"));StringBuilder out=new StringBuilder();
 for(Tree type:u.getTypeDecls())if(type instanceof ClassTree&&((ClassTree)type).getSimpleName().contentEquals("AppDatabase"))for(Tree m:((ClassTree)type).getMembers()){
 String name=m instanceof MethodTree?((MethodTree)m).getName().toString():m instanceof ClassTree?((ClassTree)m).getSimpleName().toString():"";
 if(w.remove(name))out.append(s.substring((int)p.getStartPosition(u,m),(int)p.getEndPosition(u,m))).append("\n");
@@ -416,6 +416,7 @@ if(w.remove(name))out.append(s.substring((int)p.getStartPosition(u,m),(int)p.get
 if(!w.isEmpty())throw new AssertionError(w);Files.writeString(Path.of(a[1]),out.toString());}}}'''
     harness=r'''import java.util.*;
 class SessionHarness {
+ static String fixtureName(String base){return __NAME_EXPRESSION__;}
  static void ok(boolean b,String s){if(!b)throw new AssertionError(s);System.out.println("SESSION_PASS "+s);}
  static void refuses(Class<? extends Throwable> kind,Runnable r,String label){
   Throwable failure=null;try{r.run();}catch(Throwable t){failure=t;}ok(failure!=null&&kind.isInstance(failure),label);
@@ -423,6 +424,14 @@ class SessionHarness {
  static AppDatabase.FieldEditPlan plan(AppDatabase h){return new AppDatabase.FieldEditPlan(h,h.connection,1,new CustomFields.Definition(),Arrays.asList("kept"),h.state.clone());}
  static void write(AppDatabase h,AppDatabase.FieldEditPlan p){h.fieldEditAttempt(p,db->{h.writes++;return null;});}
  public static void main(String[] args){
+  if(args.length>0){
+   String base="fields-37264008018-1-"+args[0]+".db";
+   ok(AppDatabase.validName(base).equals(base),"fixture_valid_parent");
+   String actual=fixtureName(base);
+   ok(actual.equals("fields-37264008018-1-"+args[0]+"-sessions.db"),"fixture_exact_name");
+   ok(AppDatabase.validName(actual).equals(actual),"fixture_product_name");
+   return;
+  }
   AppDatabase h=new AppDatabase();AppDatabase.FieldEditPlan p=plan(h);write(h,p);
   ok(h.writes==1,"valid_owner");ok(p.terminal&&p.before==null,"successful_cleanup");
   AppDatabase foreign=new AppDatabase();foreign.connection=h.connection;
@@ -470,9 +479,21 @@ __MEMBERS__
         p=Path(tmp);(p/"ExtractSession.java").write_text(extract)
         subprocess.run(["java",str(p/"ExtractSession.java"),str(product),str(p/"members")],check=True,timeout=30)
         members=(p/"members").read_text()
-        def execute(code):
-            f=p/"SessionHarness.java";f.write_text(harness.replace("__MEMBERS__",code))
-            return subprocess.run(["java",str(f)],capture_output=True,text=True,timeout=30)
+        expressions=re.findall(r'  String sessionName=(.+);',CASES)
+        assert len(expressions)==1,"one actual device fixture name expression"
+        expression=expressions[0].replace("name()","base")
+        def execute(code,name_expression=expression,args=()):
+            f=p/"SessionHarness.java";f.write_text(harness.replace("__MEMBERS__",code).replace("__NAME_EXPRESSION__",name_expression))
+            return subprocess.run(["java",str(f),*args],capture_output=True,text=True,timeout=30)
+        for api in ("26","34"):
+            named=execute(members,args=(api,))
+            assert named.returncode==0,(named.stdout,named.stderr)
+            assert named.stdout.splitlines()==["SESSION_PASS fixture_valid_parent","SESSION_PASS fixture_exact_name","SESSION_PASS fixture_product_name"]
+        for wrong in ('base+"-sessions"','base','"fields-fixed-sessions.db"'):
+            rejected=execute(members,name_expression=wrong,args=("26",))
+            assert rejected.returncode==1 and "AssertionError: fixture_exact_name" in rejected.stderr
+            assert rejected.stdout.splitlines()==["SESSION_PASS fixture_valid_parent"]
+        print("FIELDS_FIXTURE_NAME host_positive=2 compiled_fixture_mutants=3 PASS; actual Java expression and product validator, not Android")
         good=execute(members);assert good.returncode==0,(good.stdout,good.stderr)
         lines=good.stdout.splitlines();assert len(lines)==22 and lines[-1]=="SESSION_PASS_COMPLETE";print(good.stdout,end="")
         mutants=(

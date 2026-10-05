@@ -390,6 +390,17 @@ CASES=r'''
   ui(()->{old[0]=one("field-note-candidate-ui-plain",true);need(old[0].performClick(),"link witness");old[0].performClick();});ready();
   pass(state(h).equals(expectedNote(before,1,field,"ui-plain",null,"link")),"ui_notes_link");
   before=state(h);ui(()->old[0].performClick());ready();pass(state(h).equals(before),"ui_notes_link_replay");
+  // The linked same-title note has a real, distinct body. Verify actual rendering,
+  // then return through the editor callback rather than assuming the activity list.
+  before=state(h);click("field-note-ui-plain",true);
+  ui(()->{
+   need("ui-plain".contentEquals(((TextView)one("note-selected-id",true)).getText()),"linked editor exact identity");
+   need("Keep linked content".contentEquals(((TextView)one("note-text-plain-text",true)).getText()),"linked editor exact body");
+  });
+  need(state(h).equals(before),"linked editor open readonly");
+  click("返回活动",false);
+  ui(()->{one("field-notes-page",true);one("field-note-ui-plain",true);one("field-note-"+created,true);});
+  need(state(h).equals(before),"editor return list readonly");
   click("field-note-unlink-ui-plain",true);before=state(h);click("field-note-cancel",true);
   pass(state(h).equals(before),"ui_notes_unlink_cancel");
   click("field-note-unlink-ui-plain",true);before=state(h);
@@ -397,9 +408,14 @@ CASES=r'''
   pass(state(h).equals(expectedNote(before,1,field,"ui-plain",null,"unlink")),"ui_notes_unlink");
   before=state(h);ui(()->old[0].performClick());ready();pass(state(h).equals(before),"ui_notes_unlink_replay");
   before=state(h);click("field-note-"+created,true);
-  ui(()->need(created.contentEquals(((TextView)one("note-selected-id",true)).getText()),"exact selected note ID"));
+  ui(()->{
+   need(created.contentEquals(((TextView)one("note-selected-id",true)).getText()),"exact selected note ID");
+   need(noteKeyCount(root(),"note-text-plain-text")==0,"same-title sibling body not shown");
+  });
   pass(state(h).equals(before),"ui_notes_open_identity");
-  openFields();click("field-notes-"+field,true);
+  click("返回活动",false);
+  ui(()->{one("field-notes-page",true);one("field-note-"+created,true);});
+  need(state(h).equals(before),"created editor return readonly");
   click("field-note-unlink-"+created,true);before=state(h);click("field-note-unlink-confirm",true);
   need(state(h).equals(expectedNote(before,1,field,created,null,"unlink")),"restore original link fixture using guarded UI");
   click("field-notes-back",true);click("field-archive-"+field,true);click("field-archive-confirm",true);
@@ -698,6 +714,9 @@ for marker in (" static Map<String,List<List<String>>> expected(", " void save("
 JAVA=(shared.JAVA[:shared.JAVA.index(" static Map<String,List<List<String>>> expected(")]+CASES+
       shared.JAVA[shared.JAVA.index(" void save("):shared.JAVA.index(" void seed(")].replace("category-","fields-").replace("&&target.categoryIds().equals(source.categoryIds())","")+
       shared.JAVA[shared.JAVA.index(" @Override public void onCreate"):].replace('"category-"+nonce','"fields-"+nonce'))
+_backup_label='suffix.equals("backend")?"backend_backup":"ui_backup"'
+assert JAVA.count(_backup_label)==1,"one inherited backup label"
+JAVA=JAVA.replace(_backup_label,'suffix+"_backup"')
 def bind():
     for name in ("parser","validate","fixture","driver","report","report_selftest"):
         s=inspect.getsource(getattr(shared,name))
@@ -715,6 +734,70 @@ def bind():
         linecache.cache[filename]=(len(s),None,s.splitlines(True),filename)
         exec(compile(s,filename,"exec"),globals())
 bind()
+
+def backup_selftest():
+    """Compile the generated helper, with explicit backup/storage doubles."""
+    extract=r'''import javax.tools.*;import com.sun.source.util.*;import com.sun.source.tree.*;import java.nio.file.*;import java.util.*;
+class Extract{public static void main(String[]a)throws Exception{
+JavaCompiler c=ToolProvider.getSystemJavaCompiler();DiagnosticCollector<JavaFileObject>d=new DiagnosticCollector<>();
+try(StandardJavaFileManager f=c.getStandardFileManager(d,null,null)){
+JavacTask t=(JavacTask)c.getTask(null,f,d,Arrays.asList("-proc:none"),null,f.getJavaFileObjects(a[0]));
+CompilationUnitTree u=t.parse().iterator().next();for(Diagnostic<?>e:d.getDiagnostics())if(e.getKind()==Diagnostic.Kind.ERROR)throw new AssertionError(e.toString());
+String s=Files.readString(Path.of(a[0]));SourcePositions p=Trees.instance(t).getSourcePositions();StringBuilder out=new StringBuilder();int count=0;
+for(Tree type:u.getTypeDecls())if(type instanceof ClassTree)for(Tree m:((ClassTree)type).getMembers())
+if(m instanceof MethodTree&&((MethodTree)m).getName().contentEquals("backup")){
+out.append(s.substring((int)p.getStartPosition(u,m),(int)p.getEndPosition(u,m))).append("\n");count++;}
+if(count!=1)throw new AssertionError("one backup helper");Files.writeString(Path.of(a[1]),out.toString());}}}'''
+    harness=r'''import java.util.*;import java.nio.file.*;
+class BackupCheck{
+ Path folder=Path.of("fixture");String nonce="1";List<String>labels=new ArrayList<>();Object getTargetContext(){return this;}
+ static final class MediaRepository{MediaRepository(Path p,long n){}}
+ static final class AppDatabase implements AutoCloseable{
+  static List<String>calls=new ArrayList<>();static boolean corrupt;
+  boolean restored;
+  static AppDatabase openSchema3(Object c,String n){calls.add("open:"+n);return new AppDatabase();}
+  void exportBackup(Path p,MediaRepository m){calls.add("export:"+p);}
+  void restoreBackup(Path z,Path p,long n,MediaRepository m){calls.add("restore:"+z);restored=true;}
+  public void close(){}
+ }
+ static Map<String,String>state(AppDatabase h){return Map.of("body",h.restored&&AppDatabase.corrupt?"changed":"preserved");}
+ void pass(boolean b,String label){if(!b)throw new AssertionError("backup equality");labels.add(label);}
+ __BACKUP__
+ public static void main(String[]a)throws Exception{
+  BackupCheck h=new BackupCheck();
+  h.backup(new AppDatabase(),"backend");h.backup(new AppDatabase(),"ui");
+  if(!h.labels.equals(Arrays.asList("backend_backup","ui_backup")))throw new AssertionError("original_backup_labels");
+  System.out.println("BACKUP_ORIGINAL_WITNESS");
+  h.backup(new AppDatabase(),"notes");
+  if(!h.labels.equals(Arrays.asList("backend_backup","ui_backup","notes_backup")))throw new AssertionError("notes_backup_label");
+  if(AppDatabase.calls.size()!=9)throw new AssertionError("all_backup_calls");
+  for(String suffix:Arrays.asList("backend","ui","notes")){
+   if(!AppDatabase.calls.contains("export:fixture/"+suffix+".zip")||
+      !AppDatabase.calls.contains("open:restore-fields-1-"+suffix+".db")||
+      !AppDatabase.calls.contains("restore:fixture/"+suffix+".zip"))throw new AssertionError("backup_paths");
+  }
+  AppDatabase.corrupt=true;boolean rejected=false;
+  try{h.backup(new AppDatabase(),"notes");}catch(AssertionError e){if(!"backup equality".equals(e.getMessage()))throw e;rejected=true;}
+  if(!rejected||h.labels.size()!=3)throw new AssertionError("changed_backup_rejected");
+  System.out.println("BACKUP_HELPER positive=3 negative=1 PASS; generated helper with storage doubles");
+ }
+}'''
+    with tempfile.TemporaryDirectory() as tmp:
+        p=Path(tmp);(p/"Extract.java").write_text(extract);(p/"Source.java").write_text(JAVA)
+        subprocess.run(["java",str(p/"Extract.java"),str(p/"Source.java"),str(p/"members")],check=True,timeout=30)
+        helper=(p/"members").read_text()
+        def execute(code):
+            (p/"BackupCheck.java").write_text(harness.replace("__BACKUP__",code))
+            return subprocess.run(["java",str(p/"BackupCheck.java")],capture_output=True,text=True,timeout=30)
+        good=execute(helper);assert good.returncode==0,(good.stdout,good.stderr);print(good.stdout.strip())
+        for old,new,label in (
+            ('suffix+"_backup"','suffix.equals("backend")?"backend_backup":"ui_backup"',"notes_backup_label"),
+            ("state(target).equals(state(source))","true","changed_backup_rejected"),
+        ):
+            assert helper.count(old)==1
+            result=execute(helper.replace(old,new))
+            assert result.returncode==1 and "BACKUP_ORIGINAL_WITNESS" in result.stdout and "AssertionError: "+label in result.stderr,(result.stdout,result.stderr)
+        print("BACKUP_HELPER compiled_witnessed_mutants=2 PASS; not Android backup acceptance")
 
 def selftest():
     assert not sys.flags.optimize
@@ -742,6 +825,7 @@ def selftest():
     report_selftest()
     oracle_selftest()
     session_selftest()
+    backup_selftest()
     assert callable(driver())
     print("FIELDS_HOST "+json.dumps(dict(status="PASS",positive=2,negative=rejected,device_checks=182,
         scope="HOST_REPORT_AND_ORACLE_NOT_ANDROID",release_ready=False)))

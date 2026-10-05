@@ -226,12 +226,13 @@ jobs:
             System.out.println("FIELD_TYPED_UI_PASS all8 invalid6 clear8 choice3");
           
             // Host can discard the success callback. Page detachment must own cleanup
-            // both before and after the worker obtains the plan.
-            open();create();click("field-edit-"+id());h.closed=true;h.content();drain();
-            need(h.db.last.closed&&h.db.writes==1,"abandoned_before_prepare");
+            // independently, both before the worker starts and after it returns.
+            open();create();click("field-edit-"+id());h.content();h.closed=true;drain();
+            need(h.db.last!=null&&h.db.last.closed&&h.db.writes==1,"abandoned_before_prepare");
             for(boolean destroyed:new boolean[]{false,true}){
-             open();create();click("field-edit-"+id());h.afterRun=()->{h.content();if(destroyed)h.activity.destroyed=true;else h.closed=true;};drain();
-             need(h.db.last.closed&&h.db.writes==1,"abandoned_after_prepare_"+destroyed);
+             open();create();click("field-edit-"+id());
+             h.afterRun=()->{need(h.db.last!=null&&!h.db.last.closed,"pending_live_witness");h.content();if(destroyed)h.activity.destroyed=true;else h.closed=true;};
+             drain();need(h.db.last.closed&&h.db.writes==1,"abandoned_after_prepare_"+destroyed);
             }
             open();create();click("field-edit-"+id());h.afterRun=()->h.activity.finishing=true;drain();
             need(h.db.last.closed&&h.db.writes==1,"finishing_prepare_closes");

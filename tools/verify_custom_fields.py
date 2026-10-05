@@ -271,7 +271,7 @@ CASES=r'''
   click("field-rename-"+id,true);text("field-name","Renamed UI");before=state(h);click("field-rename-save",true);
   pass(state(h).equals(expectedDefinition(before,id,"name","3:Renamed UI")),"ui_rename_stable_id");
   before=state(h);click("field-archive-"+id,true);click("field-archive-confirm",true);
-  pass(state(h).equals(expectedDefinition(before,id,"field-TEXT","archived","1:1")),"ui_archive_history");
+  pass(state(h).equals(expectedDefinition(before,id,"archived","1:1")),"ui_archive_history");
   before=state(h);click("field-archive-"+id,true);click("field-archive-confirm",true);
   pass(state(h).equals(expectedDefinition(before,id,"archived","1:0")),"ui_restore_history");
   before=state(h);click("field-archive-"+id,true);click("field-archive-confirm",true);

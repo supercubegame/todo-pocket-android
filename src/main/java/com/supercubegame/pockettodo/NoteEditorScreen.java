@@ -180,6 +180,12 @@ public final class NoteEditorScreen {
         final java.util.Map<String,android.graphics.Bitmap> previews=new java.util.HashMap<>();
     }
     NoteEditorScreen(TodayScreen host,long activityId,String title,Runnable back){this.host=host;this.activityId=activityId;this.title=title;this.back=back;}
+    /** Explicit stable-ID entry; missing or foreign notes never fall back to the first. */
+    void load(String noteId){
+        Ledger.identifier(noteId);
+        selectedNote=noteId;
+        load();
+    }
     void load(){
         final String requested=selectedNote;
         host.work(()->{
@@ -204,6 +210,7 @@ public final class NoteEditorScreen {
         Button choose=host.button("切换笔记",()->chooseNote(s));choose.setEnabled(!s.ids.isEmpty());header.addView(choose,new LinearLayout.LayoutParams(0,host.dp(48),1));body.addView(header);
         int index=s.ids.indexOf(s.noteId);
         TextView owner=host.text(index<0?title+" · 尚无笔记":s.titles.get(index)+" · "+(index+1)+" / "+s.ids.size(),15,TodayScreen.MUTED);owner.setContentDescription("note-current");owner.setMaxLines(2);owner.setPadding(0,host.dp(4),0,host.dp(10));body.addView(owner);
+        TextView identity=host.text(s.noteId==null?"":s.noteId,12,TodayScreen.MUTED);identity.setContentDescription("note-selected-id");body.addView(identity);
         LinearLayout actions=new LinearLayout(host.activity);
         actions.addView(host.button("加入文字",()->editText(s,null)),new LinearLayout.LayoutParams(0,host.dp(48),1));
         actions.addView(host.button("加入图片",()->addImage(s)),new LinearLayout.LayoutParams(0,host.dp(48),1));body.addView(actions);

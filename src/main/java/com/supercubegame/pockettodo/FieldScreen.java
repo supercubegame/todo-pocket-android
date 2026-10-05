@@ -6,7 +6,7 @@ import android.widget.*;
 import java.util.*;
 
 /** Local field definitions are shared; values belong to one stable activity ID.
- * Native callbacks are page-bound and single-submit. Field-note UI comes later.
+ * Native callbacks are page-bound and single-submit.
  */
 final class FieldScreen {
     private final TodayScreen host;
@@ -144,6 +144,8 @@ final class FieldScreen {
             value.setContentDescription("field-value-"+f.id);value.setMaxLines(5);row.addView(value);
             Button edit=button(row,f.archived?"历史值只读":"填写 / 修改","field-edit-"+f.id);edit.setEnabled(!f.archived);
             edit.setOnClickListener(v->prepare(p,edit,f,0));
+            Button notes=button(row,"字段笔记","field-notes-"+f.id);
+            notes.setOnClickListener(v->{if(canSubmit(p,notes))loadNotes(p,f.id);});
             LinearLayout tools=new LinearLayout(host.activity);row.addView(tools);
             Button rename=host.button("改名",()->{});rename.setContentDescription("field-rename-"+f.id);
             rename.setOnClickListener(v->prepare(p,rename,f,1));
@@ -267,6 +269,132 @@ final class FieldScreen {
                 plan.close();
                 if(current(p)){p.plan=null;p.submitted=false;error.setText("未能保存，内容可能已变化。请取消后重新打开；旧提交不会重试。");}
             });
+        });
+    }
+    private static final class NoteRow {
+        final String id,title;
+        NoteRow(String id,String title){this.id=id;this.title=title;}
+    }
+    private static final class Notes {
+        final CustomFields.Definition field;
+        final List<NoteRow> linked=new ArrayList<>(),available=new ArrayList<>();
+        Notes(CustomFields.Definition field){this.field=field;}
+    }
+    private Notes readNotes(String field){
+        synchronized(host.db){
+            android.database.sqlite.SQLiteDatabase sql=host.db.getReadableDatabase();
+            sql.beginTransaction();
+            try{
+                Notes result=new Notes(host.db.fieldDefinition(field));
+                try(Cursor owner=sql.rawQuery("SELECT title FROM activities WHERE id=?",new String[]{Long.toString(activity)})){
+                    if(!owner.moveToFirst())throw new IllegalArgumentException("活动不存在");
+                }
+                try(Cursor c=sql.rawQuery("SELECT n.id,n.title,f.field_id FROM notes n LEFT JOIN field_notes f ON f.note_id=n.id WHERE n.activity_id=? ORDER BY n.rowid",new String[]{Long.toString(activity)})){
+                    while(c.moveToNext()){
+                        NoteRow note=new NoteRow(c.getString(0),c.getString(1));
+                        if(c.isNull(2))result.available.add(note);
+                        else if(field.equals(c.getString(2)))result.linked.add(note);
+                    }
+                }
+                sql.setTransactionSuccessful();return result;
+            }finally{sql.endTransaction();}
+        }
+    }
+    private void loadNotes(Page p,String field){
+        p.submitted=true;
+        host.work(()->readNotes(field),notes->{if(current(p))renderNotes(notes);},()->{
+            if(current(p)){p.submitted=false;host.message("笔记列表读取失败，请返回后重新打开；已提交操作不会重做。",true);}
+        });
+    }
+    private void renderNotes(Notes notes){
+        Page p=begin("字段笔记");p.root.setContentDescription("field-notes-page");
+        LinearLayout body=scroll(p);CustomFields.Definition f=notes.field;
+        body.addView(host.text(f.name+(f.archived?" · 历史只读":""),20,TodayScreen.INK));
+        Button leave=button(body,"返回字段","field-notes-back");
+        leave.setOnClickListener(v->{if(canSubmit(p,leave)){p.submitted=true;refresh(p);}});
+        Button create=button(body,"新建字段笔记","field-note-new");
+        Button link=button(body,"关联已有笔记","field-note-link");
+        create.setEnabled(!f.archived);link.setEnabled(!f.archived);
+        create.setOnClickListener(v->prepareNote(p,create,f,null,0));
+        link.setOnClickListener(v->prepareNote(p,link,f,null,1));
+        body.addView(host.text("仅显示当前活动的关联。解除关联不会删除笔记、正文或图片。",14,TodayScreen.MUTED));
+        if(notes.linked.isEmpty())body.addView(host.text("还没有关联笔记。",17,TodayScreen.MUTED));
+        for(NoteRow note:notes.linked){
+            TextView title=host.text(note.title+" · "+note.id,17,TodayScreen.INK);
+            title.setContentDescription("field-note-"+note.id);body.addView(title);
+            Button unlink=button(body,"解除关联","field-note-unlink-"+note.id);unlink.setEnabled(!f.archived);
+            unlink.setOnClickListener(v->prepareNote(p,unlink,f,note,2));
+        }
+    }
+    private void prepareNote(Page p,View control,CustomFields.Definition shown,NoteRow note,int mode){
+        if(!canSubmit(p,control)||shown.archived)return;
+        p.submitted=true;
+        host.work(()->{
+            AppDatabase.FieldEditPlan plan=host.db.prepareFieldEdit(activity,shown.id);
+            p.prepared(plan);return plan;
+        },plan->{
+            p.handoff(plan);
+            if(!current(p)){plan.close(); return;}
+            CustomFields.Definition actual=plan.definition();
+            if(actual.archived||!actual.name.equals(shown.name)||actual.type!=shown.type||!actual.options.equals(shown.options)){
+                plan.close();p.submitted=false;host.message("字段已变化，请重新打开笔记列表。",true);return;
+            }
+            editNote(plan,note,mode);
+        },()->{if(current(p))p.submitted=false;});
+    }
+    private void editNote(AppDatabase.FieldEditPlan plan,NoteRow note,int mode){
+        Page p=begin(mode==0?"新建字段笔记":mode==1?"关联已有笔记":"解除笔记关联");p.plan=plan;
+        p.root.setContentDescription("field-notes-page");
+        LinearLayout body=scroll(p);String field=plan.definition().id;
+        Button cancel=button(body,"取消，返回笔记列表","field-note-cancel");
+        cancel.setOnClickListener(v->{
+            if(!canSubmit(p,cancel))return;
+            plan.close();p.plan=null;loadNotes(p,field);
+        });
+        TextView error=validation(body);
+        if(mode==0){
+            String id=UUID.randomUUID().toString();
+            EditText title=input(body,"field-note-title","笔记标题",false,"");
+            Button create=button(body,"创建并关联","field-note-create");
+            create.setOnClickListener(v->{
+                if(!canSubmit(p,create)||p.plan!=plan)return;
+                final String name;
+                try{name=ActivityModel.title(title.getText().toString());}
+                catch(RuntimeException e){error.setText("笔记标题不能为空。");return;}
+                writeNote(p,create,plan,id,name,0,error);
+            });
+        }else if(mode==1){
+            host.work(()->readNotes(field),notes->{
+                if(!current(p))return;
+                if(notes.available.isEmpty())body.addView(host.text("当前活动没有未关联的笔记。",16,TodayScreen.MUTED));
+                for(NoteRow candidate:notes.available){
+                    Button pick=button(body,candidate.title+" · "+candidate.id,"field-note-candidate-"+candidate.id);
+                    pick.setOnClickListener(v->writeNote(p,pick,plan,candidate.id,null,1,error));
+                }
+            },()->{
+                plan.close();
+                if(current(p)){p.plan=null;error.setText("候选笔记读取失败，请取消后重新打开。");}
+            });
+        }else{
+            body.addView(host.text("解除「"+note.title+"」与当前字段的关联？笔记正文和图片将保留。",17,TodayScreen.INK));
+            Button confirm=button(body,"确认解除关联，不删除笔记","field-note-unlink-confirm");
+            confirm.setOnClickListener(v->writeNote(p,confirm,plan,note.id,null,2,error));
+        }
+    }
+    private void writeNote(Page p,View control,AppDatabase.FieldEditPlan plan,String note,String title,int mode,TextView error){
+        if(!canSubmit(p,control)||p.plan!=plan)return;
+        p.submitted=true;control.setEnabled(false);
+        host.work(()->{
+            if(!p.alive){plan.close();throw new IllegalStateException("笔记页面已关闭");}
+            if(mode==0)host.db.confirmFieldNoteCreate(plan,note,title);
+            else if(mode==1)host.db.confirmFieldNoteLink(plan,note);
+            else host.db.confirmFieldNoteUnlink(plan,note);
+            return true;
+        },ignored->{
+            if(current(p)){p.plan=null;loadNotes(p,plan.definition().id);}
+        },()->{
+            plan.close();
+            if(current(p)){p.plan=null;p.submitted=false;error.setText("未能保存，内容可能已变化。请取消后重新打开；本次提交不会重试。");}
         });
     }
     private static String hint(CustomFields.Type type){

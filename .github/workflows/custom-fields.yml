@@ -249,7 +249,46 @@ jobs:
              need(!worker.isAlive()&&failure.get()==null&&h.db.last.closed&&h.db.writes==1,"threaded_abandoned_"+destroyed);
             }
           
+            need(checks==245,"stage1_exact_count");
+            notes();
           System.out.println("FIELD_UI_HOST_PASS checks="+checks);
+           }
+           static void notes(){
+            open();create();String field=id();
+            h.db.notes.put("plain",new String[]{"1","Same","Body"});
+            h.db.notes.put("foreign",new String[]{"2","Same","Foreign"});
+            h.db.notes.put("keep",new String[]{"1","Same","Keep"});
+            h.db.links.put("keep","other");
+            click("field-notes-"+field);drain();need(h.db.writes==1,"notes_list_readonly");
+            click("field-note-new");drain();click("field-note-create");
+            need(h.db.writes==1&&!((TextView)one("field-validation")).text.isEmpty(),"notes_blank");
+            text("field-note-title","Same");View save=one("field-note-create");
+            save.performClick();save.performClick();need(h.queue.size()==1,"notes_create_single_queue");drain();
+            need(h.db.writes==2&&h.db.notes.size()==4&&h.db.links.size()==2,"notes_create_once");
+            String added=h.db.links.keySet().stream().filter(x->!x.equals("keep")).findFirst().get();
+            need(h.db.notes.get(added)[0].equals("1")&&h.db.notes.get(added)[1].equals("Same"),"notes_create_owner");
+            save.performClick();drain();need(h.db.writes==2,"notes_create_detached");
+            click("field-note-link");drain();
+            need(find(h.root,"field-note-candidate-foreign")==null&&find(h.root,"field-note-candidate-keep")==null,"notes_candidate_scope");
+            save=one("field-note-candidate-plain");save.performClick();save.performClick();need(h.queue.size()==1,"notes_link_single_queue");drain();
+            need(h.db.writes==3&&field.equals(h.db.links.get("plain"))&&h.db.notes.get("plain")[2].equals("Body"),"notes_link_body");
+            save.performClick();drain();need(h.db.writes==3,"notes_link_detached");
+            click("field-note-unlink-plain");drain();AppDatabase.FieldEditPlan canceled=h.db.last;
+            click("field-note-cancel");drain();need(canceled.closed&&h.db.writes==3&&field.equals(h.db.links.get("plain")),"notes_cancel_readonly");
+            click("field-note-unlink-plain");drain();save=one("field-note-unlink-confirm");
+            save.performClick();save.performClick();need(h.queue.size()==1,"notes_unlink_single_queue");drain();
+            need(h.db.writes==4&&!h.db.links.containsKey("plain")&&h.db.notes.get("plain")[2].equals("Body")&&h.db.links.get("keep").equals("other"),"notes_unlink_body");
+            save.performClick();drain();need(h.db.writes==4,"notes_unlink_detached");
+            click("field-note-new");drain();text("field-note-title","Canceled");save=one("field-note-create");AppDatabase.FieldEditPlan pending=h.db.last;
+            int attempted=h.db.attempts;save.performClick();h.content();drain();need(pending.closed&&h.db.writes==4&&h.db.attempts==attempted,"notes_queued_detach");
+            screen.open(h.root);drain();click("field-notes-"+field);drain();click("field-note-new");drain();text("field-note-title","Failed");
+            h.db.fail=true;save=one("field-note-create");save.performClick();drain();
+            need(h.db.last.closed&&!save.enabled&&h.db.writes==4,"notes_failed_terminal");
+            h.db.fail=false;save.performClick();drain();need(h.db.writes==4,"notes_failed_replay");
+            click("field-note-cancel");drain();click("field-notes-back");drain();click("field-archive-"+field);drain();click("field-archive-confirm");drain();
+            click("field-notes-"+field);drain();need(!one("field-note-new").enabled&&!one("field-note-link").enabled&&!one("field-note-unlink-"+added).enabled,"notes_archived_disabled");
+            int before=h.db.writes;one("field-note-new").performClick();drain();need(h.db.writes==before,"notes_archived_readonly");
+            System.out.println("FIELD_NOTES_UI_WITNESS");
            }
            static void await(java.util.concurrent.CountDownLatch latch){
             try{if(!latch.await(5,java.util.concurrent.TimeUnit.SECONDS))throw new AssertionError("latch_timeout");}
@@ -296,26 +335,34 @@ jobs:
           }
           class ActivityModel{static String title(String s){if(s==null||s.trim().isEmpty())throw new IllegalArgumentException();return s.trim();}}
           class Cursor implements AutoCloseable{
-           List<String>rows;int i=-1;Cursor(List<String>r){rows=r;}boolean moveToFirst(){i=0;return !rows.isEmpty();}boolean moveToNext(){return ++i<rows.size();}String getString(int c){return rows.get(i);}public void close(){}
+           List<String>rows;List<String[]>cells;int i=-1;Cursor(List<String>r){rows=r;}boolean moveToFirst(){i=0;return !rows.isEmpty();}boolean moveToNext(){return ++i<(cells==null?rows.size():cells.size());}String getString(int c){return cells==null?rows.get(i):cells.get(i)[c];}boolean isNull(int c){return getString(c)==null;}public void close(){}
           }
           class SQLiteDatabase {
            AppDatabase owner;SQLiteDatabase(AppDatabase o){owner=o;}void beginTransaction(){}void endTransaction(){}void setTransactionSuccessful(){}
            Cursor rawQuery(String q,String[]a){if(owner.readFail)throw new IllegalStateException("read");
             if(q.equals("SELECT title FROM activities WHERE id=?"))return new Cursor(List.of("Activity"));
             if(q.equals("SELECT id FROM fields ORDER BY rowid"))return new Cursor(new ArrayList<>(owner.defs.keySet()));
+            if(q.equals("SELECT n.id,n.title,f.field_id FROM notes n LEFT JOIN field_notes f ON f.note_id=n.id WHERE n.activity_id=? ORDER BY n.rowid")){
+             Cursor c=new Cursor(List.of());c.cells=new ArrayList<>();
+             owner.notes.forEach((id,n)->{if(n[0].equals(a[0]))c.cells.add(new String[]{id,n[1],owner.links.get(id)});});return c;
+            }
             throw new AssertionError(q);}
           }
           class AppDatabase {
            Map<String,CustomFields.Definition>defs=new LinkedHashMap<>();List<String>value=List.of();int writes;boolean fail,readFail;FieldEditPlan last;
+           Map<String,String[]>notes=new LinkedHashMap<>();Map<String,String>links=new LinkedHashMap<>();int attempts;
            static class FieldEditPlan{CustomFields.Definition def;List<String>values;boolean closed;void close(){closed=true;}CustomFields.Definition definition(){return def;}List<String>values(){return values;}}
            SQLiteDatabase getReadableDatabase(){return new SQLiteDatabase(this);}
            CustomFields.Definition fieldDefinition(String id){return defs.get(id);}List<String>fieldValue(long a,String id){return value;}
            void defineField(String id,String n,String t,List<String>o){if(defs.containsKey(id))throw new IllegalArgumentException();defs.put(id,new CustomFields.Definition(id,n,CustomFields.Type.valueOf(t),o,false));writes++;}
            FieldEditPlan prepareFieldEdit(long a,String id){last=new FieldEditPlan();last.def=defs.get(id);last.values=new ArrayList<>(value);return last;}
-           void attempt(FieldEditPlan p){if(p.closed)throw new IllegalStateException("closed");p.close();if(fail)throw new IllegalStateException("fail");writes++;}
+           void attempt(FieldEditPlan p){attempts++;if(p.closed)throw new IllegalStateException("closed");p.close();if(fail)throw new IllegalStateException("fail");writes++;}
            void confirmFieldValue(FieldEditPlan p,List<String>v){attempt(p);value=new ArrayList<>(v);}
            void confirmFieldRename(FieldEditPlan p,String n){attempt(p);CustomFields.Definition d=p.def;defs.put(d.id,new CustomFields.Definition(d.id,n,d.type,d.options,d.archived));}
            void confirmFieldArchive(FieldEditPlan p,boolean a){attempt(p);CustomFields.Definition d=p.def;defs.put(d.id,new CustomFields.Definition(d.id,d.name,d.type,d.options,a));}
+           void confirmFieldNoteCreate(FieldEditPlan p,String id,String title){attempt(p);notes.put(id,new String[]{"1",title,""});links.put(id,p.def.id);}
+           void confirmFieldNoteLink(FieldEditPlan p,String id){attempt(p);links.put(id,p.def.id);}
+           void confirmFieldNoteUnlink(FieldEditPlan p,String id){attempt(p);links.remove(id);}
           }
           '''
           LEDGER=r'''
@@ -340,10 +387,10 @@ jobs:
               assert good.returncode==0,(good.stdout,good.stderr)
               lines=good.stdout.splitlines()
               checks=[x for x in lines if x.startswith("FIELD_UI_CHECK ")]
-              assert len(checks)==245 and [int(x.split()[1]) for x in checks]==list(range(1,246)),checks
+              assert len(checks)==296 and [int(x.split()[1]) for x in checks]==list(range(1,297)),checks
               assert lines.count("FIELD_UI_RENDER_WITNESS")==1 and lines.count("FIELD_UI_CREATE_WITNESS")==1
               assert lines.count("FIELD_TYPED_UI_PASS all8 invalid6 clear8 choice3")==1
-              assert lines[-1]=="FIELD_UI_HOST_PASS checks=245",lines
+              assert lines[-1]=="FIELD_UI_HOST_PASS checks=296",lines
               print(good.stdout,end="")
               killed=[]
               for old,new,count,label in (
@@ -353,6 +400,9 @@ jobs:
                   ("if(plan!=null){plan.close();plan=null;}","if(plan!=null){plan=null;}",1,"detach_closes"),
                   ("if(!alive){value.close();return;}","if(!alive){return;}",1,"abandoned_before_prepare"),
                   ("pending=value;","pending=null;",1,"abandoned_after_prepare_false"),
+                  ("host.db.confirmFieldNoteUnlink(plan,note)","host.db.confirmFieldNoteLink(plan,note)",1,"notes_unlink_body"),
+                  ('if(!p.alive){plan.close();throw new IllegalStateException("笔记页面已关闭");}','if(false){plan.close();throw new IllegalStateException("笔记页面已关闭");}',1,"notes_queued_detach"),
+                  ("plan.close();p.plan=null;loadNotes(p,field);","p.plan=null;loadNotes(p,field);",1,"notes_cancel_readonly"),
               ):
                   assert code.count(old)==count and old!=new,(old,code.count(old))
                   candidate=code.replace(old,new)

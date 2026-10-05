@@ -7,18 +7,20 @@ sys.path.insert(0,str(ROOT/"tools"))
 import verify_todo_management as runner
 import verify_category_drag as shared
 PACKAGE=runner.PACKAGE
-SCOPE="FIELD_STAGE1_EIGHT_TYPES_GUARDED_EDITS_NOT_FIELD_NOTE_UI_OR_FULL_RELEASE"
+SCOPE="FIELD_STAGE2_GUARDED_NOTE_LINKS_AND_UI_NOT_FULL_RELEASE"
 assert hashlib.sha256(Path(shared.__file__).read_bytes()).hexdigest()=="9b1b435b21b630e1230f1e112a794962825665982ceabdbb41cc68583ce3d70d","review changed shared adapter"
 TYPES=("TEXT","LONG_TEXT","NUMBER","DATE","SELECT","MULTI_SELECT","LINK","BOOLEAN")
 EXPECTED={
  "seed":[action+"_"+kind for kind in TYPES for action in ("create","create_duplicate")]+["create_late_rollback","backend_fixture"]+[action+"_"+kind for kind in TYPES for action in ("prepare","value","replay","invalid","consumed")]+
  ["cancel_readonly","same_revision_stale_readonly","rename_stable_id","archive_preserves_history","archived_value_readonly",
   "unarchive_preserves_history","late_rollback","failed_plan_consumed","outer_transaction_readonly","missing_activity_readonly","missing_field_readonly"]+
- ["session_"+op+"_"+action for op in ("value","rename","archive") for action in ("foreign","owner","reopen","old","consumed","fresh")]+["backend_checkpoint"],
+ ["session_"+op+"_"+action for op in ("value","rename","archive") for action in ("foreign","owner","reopen","old","consumed","fresh")]+
+ ["notes_"+x for x in ("fixture","prepare","create","create_replay","link","link_replay","cross_owner","already_linked","unlink","unlink_replay","wrong_field","cancel","stale","stale_consumed","rollback","failure_consumed","archived","missing","foreign","owner")]+["backend_checkpoint"],
  "deleted":["backend_restart","backend_backup","ui_open_readonly"]+sum(
   [["ui_blank_"+kind]+(["ui_duplicate_options_"+kind] if "SELECT" in kind else [])+
    [action+"_"+kind for action in ("ui_create","ui_create_replay","ui_value","ui_replay","ui_clear")] for kind in TYPES],[])+
- ["ui_cancel_readonly","ui_rename_stable_id","ui_archive_history","ui_restore_history","ui_checkpoint"],
+ ["ui_cancel_readonly","ui_rename_stable_id","ui_archive_history","ui_restore_history"]+
+ ["notes_restart","notes_backup"]+["ui_notes_"+x for x in ("archive_readonly","list_scope","blank","create","create_replay","link","link_replay","unlink_cancel","unlink","unlink_replay","open_identity","checkpoint")]+["ui_checkpoint"],
  "undone":["ui_restart","ui_backup"],
 }
 REQUIRED=copy.deepcopy(EXPECTED)
@@ -211,6 +213,7 @@ CASES=r'''
    readonly(h,IllegalArgumentException.class,()->prepare(h,1,"missing"),"missing_field_readonly");
    Map<String,List<List<String>>> originalFixture=state(h);sessionCases();
    need(state(h).equals(originalFixture),"session tests preserve original backend fixture");
+   noteCases();need(state(h).equals(originalFixture),"note tests preserve original backend fixture");
    save("backend-state",state(h).toString());pass(h.fieldNoteIds(1,"field-TEXT").equals(Arrays.asList("linked-note")),"backend_checkpoint");
   }
  }
@@ -276,11 +279,136 @@ CASES=r'''
   pass(state(h).equals(expectedDefinition(before,id,"archived","1:0")),"ui_restore_history");
   before=state(h);click("field-archive-"+id,true);click("field-archive-confirm",true);
   need(state(h).equals(expectedDefinition(before,id,"archived","1:1")),"restore original archived restart fixture");
+  try(AppDatabase notes=AppDatabase.openSchema3(getTargetContext(),name().replace(".db","-notes.db"))){
+   pass(state(notes).toString().equals(read("notes-state")),"notes_restart");backup(notes,"notes");
+  }
+  noteUi(h,id);
   save("ui-state",state(h).toString());save("ui-media",media().toString());
   pass(h.fieldNoteIds(1,id).equals(Arrays.asList("ui-linked"))&&h.fieldValue(2,id).isEmpty(),"ui_checkpoint");
  }
  void undone()throws Exception{
   launch();openFields();pass(state(db()).toString().equals(read("ui-state"))&&media().toString().equals(read("ui-media")),"ui_restart");backup(db(),"ui");
+ }
+ void noteWrite(AppDatabase h,Object plan,String op,String note,String title)throws Exception{
+  if(op.equals("create"))invoke(h,"confirmFieldNoteCreate",new Class<?>[]{plan.getClass(),String.class,String.class},plan,note,title);
+  else invoke(h,op.equals("link")?"confirmFieldNoteLink":"confirmFieldNoteUnlink",new Class<?>[]{plan.getClass(),String.class},plan,note);
+ }
+ static Map<String,List<List<String>>> expectedNote(Map<String,List<List<String>>> before,long owner,String field,String note,String title,String op){
+  Map<String,List<List<String>>> out=copy(before);
+  List<List<String>> notes=out.get("notes"),links=out.get("field_notes");
+  need(notes.get(0).equals(Arrays.asList("rowid","id","activity_id","title")),"oracle note schema");
+  need(links.get(0).equals(Arrays.asList("rowid","note_id","field_id")),"oracle link schema");
+  if(op.equals("create")){
+   for(int i=1;i<notes.size();i++)need(!notes.get(i).get(1).equals("3:"+note),"oracle new note");
+   notes.add(new ArrayList<>(Arrays.asList("1:"+nextRow(notes),"3:"+note,"1:"+owner,"3:"+title)));
+  }else{
+   int matches=0;for(int i=1;i<notes.size();i++)if(notes.get(i).get(1).equals("3:"+note)&&notes.get(i).get(2).equals("1:"+owner))matches++;
+   need(matches==1,"oracle note owner");
+  }
+  if(op.equals("unlink")){
+   int removed=0;for(int i=links.size()-1;i>0;i--)if(links.get(i).get(1).equals("3:"+note)&&links.get(i).get(2).equals("3:"+field)){links.remove(i);removed++;}
+   need(removed==1,"oracle unlink identity");
+  }else{
+   need(op.equals("create")||op.equals("link"),"oracle note operation");
+   for(int i=1;i<links.size();i++)need(!links.get(i).get(1).equals("3:"+note),"oracle unlinked note");
+   links.add(new ArrayList<>(Arrays.asList("1:"+nextRow(links),"3:"+note,"3:"+field)));
+  }
+  revision(out);return out;
+ }
+ void noteCases()throws Exception{
+  String notesName=name().replace(".db","-notes.db");
+  need(!getTargetContext().getDatabasePath(notesName).exists(),"fresh notes database");
+  try(AppDatabase h=AppDatabase.openSchema3(getTargetContext(),notesName)){
+   h.addCategory(1,"Same");h.addActivity(1,1,0,"Same");h.addActivity(2,1,0,"Same");
+   h.defineField("notes-field","Same","TEXT",Collections.emptyList());h.defineField("notes-other","Same","TEXT",Collections.emptyList());
+   h.createNote("plain",1,"Same");h.createNote("foreign",2,"Same");
+   h.createFieldNote("keep-link",1,"notes-other","Same");h.createFieldNote("foreign-link",2,"notes-field","Same");
+   h.saveNote("plain",Arrays.asList(NoteDocument.Block.text("text","Keep body",true)));
+   h.putField(1,"notes-field",Arrays.asList("Keep value"));h.addTodo("notes-keep","Keep");
+   pass(h.fieldNoteIds(1,"notes-field").isEmpty()&&h.fieldNoteIds(2,"notes-field").equals(Arrays.asList("foreign-link"))&&h.noteBlocks("plain").size()==1,"notes_fixture");
+   Map<String,List<List<String>>> before=state(h);Object create=prepare(h,1,"notes-field");
+   pass(state(h).equals(before),"notes_prepare");
+   noteWrite(h,create,"create","created","Same");pass(state(h).equals(expectedNote(before,1,"notes-field","created","Same","create")),"notes_create");
+   readonly(h,IllegalStateException.class,()->noteWrite(h,create,"create","again","Same"),"notes_create_replay");
+   Object link=prepare(h,1,"notes-field");before=state(h);noteWrite(h,link,"link","plain",null);
+   pass(state(h).equals(expectedNote(before,1,"notes-field","plain",null,"link")),"notes_link");
+   readonly(h,IllegalStateException.class,()->noteWrite(h,link,"link","plain",null),"notes_link_replay");
+   Object cross=prepare(h,1,"notes-field");
+   readonly(h,IllegalArgumentException.class,()->noteWrite(h,cross,"link","foreign",null),"notes_cross_owner");
+   Object occupied=prepare(h,1,"notes-field");
+   readonly(h,IllegalStateException.class,()->noteWrite(h,occupied,"link","keep-link",null),"notes_already_linked");
+   Object unlink=prepare(h,1,"notes-field");before=state(h);noteWrite(h,unlink,"unlink","plain",null);
+   pass(state(h).equals(expectedNote(before,1,"notes-field","plain",null,"unlink")),"notes_unlink");
+   readonly(h,IllegalStateException.class,()->noteWrite(h,unlink,"unlink","plain",null),"notes_unlink_replay");
+   Object wrong=prepare(h,1,"notes-field");
+   readonly(h,IllegalStateException.class,()->noteWrite(h,wrong,"unlink","keep-link",null),"notes_wrong_field");
+   Object canceled=prepare(h,1,"notes-field");((AutoCloseable)canceled).close();
+   readonly(h,IllegalStateException.class,()->noteWrite(h,canceled,"link","plain",null),"notes_cancel");
+   Object stale=prepare(h,1,"notes-field");h.getWritableDatabase().execSQL("UPDATE notes SET title='Changed without revision' WHERE id='plain'");
+   readonly(h,IllegalStateException.class,()->noteWrite(h,stale,"link","plain",null),"notes_stale");
+   readonly(h,IllegalStateException.class,()->noteWrite(h,stale,"link","plain",null),"notes_stale_consumed");
+   Object failed=prepare(h,1,"notes-field");before=state(h);
+   h.getWritableDatabase().execSQL("CREATE TRIGGER notes_fault BEFORE UPDATE OF value ON revision BEGIN SELECT RAISE(ABORT,'notes_late_fault'); END");
+   Throwable failure=null;try{noteWrite(h,failed,"create","rollback-note","Same");}catch(Throwable t){failure=t;}
+   boolean sentinel=false;for(Throwable t=failure;t!=null;t=t.getCause())if(String.valueOf(t.getMessage()).contains("notes_late_fault"))sentinel=true;
+   pass(sentinel&&state(h).equals(before),"notes_rollback");h.getWritableDatabase().execSQL("DROP TRIGGER notes_fault");
+   readonly(h,IllegalStateException.class,()->noteWrite(h,failed,"create","rollback-note","Same"),"notes_failure_consumed");
+   h.archiveField("notes-field",true);Object archived=prepare(h,1,"notes-field");
+   readonly(h,IllegalStateException.class,()->noteWrite(h,archived,"link","plain",null),"notes_archived");h.archiveField("notes-field",false);
+   Object missing=prepare(h,1,"notes-field");
+   readonly(h,IllegalArgumentException.class,()->noteWrite(h,missing,"link","missing-note",null),"notes_missing");
+   Object owned=prepare(h,1,"notes-field");before=state(h);
+   try(AppDatabase foreign=AppDatabase.openSchema3(getTargetContext(),notesName)){
+    need(foreign.getReadableDatabase()!=h.getReadableDatabase()&&state(foreign).equals(before),"notes independent helper witness");
+    readonly(foreign,IllegalArgumentException.class,()->noteWrite(foreign,owned,"link","plain",null),"notes_foreign");
+   }
+   noteWrite(h,owned,"link","plain",null);pass(state(h).equals(expectedNote(before,1,"notes-field","plain",null,"link")),"notes_owner");
+   save("notes-state",state(h).toString());
+  }
+ }
+ void noteUi(AppDatabase h,String field)throws Exception{
+  Map<String,List<List<String>>> before=state(h);click("field-notes-"+field,true);
+  ui(()->{need(one("field-note-ui-linked",true)!=null,"archived history visible");need(!one("field-note-new",true).isEnabled()&&!one("field-note-link",true).isEnabled(),"archived additions disabled");});
+  pass(state(h).equals(before),"ui_notes_archive_readonly");click("field-notes-back",true);
+  click("field-archive-"+field,true);click("field-archive-confirm",true);
+  h.createNote("ui-plain",1,"Same");h.createNote("ui-foreign",2,"Same");
+  h.saveNote("ui-plain",Arrays.asList(NoteDocument.Block.text("plain-text","Keep linked content",false)));
+  before=state(h);click("field-notes-"+field,true);
+  ui(()->{View root=one("field-notes-page",true);one("field-note-ui-linked",true);need(noteKeyCount(root,"field-note-create-keep")==0,"other owner hidden");});
+  pass(state(h).equals(before)&&h.fieldNoteIds(1,field).equals(Arrays.asList("ui-linked")),"ui_notes_list_scope");
+  click("field-note-new",true);before=state(h);click("field-note-create",true);
+  boolean[] visible={false};ui(()->visible[0]=((TextView)one("field-validation",true)).getText().length()>0);
+  pass(visible[0]&&state(h).equals(before),"ui_notes_blank");text("field-note-title","Same");
+  final View[] old={null};before=state(h);
+  ui(()->{old[0]=one("field-note-create",true);need(old[0].performClick(),"create linked note witness");old[0].performClick();});ready();
+  List<String> ids=h.fieldNoteIds(1,field);need(ids.size()==2&&ids.get(0).equals("ui-linked"),"new linked ID");
+  String created=ids.get(1);need(UUID.fromString(created).toString().equals(created),"note canonical UUID");
+  pass(state(h).equals(expectedNote(before,1,field,created,"Same","create")),"ui_notes_create");
+  before=state(h);ui(()->old[0].performClick());ready();pass(state(h).equals(before),"ui_notes_create_replay");
+  click("field-note-link",true);before=state(h);
+  ui(()->need(noteKeyCount(one("field-notes-page",true),"field-note-candidate-ui-foreign")==0,"foreign candidate hidden"));
+  ui(()->{old[0]=one("field-note-candidate-ui-plain",true);need(old[0].performClick(),"link witness");old[0].performClick();});ready();
+  pass(state(h).equals(expectedNote(before,1,field,"ui-plain",null,"link")),"ui_notes_link");
+  before=state(h);ui(()->old[0].performClick());ready();pass(state(h).equals(before),"ui_notes_link_replay");
+  click("field-note-unlink-ui-plain",true);before=state(h);click("field-note-cancel",true);
+  pass(state(h).equals(before),"ui_notes_unlink_cancel");
+  click("field-note-unlink-ui-plain",true);before=state(h);
+  ui(()->{old[0]=one("field-note-unlink-confirm",true);need(old[0].performClick(),"unlink witness");old[0].performClick();});ready();
+  pass(state(h).equals(expectedNote(before,1,field,"ui-plain",null,"unlink")),"ui_notes_unlink");
+  before=state(h);ui(()->old[0].performClick());ready();pass(state(h).equals(before),"ui_notes_unlink_replay");
+  before=state(h);click("field-note-"+created,true);
+  ui(()->need(created.contentEquals(((TextView)one("note-selected-id",true)).getText()),"exact selected note ID"));
+  pass(state(h).equals(before),"ui_notes_open_identity");
+  openFields();click("field-notes-"+field,true);
+  click("field-note-unlink-"+created,true);before=state(h);click("field-note-unlink-confirm",true);
+  need(state(h).equals(expectedNote(before,1,field,created,null,"unlink")),"restore original link fixture using guarded UI");
+  click("field-notes-back",true);click("field-archive-"+field,true);click("field-archive-confirm",true);
+  pass(h.fieldNoteIds(1,field).equals(Arrays.asList("ui-linked"))&&h.noteBlocks("ui-plain").size()==1,"ui_notes_checkpoint");
+ }
+ static int noteKeyCount(View root,String key){
+  int n=key.contentEquals(root.getContentDescription()==null?"":root.getContentDescription())?1:0;
+  if(root instanceof android.view.ViewGroup){android.view.ViewGroup group=(android.view.ViewGroup)root;for(int i=0;i<group.getChildCount();i++)n+=noteKeyCount(group.getChildAt(i),key);}
+  return n;
  }
 '''
 def oracle_selftest():
@@ -290,7 +418,7 @@ JavaCompiler c=ToolProvider.getSystemJavaCompiler();DiagnosticCollector<JavaFile
 try(StandardJavaFileManager f=c.getStandardFileManager(d,null,null)){
 JavacTask t=(JavacTask)c.getTask(null,f,d,Arrays.asList("-proc:none"),null,f.getJavaFileObjects(a[0]));
 CompilationUnitTree u=t.parse().iterator().next();for(Diagnostic<?>e:d.getDiagnostics())if(e.getKind()==Diagnostic.Kind.ERROR)throw new AssertionError(e.toString());
-String s=Files.readString(Path.of(a[0]));SourcePositions p=Trees.instance(t).getSourcePositions();Set<String>w=new HashSet<>(Arrays.asList("need","copy","revision","expectedValue","expectedDefinition","nextRow","expectedCreate"));StringBuilder out=new StringBuilder();
+String s=Files.readString(Path.of(a[0]));SourcePositions p=Trees.instance(t).getSourcePositions();Set<String>w=new HashSet<>(Arrays.asList("need","copy","revision","expectedValue","expectedDefinition","nextRow","expectedCreate","expectedNote"));StringBuilder out=new StringBuilder();
 for(Tree type:u.getTypeDecls())if(type instanceof ClassTree)for(Tree m:((ClassTree)type).getMembers())
 if(m instanceof MethodTree&&w.remove(((MethodTree)m).getName().toString()))out.append(s.substring((int)p.getStartPosition(u,m),(int)p.getEndPosition(u,m))).append("\n");
 if(!w.isEmpty())throw new AssertionError(w);Files.writeString(Path.of(a[1]),out.toString());}}}'''
@@ -332,7 +460,55 @@ System.out.println("FIELD_ORACLE_PASS");}}'''
             code=methods.replace(old,new,1);result=execute(code)
             assert result.returncode==1 and "FIELD_ORACLE_VALID_WITNESS" in result.stdout and "AssertionError: "+label in result.stderr,(label,result.stdout,result.stderr)
         print("FIELD_ORACLE compiled_witnessed_mutants=4 PASS; Java oracle, not Android")
-        creation_oracle_selftest(methods)
+        # Keep the old creation mutation's input bounded to its original AST members.
+        creation_oracle_selftest(methods[:methods.index("static Map<String,List<List<String>>> expectedNote")])
+        note_oracle_selftest(methods)
+def note_oracle_selftest(methods):
+    harness=r'''import java.util.*;class NotesOracle{
+__METHODS__
+static List<String> r(String...s){return new ArrayList<>(Arrays.asList(s));}
+static void check(boolean b,String s){need(b,s);System.out.println("NOTE_ORACLE_PASS "+s);}
+public static void main(String[]args){
+Map<String,List<List<String>>> b=new TreeMap<>();
+b.put("revision",new ArrayList<>(Arrays.asList(r("rowid","id","value"),r("1:1","1:1","1:9"))));
+b.put("notes",new ArrayList<>(Arrays.asList(r("rowid","id","activity_id","title"),r("1:2","3:plain","1:1","3:Same"),r("1:5","3:keep","1:1","3:Same"),r("1:9","3:foreign","1:2","3:Same"))));
+b.put("field_notes",new ArrayList<>(Arrays.asList(r("rowid","note_id","field_id"),r("1:5","3:keep","3:other"),r("1:7","3:foreign","3:f"))));
+b.put("blocks",new ArrayList<>(Arrays.asList(r("rowid","note_id","text"),r("1:7","3:plain","3:Keep"))));
+check(copy(b).equals(b),"valid_copy");String frozen=b.toString();
+Map<String,List<List<String>>> linked=expectedNote(b,1,"f","plain",null,"link");
+check(linked.get("field_notes").equals(Arrays.asList(b.get("field_notes").get(0),r("1:5","3:keep","3:other"),r("1:7","3:foreign","3:f"),r("1:8","3:plain","3:f"))),"exact_link");
+check(linked.get("notes").equals(b.get("notes"))&&linked.get("blocks").equals(b.get("blocks"))&&b.toString().equals(frozen),"link_preserves_body");
+check(linked.get("revision").get(1).equals(r("1:1","1:1","1:10")),"revision");
+Map<String,List<List<String>>> created=expectedNote(b,1,"f","new","Same","create");
+check(created.get("notes").equals(Arrays.asList(b.get("notes").get(0),r("1:2","3:plain","1:1","3:Same"),r("1:5","3:keep","1:1","3:Same"),r("1:9","3:foreign","1:2","3:Same"),r("1:10","3:new","1:1","3:Same"))),"exact_create_owner");
+Map<String,List<List<String>>> unlinked=expectedNote(linked,1,"f","plain",null,"unlink");
+check(unlinked.get("field_notes").equals(b.get("field_notes"))&&unlinked.get("notes").equals(b.get("notes"))&&unlinked.get("blocks").equals(b.get("blocks")),"exact_unlink");
+boolean refused=false;try{expectedNote(b,1,"f","foreign",null,"link");}catch(AssertionError e){refused=e.getMessage().equals("oracle note owner");}
+check(refused,"cross_owner_refused");
+check(b.toString().equals(frozen),"input_frozen");
+}}'''
+    with tempfile.TemporaryDirectory() as tmp:
+        p=Path(tmp);(p/"NotesOracle.java").write_text(harness.replace("__METHODS__",methods))
+        def run(code):
+            (p/"NotesOracle.java").write_text(harness.replace("__METHODS__",code))
+            # Source launcher compiles each real Java mutant; exact runtime witness
+            # prefixes below prevent compile failures from counting as rejection.
+            return subprocess.run(["java",str(p/"NotesOracle.java")],capture_output=True,text=True,timeout=30)
+        good=run(methods);assert good.returncode==0,(good.stdout,good.stderr)
+        lines=good.stdout.splitlines();assert len(lines)==8,lines
+        mutants=(
+            ('"1:"+nextRow(links),"3:"+note,"3:"+field','"1:"+nextRow(links),"3:"+note,"3:other"',"exact_link"),
+            ('"1:"+nextRow(notes),"3:"+note,"1:"+owner','"1:"+nextRow(notes),"3:"+note,"1:2"',"exact_create_owner"),
+            ('links.get(i).get(1).equals("3:"+note)&&links.get(i).get(2).equals("3:"+field)','links.get(i).get(2).equals("3:"+field)',"oracle unlink identity"),
+            ('&&notes.get(i).get(2).equals("1:"+owner)','',"cross_owner_refused"),
+        )
+        for old,new,label in mutants:
+            assert methods.count(old)==1,(old,methods.count(old))
+            result=run(methods.replace(old,new,1))
+            stop="exact_unlink" if label=="oracle unlink identity" else label
+            assert result.returncode==1 and "AssertionError: "+label in result.stderr,(label,result.stdout,result.stderr)
+            assert result.stdout.splitlines()==lines[:lines.index("NOTE_ORACLE_PASS "+stop)]
+        print("FIELD_NOTES_ORACLE positive_assertions=8 compiled_witnessed_oracle_mutants=4 PASS; not product or Android")
 
 def creation_oracle_selftest(methods):
     harness=r'''import java.util.*;import java.lang.reflect.*;
@@ -542,8 +718,8 @@ bind()
 
 def selftest():
     assert not sys.flags.optimize
-    assert REQUIRED==EXPECTED and [len(EXPECTED[p]) for p in ("seed","deleted","undone")]==[88,58,2]
-    assert len(set(sum(EXPECTED.values(),[])))==148
+    assert REQUIRED==EXPECTED and [len(EXPECTED[p]) for p in ("seed","deleted","undone")]==[108,72,2]
+    assert len(set(sum(EXPECTED.values(),[])))==182
     rejected=0
     for api in (26,34):
         v,m,l=fixture(api);validate(v,m,l,api,"a"*40,"123","1")
@@ -552,13 +728,13 @@ def selftest():
             bad=copy.deepcopy(v);del bad[key];cases.append((bad,m,l))
         for key in m:
             bad=copy.deepcopy(m);del bad[key];cases.append((v,bad,l))
-        for key,wrong in (("checks",148.0),("checks",True),("checks",78),("checks",130),("release_ready",0),("api",float(api)),
+        for key,wrong in (("checks",182.0),("checks",True),("checks",78),("checks",130),("checks",148),("release_ready",0),("api",float(api)),
                           ("commit","d"*40),("run_id","999"),("run_attempt","2"),("apk_sha256","d"*64),
                           ("native_ui","WIDGET_CALLBACKS"),("status","FAIL"),("error","sentinel")):
             bad=copy.deepcopy(v);bad[key]=wrong;cases.append((bad,m,l))
         for phase,labels in EXPECTED.items():
             for label in labels:
-                bad=dict(l);bad[phase]=bad[phase].replace("TODO_PASS "+label+"\n","");cases.append((v,m,bad))
+                bad=dict(l);bad[phase]=bad[phase].replace("TODO_PASS "+label+"\n","");cases.append((v,bad,l))
         for value,manifest,logs in cases:
             try:validate(value,manifest,logs,api,"a"*40,"123","1")
             except (AssertionError,KeyError,TypeError):rejected+=1
@@ -567,7 +743,7 @@ def selftest():
     oracle_selftest()
     session_selftest()
     assert callable(driver())
-    print("FIELDS_HOST "+json.dumps(dict(status="PASS",positive=2,negative=rejected,device_checks=148,
+    print("FIELDS_HOST "+json.dumps(dict(status="PASS",positive=2,negative=rejected,device_checks=182,
         scope="HOST_REPORT_AND_ORACLE_NOT_ANDROID",release_ready=False)))
 
 if __name__=="__main__":

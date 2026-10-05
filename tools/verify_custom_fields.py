@@ -355,6 +355,103 @@ public static void main(String[]args)throws Exception{
         print("CREATE_ORACLE mutations=5 PASS; fixed expected cells, not Android")
 
 
+def session_selftest():
+    # Parse current product members, not a copied implementation. This model
+    # isolates owner/session/connection gates; tx/SQLite are explicit doubles.
+    extract=r'''import javax.tools.*;import com.sun.source.util.*;import com.sun.source.tree.*;import java.nio.file.*;import java.util.*;
+class ExtractSession{public static void main(String[]a)throws Exception{
+JavaCompiler c=ToolProvider.getSystemJavaCompiler();DiagnosticCollector<JavaFileObject>d=new DiagnosticCollector<>();
+try(StandardJavaFileManager f=c.getStandardFileManager(d,null,null)){
+JavacTask t=(JavacTask)c.getTask(null,f,d,Arrays.asList("-proc:none"),null,f.getJavaFileObjects(a[0]));
+CompilationUnitTree u=t.parse().iterator().next();for(Diagnostic<?>e:d.getDiagnostics())if(e.getKind()==Diagnostic.Kind.ERROR)throw new AssertionError(e.toString());
+String s=Files.readString(Path.of(a[0]));SourcePositions p=Trees.instance(t).getSourcePositions();Set<String>w=new HashSet<>(Arrays.asList("FieldEditPlan","fieldEditAttempt"));StringBuilder out=new StringBuilder();
+for(Tree type:u.getTypeDecls())if(type instanceof ClassTree&&((ClassTree)type).getSimpleName().contentEquals("AppDatabase"))for(Tree m:((ClassTree)type).getMembers()){
+String name=m instanceof MethodTree?((MethodTree)m).getName().toString():m instanceof ClassTree?((ClassTree)m).getSimpleName().toString():"";
+if(w.remove(name))out.append(s.substring((int)p.getStartPosition(u,m),(int)p.getEndPosition(u,m))).append("\n");
+}
+if(!w.isEmpty())throw new AssertionError(w);Files.writeString(Path.of(a[1]),out.toString());}}}'''
+    harness=r'''import java.util.*;
+class SessionHarness {
+ static void ok(boolean b,String s){if(!b)throw new AssertionError(s);System.out.println("SESSION_PASS "+s);}
+ static void refuses(Class<? extends Throwable> kind,Runnable r,String label){
+  Throwable failure=null;try{r.run();}catch(Throwable t){failure=t;}ok(failure!=null&&kind.isInstance(failure),label);
+ }
+ static AppDatabase.FieldEditPlan plan(AppDatabase h){return new AppDatabase.FieldEditPlan(h,h.connection,1,new CustomFields.Definition(),Arrays.asList("kept"),h.state.clone());}
+ static void write(AppDatabase h,AppDatabase.FieldEditPlan p){h.fieldEditAttempt(p,db->{h.writes++;return null;});}
+ public static void main(String[] args){
+  AppDatabase h=new AppDatabase();AppDatabase.FieldEditPlan p=plan(h);write(h,p);
+  ok(h.writes==1,"valid_owner");ok(p.terminal&&p.before==null,"successful_cleanup");
+  AppDatabase foreign=new AppDatabase();foreign.connection=h.connection;
+  AppDatabase.FieldEditPlan owned=plan(h);
+  refuses(IllegalArgumentException.class,()->write(foreign,owned),"foreign_owner");
+  ok(foreign.writes==0&&!owned.terminal&&owned.before!=null,"foreign_preserves_plan");write(h,owned);ok(h.writes==2,"owner_after_foreign");
+  refuses(IllegalArgumentException.class,()->write(h,null),"null_plan");
+  AppDatabase.FieldEditPlan closed=plan(h);closed.close();
+  ok(closed.terminal&&closed.before==null,"cancel_cleanup");
+  refuses(IllegalStateException.class,()->write(h,closed),"closed_plan");
+  AppDatabase.FieldEditPlan session=plan(h);h.restoreSession=new Object();
+  refuses(IllegalStateException.class,()->write(h,session),"old_session");
+  ok(session.terminal&&session.before==null,"session_cleanup");
+  AppDatabase.FieldEditPlan connection=plan(h);h.connection=new SQLiteDatabase();
+  refuses(IllegalStateException.class,()->write(h,connection),"old_connection");
+  ok(connection.terminal&&connection.before==null,"connection_cleanup");
+  AppDatabase.FieldEditPlan outer=plan(h);h.connection.outer=true;
+  refuses(IllegalStateException.class,()->write(h,outer),"outer_transaction");h.connection.outer=false;
+  refuses(IllegalStateException.class,()->write(h,outer),"outer_consumed");
+  AppDatabase.FieldEditPlan stale=plan(h);h.state=new byte[]{9};
+  refuses(IllegalStateException.class,()->write(h,stale),"same_revision_content");
+  ok(stale.terminal&&stale.before==null,"stale_cleanup");
+  AppDatabase.FieldEditPlan failed=plan(h);
+  refuses(UnsupportedOperationException.class,()->h.fieldEditAttempt(failed,db->{throw new UnsupportedOperationException("sentinel");}),"original_failure");
+  ok(failed.terminal&&failed.before==null,"failure_cleanup");
+  refuses(IllegalStateException.class,()->write(h,failed),"failure_consumed");
+  ok(h.writes==2&&foreign.writes==0,"all_rejections_readonly");
+  write(h,plan(h));ok(h.writes==3,"fresh_session_connection");
+  System.out.println("SESSION_PASS_COMPLETE");
+ }
+ static class SQLiteDatabase {boolean outer;boolean isOpen(){return true;}}
+ static class CustomFields {static class Definition{}}
+ static class AppDatabase {
+  interface Work<T>{T run(SQLiteDatabase db);}
+  Object restoreSession=new Object();SQLiteDatabase connection=new SQLiteDatabase();byte[] state={1};int writes;
+  SQLiteDatabase getWritableDatabase(){return connection;}
+  void noteDeletionNoOuterTransaction(SQLiteDatabase db){if(db.outer)throw new IllegalStateException();}
+  byte[] noteDeletionState(SQLiteDatabase db){return state.clone();}
+  <T>T tx(Work<T> work){return work.run(connection);}
+__MEMBERS__
+ }
+}'''
+    product=ROOT/"src/main/java/com/supercubegame/pockettodo/AppDatabase.java"
+    with tempfile.TemporaryDirectory() as tmp:
+        p=Path(tmp);(p/"ExtractSession.java").write_text(extract)
+        subprocess.run(["java",str(p/"ExtractSession.java"),str(product),str(p/"members")],check=True,timeout=30)
+        members=(p/"members").read_text()
+        def execute(code):
+            f=p/"SessionHarness.java";f.write_text(harness.replace("__MEMBERS__",code))
+            return subprocess.run(["java",str(f)],capture_output=True,text=True,timeout=30)
+        good=execute(members);assert good.returncode==0,(good.stdout,good.stderr)
+        lines=good.stdout.splitlines();assert len(lines)==22 and lines[-1]=="SESSION_PASS_COMPLETE";print(good.stdout,end="")
+        mutants=(
+            ("plan==null||plan.owner!=this","plan==null","foreign_owner"),
+            ("plan.terminal||plan.session!=restoreSession","plan.terminal","old_session"),
+            ("connection!=plan.connection||!connection.isOpen()","!connection.isOpen()","old_connection"),
+            ("noteDeletionNoOuterTransaction(connection);",";","outer_transaction"),
+            ("!Arrays.equals(plan.before,noteDeletionState(db))","false","same_revision_content"),
+            ("terminal=true;before=null;","terminal=true;","successful_cleanup"),
+        )
+        for old,new,label in mutants:
+            assert members.count(old)==1,(old,members.count(old))
+            result=execute(members.replace(old,new,1))
+            assert result.returncode==1 and "AssertionError: "+label in result.stderr,(label,result.stdout,result.stderr)
+            assert result.stdout.splitlines()==lines[:lines.index("SESSION_PASS "+label)]
+            assert "SESSION_PASS valid_owner" in result.stdout
+            print("SESSION_COMPILED_WITNESSED_MUTANT "+label)
+        print("FIELDS_SESSION_HOST "+json.dumps(dict(status="PASS",checks=21,compiled_product_mutants=len(mutants),
+            product_sha256=hashlib.sha256(product.read_bytes()).hexdigest(),members_sha256=hashlib.sha256(members.encode()).hexdigest(),
+            scope="CURRENT_JAVA_PLAN_AND_ATTEMPT_WITH_DB_DOUBLES_NOT_SQLITE_ATOMICITY_OR_CONCURRENCY",
+            release_ready=False)))
+
+
 for marker in (" static Map<String,List<List<String>>> expected(", " void save(", " void seed(", " @Override public void onCreate"):
     assert shared.JAVA.count(marker)==1,marker
 JAVA=(shared.JAVA[:shared.JAVA.index(" static Map<String,List<List<String>>> expected(")]+CASES+
@@ -403,6 +500,7 @@ def selftest():
             else:raise AssertionError("invalid field receipt accepted")
     report_selftest()
     oracle_selftest()
+    session_selftest()
     assert callable(driver())
     print("FIELDS_HOST "+json.dumps(dict(status="PASS",positive=2,negative=rejected,device_checks=130,
         scope="HOST_REPORT_AND_ORACLE_NOT_ANDROID",release_ready=False)))

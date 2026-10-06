@@ -26,6 +26,17 @@ jobs:
           python3 tools/verify_evidence.py 2>&1 | tee -a core.log
           python3 tools/verify.py v12 2>&1 | tee -a core.log
           python3 tools/verify_schema3.py selftest 2>&1 | tee -a core.log
+      - name: Isolated stop tracing dependency and host gates
+        run: &isolated_trace_setup |
+          set -euo pipefail
+          exec > >(tee isolated-trace-host.log) 2>&1
+          if ! command -v strace >/dev/null 2>&1; then
+            timeout 90s sudo apt-get -o Acquire::Retries=0 update
+            timeout 60s sudo apt-get -o Acquire::Retries=0 install --no-install-recommends -y strace
+          fi
+          strace --version
+          python3 tools/verify_process_control.py isolated-selftest
+          python3 tools/verify_process_control.py isolated-real-selftest
       - name: Verify unfinished delivery cannot be mislabeled
         run: |
           set -euo pipefail
@@ -161,7 +172,9 @@ jobs:
         if: always()
         with:
           name: core-evidence
-          path: core.log
+          path: |
+            core.log
+            isolated-trace-host.log
           if-no-files-found: error
   export_probe:
     needs: core
@@ -176,6 +189,8 @@ jobs:
       TEST_API: ${{ matrix.api }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Require isolated stop tracing before export device work
+        run: *isolated_trace_setup
       - name: Fixed Android build setup for independent export probe
         run: |
           set -euo pipefail
@@ -610,13 +625,14 @@ jobs:
               from verify_paged_exports import format_button
               from verify_schema3 import signal_target_identity,signal_identity_selftest
               from verify_schema3 import exception_evidence,native_failure_evidence,diagnostics_selftest
-              from verify_process_control import stop_verified,capture_crash_logs
+              from verify_process_control import stop_verified,capture_crash_logs,isolated_stop_runner
               from verify_ui_observer import Observer
               out=Path("export-native");out.mkdir()
               prefix=[str(adb),"-s",gate.SERIAL]
               result={"status":"FAIL","commit":os.environ["GITHUB_SHA"],"run_id":os.environ["GITHUB_RUN_ID"],
                   "api":gate.API,"scope":"SYNTHETIC_NATIVE_IMAGE_MULTIPAGE_SAF_WITH_PROCESS_LOSS_NOT_RECEIVER",
-                  "labels":[],"outputs":{},"process_loss":{},"process_stops":[],"release_ready":False}
+                  "labels":[],"outputs":{},"process_loss":{},"process_stops":[],"process_query_traces":[],"release_ready":False}
+              stop_runner=isolated_stop_runner(adb,gate.SERIAL,gate.PKG,result["process_query_traces"])
               serial=0
               def command(*args,binary=False,timeout=40):
                   return subprocess.check_output(prefix+list(args),text=not binary,stderr=subprocess.PIPE,timeout=timeout,stdin=subprocess.DEVNULL)
@@ -641,7 +657,7 @@ jobs:
               def touch(desc):click(find(**{"content-desc":desc}))
               def ready():find(**{"content-desc":"v12-status","text":"已保存到本机"})
               def stop():
-                  return stop_verified(adb,gate.SERIAL,gate.PKG,emit=result["process_stops"].append)
+                  return stop_verified(adb,gate.SERIAL,gate.PKG,runner=stop_runner,emit=result["process_stops"].append)
               def start():
                   shell("am","start","-W","-n",gate.PKG+"/com.supercubegame.pockettodo.MainActivity");ready()
               def state():
@@ -989,6 +1005,7 @@ jobs:
         with:
           name: export-probe-api-${{ matrix.api }}
           path: |
+            isolated-trace-host.log
             export-probe.json
             export-probe.log
             export-probe-setup.log
@@ -1224,7 +1241,7 @@ jobs:
               'cancel twice clears private staging without altering live state',
               'canceled restore plan cannot be confirmed',
               'semantic-invalid preview refuses and cleans staging without touching live data',
-              'restore preview is bound to its exact database helper owner',
+              'guarded restore preview is bound to its exact database helper owner',
               'ordinary write after preview rejects stale restore',
               'stale rejection preserves every new row and revision and clears stage',
               'failed stale plan is single use and requires a new preview',

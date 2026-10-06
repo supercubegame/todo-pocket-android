@@ -1062,6 +1062,435 @@ def adb_failure_wiring(workflow):
     print("ADB_FAILURE_WIRING first_failure=4 mutants=2 PASS; actual workflow AST", flush=True)
 
 
+
+def run_pidof_isolated(args, *, capture_output, text, stdin, timeout, receipt,
+                       environment=None, tracer="strace"):
+    """One CI pidof invocation; separate tracer pipes, bounded diagnostic tails.
+
+    strace changes timing. This is diagnostic instrumentation, not an untraced
+    reproduction, device-root-cause proof, or permission to accept exit 255.
+    Command streams retain subprocess.run's existing unbounded capture contract.
+    Trace retention is bounded in memory and never spooled to disk.
+    """
+    import base64
+    import locale
+    import os
+    import selectors
+    import signal
+    import sys
+    env = dict(os.environ if environment is None else environment)
+    args = list(args)
+    if (env.get("GITHUB_ACTIONS") != "true" or len(args) != 8 or
+            args[1:7] != ["-s", "emulator-5554", "shell", "-n", "-T", "pidof"] or
+            not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+", args[7]) or
+            capture_output is not True or text is not True or stdin != subprocess.DEVNULL or
+            type(timeout) not in (int, float) or not math.isfinite(timeout) or
+            not 0 < timeout <= 10 or not isinstance(receipt, dict)):
+        raise ValueError("CI emulator exact pidof and original <=10s capture contract required")
+    receipt.update(scope="HOST_SYSCALL_TAIL_NOT_DEVICE_ROOT_CAUSE", attempts=1,
+                   command=args, timeout_seconds=timeout, status="NOT_OBSERVED",
+                   stderr_kind="COMMAND_STDERR_SEPARATE_FROM_TRACER", timed_out=False,
+                   trace_retention_bytes=65536, tracer_stderr_retention_bytes=4096,
+                   release_ready=False)
+    # The child alone writes this private completion pipe. A tracer returning 1
+    # before launch must not masquerade as a legitimate pidof absence response.
+    wrapper = (
+        "import os,subprocess,sys\n"
+        "error,done,trace=map(int,sys.argv[1:4])\n"
+        "os.dup2(error,2);os.close(error);os.close(trace)\n"
+        "p=subprocess.run(sys.argv[4:],stdin=subprocess.DEVNULL,close_fds=True)\n"
+        "os.write(done,(str(p.returncode)+'\\n').encode('ascii'));os.close(done)\n"
+        "os._exit(p.returncode if p.returncode>=0 else 128-p.returncode)\n"
+    )
+    buffers = {key: bytearray() for key in ("stdout", "stderr", "done", "trace", "tracer_stderr")}
+    totals = dict.fromkeys(buffers, 0)
+    limits = {"trace": 65536, "tracer_stderr": 4096, "done": 64}
+    fds = set(); writes = []; process = None
+    selector = selectors.DefaultSelector()
+    started = time.monotonic(); deadline = started + timeout
+    def keep(name, chunk):
+        totals[name] += len(chunk)
+        buffers[name].extend(chunk)
+        if name in limits and len(buffers[name]) > limits[name]:
+            del buffers[name][:-limits[name]]
+    def register(fd, name):
+        os.set_blocking(fd, False)
+        selector.register(fd, selectors.EVENT_READ, name)
+    def drain(wait):
+        for key, _ in selector.select(wait):
+            try: chunk = os.read(key.fd, 8192)
+            except BlockingIOError: continue
+            if chunk:
+                keep(key.data, chunk)
+            else:
+                selector.unregister(key.fd)
+    def terminate():
+        if process is None: return
+        try: os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError: pass
+        # Cleanup is not a new command/observation budget or an assertion retry.
+        # Do not wait indefinitely for a tracer or its descendants after timeout.
+        try:
+            process.wait(timeout=1)
+            receipt["cleanup"] = "PROCESS_GROUP_KILLED_AND_REAPED"
+        except subprocess.TimeoutExpired:
+            receipt["cleanup"] = "PROCESS_GROUP_KILLED_REAP_NOT_OBSERVED"
+    try:
+        channels = {}
+        for name in ("stderr", "done", "trace"):
+            read_fd, write_fd = os.pipe()
+            fds.update((read_fd, write_fd)); writes.append(write_fd)
+            channels[name] = write_fd
+            register(read_fd, name)
+        command = [tracer, "-f", "-qq", "-ttt", "-s", "128", "-xx",
+                   "-e", "trace=read,write,readv,writev,recvfrom,recvmsg,sendto,sendmsg,connect,exit_group",
+                   "-o", "/proc/self/fd/"+str(channels["trace"]),
+                   sys.executable, "-c", wrapper, str(channels["stderr"]),
+                   str(channels["done"]), str(channels["trace"]), *args]
+        process = subprocess.Popen(command, stdin=stdin, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, pass_fds=tuple(writes),
+                                   start_new_session=True, env=env)
+        for fd in writes:
+            os.close(fd); fds.remove(fd)
+        register(process.stdout.fileno(), "stdout")
+        register(process.stderr.fileno(), "tracer_stderr")
+        while selector.get_map() or process.poll() is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                receipt["timed_out"] = True
+                terminate()
+                # Bounded nonblocking drain preserves already-buffered command
+                # output. No second invocation or post-failure pidof is issued.
+                for _ in range(64):
+                    if not selector.get_map(): break
+                    drain(0)
+                raise subprocess.TimeoutExpired(args, timeout,
+                    output=bytes(buffers["stdout"]), stderr=bytes(buffers["stderr"]))
+            drain(min(.05, remaining))
+        receipt["tracer_returncode"] = process.returncode
+        completed = bytes(buffers["done"])
+        if totals["done"] != len(completed) or not re.fullmatch(rb"-?[0-9]{1,3}\n", completed):
+            raise RuntimeError("isolated trace has no exact child exit receipt; not process absence")
+        code = int(completed)
+        if not -64 <= code <= 255:
+            raise RuntimeError("invalid original child exit receipt")
+        receipt["command_returncode"] = code
+        receipt["tracer_exit_matches"] = process.returncode == (code if code >= 0 else 128-code)
+        receipt["status"] = "OBSERVED_NOT_ROOT_CAUSE" if totals["trace"] else "TRACE_NOT_OBSERVED"
+        encoding = locale.getencoding()
+        def decode(raw):
+            return bytes(raw).decode(encoding).replace("\r\n", "\n").replace("\r", "\n")
+        return subprocess.CompletedProcess(args, code, decode(buffers["stdout"]), decode(buffers["stderr"]))
+    except BaseException as exc:
+        receipt["error"] = repr(exc)
+        if process is not None and process.poll() is None: terminate()
+        raise
+    finally:
+        for name in ("trace", "tracer_stderr"):
+            receipt[name] = {"bytes": totals[name], "truncated": totals[name] > len(buffers[name]),
+                             "tail_b64": base64.b64encode(buffers[name]).decode("ascii")}
+        receipt["elapsed_seconds"] = round(time.monotonic()-started, 6)
+        selector.close()
+        for fd in fds:
+            try: os.close(fd)
+            except OSError: pass
+        if process is not None:
+            process.stdout.close(); process.stderr.close()
+
+
+def isolated_stop_runner(adb, serial, package, records, *, environment=None, tracer="strace"):
+    """Explicit export-only adapter. Unchanged force-stop is invoked exactly once."""
+    import os
+    env = dict(os.environ if environment is None else environment)
+    if env.get("GITHUB_ACTIONS") != "true" or serial != "emulator-5554":
+        raise ValueError("isolated stop tracing is CI emulator-only")
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+", package):
+        raise ValueError("exact package required")
+    prefix = [str(adb), "-s", serial, "shell", "-n", "-T"]
+    sequence = 0
+    def invoke(args, **kwargs):
+        nonlocal sequence
+        if args == prefix+["pidof", package]:
+            # Keep at most eight query traces; the existing stop receipt still
+            # records EVERY command. A failing query is last because stop_verified
+            # propagates it immediately, so its original trace is not overwritten.
+            sequence += 1
+            if len(records) >= 8: records.pop(0)
+            record = {"observation_number": sequence, "retention": "LATEST_8_QUERY_TRACES"}
+            records.append(record)
+            return run_pidof_isolated(args, receipt=record, environment=env, tracer=tracer, **kwargs)
+        if args != prefix+["am", "force-stop", package]:
+            raise ValueError("unexpected stop adapter command")
+        return subprocess.run(args, env=env, **kwargs)
+    return invoke
+
+
+def isolated_stop_selftest(module=None, witness_only=False):
+    """Real host subprocesses with a fake tracer/ADB, never device evidence."""
+    import base64
+    import os
+    import tempfile
+    namespace = globals() if module is None else module
+    run = namespace["run_pidof_isolated"]
+    make_runner = namespace["isolated_stop_runner"]
+    fake_trace = r'''#!/usr/bin/env python3
+import os,subprocess,sys
+a=sys.argv[1:]; i=a.index("-o"); path=a[i+1]; command=a[i+2:]
+mode=os.environ.get("TRACE_FIXTURE","normal")
+if mode=="missing_receipt": sys.exit(1)
+with open(path,"wb",buffering=0) as f:
+    f.write(b"x"*100000+b"TRACE_END")
+    if mode=="trace_stderr": os.write(2,b"TRACER_ONLY_SENTINEL")
+    p=subprocess.run(command,close_fds=False)
+sys.exit(p.returncode)
+'''
+    fake_adb = r'''#!/usr/bin/env python3
+import os,sys,time
+from pathlib import Path
+p=Path(os.environ["CALL_FILE"])
+previous=p.read_text().splitlines() if p.exists() else []
+with p.open("a") as f: f.write(" ".join(sys.argv[1:])+"\n")
+if os.environ.get("STOP_FIXTURE"):
+    if "force-stop" in sys.argv: sys.exit(0)
+    if not previous: print("5744"); sys.exit(0)
+    sys.exit(int(os.environ["STOP_FIXTURE"]))
+os.write(1,bytes.fromhex(os.environ.get("ADB_OUT","")))
+os.write(2,bytes.fromhex(os.environ.get("ADB_ERR","")))
+if os.environ.get("ADB_SLEEP"): time.sleep(10)
+sys.exit(int(os.environ.get("ADB_CODE","0")))
+'''
+    with tempfile.TemporaryDirectory(prefix="isolated-stop-host-") as directory:
+        root = Path(directory)
+        trace = root/"fake-strace"; trace.write_text(fake_trace); trace.chmod(0o700)
+        adb = root/"adb"; adb.write_text(fake_adb); adb.chmod(0o700)
+        calls = root/"calls"
+        command = [str(adb), "-s", "emulator-5554", "shell", "-n", "-T",
+                   "pidof", "com.supercubegame.pockettodo.v12.preview"]
+        base = dict(os.environ, GITHUB_ACTIONS="true", CALL_FILE=str(calls))
+        def exercise(code, out, err, mode="normal"):
+            calls.unlink(missing_ok=True)
+            env = dict(base, ADB_CODE=str(code), ADB_OUT=out.hex(), ADB_ERR=err.hex(),
+                       TRACE_FIXTURE=mode)
+            record = {}
+            value = run(command, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                        timeout=5, receipt=record, environment=env, tracer=str(trace))
+            assert value.args == command and value.returncode == code, "original exit or argv lost"
+            assert value.stdout == out.decode().replace("\r\n", "\n").replace("\r", "\n"), "stdout changed"
+            assert value.stderr == err.decode().replace("\r\n", "\n").replace("\r", "\n"), "stderr changed"
+            assert calls.read_text().splitlines() == [" ".join(command[1:])], "command replayed"
+            assert record["attempts"] == 1 and record["timeout_seconds"] == 5
+            assert record["scope"] == "HOST_SYSCALL_TAIL_NOT_DEVICE_ROOT_CAUSE"
+            assert record["command_returncode"] == code
+            assert record["trace"]["bytes"] == 100009 and record["trace"]["truncated"] is True
+            assert len(base64.b64decode(record["trace"]["tail_b64"])) == 65536
+            assert base64.b64decode(record["trace"]["tail_b64"]).endswith(b"TRACE_END")
+            expected = b"TRACER_ONLY_SENTINEL" if mode == "trace_stderr" else b""
+            assert base64.b64decode(record["tracer_stderr"]["tail_b64"]) == expected
+            assert record["stderr_kind"] == "COMMAND_STDERR_SEPARATE_FROM_TRACER"
+            return value
+        exercise(0, b"5744\n", b"")
+        if witness_only:
+            print("ISOLATED_POSITIVE_WITNESS PASS", flush=True)
+            return
+        exercise(1, b"", b"")
+        exercise(255, b"original-out\r\n", b"original-error")
+        exercise(1, b"", b"adb-warning")
+        exercise(0, b"5744\n", b"", "trace_stderr")
+        positives = 5
+        negatives = 0
+        for tracer, mode, failure in (
+                (str(root/"missing-strace"), "normal", FileNotFoundError),
+                (str(trace), "missing_receipt", RuntimeError)):
+            calls.unlink(missing_ok=True); record = {}
+            try:
+                run(command, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                    timeout=5, receipt=record, environment=dict(base, TRACE_FIXTURE=mode),
+                    tracer=tracer)
+            except failure: pass
+            else: raise AssertionError("tracer setup failure interpreted as command absence")
+            assert not calls.exists(), "fallback command launched"
+            negatives += 1
+        calls.unlink(missing_ok=True); record = {}
+        try:
+            run(command, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                timeout=.5, receipt=record,
+                environment=dict(base, ADB_SLEEP="true", ADB_OUT=b"partial".hex(),
+                                 ADB_ERR=b"original-timeout-error".hex()), tracer=str(trace))
+        except subprocess.TimeoutExpired as exc:
+            assert exc.cmd == command and exc.timeout == .5
+            assert exc.stdout == b"partial" and exc.stderr == b"original-timeout-error"
+        else: raise AssertionError("timeout was hidden or retried")
+        assert len(calls.read_text().splitlines()) == 1
+        assert record["timed_out"] is True and record["cleanup"] == "PROCESS_GROUP_KILLED_AND_REAPED"
+        negatives += 1
+        for changed, env in (
+                (command[:2]+["phone"]+command[3:], base),
+                (command[:-2]+["am", command[-1]], base),
+                (command, dict(base, GITHUB_ACTIONS="false"))):
+            calls.unlink(missing_ok=True)
+            try:
+                run(changed, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                    timeout=5, receipt={}, environment=env, tracer=str(trace))
+            except ValueError: pass
+            else: raise AssertionError("scope escaped")
+            assert not calls.exists()
+            negatives += 1
+        for final in (1, 255):
+            calls.unlink(missing_ok=True); records = []; stops = []
+            runner = make_runner(str(adb), "emulator-5554", command[-1], records,
+                                 environment=dict(base, STOP_FIXTURE=str(final)), tracer=str(trace))
+            try:
+                namespace["stop_verified"](str(adb), "emulator-5554", command[-1],
+                                            runner=runner, emit=stops.append)
+            except subprocess.CalledProcessError as exc:
+                assert final == 255 and exc.returncode == 255
+                assert exc.stdout == "" and exc.stderr == "" and exc.cmd == command
+            else:
+                assert final == 1 and stops[-1]["status"] == "PASS"
+            assert len(calls.read_text().splitlines()) == 3, "stop or query was replayed"
+            assert len(records) == 2 and all(r["timeout_seconds"] <= 10 for r in records)
+            assert stops[-1]["force_stop_attempts"] == 1
+            if final == 255: assert stops[-1]["original_failure"]["returncode"] == 255
+        calls.unlink(missing_ok=True); records = []
+        runner = make_runner(str(adb), "emulator-5554", command[-1], records,
+                             environment=dict(base, ADB_CODE="1"), tracer=str(trace))
+        for number in range(12):
+            value = runner(command, capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL, timeout=5)
+            assert value.returncode == 1 and value.stdout == value.stderr == ""
+        assert len(calls.read_text().splitlines()) == 12
+        assert len(records) == 8 and [v["observation_number"] for v in records] == list(range(5,13))
+        print("ISOLATED_STOP_HOST_CONTROLS 5 positive 6 negative 2 stop integrations PASS; FAKE_TRACER_NOT_DEVICE", flush=True)
+        print("ISOLATED_TRACE_RETENTION 12 invocations latest8 retained PASS", flush=True)
+        return positives, negatives
+
+
+def isolated_stop_mutation_selftest():
+    """Compile and run changed implementations, each with a passing live witness."""
+    import inspect
+    import textwrap
+    source = textwrap.dedent(inspect.getsource(run_pidof_isolated))
+    variants = [
+        ("code = int(completed)", "code = 1 if int(completed) == 255 else int(completed)",
+         "original exit or argv lost"),
+        ('decode(buffers["stderr"]))', '"" )', "stderr changed"),
+        ('decode(buffers["stderr"]))', 'decode(buffers["stderr"]+buffers["tracer_stderr"]))',
+         "stderr changed"),
+        ('completed = bytes(buffers["done"])',
+         'completed = bytes(buffers["done"]) or (str(process.returncode)+"\\n").encode(); totals["done"] = len(completed)',
+         "tracer setup failure interpreted as command absence"),
+    ]
+    for old, new, expected in variants:
+        assert source.count(old) == 1, "ambiguous mutation anchor"
+        changed = source.replace(old, new, 1)
+        assert changed != source
+        namespace = dict(globals())
+        exec(compile(changed, "<compiled-isolated-stop-mutant>", "exec"), namespace)
+        isolated_stop_selftest(namespace, witness_only=True)
+        try: isolated_stop_selftest(namespace)
+        except AssertionError as exc:
+            assert expected in str(exc), (expected, str(exc))
+        else: raise AssertionError("compiled trace mutant survived")
+    print("ISOLATED_STOP_MUTANTS 4 compiled 4 witnessed 4 rejected HOST_ONLY", flush=True)
+
+
+def isolated_stop_real_tracer_selftest():
+    """CI real strace + synthetic executable, NOT ADB/device acceptance."""
+    import base64
+    import os
+    import shutil
+    import tempfile
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        raise ValueError("real tracer gate is CI-only")
+    tracer = shutil.which("strace")
+    if not tracer: raise FileNotFoundError("required CI strace dependency missing; no fallback")
+    with tempfile.TemporaryDirectory(prefix="isolated-real-tracer-") as directory:
+        path = Path(directory)/"fixture-adb"
+        path.write_text("#!/usr/bin/env python3\nimport os,sys,time\n"
+                        "os.write(1,bytes.fromhex(os.environ['ISOLATED_OUT']))\n"
+                        "os.write(2,bytes.fromhex(os.environ['ISOLATED_ERR']))\n"
+                        "if os.environ.get('ISOLATED_SLEEP'):time.sleep(10)\n"
+                        "sys.exit(int(os.environ['ISOLATED_FIXTURE_CODE']))\n")
+        path.chmod(0o700)
+        for code, out, err in ((0, b"5744\n", b""), (1, b"", b""),
+                               (255, b"original-out\n", b"original-error\n"),
+                               (1, b"", b"command-warning\n")):
+            record = {}
+            command = [str(path), "-s", "emulator-5554", "shell", "-n", "-T",
+                       "pidof", "com.example.fixture"]
+            value = run_pidof_isolated(command, capture_output=True, text=True,
+                stdin=subprocess.DEVNULL, timeout=10, receipt=record, tracer=tracer,
+                environment=dict(os.environ, ISOLATED_FIXTURE_CODE=str(code),
+                                 ISOLATED_OUT=out.hex(), ISOLATED_ERR=err.hex()))
+            assert (value.returncode, value.stdout, value.stderr) == (
+                code, out.decode(), err.decode())
+            assert record["tracer_exit_matches"] and record["trace"]["bytes"] > 0
+            assert record["tracer_stderr"]["bytes"] == 0
+            assert base64.b64decode(record["trace"]["tail_b64"])
+        record = {}
+        try:
+            run_pidof_isolated(command, capture_output=True, text=True,
+                stdin=subprocess.DEVNULL, timeout=1, receipt=record, tracer=tracer,
+                environment=dict(os.environ, ISOLATED_FIXTURE_CODE="0", ISOLATED_SLEEP="true",
+                                 ISOLATED_OUT=b"partial".hex(), ISOLATED_ERR=b"partial-error".hex()))
+        except subprocess.TimeoutExpired as exc:
+            assert exc.cmd == command and exc.timeout == 1
+            assert exc.stdout == b"partial" and exc.stderr == b"partial-error"
+            assert record["cleanup"] == "PROCESS_GROUP_KILLED_AND_REAPED"
+        else: raise AssertionError("real tracer timeout did not stop the original invocation")
+    print("ISOLATED_REAL_STRACE_CONTROLS 4 exit cases 1 timeout PASS; SYNTHETIC_HOST_EXECUTABLE_NOT_DEVICE", flush=True)
+
+
+def isolated_stop_wiring(workflow):
+    """Inspect the real export caller, not a detached copy of its command."""
+    import ast
+    marker = '          cat > "$RUNNER_TEMP/export_native_probe.py" <<'+"'PY'"+'\n'
+    assert workflow.count(marker) == 1
+    body = workflow.split(marker, 1)[1].split('          PY\n', 1)[0]
+    source = "\n".join(line[10:] if line else "" for line in body.splitlines())+"\n"
+    def check(source):
+        tree = ast.parse(source)
+        native = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "standalone_native")
+        stop = next(n for n in native.body if isinstance(n, ast.FunctionDef) and n.name == "stop")
+        expected = ast.parse('def stop():\n    return stop_verified(adb,gate.SERIAL,gate.PKG,runner=stop_runner,emit=result["process_stops"].append)\n').body[0]
+        assert ast.dump(stop) == ast.dump(expected), "export stop bypasses isolated runner"
+        bindings = [n for n in native.body if isinstance(n, ast.Assign) and
+                    any(isinstance(t, ast.Name) and t.id == "stop_runner" for t in n.targets)]
+        expected = ast.parse('stop_runner=isolated_stop_runner(adb,gate.SERIAL,gate.PKG,result["process_query_traces"])').body[0]
+        assert len(bindings) == 1 and ast.dump(bindings[0]) == ast.dump(expected), "wrong runner binding"
+        imports = [a.name for n in native.body if isinstance(n, ast.ImportFrom) and
+                   n.module == "verify_process_control" for a in n.names]
+        assert imports.count("isolated_stop_runner") == 1, "missing actual adapter import"
+    check(source)
+    for old, new, expected_error in (
+            ('runner=stop_runner,', '', "export stop bypasses"),
+            ('result["process_query_traces"]', 'result["other"]', "wrong runner binding"),
+            ('stop_verified,capture_crash_logs,isolated_stop_runner',
+             'stop_verified,capture_crash_logs', "missing actual adapter import")):
+        assert source.count(old) == 1
+        changed = source.replace(old, new, 1); compile(changed, "<caller-mutant>", "exec")
+        try: check(changed)
+        except AssertionError as exc: assert expected_error in str(exc)
+        else: raise AssertionError("caller mutation survived")
+    assert workflow.count("        run: &isolated_trace_setup |") == 1
+    assert workflow.count("        run: *isolated_trace_setup") == 1
+    assert workflow.count("python3 tools/verify_process_control.py isolated-selftest") == 1
+    assert workflow.count("python3 tools/verify_process_control.py isolated-real-selftest") == 1
+    assert workflow.count("strace --version") == 1
+    print("ISOLATED_STOP_WIRING 1 actual positive 3 compiled negative controls PASS; NOT_DEVICE", flush=True)
+
+
+if __name__ == "__main__":
+    import sys
+    if sys.argv[1:] == ["isolated-selftest"]:
+        isolated_stop_selftest()
+        isolated_stop_mutation_selftest()
+        isolated_stop_wiring(Path(".github/workflows/android.yml").read_text())
+        sys.exit(0)
+    if sys.argv[1:] == ["isolated-real-selftest"]:
+        isolated_stop_real_tracer_selftest()
+        sys.exit(0)
+
 if __name__ == "__main__":
     import sys
     if sys.argv[1:] == ["connection-selftest"]:

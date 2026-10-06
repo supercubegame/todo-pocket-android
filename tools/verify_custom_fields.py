@@ -618,7 +618,7 @@ public static void main(String[]args)throws Exception{
  check(plain.get("field_options").equals(b.get("field_options")),"no_phantom_options");
  Map<String,List<List<String>>> empty=copy(b);empty.get("fields").subList(1,empty.get("fields").size()).clear();empty.get("field_options").subList(1,empty.get("field_options").size()).clear();
  Map<String,List<List<String>>> fresh=create(empty,"SELECT",Arrays.asList("x"));
- check(fresh.get("fields").get(1).get(0).equals("1:1")&&fresh.get("field_options").get(1).equals(r("1:1","3:new-id","3:x","1:0"))),"empty_rowids");
+ check(fresh.get("fields").get(1).get(0).equals("1:1")&&fresh.get("field_options").get(1).equals(r("1:1","3:new-id","3:x","1:0")),"empty_rowids");
  System.out.println("CREATE_ORACLE_PASS");
 }}'''
     with tempfile.TemporaryDirectory() as tmp:

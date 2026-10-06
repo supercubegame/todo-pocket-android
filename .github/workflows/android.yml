@@ -36,6 +36,7 @@ jobs:
           fi
           strace --version
           python3 tools/verify_process_control.py isolated-selftest
+          python3 tools/verify_process_control.py absence-selftest
           python3 tools/verify_process_control.py isolated-real-selftest
       - name: Verify unfinished delivery cannot be mislabeled
         run: |
@@ -725,7 +726,7 @@ jobs:
                   old=identity("old");record["old_identity"]=old;step("exact_old_identity")
                   assert find(text="SAVE").get("package") in ("com.android.documentsui","com.google.android.documentsui")
                   shell("run-as",gate.PKG,"kill","-9",old["pid"])
-                  wait_old_absent(prefix,gate.PKG,old["pid"],record)
+                  wait_old_absent(prefix,gate.PKG,old["pid"],record,invoke=stop_runner)
                   save=find(text="SAVE");record["picker_package"]=save.get("package")
                   assert record["picker_package"] in ("com.android.documentsui","com.google.android.documentsui")
                   step("old_process_absent_picker_retained")
@@ -1107,6 +1108,8 @@ jobs:
       TEST_API: ${{ matrix.api }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Require isolated tracing before full regression device work
+        run: *isolated_trace_setup
       - name: Fixed Android build setup
         run: |
           set -euo pipefail
@@ -1185,6 +1188,7 @@ jobs:
           name: database-api-${{ matrix.api }}
           path: |
             setup.log
+            isolated-trace-host.log
             build.log
             ui.log
             emulator.log

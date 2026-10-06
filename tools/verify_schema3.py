@@ -784,6 +784,7 @@ def native_share_ui(adb, gate):
     import time
     import zipfile
     import xml.etree.ElementTree as ET
+    from verify_process_control import wait_old_absent, isolated_stop_runner
     out = Path("native-ui")
     report_path = out / "native-result.json"
     parent = json.loads(report_path.read_text())
@@ -795,6 +796,8 @@ def native_share_ui(adb, gate):
               "checks": checks, "release_ready": False,
               "recreation": "NOT_TESTED", "provider_failures": "NOT_TESTED",
               "private_text": "NOT_TESTED", "actual_receiver": "NOT_TESTED"}
+    result["process_query_traces"] = []
+    loss_runner=isolated_stop_runner(adb,gate.SERIAL,gate.PKG,result["process_query_traces"])
     def command(*args, binary=False):
         return subprocess.check_output(prefix + list(args), text=not binary, stderr=subprocess.PIPE, timeout=40)
     def shell(*args): return command("shell", *args)
@@ -1056,16 +1059,9 @@ public class ShareExternalWriter {
         assert target["status"]=="PASS", "refuse unverified process signal target: "+json.dumps(target)
         shell("run-as",gate.PKG,"kill","-9",old_pid)
         result["process_loss"]["stage"] = "SIGNAL_SENT"
-        deadline = time.monotonic()+30
-        while True:
-            probe = subprocess.run(prefix+["shell","pidof",gate.PKG],
-                                   capture_output=True,text=True,timeout=10)
-            probes.append({"returncode":probe.returncode,"stdout":probe.stdout.strip(),
-                           "stderr":probe.stderr.strip()})
-            if probe.returncode==1 and not probe.stdout.strip(): break
-            assert probe.returncode==0 and probe.stdout.strip()==old_pid, "unexpected process identity during kill"
-            assert time.monotonic()<deadline, "background process did not die"
-            time.sleep(.25)
+        # Approved CI invocation change: explicit noninteractive shell and DEVNULL.
+        # Preserve the original failure; never retry, reconnect, or accept exit255.
+        wait_old_absent(prefix,gate.PKG,old_pid,result["process_loss"],invoke=loss_runner)
         picker = find(text="SAVE")
         result["process_loss"]["picker_package"] = picker.get("package")
         ok(picker.get("package") in ("com.android.documentsui","com.google.android.documentsui") and

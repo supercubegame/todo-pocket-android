@@ -1199,7 +1199,7 @@ def run_pidof_isolated(args, *, capture_output, text, stdin, timeout, receipt,
 
 
 def isolated_stop_runner(adb, serial, package, records, *, environment=None, tracer="strace"):
-    """Explicit export-only adapter. Unchanged force-stop is invoked exactly once."""
+    """Explicit CI adapter for stop and post-signal absence; never global."""
     import os
     env = dict(os.environ if environment is None else environment)
     if env.get("GITHUB_ACTIONS") != "true" or serial != "emulator-5554":
@@ -1473,12 +1473,283 @@ def isolated_stop_wiring(workflow):
         except AssertionError as exc: assert expected_error in str(exc)
         else: raise AssertionError("caller mutation survived")
     assert workflow.count("        run: &isolated_trace_setup |") == 1
-    assert workflow.count("        run: *isolated_trace_setup") == 1
+    assert workflow.count("        run: *isolated_trace_setup") == 2
     assert workflow.count("python3 tools/verify_process_control.py isolated-selftest") == 1
     assert workflow.count("python3 tools/verify_process_control.py isolated-real-selftest") == 1
     assert workflow.count("strace --version") == 1
     print("ISOLATED_STOP_WIRING 1 actual positive 3 compiled negative controls PASS; NOT_DEVICE", flush=True)
 
+
+
+def wait_old_absent(prefix, package, pid, record, invoke=None, clock=None, pause=None):
+    """Read-only post-signal observation; command errors never mean absence."""
+    invoke = subprocess.run if invoke is None else invoke
+    clock = time.monotonic if clock is None else clock
+    pause = time.sleep if pause is None else pause
+    command = prefix + ["shell", "-n", "-T", "pidof", package]
+    probes = record["absence_probes"] = []
+    traces = record["absence_commands"] = []
+    deadline = clock() + 30
+    def text(value):
+        return value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
+    while True:
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise TimeoutError("old process absence not verified within 30 seconds")
+        trace = {"command": command[:], "stdin": "DEVNULL", "timeout_seconds": min(10, remaining)}
+        traces.append(trace)
+        try:
+            p = invoke(command, capture_output=True, text=True, timeout=trace["timeout_seconds"],
+                       stdin=subprocess.DEVNULL)
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            trace.update(error=repr(exc), stdout=text(getattr(exc, "stdout", None)),
+                         stderr=text(getattr(exc, "stderr", None)))
+            raise
+        trace.update(returncode=p.returncode, stdout=p.stdout, stderr=p.stderr)
+        probes.append({"returncode": p.returncode, "stdout": p.stdout.strip()})
+        if p.returncode not in (0, 1):
+            raise subprocess.CalledProcessError(p.returncode, command, output=p.stdout, stderr=p.stderr)
+        if p.stderr != "":
+            raise RuntimeError("pidof stderr prevents absence proof: " + repr(trace))
+        if clock() >= deadline:
+            raise TimeoutError("pidof completed outside absence observation budget: " + repr(trace))
+        if p.returncode == 1 and not p.stdout.strip():
+            return
+        if p.returncode != 0 or p.stdout.strip() != pid:
+            raise RuntimeError("unexpected post-signal process observation: " + repr(trace))
+        pause(.25)
+
+
+def absence_trace_selftest(workflow, schema):
+    """Actual observers/call sites; host doubles are not Android acceptance."""
+    import ast
+    import copy
+    import inspect
+    import os
+    import tempfile
+    from types import SimpleNamespace
+    marker = '          cat > "$RUNNER_TEMP/export_native_probe.py" <<'+"'PY'"+'\n'
+    assert workflow.count(marker) == 1
+    body = workflow.split(marker, 1)[1].split('          PY\n', 1)[0]
+    export = "\n".join(line[10:] if line else "" for line in body.splitlines())+"\n"
+    et, st = ast.parse(export), ast.parse(schema)
+    def fn(tree, name):
+        found = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == name]
+        assert len(found) == 1, "one actual function required: "+name
+        return found[0]
+    def load(node, scope):
+        exec(compile(ast.Module(body=[copy.deepcopy(node)], type_ignores=[]), "<actual-source>", "exec"), scope)
+        return scope[node.name]
+    old_scope = dict(subprocess=subprocess, time=time)
+    old_wait = load(fn(et, "wait_old_absent"), old_scope)
+    old_controls = load(fn(et, "absence_selftest"), old_scope)
+    old_controls()
+    shared = globals().get("wait_old_absent")
+    assert callable(shared), "shared strict absence observer missing"
+    # Deliberately retain the original independent export tests unchanged.
+    old_controls(shared)
+    assert ast.dump(ast.parse(inspect.getsource(shared)).body[0]) == ast.dump(fn(et, "wait_old_absent")), (
+        "export/shared absence implementations diverged")
+
+    def exercise(observer, witness_only=False):
+        prefix = ["fixture-adb", "-s", "emulator-5554"]
+        package = "com.example.fixture"
+        command = prefix+["shell", "-n", "-T", "pidof", package]
+        def response(code, out="", err=""):
+            return subprocess.CompletedProcess(command, code, out, err)
+        good = [response(1)]
+        failure = subprocess.TimeoutExpired(command, 10, output=b"partial-out", stderr=b"partial-err")
+        absent_os = OSError("synthetic invocation failure")
+        cases = [
+            ("absent", good, [0, 0, .1], None),
+            ("old_then_absent", [response(0, "8416\n"), response(1)], [0, 0, 0, .25, .3], None),
+            ("255_empty", [response(255)], [0, 0], subprocess.CalledProcessError),
+            ("255_streams", [response(255, "original-out\n", "original-err\n")], [0, 0], subprocess.CalledProcessError),
+            ("warning", [response(1, "", "warning\n")], [0, 0, .1], RuntimeError),
+            ("late_absent", good, [0, 0, 30], TimeoutError),
+            ("no_budget", [], [0, 30], TimeoutError),
+            ("foreign_pid", [response(0, "9000\n")], [0, 0, .1], RuntimeError),
+            ("timeout", [failure], [0, 0], subprocess.TimeoutExpired),
+            ("oserror", [absent_os], [0, 0], OSError),
+            ("remaining_cap", good, [0, 29.75, 29.9], None),
+        ]
+        if witness_only: cases = cases[:1]
+        for label, answers, ticks, error in cases:
+            sent, sleeps, record = [], [], {}
+            clock_values = iter(ticks)
+            def invoke(args, **kwargs):
+                assert args == command, "exact query changed"
+                assert kwargs == dict(capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                                      timeout=.25 if label == "remaining_cap" else 10), "query budget or streams changed"
+                assert len(sent) < len(answers), "failed query replayed"
+                value = answers[len(sent)]; sent.append(value)
+                if isinstance(value, Exception): raise value
+                return value
+            caught = None
+            try:
+                observer(prefix, package, "8416", record, invoke, lambda: next(clock_values), sleeps.append)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, RuntimeError, OSError) as exc:
+                caught = exc
+            assert (caught is None if error is None else type(caught) is error), "classification: "+label
+            assert len(sent) == len(answers), "one observation per intended command: "+label
+            assert sleeps == ([.25] if label == "old_then_absent" else []), "sleep/retry after failure: "+label
+            if isinstance(caught, subprocess.CalledProcessError):
+                p = answers[-1]
+                assert (caught.cmd, caught.returncode, caught.stdout, caught.stderr) == (
+                    command, p.returncode, p.stdout, p.stderr), "original failure lost"
+            if label in ("timeout", "oserror"):
+                assert caught is answers[0], "original exception object lost"
+            if label == "timeout":
+                assert record["absence_commands"][0]["stdout"] == "partial-out"
+                assert record["absence_commands"][0]["stderr"] == "partial-err"
+            for p, entry in zip(sent, record["absence_commands"]):
+                assert entry["command"] == command
+                if not isinstance(p, Exception):
+                    assert (entry["returncode"], entry["stdout"], entry["stderr"]) == (p.returncode, p.stdout, p.stderr)
+        return len(cases)
+    assert exercise(shared) == exercise(old_wait) == 11
+    original = inspect.getsource(shared)
+    for before, after, why in (
+        ('if p.returncode not in (0, 1):', 'if p.returncode == 255: return\n        if p.returncode not in (0, 1):', "classification: 255_empty"),
+        ('if p.stderr != "":', 'if False:', "classification: warning"),
+        ('if clock() >= deadline:', 'if False:', "classification: late_absent"),
+        ('"timeout_seconds": min(10, remaining)', '"timeout_seconds": 10', "query budget or streams changed"),
+        ('output=p.stdout, stderr=p.stderr)', 'output="", stderr="")', "original failure lost"),
+    ):
+        assert original.count(before) == 1, "mutation anchor not unique"
+        mutated = original.replace(before, after, 1)
+        assert mutated != original
+        ns = dict(globals()); exec(compile(mutated, "<absence-mutant>", "exec"), ns)
+        exercise(ns["wait_old_absent"], witness_only=True)
+        try: exercise(ns["wait_old_absent"])
+        except AssertionError as exc: assert why == str(exc), (why, str(exc))
+        else: raise AssertionError("compiled absence mutant survived")
+
+    def wiring(export_source, schema_source):
+        export_tree, schema_tree = ast.parse(export_source), ast.parse(schema_source)
+        native, loss, full = fn(export_tree, "standalone_native"), fn(export_tree, "lost_owner"), fn(schema_tree, "native_share_ui")
+        expected = [
+            (loss, 'wait_old_absent(prefix,gate.PKG,old["pid"],record,invoke=stop_runner)'),
+            (full, 'wait_old_absent(prefix,gate.PKG,old_pid,result["process_loss"],invoke=loss_runner)'),
+        ]
+        found = []
+        for parent, text in expected:
+            calls = [n for n in ast.walk(parent) if isinstance(n, ast.Call) and
+                     isinstance(n.func, ast.Name) and n.func.id == "wait_old_absent"]
+            assert len(calls) == 1 and ast.dump(calls[0]) == ast.dump(ast.parse(text, mode="eval").body), (
+                "actual absence caller bypasses isolated runner: "+parent.name)
+            found.append(calls[0])
+        imports = [a.name for n in full.body if isinstance(n, ast.ImportFrom) and
+                   n.module == "verify_process_control" for a in n.names]
+        assert imports.count("wait_old_absent") == imports.count("isolated_stop_runner") == 1, "full absence import"
+        for parent, text in (
+            (native, 'stop_runner=isolated_stop_runner(adb,gate.SERIAL,gate.PKG,result["process_query_traces"])'),
+            (full, 'loss_runner=isolated_stop_runner(adb,gate.SERIAL,gate.PKG,result["process_query_traces"])'),
+        ):
+            target = ast.parse(text).body[0]
+            nodes = [n for n in parent.body if isinstance(n, ast.Assign) and
+                     any(isinstance(t, ast.Name) and t.id == target.targets[0].id for t in n.targets)]
+            assert len(nodes) == 1 and ast.dump(nodes[0]) == ast.dump(target), "actual absence runner binding"
+        return found
+    calls = wiring(export, schema)
+    # Compile each actual caller expression and execute through the real adapter
+    # with host fake-strace/fake-ADB subprocesses. This does NOT execute whole UI.
+    fixtures = ast.parse(inspect.getsource(isolated_stop_selftest)).body[0]
+    literals = {n.targets[0].id: ast.literal_eval(n.value) for n in fixtures.body
+                if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Name) and
+                n.targets[0].id in ("fake_trace", "fake_adb")}
+    with tempfile.TemporaryDirectory(prefix="absence-callers-") as tmp:
+        root = Path(tmp); trace, adb, log = root/"trace", root/"adb", root/"calls"
+        trace.write_text(literals["fake_trace"]); trace.chmod(0o700)
+        adb.write_text(literals["fake_adb"]); adb.chmod(0o700)
+        command = [str(adb), "-s", "emulator-5554", "shell", "-n", "-T", "pidof", "com.example.fixture"]
+        for call in calls:
+            for mode in ("absent", "255_empty", "255_streams", "warning", "timeout"):
+                log.unlink(missing_ok=True); traces=[]; record={}
+                code = "255" if mode.startswith("255") else "1"
+                out = b"partial-out" if mode == "timeout" else b"original-out" if mode == "255_streams" else b""
+                err = b"partial-err" if mode == "timeout" else b"warning" if mode == "warning" else b"original-err" if mode == "255_streams" else b""
+                env = dict(os.environ, GITHUB_ACTIONS="true", CALL_FILE=str(log),
+                           ADB_CODE=code, ADB_OUT=out.hex(), ADB_ERR=err.hex())
+                if mode == "timeout": env["ADB_SLEEP"] = "true"
+                runner = isolated_stop_runner(str(adb), "emulator-5554", command[-1], traces,
+                                              environment=env, tracer=str(trace))
+                def observe(*args, **kwargs):
+                    assert kwargs["invoke"] is runner, "actual runner not passed"
+                    if mode == "timeout":
+                        ticks=iter((0, 29.5))
+                        kwargs["clock"]=lambda: next(ticks)
+                    return shared(*args, **kwargs)
+                scope = dict(wait_old_absent=observe, prefix=command[:3], gate=SimpleNamespace(PKG=command[-1]),
+                             old={"pid":"8416"}, old_pid="8416", record=record,
+                             result={"process_loss":record}, stop_runner=runner, loss_runner=runner)
+                caught=None
+                try: eval(compile(ast.Expression(body=copy.deepcopy(call)), "<actual-absence-call>", "eval"), scope)
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired, RuntimeError) as exc: caught=exc
+                expected = subprocess.TimeoutExpired if mode=="timeout" else subprocess.CalledProcessError if mode.startswith("255") else RuntimeError
+                assert (caught is None if mode=="absent" else type(caught) is expected), mode
+                assert log.read_text().splitlines() == [" ".join(command[1:])], "actual caller repeated command"
+                assert len(traces)==len(record["absence_commands"])==1
+                assert traces[0]["command"]==command and traces[0]["timeout_seconds"]==(.5 if mode=="timeout" else 10)
+                if mode.startswith("255"):
+                    assert (caught.returncode,caught.stdout,caught.stderr,caught.cmd)==(255,out.decode(),err.decode(),command)
+                if mode=="timeout":
+                    assert (caught.stdout,caught.stderr,caught.timeout,caught.cmd)==(out,err,.5,command)
+                    assert traces[0]["timed_out"] and traces[0]["cleanup"]=="PROCESS_GROUP_KILLED_AND_REAPED"
+    for target, before, after in (
+        (0, ',invoke=stop_runner)', ')'),
+        (1, ',invoke=loss_runner)', ')'),
+        (1, 'result["process_query_traces"])', 'result["wrong_traces"])'),
+        (1, 'from verify_process_control import wait_old_absent, isolated_stop_runner',
+            'from verify_process_control import isolated_stop_runner'),
+    ):
+        sources=[export,schema]; assert sources[target].count(before)==1
+        sources[target]=sources[target].replace(before,after,1)
+        compile(sources[target], "<absence-caller-mutant>", "exec")
+        wiring(export,schema) # Valid positive witness before each structural rejection.
+        try: wiring(*sources)
+        except AssertionError: pass
+        else: raise AssertionError("compiled caller wiring mutant survived")
+    def gate_wiring(value):
+        jobs = re.split(r"(?m)^  ([A-Za-z_][A-Za-z_0-9]*):\n", value)
+        assert len(jobs) > 1
+        sections = dict(zip(jobs[1::2], jobs[2::2]))
+        for job in ("export_probe", "database"):
+            steps = re.split(r"(?m)^      - ", sections[job])[1:]
+            aliases = [i for i, step in enumerate(steps) if "run: *isolated_trace_setup" in step]
+            assert aliases == [1], "setup must precede device work: "+job
+            assert steps[1].splitlines()[1:] == ["        run: *isolated_trace_setup"], "conditional/bypassed setup: "+job
+            uploads = [step for step in steps if "actions/upload-artifact@" in step and
+                       ("name: database-api-" if job=="database" else "name: export-probe-api-") in step]
+            assert len(uploads)==1 and "            isolated-trace-host.log\n" in uploads[0], "trace host evidence upload: "+job
+        setup = sections["core"].split("        run: &isolated_trace_setup |\n")
+        assert len(setup)==2
+        script = setup[1].split("      - ",1)[0]
+        assert "          set -euo pipefail\n" in script
+        required = "          python3 tools/verify_process_control.py absence-selftest\n"
+        assert script.count(required)==1 and value.count(required)==1, "required absence gate not executed"
+    gate_wiring(workflow)
+    for before,after in (
+        ("          python3 tools/verify_process_control.py absence-selftest\n", ""),
+        ("      - name: Require isolated tracing before full regression device work\n        run: *isolated_trace_setup\n", ""),
+        ("      - name: Require isolated tracing before full regression device work\n",
+         "      - name: Require isolated tracing before full regression device work\n        continue-on-error: true\n"),
+        ("            setup.log\n            isolated-trace-host.log\n", "            setup.log\n"),
+    ):
+        assert workflow.count(before)==1
+        changed=workflow.replace(before,after,1)
+        gate_wiring(workflow)
+        try: gate_wiring(changed)
+        except AssertionError: pass
+        else: raise AssertionError("workflow omission survived")
+    print("ABSENCE_TRACE_CONTROLS both observers 11 cases; 5 compiled witnessed mutants rejected; 10 actual-call host-subprocess integrations; 4 caller negatives; 4 workflow negatives PASS; NOT_ANDROID", flush=True)
+
+if __name__ == "__main__":
+    import sys
+    if sys.argv[1:] == ["absence-selftest"]:
+        absence_trace_selftest(Path(".github/workflows/android.yml").read_text(),
+                               Path("tools/verify_schema3.py").read_text())
+        sys.exit(0)
 
 if __name__ == "__main__":
     import sys

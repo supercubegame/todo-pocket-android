@@ -776,6 +776,34 @@ JAVA=(shared.JAVA[:shared.JAVA.index(" static Map<String,List<List<String>>> exp
 _backup_label='suffix.equals("backend")?"backend_backup":"ui_backup"'
 assert JAVA.count(_backup_label)==1,"one inherited backup label"
 JAVA=JAVA.replace(_backup_label,'suffix+"_backup"')
+BACKUP_EXPECTED=r'''
+ static Map<String,List<List<String>>> expectedBackup(Map<String,List<List<String>>> before){
+  Map<String,List<List<String>>> out=new TreeMap<>();
+  for(Map.Entry<String,List<List<String>>> entry:before.entrySet()){
+   List<List<String>> rows=new ArrayList<>();
+   for(List<String> row:entry.getValue())rows.add(new ArrayList<>(row));
+   out.put(entry.getKey(),rows);
+  }
+  // This fixture writes/deletes blocks. Backup serializes declared columns,
+  // preserving row order but not SQLite's undeclared physical rowid gaps.
+  // Other tables retain the exact original expectations, including their rowids.
+  List<List<String>> rows=out.get("blocks");
+  if(rows==null||rows.isEmpty()||!rows.get(0).equals(Arrays.asList(
+    "rowid","note_id","id","position","kind","text","asset_id","caption","private","original_asset_id")))
+   throw new AssertionError("backup block schema");
+  for(int i=1;i<rows.size();i++){
+   if(rows.get(i).size()!=10)throw new AssertionError("backup block cells");
+   rows.get(i).set(0,"1:"+i);
+  }
+  return out;
+ }
+'''
+assert JAVA.count("state(target).equals(state(source))")==1
+assert JAVA.count('Path zip=folder.resolve(suffix+".zip");source.exportBackup(zip,repo);')==1
+JAVA=JAVA.replace("state(target).equals(state(source))","state(target).equals(expectedBackup(before))&&state(source).equals(before)")
+JAVA=JAVA.replace('Path zip=folder.resolve(suffix+".zip");source.exportBackup(zip,repo);',
+ 'Map<String,List<List<String>>> before=state(source);Path zip=folder.resolve(suffix+".zip");source.exportBackup(zip,repo);')
+JAVA=JAVA.replace(" void backup(",BACKUP_EXPECTED+" void backup(")
 def bind():
     for name in ("parser","validate","fixture","driver","report","report_selftest"):
         s=inspect.getsource(getattr(shared,name))
@@ -804,22 +832,31 @@ JavacTask t=(JavacTask)c.getTask(null,f,d,Arrays.asList("-proc:none"),null,f.get
 CompilationUnitTree u=t.parse().iterator().next();for(Diagnostic<?>e:d.getDiagnostics())if(e.getKind()==Diagnostic.Kind.ERROR)throw new AssertionError(e.toString());
 String s=Files.readString(Path.of(a[0]));SourcePositions p=Trees.instance(t).getSourcePositions();StringBuilder out=new StringBuilder();int count=0;
 for(Tree type:u.getTypeDecls())if(type instanceof ClassTree)for(Tree m:((ClassTree)type).getMembers())
-if(m instanceof MethodTree&&((MethodTree)m).getName().contentEquals("backup")){
+if(m instanceof MethodTree&&Arrays.asList("backup","expectedBackup").contains(((MethodTree)m).getName().toString())){
 out.append(s.substring((int)p.getStartPosition(u,m),(int)p.getEndPosition(u,m))).append("\n");count++;}
-if(count!=1)throw new AssertionError("one backup helper");Files.writeString(Path.of(a[1]),out.toString());}}}'''
+if(count!=2)throw new AssertionError("backup helper and expected state");Files.writeString(Path.of(a[1]),out.toString());}}}'''
     harness=r'''import java.util.*;import java.nio.file.*;
 class BackupCheck{
  Path folder=Path.of("fixture");String nonce="1";List<String>labels=new ArrayList<>();Object getTargetContext(){return this;}
  static final class MediaRepository{MediaRepository(Path p,long n){}}
  static final class AppDatabase implements AutoCloseable{
-  static List<String>calls=new ArrayList<>();static boolean corrupt;
-  boolean restored;
+  static List<String>calls=new ArrayList<>();static boolean corrupt,gapped,changeSource;
+  boolean restored,exported;
   static AppDatabase openSchema3(Object c,String n){calls.add("open:"+n);return new AppDatabase();}
-  void exportBackup(Path p,MediaRepository m){calls.add("export:"+p);}
+  void exportBackup(Path p,MediaRepository m){calls.add("export:"+p);exported=true;}
   void restoreBackup(Path z,Path p,long n,MediaRepository m){calls.add("restore:"+z);restored=true;}
   public void close(){}
  }
- static Map<String,String>state(AppDatabase h){return Map.of("body",h.restored&&AppDatabase.corrupt?"changed":"preserved");}
+ static Map<String,List<List<String>>>state(AppDatabase h){
+  Map<String,List<List<String>>> out=new TreeMap<>();
+  out.put("blocks",new ArrayList<>(Arrays.asList(
+   new ArrayList<>(Arrays.asList("rowid","note_id","id","position","kind","text","asset_id","caption","private","original_asset_id")),
+   new ArrayList<>(Arrays.asList("1:1","3:sibling","3:plain-text","1:0","3:TEXT","3:Keep linked content","0:","3:","1:0","0:")),
+   new ArrayList<>(Arrays.asList(h.restored||!AppDatabase.gapped?"1:2":"1:3","3:foreign","3:plain-text","1:0","3:TEXT","3:Foreign body","0:","3:","1:0","0:")),
+   new ArrayList<>(Arrays.asList(h.restored||!AppDatabase.gapped?"1:3":"1:4","3:target","3:plain-text","1:0","3:TEXT",h.restored&&AppDatabase.corrupt?"3:changed":"3:New linked body","0:","3:","1:1","0:")))));
+  out.put("revision",new ArrayList<>(Arrays.asList(new ArrayList<>(Arrays.asList("rowid","id","value")),new ArrayList<>(Arrays.asList("1:1","1:1",h.exported&&AppDatabase.changeSource?"1:10":"1:9")))));
+  return out;
+ }
  void pass(boolean b,String label){if(!b)throw new AssertionError("backup equality");labels.add(label);}
  __BACKUP__
  public static void main(String[]a)throws Exception{
@@ -839,6 +876,18 @@ class BackupCheck{
   try{h.backup(new AppDatabase(),"notes");}catch(AssertionError e){if(!"backup equality".equals(e.getMessage()))throw e;rejected=true;}
   if(!rejected||h.labels.size()!=3)throw new AssertionError("changed_backup_rejected");
   System.out.println("BACKUP_HELPER positive=3 negative=1 PASS; generated helper with storage doubles");
+  AppDatabase.corrupt=false;AppDatabase.gapped=true;
+  h.backup(new AppDatabase(),"ui");
+  if(h.labels.size()!=4)throw new AssertionError("gapped_backup");
+  System.out.println("BACKUP_GAPPED_ROWIDS_PASS");
+  Map<String,List<List<String>>> frozen=state(new AppDatabase());String original=frozen.toString();
+  Map<String,List<List<String>>> normalized=expectedBackup(frozen);
+  if(!original.equals(frozen.toString())||!normalized.get("revision").equals(frozen.get("revision")))
+   throw new AssertionError("backup_input_and_unrelated_preserved");
+  AppDatabase.changeSource=true;rejected=false;
+  try{h.backup(new AppDatabase(),"notes");}catch(AssertionError e){if(!"backup equality".equals(e.getMessage()))throw e;rejected=true;}
+  if(!rejected||h.labels.size()!=4)throw new AssertionError("changed_source_rejected");
+  System.out.println("BACKUP_EXTENDED positive=4 negative=2 PASS; storage doubles, not Android");
  }
 }'''
     with tempfile.TemporaryDirectory() as tmp:
@@ -851,12 +900,14 @@ class BackupCheck{
         good=execute(helper);assert good.returncode==0,(good.stdout,good.stderr);print(good.stdout.strip())
         for old,new,label in (
             ('suffix+"_backup"','suffix.equals("backend")?"backend_backup":"ui_backup"',"notes_backup_label"),
-            ("state(target).equals(state(source))","true","changed_backup_rejected"),
+            ("state(target).equals(expectedBackup(before))","true","changed_backup_rejected"),
+            ('rows.get(i).set(0,"1:"+i);',';',"backup equality"),
+            ("state(source).equals(before)","true","changed_source_rejected"),
         ):
             assert helper.count(old)==1
             result=execute(helper.replace(old,new))
             assert result.returncode==1 and "BACKUP_ORIGINAL_WITNESS" in result.stdout and "AssertionError: "+label in result.stderr,(result.stdout,result.stderr)
-        print("BACKUP_HELPER compiled_witnessed_mutants=2 PASS; not Android backup acceptance")
+        print("BACKUP_HELPER compiled_witnessed_mutants=4 PASS; not Android backup acceptance")
 
 def body_oracle_selftest():
     """Actual Java expected-state helper; no Android or product-save claim."""

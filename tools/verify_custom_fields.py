@@ -20,7 +20,7 @@ EXPECTED={
   [["ui_blank_"+kind]+(["ui_duplicate_options_"+kind] if "SELECT" in kind else [])+
    [action+"_"+kind for action in ("ui_create","ui_create_replay","ui_value","ui_replay","ui_clear")] for kind in TYPES],[])+
  ["ui_cancel_readonly","ui_rename_stable_id","ui_archive_history","ui_restore_history"]+
- ["notes_restart","notes_backup"]+["ui_notes_"+x for x in ("archive_readonly","list_scope","blank","create","create_replay","link","link_replay","unlink_cancel","unlink","unlink_replay","open_identity","checkpoint")]+["ui_checkpoint"],
+ ["notes_restart","notes_backup"]+["ui_notes_"+x for x in ("archive_readonly","list_scope","blank","create","create_replay","link","link_replay","unlink_cancel","unlink","unlink_replay","open_identity","body_cancel","body_save","body_reopen","body_restore","checkpoint")]+["ui_checkpoint"],
  "undone":["ui_restart","ui_backup"],
 }
 REQUIRED=copy.deepcopy(EXPECTED)
@@ -416,6 +416,7 @@ CASES=r'''
   click("返回活动",false);
   ui(()->{one("field-notes-page",true);one("field-note-"+created,true);});
   need(state(h).equals(before),"created editor return readonly");
+  noteBodyUi(h,created);
   click("field-note-unlink-"+created,true);before=state(h);click("field-note-unlink-confirm",true);
   need(state(h).equals(expectedNote(before,1,field,created,null,"unlink")),"restore original link fixture using guarded UI");
   click("field-notes-back",true);click("field-archive-"+field,true);click("field-archive-confirm",true);
@@ -425,6 +426,64 @@ CASES=r'''
   int n=key.contentEquals(root.getContentDescription()==null?"":root.getContentDescription())?1:0;
   if(root instanceof android.view.ViewGroup){android.view.ViewGroup group=(android.view.ViewGroup)root;for(int i=0;i<group.getChildCount();i++)n+=noteKeyCount(group.getChildAt(i),key);}
   return n;
+ }
+ // Narrow oracle for this one-TEXT-block fixture. Compute from pre-write rows,
+ // including delete/reinsert rowid allocation; never learn expected cells from
+ // the saved database. Same block IDs in sibling/foreign notes are intentional.
+ static Map<String,List<List<String>>> expectedBody(Map<String,List<List<String>>> before,String note,String block,String text){
+  Map<String,List<List<String>>> out=copy(before);List<List<String>> rows=out.get("blocks");
+  need(rows.get(0).equals(Arrays.asList("rowid","note_id","id","position","kind","text","asset_id","caption","private","original_asset_id")),"body oracle schema");
+  List<String> target=null;int count=0;
+  for(int i=rows.size()-1;i>0;i--)if(rows.get(i).get(1).equals("3:"+note)){target=rows.remove(i);count++;}
+  need(count==1&&target!=null,"body oracle one target");
+  need(target.get(2).equals("3:"+block)&&target.get(3).equals("1:0")&&target.get(4).equals("3:TEXT"),"body oracle exact block");
+  target.set(0,"1:"+nextRow(rows));target.set(5,"3:"+text);
+  rows.add(target);revision(out);return out;
+ }
+ void bodyDialog(String input,boolean save)throws Exception{
+  AccessibilityNodeInfo field=node("文字内容",true);
+  need(field.isEditable(),"body dialog editable witness");
+  Bundle value=new Bundle();value.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,input);
+  need(field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,value)&&field.refresh()&&input.contentEquals(field.getText()),"body dialog exact input");
+  need(node(save?"保存":"取消",false).performAction(AccessibilityNodeInfo.ACTION_CLICK),"body dialog terminal action");
+  long end=SystemClock.elapsedRealtime()+10000;
+  while(true){
+   AccessibilityNodeInfo active=getUiAutomation().getRootInActiveWindow();List<AccessibilityNodeInfo> inputs=new ArrayList<>();
+   if(active!=null&&PACKAGE.contentEquals(active.getPackageName()==null?"":active.getPackageName())){
+    nodes(active,"文字内容",true,inputs);if(inputs.isEmpty())break;
+   }
+   need(SystemClock.elapsedRealtime()<end,"body dialog close deadline");SystemClock.sleep(50);
+  }
+  ready();
+ }
+ void noteBodyUi(AppDatabase h,String created)throws Exception{
+  // Original empty-note and sibling-body-exclusion assertions already ran.
+  h.saveNote(created,Arrays.asList(com.supercubegame.pockettodo.NoteDocument.Block.text("plain-text","New linked body",true)));
+  h.saveNote("ui-foreign",Arrays.asList(com.supercubegame.pockettodo.NoteDocument.Block.text("plain-text","Foreign body",false)));
+  need(h.noteBlocks(created).size()==1&&h.noteBlocks("ui-plain").size()==1&&h.noteBlocks("ui-foreign").size()==1,"body nonempty identity witnesses");
+  Map<String,String> images=media();Map<String,List<List<String>>> before=state(h);
+  click("field-note-"+created,true);
+  ui(()->{
+   need(created.contentEquals(((TextView)one("note-selected-id",true)).getText()),"body selected identity");
+   need("New linked body".contentEquals(((TextView)one("note-text-plain-text",true)).getText()),"body initial exact text");
+  });
+  click("note-edit-plain-text",true);bodyDialog("Canceled body",false);
+  pass(state(h).equals(before)&&media().equals(images),"ui_notes_body_cancel");
+  Map<String,List<List<String>>> wanted=expectedBody(before,created,"plain-text","Saved linked body");
+  click("note-edit-plain-text",true);bodyDialog("Saved linked body",true);
+  pass(state(h).equals(wanted)&&media().equals(images),"ui_notes_body_save");
+  click("返回活动",false);click("field-note-"+created,true);
+  ui(()->{
+   need(created.contentEquals(((TextView)one("note-selected-id",true)).getText()),"saved body exact owner");
+   need("Saved linked body".contentEquals(((TextView)one("note-text-plain-text",true)).getText()),"saved body exact render");
+  });
+  pass(state(h).equals(wanted)&&media().equals(images),"ui_notes_body_reopen");
+  before=state(h);wanted=expectedBody(before,created,"plain-text","New linked body");
+  click("note-edit-plain-text",true);bodyDialog("New linked body",true);
+  pass(state(h).equals(wanted)&&media().equals(images),"ui_notes_body_restore");
+  click("返回活动",false);
+  ui(()->{one("field-notes-page",true);one("field-note-"+created,true);});
+  need(state(h).equals(wanted),"body return readonly");
  }
 '''
 def oracle_selftest():
@@ -559,7 +618,7 @@ public static void main(String[]args)throws Exception{
  check(plain.get("field_options").equals(b.get("field_options")),"no_phantom_options");
  Map<String,List<List<String>>> empty=copy(b);empty.get("fields").subList(1,empty.get("fields").size()).clear();empty.get("field_options").subList(1,empty.get("field_options").size()).clear();
  Map<String,List<List<String>>> fresh=create(empty,"SELECT",Arrays.asList("x"));
- check(fresh.get("fields").get(1).get(0).equals("1:1")&&fresh.get("field_options").get(1).equals(r("1:1","3:new-id","3:x","1:0")),"empty_rowids");
+ check(fresh.get("fields").get(1).get(0).equals("1:1")&&fresh.get("field_options").get(1).equals(r("1:1","3:new-id","3:x","1:0"))),"empty_rowids");
  System.out.println("CREATE_ORACLE_PASS");
 }}'''
     with tempfile.TemporaryDirectory() as tmp:
@@ -799,10 +858,78 @@ class BackupCheck{
             assert result.returncode==1 and "BACKUP_ORIGINAL_WITNESS" in result.stdout and "AssertionError: "+label in result.stderr,(result.stdout,result.stderr)
         print("BACKUP_HELPER compiled_witnessed_mutants=2 PASS; not Android backup acceptance")
 
+def body_oracle_selftest():
+    """Actual Java expected-state helper; no Android or product-save claim."""
+    extract=r'''import javax.tools.*;import com.sun.source.util.*;import com.sun.source.tree.*;import java.nio.file.*;import java.util.*;
+class ExtractBody{public static void main(String[]a)throws Exception{
+JavaCompiler c=ToolProvider.getSystemJavaCompiler();DiagnosticCollector<JavaFileObject>d=new DiagnosticCollector<>();
+try(StandardJavaFileManager f=c.getStandardFileManager(d,null,null)){
+JavacTask t=(JavacTask)c.getTask(null,f,d,Arrays.asList("-proc:none"),null,f.getJavaFileObjects(a[0]));
+CompilationUnitTree u=t.parse().iterator().next();for(Diagnostic<?>e:d.getDiagnostics())if(e.getKind()==Diagnostic.Kind.ERROR)throw new AssertionError(e.toString());
+String s=Files.readString(Path.of(a[0]));SourcePositions p=Trees.instance(t).getSourcePositions();Set<String>w=new HashSet<>(Arrays.asList("need","copy","revision","nextRow","expectedBody"));StringBuilder out=new StringBuilder();
+for(Tree type:u.getTypeDecls())if(type instanceof ClassTree)for(Tree m:((ClassTree)type).getMembers())
+if(m instanceof MethodTree&&w.remove(((MethodTree)m).getName().toString()))out.append(s.substring((int)p.getStartPosition(u,m),(int)p.getEndPosition(u,m))).append("\n");
+w.remove("expectedBody");if(!w.isEmpty())throw new AssertionError(w);Files.writeString(Path.of(a[1]),out.toString());}}}'''
+    harness=r'''import java.util.*;import java.lang.reflect.*;
+class BodyOracle{
+__METHODS__
+static List<String> r(String...s){return new ArrayList<>(Arrays.asList(s));}
+static void check(boolean b,String label){need(b,label);System.out.println("BODY_CHECK "+label);}
+@SuppressWarnings("unchecked")
+static Map<String,List<List<String>>> call(Map<String,List<List<String>>> b,String note)throws Exception{
+ Method m;try{m=BodyOracle.class.getDeclaredMethod("expectedBody",Map.class,String.class,String.class,String.class);}
+ catch(NoSuchMethodException e){throw new AssertionError("missing_body_oracle");}
+ try{return (Map<String,List<List<String>>>)m.invoke(null,b,note,"shared","Saved text");}
+ catch(InvocationTargetException e){if(e.getCause() instanceof Error)throw(Error)e.getCause();throw e;}
+}
+public static void main(String[]a)throws Exception{
+ Map<String,List<List<String>>> b=new TreeMap<>();
+ b.put("revision",new ArrayList<>(Arrays.asList(r("rowid","id","value"),r("1:1","1:1","1:9"))));
+ b.put("blocks",new ArrayList<>(Arrays.asList(
+  r("rowid","note_id","id","position","kind","text","asset_id","caption","private","original_asset_id"),
+  r("1:3","3:target","3:shared","1:0","3:TEXT","3:Before","0:","3:","1:1","0:"),
+  r("1:7","3:sibling","3:shared","1:0","3:TEXT","3:Sibling","0:","3:","1:0","0:"),
+  r("1:11","3:foreign","3:shared","1:0","3:TEXT","3:Foreign","0:","3:","1:0","0:"))));
+ b.put("notes",new ArrayList<>(Arrays.asList(r("id","activity_id","title"),r("3:target","1:1","3:Same"),r("3:sibling","1:1","3:Same"),r("3:foreign","1:2","3:Same"))));
+ b.put("field_notes",new ArrayList<>(Arrays.asList(r("note_id","field_id"),r("3:target","3:f"))));
+ check(copy(b).equals(b),"copy_witness");String frozen=b.toString();
+ Map<String,List<List<String>>> out=call(b,"target");
+ check(out.get("blocks").equals(Arrays.asList(b.get("blocks").get(0),b.get("blocks").get(2),b.get("blocks").get(3),
+  r("1:12","3:target","3:shared","1:0","3:TEXT","3:Saved text","0:","3:","1:1","0:"))),"exact_target_rows");
+ check(out.get("notes").equals(b.get("notes"))&&out.get("field_notes").equals(b.get("field_notes")),"unrelated_tables");
+ check(out.get("revision").get(1).equals(r("1:1","1:1","1:10")),"one_revision");
+ check(b.toString().equals(frozen),"frozen_input");
+ boolean missing=false;try{call(b,"absent");}catch(AssertionError e){missing="body oracle one target".equals(e.getMessage());}
+ check(missing,"missing_refused");
+ Map<String,List<List<String>>> multiple=copy(b);multiple.get("blocks").add(r("1:20","3:target","3:second","1:1","3:TEXT","3:Other","0:","3:","1:0","0:"));
+ boolean refused=false;try{call(multiple,"target");}catch(AssertionError e){refused="body oracle one target".equals(e.getMessage());}
+ check(refused,"multi_block_fixture_refused");
+}}'''
+    with tempfile.TemporaryDirectory() as tmp:
+        p=Path(tmp);(p/"ExtractBody.java").write_text(extract);(p/"Source.java").write_text(JAVA)
+        subprocess.run(["java",str(p/"ExtractBody.java"),str(p/"Source.java"),str(p/"methods")],check=True,timeout=30)
+        methods=(p/"methods").read_text()
+        def execute(code):
+            (p/"BodyOracle.java").write_text(harness.replace("__METHODS__",code))
+            return subprocess.run(["java",str(p/"BodyOracle.java")],capture_output=True,text=True,timeout=30)
+        good=execute(methods);assert good.returncode==0,(good.stdout,good.stderr)
+        lines=good.stdout.splitlines();assert len(lines)==7;print(good.stdout,end="")
+        for old,new,label in (
+            ('target.set(0,"1:"+nextRow(rows));','target.set(0,"1:1");',"exact_target_rows"),
+            ('target.set(5,"3:"+text);','target.set(5,"3:wrong");',"exact_target_rows"),
+            ('rows.add(target);revision(out);','target.set(8,"1:0");rows.add(target);revision(out);',"exact_target_rows"),
+            ('Math.incrementExact(Long.parseLong(rows.get(1).get(col).substring(2)))','Long.parseLong(rows.get(1).get(col).substring(2))',"one_revision"),
+        ):
+            assert methods.count(old)==1,(old,methods.count(old))
+            result=execute(methods.replace(old,new,1))
+            assert result.returncode==1 and "AssertionError: "+label in result.stderr,(result.stdout,result.stderr)
+            assert result.stdout.splitlines()==lines[:lines.index("BODY_CHECK "+label)]
+        print("FIELD_BODY_ORACLE checks=7 compiled_witnessed_mutants=4 PASS; independent expected rows, not Android")
+
 def selftest():
     assert not sys.flags.optimize
-    assert REQUIRED==EXPECTED and [len(EXPECTED[p]) for p in ("seed","deleted","undone")]==[108,72,2]
-    assert len(set(sum(EXPECTED.values(),[])))==182
+    assert REQUIRED==EXPECTED and [len(EXPECTED[p]) for p in ("seed","deleted","undone")]==[108,76,2]
+    assert len(set(sum(EXPECTED.values(),[])))==186
     rejected=0
     for api in (26,34):
         v,m,l=fixture(api);validate(v,m,l,api,"a"*40,"123","1")
@@ -811,7 +938,7 @@ def selftest():
             bad=copy.deepcopy(v);del bad[key];cases.append((bad,m,l))
         for key in m:
             bad=copy.deepcopy(m);del bad[key];cases.append((v,bad,l))
-        for key,wrong in (("checks",182.0),("checks",True),("checks",78),("checks",130),("checks",148),("release_ready",0),("api",float(api)),
+        for key,wrong in (("checks",186.0),("checks",True),("checks",78),("checks",130),("checks",148),("checks",182),("release_ready",0),("api",float(api)),
                           ("commit","d"*40),("run_id","999"),("run_attempt","2"),("apk_sha256","d"*64),
                           ("native_ui","WIDGET_CALLBACKS"),("status","FAIL"),("error","sentinel")):
             bad=copy.deepcopy(v);bad[key]=wrong;cases.append((bad,m,l))
@@ -826,8 +953,9 @@ def selftest():
     oracle_selftest()
     session_selftest()
     backup_selftest()
+    body_oracle_selftest()
     assert callable(driver())
-    print("FIELDS_HOST "+json.dumps(dict(status="PASS",positive=2,negative=rejected,device_checks=182,
+    print("FIELDS_HOST "+json.dumps(dict(status="PASS",positive=2,negative=rejected,device_checks=186,
         scope="HOST_REPORT_AND_ORACLE_NOT_ANDROID",release_ready=False)))
 
 if __name__=="__main__":

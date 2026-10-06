@@ -1,0 +1,169 @@
+{
+  "commit": "c4c18c4816c898fbec49e4955820279d27f747e0",
+  "run_id": "37428621033",
+  "status": "NOT_VERIFIED",
+  "scope": "FROZEN_SCHEMA2_DB_BACKUP_COMPATIBILITY_NOT_SCHEMA3_IMPLEMENTATION",
+  "devices": {
+    "26": {
+      "status": "NOT_VERIFIED",
+      "phases": {
+        "seed": {
+          "status": "NOT_VERIFIED",
+          "checks": 14,
+          "expected_checks": 14,
+          "labels": [
+            "frozen fixture really uses schema2 and eight block columns",
+            "frozen serializer detects a real changed row and rollback restores fixture",
+            "archive wraps frozen old bytes without current database encoder",
+            "opening frozen old database preserves all historical cells and ordering",
+            "cancel old-backup preview preserves live state and publishes no media",
+            "guarded old-backup restore preserves complete old-format projection",
+            "guarded old-backup restore publishes exact original bytes",
+            "old archived field and note attachment survive restore",
+            "duplicate titles and shared image retain separate block privacy and ownership",
+            "truncated frozen state cannot replace current live data",
+            "missing frozen original refuses restore without data loss",
+            "late old-backup restore failure rolls back every deleted and inserted table",
+            "lower-level old restore stays deterministic and retains original bytes",
+            "current-format export and restore retain historical semantic content"
+          ],
+          "required_labels": [
+            "frozen fixture really uses schema2 and eight block columns",
+            "frozen serializer detects a real changed row and rollback restores fixture",
+            "archive wraps frozen old bytes without current database encoder",
+            "opening frozen old database preserves all historical cells and ordering",
+            "cancel old-backup preview preserves live state and publishes no media",
+            "guarded old-backup restore preserves complete old-format projection",
+            "guarded old-backup restore publishes exact original bytes",
+            "old archived field and note attachment survive restore",
+            "duplicate titles and shared image retain separate block privacy and ownership",
+            "truncated frozen state cannot replace current live data",
+            "missing frozen original refuses restore without data loss",
+            "late old-backup restore failure rolls back every deleted and inserted table",
+            "lower-level old restore stays deterministic and retains original bytes",
+            "current-format export and restore retain historical semantic content"
+          ],
+          "decoded_log_text_sha256": "d1fb717154442523b514c90703dd2d3bbaefab03c57a9188066fab0fc4562d6f",
+          "failure_tail": "es not create orphan note\nPASS new ordinary todo does not inherit legacy title cap\nPASS ordinary todo edit and completion persist\nPASS blank ordinary todo edit rejected\nPASS invalid todo edit does not change completion\nPASS legacy import appends ordinary todos without replacing existing\nPASS same legacy backup imported twice is persistent no-op\nPASS legacy remapping keeps text and completion\nPASS legacy appends preserve imported and existing order\nPASS legacy import invents no activities money or check-ins\nPASS corrupt legacy import rejected before transaction\nPASS bad import retains rows and journal exactly\nPASS late imported ID collision rolls back complete import\nPASS failed import has neither first row nor journal residue\nPASS migration fixture really is v1 without new field table\nPASS v1 to v2 migration retains category and activity\nPASS migration preserves old private note and check-in\nPASS migration advances schema not user revision\nPASS new fields usable on migrated database\nPASS migrated database has no foreign key violations\nPASS production snapshot equals independently encoded all-table fixture\nPASS backup fixture covers nonempty revision\nPASS backup fixture covers nonempty categories\nPASS backup fixture covers nonempty applications\nPASS backup fixture covers nonempty activities\nPASS backup fixture covers nonempty paths\nPASS backup fixture covers nonempty tags\nPASS backup fixture covers nonempty batches\nPASS backup fixture covers nonempty ledger\nPASS backup fixture covers nonempty checkins\nPASS backup fixture covers nonempty media\nPASS backup fixture covers nonempty notes\nPASS backup fixture covers nonempty blocks\nPASS backup fixture covers nonempty fields\nPASS backup fixture covers nonempty field_options\nPASS backup fixture covers nonempty field_values\nPASS backup fixture covers nonempty field_notes\nPASS backup fixture covers nonempty todos\nPASS backup fixture covers nonempty legacy_imports\nPASS real backup ZIP contains exact semantic state and registered assets\nPASS valid ZIP with missing registered media rejected\nPASS valid ZIP with missing registered media keeps complete prior DB state\nPASS valid ZIP with unregistered extra media rejected\nPASS valid ZIP with unregistered extra media keeps complete prior DB state\nPASS unknown state schema rejected\nPASS unknown state schema keeps complete prior DB state\nPASS trailing semantic state bytes rejected\nPASS trailing semantic state bytes keeps complete prior DB state\nPASS semantic fault fixture differs: invalid archived numeric field\nPASS invalid archived numeric field rejected\nPASS invalid archived numeric field keeps complete prior DB state\nPASS semantic fault fixture differs: impossible check-in date\nPASS impossible check-in date rejected\nPASS impossible check-in date keeps complete prior DB state\nPASS semantic fault fixture differs: ordered path gap\nPASS ordered path gap rejected\nPASS ordered path gap keeps complete prior DB state\nPASS semantic fault fixture differs: inconsistent money batch journal\nPASS inconsistent money batch journal rejected\nPASS inconsistent money batch journal keeps complete prior DB state\nPASS semantic fault fixture differs: media registry size mismatch\nPASS media registry size mismatch rejected\nPASS media registry size mismatch keeps complete prior DB state\nPASS semantic fault fixture differs: unknown saved choice\nPASS unknown saved choice rejected\nPASS unknown saved choice keeps complete prior DB state\nPASS late restore failure is the exact injected SQLite trigger fault\nPASS late commit failure rolls back deleted old data plus all inserted tables\nPASS failed restore never modifies old media bytes\nPASS successful replacement round-trips all tables and journals exactly\nPASS restored media has exact source bytes\nPASS restore replaces sentinel rather than merging and preserves todo order\nPASS restore retains ordered choices and archived field values\nPASS restore retains field-note relationship\nPASS restored legacy import journal still prevents duplicate import\nPASS restored money journal still prevents duplicate batch\nPASS restored undo tombstone rejects resurrection\nPASS same complete backup can be restored repeatedly without duplicates\nPASS new unregistered table cannot silently disappear from backup\nPASS restore preview does not mutate any live table or publish media\nPASS preview shows independent exact current and incoming counts for every table\nPASS restore preview summary cannot be modified by caller\nPASS cancel twice clears private staging without altering live state\nPASS canceled restore plan cannot be confirmed\nPASS semantic-invalid preview refuses and cleans staging without touching live data\nPASS restore preview is bound to its exact database helper owner\nPASS ordinary write after preview rejects stale restore\nPASS stale rejection preserves every new row and revision and clears stage\nPASS failed stale plan is single use and requires a new preview\nPASS full snapshot guard rejects another connection write even without revision bump\nPASS same-revision stale rejection retains exact externally changed state\nPASS changed staged media is rejected on confirmation with complete old state intact\nPASS guarded confirmation late injected failure rolls back every replaced table\nPASS failed commit plan cannot be reused after removing the fault\nPASS confirmation uses the exact validated preview not a subsequently replaced source file\nPASS confirmed snapshot publishes exact media and cleans staging before commit\nPASS successful confirmation cannot be replayed\nPASS exact idempotent retry remains a genuine no-op while preview is open\nPASS unchanged state after no-op can still confirm the reviewed snapshot\nLEGACY_SCHEMA2_PASS frozen fixture really uses schema2 and eight block columns\nLEGACY_SCHEMA2_PASS frozen serializer detects a real changed row and rollback restores fixture\nLEGACY_SCHEMA2_PASS archive wraps frozen old bytes without current database encoder\nLEGACY_SCHEMA2_PASS opening frozen old database preserves all historical cells and ordering\nLEGACY_SCHEMA2_PASS cancel old-backup preview preserves live state and publishes no media\nLEGACY_SCHEMA2_PASS guarded old-backup restore preserves complete old-format projection\nLEGACY_SCHEMA2_PASS guarded old-backup restore publishes exact original bytes\nLEGACY_SCHEMA2_PASS old archived field and note attachment survive restore\nLEGACY_SCHEMA2_PASS duplicate titles and shared image retain separate block privacy and ownership\nLEGACY_SCHEMA2_PASS truncated frozen state cannot replace current live data\nLEGACY_SCHEMA2_PASS missing frozen original refuses restore without data loss\nLEGACY_SCHEMA2_PASS late old-backup restore failure rolls back every deleted and inserted table\nLEGACY_SCHEMA2_PASS lower-level old restore stays deterministic and retains original bytes\nLEGACY_SCHEMA2_PASS current-format export and restore retain historical semantic content\nLEGACY_SCHEMA2_RESULT seed 14/14 PASS\nDEVICE_DATABASE_RESULT seed 155/155 PASS\n\nINSTRUMENTATION_CODE: -1\n"
+        },
+        "reopen": {
+          "status": "PASS",
+          "checks": 3,
+          "expected_checks": 3,
+          "labels": [
+            "separate process retains complete frozen old-backup content",
+            "separate process retains exact shared original",
+            "restored todo and archived field remain usable after process restart"
+          ],
+          "required_labels": [
+            "separate process retains complete frozen old-backup content",
+            "separate process retains exact shared original",
+            "restored todo and archived field remain usable after process restart"
+          ],
+          "decoded_log_text_sha256": "fffe9936ab56057fa7c0877054feee084fc67733ce1e1ae1c3b2a110850e8f7f",
+          "failure_tail": null
+        }
+      }
+    },
+    "34": {
+      "status": "NOT_VERIFIED",
+      "phases": {
+        "seed": {
+          "status": "NOT_VERIFIED",
+          "checks": 14,
+          "expected_checks": 14,
+          "labels": [
+            "frozen fixture really uses schema2 and eight block columns",
+            "frozen serializer detects a real changed row and rollback restores fixture",
+            "archive wraps frozen old bytes without current database encoder",
+            "opening frozen old database preserves all historical cells and ordering",
+            "cancel old-backup preview preserves live state and publishes no media",
+            "guarded old-backup restore preserves complete old-format projection",
+            "guarded old-backup restore publishes exact original bytes",
+            "old archived field and note attachment survive restore",
+            "duplicate titles and shared image retain separate block privacy and ownership",
+            "truncated frozen state cannot replace current live data",
+            "missing frozen original refuses restore without data loss",
+            "late old-backup restore failure rolls back every deleted and inserted table",
+            "lower-level old restore stays deterministic and retains original bytes",
+            "current-format export and restore retain historical semantic content"
+          ],
+          "required_labels": [
+            "frozen fixture really uses schema2 and eight block columns",
+            "frozen serializer detects a real changed row and rollback restores fixture",
+            "archive wraps frozen old bytes without current database encoder",
+            "opening frozen old database preserves all historical cells and ordering",
+            "cancel old-backup preview preserves live state and publishes no media",
+            "guarded old-backup restore preserves complete old-format projection",
+            "guarded old-backup restore publishes exact original bytes",
+            "old archived field and note attachment survive restore",
+            "duplicate titles and shared image retain separate block privacy and ownership",
+            "truncated frozen state cannot replace current live data",
+            "missing frozen original refuses restore without data loss",
+            "late old-backup restore failure rolls back every deleted and inserted table",
+            "lower-level old restore stays deterministic and retains original bytes",
+            "current-format export and restore retain historical semantic content"
+          ],
+          "decoded_log_text_sha256": "d1fb717154442523b514c90703dd2d3bbaefab03c57a9188066fab0fc4562d6f",
+          "failure_tail": "es not create orphan note\nPASS new ordinary todo does not inherit legacy title cap\nPASS ordinary todo edit and completion persist\nPASS blank ordinary todo edit rejected\nPASS invalid todo edit does not change completion\nPASS legacy import appends ordinary todos without replacing existing\nPASS same legacy backup imported twice is persistent no-op\nPASS legacy remapping keeps text and completion\nPASS legacy appends preserve imported and existing order\nPASS legacy import invents no activities money or check-ins\nPASS corrupt legacy import rejected before transaction\nPASS bad import retains rows and journal exactly\nPASS late imported ID collision rolls back complete import\nPASS failed import has neither first row nor journal residue\nPASS migration fixture really is v1 without new field table\nPASS v1 to v2 migration retains category and activity\nPASS migration preserves old private note and check-in\nPASS migration advances schema not user revision\nPASS new fields usable on migrated database\nPASS migrated database has no foreign key violations\nPASS production snapshot equals independently encoded all-table fixture\nPASS backup fixture covers nonempty revision\nPASS backup fixture covers nonempty categories\nPASS backup fixture covers nonempty applications\nPASS backup fixture covers nonempty activities\nPASS backup fixture covers nonempty paths\nPASS backup fixture covers nonempty tags\nPASS backup fixture covers nonempty batches\nPASS backup fixture covers nonempty ledger\nPASS backup fixture covers nonempty checkins\nPASS backup fixture covers nonempty media\nPASS backup fixture covers nonempty notes\nPASS backup fixture covers nonempty blocks\nPASS backup fixture covers nonempty fields\nPASS backup fixture covers nonempty field_options\nPASS backup fixture covers nonempty field_values\nPASS backup fixture covers nonempty field_notes\nPASS backup fixture covers nonempty todos\nPASS backup fixture covers nonempty legacy_imports\nPASS real backup ZIP contains exact semantic state and registered assets\nPASS valid ZIP with missing registered media rejected\nPASS valid ZIP with missing registered media keeps complete prior DB state\nPASS valid ZIP with unregistered extra media rejected\nPASS valid ZIP with unregistered extra media keeps complete prior DB state\nPASS unknown state schema rejected\nPASS unknown state schema keeps complete prior DB state\nPASS trailing semantic state bytes rejected\nPASS trailing semantic state bytes keeps complete prior DB state\nPASS semantic fault fixture differs: invalid archived numeric field\nPASS invalid archived numeric field rejected\nPASS invalid archived numeric field keeps complete prior DB state\nPASS semantic fault fixture differs: impossible check-in date\nPASS impossible check-in date rejected\nPASS impossible check-in date keeps complete prior DB state\nPASS semantic fault fixture differs: ordered path gap\nPASS ordered path gap rejected\nPASS ordered path gap keeps complete prior DB state\nPASS semantic fault fixture differs: inconsistent money batch journal\nPASS inconsistent money batch journal rejected\nPASS inconsistent money batch journal keeps complete prior DB state\nPASS semantic fault fixture differs: media registry size mismatch\nPASS media registry size mismatch rejected\nPASS media registry size mismatch keeps complete prior DB state\nPASS semantic fault fixture differs: unknown saved choice\nPASS unknown saved choice rejected\nPASS unknown saved choice keeps complete prior DB state\nPASS late restore failure is the exact injected SQLite trigger fault\nPASS late commit failure rolls back deleted old data plus all inserted tables\nPASS failed restore never modifies old media bytes\nPASS successful replacement round-trips all tables and journals exactly\nPASS restored media has exact source bytes\nPASS restore replaces sentinel rather than merging and preserves todo order\nPASS restore retains ordered choices and archived field values\nPASS restore retains field-note relationship\nPASS restored legacy import journal still prevents duplicate import\nPASS restored money journal still prevents duplicate batch\nPASS restored undo tombstone rejects resurrection\nPASS same complete backup can be restored repeatedly without duplicates\nPASS new unregistered table cannot silently disappear from backup\nPASS restore preview does not mutate any live table or publish media\nPASS preview shows independent exact current and incoming counts for every table\nPASS restore preview summary cannot be modified by caller\nPASS cancel twice clears private staging without altering live state\nPASS canceled restore plan cannot be confirmed\nPASS semantic-invalid preview refuses and cleans staging without touching live data\nPASS restore preview is bound to its exact database helper owner\nPASS ordinary write after preview rejects stale restore\nPASS stale rejection preserves every new row and revision and clears stage\nPASS failed stale plan is single use and requires a new preview\nPASS full snapshot guard rejects another connection write even without revision bump\nPASS same-revision stale rejection retains exact externally changed state\nPASS changed staged media is rejected on confirmation with complete old state intact\nPASS guarded confirmation late injected failure rolls back every replaced table\nPASS failed commit plan cannot be reused after removing the fault\nPASS confirmation uses the exact validated preview not a subsequently replaced source file\nPASS confirmed snapshot publishes exact media and cleans staging before commit\nPASS successful confirmation cannot be replayed\nPASS exact idempotent retry remains a genuine no-op while preview is open\nPASS unchanged state after no-op can still confirm the reviewed snapshot\nLEGACY_SCHEMA2_PASS frozen fixture really uses schema2 and eight block columns\nLEGACY_SCHEMA2_PASS frozen serializer detects a real changed row and rollback restores fixture\nLEGACY_SCHEMA2_PASS archive wraps frozen old bytes without current database encoder\nLEGACY_SCHEMA2_PASS opening frozen old database preserves all historical cells and ordering\nLEGACY_SCHEMA2_PASS cancel old-backup preview preserves live state and publishes no media\nLEGACY_SCHEMA2_PASS guarded old-backup restore preserves complete old-format projection\nLEGACY_SCHEMA2_PASS guarded old-backup restore publishes exact original bytes\nLEGACY_SCHEMA2_PASS old archived field and note attachment survive restore\nLEGACY_SCHEMA2_PASS duplicate titles and shared image retain separate block privacy and ownership\nLEGACY_SCHEMA2_PASS truncated frozen state cannot replace current live data\nLEGACY_SCHEMA2_PASS missing frozen original refuses restore without data loss\nLEGACY_SCHEMA2_PASS late old-backup restore failure rolls back every deleted and inserted table\nLEGACY_SCHEMA2_PASS lower-level old restore stays deterministic and retains original bytes\nLEGACY_SCHEMA2_PASS current-format export and restore retain historical semantic content\nLEGACY_SCHEMA2_RESULT seed 14/14 PASS\nDEVICE_DATABASE_RESULT seed 155/155 PASS\n\nINSTRUMENTATION_CODE: -1\n"
+        },
+        "reopen": {
+          "status": "PASS",
+          "checks": 3,
+          "expected_checks": 3,
+          "labels": [
+            "separate process retains complete frozen old-backup content",
+            "separate process retains exact shared original",
+            "restored todo and archived field remain usable after process restart"
+          ],
+          "required_labels": [
+            "separate process retains complete frozen old-backup content",
+            "separate process retains exact shared original",
+            "restored todo and archived field remain usable after process restart"
+          ],
+          "decoded_log_text_sha256": "fffe9936ab56057fa7c0877054feee084fc67733ce1e1ae1c3b2a110850e8f7f",
+          "failure_tail": null
+        }
+      }
+    }
+  },
+  "observer_selftests": {
+    "seed": {
+      "positive_controls": 2,
+      "negative_controls": 12,
+      "mutants": [
+        "missing_entire_suite",
+        "missing_result",
+        "wrong_count",
+        "duplicate_result",
+        "wrong_phase",
+        "missing_named_check",
+        "self_consistent_missing_check",
+        "duplicate_named_check",
+        "substituted_named_check",
+        "failed_suite",
+        "failed_instrumentation",
+        "missing_instrumentation_finish"
+      ]
+    },
+    "reopen": {
+      "positive_controls": 2,
+      "negative_controls": 12,
+      "mutants": [
+        "missing_entire_suite",
+        "missing_result",
+        "wrong_count",
+        "duplicate_result",
+        "wrong_phase",
+        "missing_named_check",
+        "self_consistent_missing_check",
+        "duplicate_named_check",
+        "substituted_named_check",
+        "failed_suite",
+        "failed_instrumentation",
+        "missing_instrumentation_finish"
+      ]
+    }
+  },
+  "release_ready": false
+}

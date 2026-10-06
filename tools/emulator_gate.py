@@ -194,12 +194,18 @@ def select_restore_file(read_nodes, tap_node, label, records, clock=None, pause=
         if clock() >= deadline:
             raise TimeoutError("restore picker observation completed after deadline")
         controls = [n for n in frame if n.get("content-desc") in ("List view", "Grid view")]
-        files = [n for n in frame if n.get("text") == label]
+        matches = [n for n in frame if n.get("text") == label]
+        # API26 repeats the name in android:id/summary. Keep that evidence,
+        # but only the same picker's known summary is not a file title.
+        files = [n for n in matches if not (
+            n.get("resource-id") == "android:id/summary"
+            and len(controls) == 1 and controls[0].get("package") in packages
+            and n.get("package") == controls[0].get("package"))]
         records.append({"stage": "OBSERVED",
                         "view_controls": [dict(n.attrib) if hasattr(n, "attrib") else dict(n)
                                           for n in controls],
                         "filename_matches": [dict(n.attrib) if hasattr(n, "attrib") else dict(n)
-                                             for n in files]})
+                                             for n in matches]})
         assert len(controls) <= 1, "ambiguous picker view controls"
         assert len(files) <= 1, "ambiguous restore filename"
         if controls:
@@ -492,7 +498,70 @@ def restore_picker_wiring_selftest(source=None):
     print("RESTORE_PICKER_WIRING positive=1 negative=6 PASS; AST_ONLY", flush=True)
 
 
+def restore_picker_summary_selftest():
+    """API26 recorded title/summary shape; host replay, not a device rerun."""
+    import inspect
+    package = "com.android.documentsui"
+    label = "pocket-todo-backup.zip"
+    def node(rid, bounds, desc="", text=label):
+        return ET.Element("node", {"resource-id": rid, "bounds": bounds,
+            "content-desc": desc, "text": text, "package": package, "enabled": "true"})
+    grid = node(package+":id/menu_list", "[232,28][280,76]", "List view", "")
+    view = node(package+":id/menu_grid", "[232,28][280,76]", "Grid view", "")
+    title = node("android:id/title", "[76,156][240,178]")
+    summary = node("android:id/summary", "[272,178][304,195]")
+    def exercise(function):
+        positive = 0
+        negative = 0
+        for pkg in ("com.android.documentsui", "com.google.android.documentsui"):
+            for n in (grid, view, title, summary): n.set("package", pkg)
+            for transition in (False, True):
+                frames = [[grid, title, summary], [view, summary, title]] if transition else [[view, summary, title]]
+                position = [0]; taps = []; records = []
+                def read():
+                    frame = frames[min(position[0],len(frames)-1)]
+                    position[0] += 1
+                    return frame
+                result = function(read, taps.append, label, records, lambda:0, lambda _:None)
+                assert result is title and taps == ([grid,title] if transition else [title])
+                assert records[-1]["stage"] == "FILE_TAPPED"
+                assert len(records[0]["filename_matches"]) == 2, "summary evidence discarded"
+                positive += 1
+        for kind in ("two_titles", "summary_only", "foreign_summary", "unknown_resource"):
+            other = ET.Element("node", dict(summary.attrib))
+            if kind == "foreign_summary": other.set("package", "foreign.app")
+            if kind == "unknown_resource": other.set("resource-id", "other:id/title")
+            frame = [view,title,title,summary] if kind == "two_titles" else (
+                [view,summary] if kind == "summary_only" else [view,title,other])
+            taps=[];records=[];now=[0]
+            def pause(_): now[0] += .25
+            try:
+                function(lambda:frame,taps.append,label,records,lambda:now[0],pause)
+            except (AssertionError,TimeoutError):
+                pass
+            else:
+                raise AssertionError("summary control accepted "+kind)
+            assert not taps, "ambiguous or non-title target tapped"
+            negative += 1
+        return positive,negative
+    assert exercise(select_restore_file) == (4,4)
+    source = inspect.getsource(select_restore_file)
+    old = 'n.get("resource-id") == "android:id/summary"'
+    assert source.count(old) == 1
+    namespace = dict(globals())
+    exec(compile(source.replace(old,"False",1),"<summary-filter-mutant>","exec"),namespace)
+    mutant = namespace["select_restore_file"]
+    taps=[]
+    assert mutant(lambda:[view,title],taps.append,label,[],lambda:0,lambda _:None) is title
+    assert taps == [title]
+    try: exercise(mutant)
+    except AssertionError: pass
+    else: raise AssertionError("summary filter mutant survived")
+    print("RESTORE_PICKER_SUMMARY positive=4 negative=4 witnessed_mutant=1 PASS; HOST_REPLAY_NOT_ANDROID",flush=True)
+
+
 def parser_selftest():
+    restore_picker_summary_selftest()
     restore_picker_selftest()
     restore_picker_wiring_selftest()
     full_native_observer_selftest()

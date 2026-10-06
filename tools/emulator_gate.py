@@ -170,7 +170,331 @@ def database_directory_selftest():
     assert failure is timeout and len(calls) == 1, 'directory timeout retried or replaced'
     print('DATABASE_DIRECTORY_SELFTEST positive=2 negative=4 PASS; host command contract, not Android root cause', flush=True)
 
+def select_restore_file(read_nodes, tap_node, label, records, clock=None, pause=None):
+    """Select once from a verified list view; never replay a failed file tap."""
+    clock = time.monotonic if clock is None else clock
+    pause = time.sleep if pause is None else pause
+    assert isinstance(label, str) and label and "/" not in label
+    packages = {"com.android.documentsui", "com.google.android.documentsui"}
+    deadline = clock() + 20
+    switched = False
+    def valid(n, package=None):
+        assert n.get("package") in packages, "foreign picker control"
+        if package is not None:
+            assert n.get("package") == package, "mixed picker packages"
+        assert n.get("enabled") == "true", "disabled picker control"
+        match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", n.get("bounds", ""))
+        assert match, "invalid picker bounds"
+        left, top, right, bottom = map(int, match.groups())
+        assert right > left and bottom > top, "empty picker bounds"
+    while True:
+        if clock() >= deadline:
+            raise TimeoutError("restore picker selection exceeded 20 seconds")
+        frame = read_nodes()
+        if clock() >= deadline:
+            raise TimeoutError("restore picker observation completed after deadline")
+        controls = [n for n in frame if n.get("content-desc") in ("List view", "Grid view")]
+        files = [n for n in frame if n.get("text") == label]
+        records.append({"stage": "OBSERVED",
+                        "view_controls": [dict(n.attrib) if hasattr(n, "attrib") else dict(n)
+                                          for n in controls],
+                        "filename_matches": [dict(n.attrib) if hasattr(n, "attrib") else dict(n)
+                                             for n in files]})
+        assert len(controls) <= 1, "ambiguous picker view controls"
+        assert len(files) <= 1, "ambiguous restore filename"
+        if controls:
+            control = controls[0]
+            valid(control)
+            if control.get("content-desc") == "List view":
+                if not switched:
+                    switched = True
+                    tap_node(control)
+                    records.append({"stage": "LIST_VIEW_REQUESTED"})
+                # Never reuse grid coordinates even if the filename was visible.
+            elif files:
+                file = files[0]
+                valid(file, control.get("package"))
+                assert file.get("resource-id") == "android:id/title", "unexpected filename resource"
+                tap_node(file)
+                records.append({"stage": "FILE_TAPPED", "label": label})
+                return file
+        pause(.25)
+
+def restore_picker_selftest():
+    """Host controls; not device acceptance."""
+    import copy
+    import inspect
+    import unittest
+    import ast
+    import textwrap
+    import xml.etree.ElementTree as ET
+
+    PKG = "com.google.android.documentsui"
+
+
+    def node(desc="", text="", package=PKG, enabled="true", bounds="[20,200][250,250]", rid=""):
+        return {"content-desc": desc, "text": text, "package": package,
+                "enabled": enabled, "bounds": bounds, "resource-id": rid}
+
+
+    GRID = node("List view")
+    LIST = node("Grid view")
+    FILE = node(text="pocket-todo-backup.zip", rid="android:id/title")
+
+
+    class Model:
+        def __init__(self, frames, ticks=None):
+            self.frames = copy.deepcopy(frames)
+            self.index = 0
+            self.now = 0
+            self.taps = []
+            self.records = []
+            self.ticks = iter(ticks) if ticks is not None else None
+
+        def read(self):
+            value = self.frames[min(self.index, len(self.frames)-1)]
+            self.index += 1
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        def tap(self, value):
+            self.taps.append(value["content-desc"] or value["text"])
+
+        def clock(self):
+            return next(self.ticks) if self.ticks is not None else self.now
+
+        def pause(self, seconds):
+            assert seconds == .25
+            self.now += seconds
+
+        def run(self, function):
+            return function(self.read, self.tap, "pocket-todo-backup.zip",
+                            self.records, self.clock, self.pause)
+
+
+    def exercise(function):
+        positives = [
+            ([[LIST, FILE]], ["pocket-todo-backup.zip"]),
+            ([[GRID, FILE], [LIST, FILE]], ["List view", "pocket-todo-backup.zip"]),
+            ([[], [GRID, FILE], [GRID, FILE], [LIST], [LIST, FILE]],
+             ["List view", "pocket-todo-backup.zip"]),
+            ([[LIST], [LIST, FILE]], ["pocket-todo-backup.zip"]),
+            ([[LIST, node("Preview the file pocket-todo-backup.zip"), FILE]],
+             ["pocket-todo-backup.zip"]),
+        ]
+        for frames, taps in positives:
+            m = Model(frames)
+            result = m.run(function)
+            assert result == FILE and m.taps == taps, "selection order"
+            assert m.records[-1]["stage"] == "FILE_TAPPED", "selection evidence"
+        # Both supported DocumentsUI packages must pass using the actual helper.
+        m = Model([[dict(LIST, package="com.android.documentsui"),
+                    dict(FILE, package="com.android.documentsui")]])
+        assert m.run(function)["package"] == "com.android.documentsui"
+        assert m.taps == ["pocket-todo-backup.zip"]
+        negatives = [
+            ([[LIST, FILE, FILE]], AssertionError, [], "duplicate filename"),
+            ([[GRID, GRID, FILE]], AssertionError, [], "ambiguous view"),
+            ([[GRID, LIST, FILE]], AssertionError, [], "ambiguous view"),
+            ([[dict(LIST, package="foreign.app"), FILE]], AssertionError, [], "foreign view"),
+            ([[dict(LIST, package="foreign.app"), dict(FILE, package="foreign.app")]],
+             AssertionError, [], "coherent foreign picker"),
+            ([[LIST, dict(FILE, package="foreign.app")]], AssertionError, [], "foreign file"),
+            ([[LIST, dict(FILE, enabled="false")]], AssertionError, [], "disabled file"),
+            ([[dict(GRID, enabled="false"), FILE]], AssertionError, [], "disabled view"),
+            ([[LIST, dict(FILE, bounds="[0,0][0,0]")]], AssertionError, [], "empty bounds"),
+            ([[LIST, dict(FILE, bounds="malformed")]], AssertionError, [], "bad bounds"),
+            ([[LIST, dict(FILE, **{"resource-id": "other:id/title"})]], AssertionError, [], "wrong id"),
+            ([[GRID, FILE]], TimeoutError, ["List view"], "unchanged grid"),
+            ([[LIST]], TimeoutError, [], "missing file"),
+            ([[FILE]], TimeoutError, [], "unverified view"),
+            ([[]], TimeoutError, [], "missing picker"),
+            ([[LIST, dict(FILE, text="pocket-todo-backup (1).zip")]],
+             TimeoutError, [], "different file"),
+        ]
+        for frames, error, taps, name in negatives:
+            m = Model(frames)
+            try:
+                m.run(function)
+            except error:
+                pass
+            else:
+                raise AssertionError("negative survived: " + name)
+            assert m.taps == taps, "unexpected tap: " + name
+            assert len(m.records) <= 82, "unbounded observations"
+        for ticks in ([0, 20], [0, 0, 20]):
+            m = Model([[LIST, FILE]], ticks)
+            try:
+                m.run(function)
+            except TimeoutError:
+                pass
+            else:
+                raise AssertionError("late observation accepted")
+            assert not m.taps, "tap after deadline"
+        sentinel = OSError("original read failure")
+        m = Model([sentinel])
+        # deepcopy on the model replaces exception identity; capture actual fixture.
+        sentinel = m.frames[0]
+        try:
+            m.run(function)
+        except OSError as exc:
+            assert exc is sentinel, "original read error replaced"
+        else:
+            raise AssertionError("read error swallowed")
+        assert m.index == 1 and not m.taps
+        m = Model([[LIST, FILE]])
+        sentinel = RuntimeError("original tap failure")
+        def broken_tap(value):
+            m.taps.append(value["text"])
+            raise sentinel
+        try:
+            function(m.read, broken_tap, "pocket-todo-backup.zip",
+                     m.records, m.clock, m.pause)
+        except RuntimeError as exc:
+            assert exc is sentinel
+        else:
+            raise AssertionError("tap error swallowed")
+        assert m.taps == ["pocket-todo-backup.zip"]
+        return 6, 20
+
+
+    print('RESTORE_PICKER_HOST', exercise(select_restore_file), 'PASS; NOT_ANDROID')
+    original = inspect.getsource(select_restore_file)
+    mutants = [('if not switched:', 'if True:', 'repeated toggle'), ('assert len(files) <= 1, "ambiguous restore filename"', 'pass', 'duplicate filename'), ('assert n.get("package") in packages, "foreign picker control"', 'pass', 'foreign package'), ('assert n.get("enabled") == "true", "disabled picker control"', 'pass', 'disabled control'), ('assert right > left and bottom > top, "empty picker bounds"', 'pass', 'empty bounds')]
+    for old, new, name in mutants:
+        assert original.count(old) == 1
+        namespace = dict(globals(), select_restore_file=select_restore_file)
+        exec(compile(original.replace(old, new, 1), '<picker-mutant>', 'exec'), namespace)
+        function = namespace['select_restore_file']
+        witness = Model([[LIST, FILE]])
+        assert witness.run(function) == FILE
+        try:
+            exercise(function)
+        except AssertionError:
+            print('WITNESSED_MUTANT_REJECTED', name)
+        else:
+            raise AssertionError('mutant survived: ' + name)
+    old_caller = "def import_backup(label):\n        tap('活动'); ready()\n        if absent('恢复完整备份'): tap('备份 / 恢复'); ready()\n        tap('恢复完整备份')\n        file=find(text=label); tap_node(file)\n        dialog=desc('restore-consent')\n        assert dialog.get('enabled')=='true' and dialog.get('checked')=='false','consent checkbox starts visible and unchecked'\n        counts=desc('restore-counts').get('text')\n        assert counts is not None and '普通待办：本机 3 → 备份 2' in counts,'restore preview shows exact current and incoming todo counts; actual='+repr(counts)\n        ok(True,'SAF file selection shows visible restore preview and replacement counts')\n        return dialog\n"
+    new_caller = old_caller.replace('file=find(text=label); tap_node(file)', 'select_restore_file(nodes,tap_node,label,restore_picker_traces)')
+    def caller_exercise(source, starts_grid):
+        state = {'grid': starts_grid, 'opened': False}
+        events = []
+
+        def nodes():
+            return [ET.Element('node', GRID if state['grid'] else LIST), ET.Element('node', FILE)]
+
+        def tap_node(value):
+            if value.get('content-desc') == 'List view':
+                state['grid'] = False
+                events.append('LIST')
+            else:
+                assert value.get('text') == FILE['text']
+                events.append('FILE')
+                state['opened'] = not state['grid']
+
+        def desc(value):
+            assert state['opened'], 'restore consent missing: still in grid picker'
+            events.append(value)
+            return {'enabled': 'true', 'checked': 'false'} if value == 'restore-consent' else {'text': '普通待办：本机 3 → 备份 2'}
+
+        def ok(condition, label):
+            assert condition
+            events.append('EXACT_COUNTS')
+        namespace = dict(tap=lambda name: None, ready=lambda: None, absent=lambda name: False, find=lambda **attrs: ET.Element('node', FILE), tap_node=tap_node, desc=desc, ok=ok, nodes=nodes, restore_picker_traces=[], select_restore_file=select_restore_file)
+        exec(compile(source, '<actual-import-backup>', 'exec'), namespace)
+        namespace['import_backup'](FILE['text'])
+        assert events == (['LIST'] if starts_grid else []) + ['FILE', 'restore-consent', 'restore-counts', 'EXACT_COUNTS']
+    caller_exercise(old_caller, False)
+    try:
+        caller_exercise(old_caller, True)
+    except AssertionError as exc:
+        assert str(exc) == 'restore consent missing: still in grid picker'
+        print('ORIGINAL_CALLER_GRID_MODEL_RED: NOT_DEVICE_REPRODUCTION')
+    else:
+        raise AssertionError('old caller accepted grid fixture')
+    caller_exercise(new_caller, False)
+    caller_exercise(new_caller, True)
+    a, b = (ast.parse(old_caller).body[0], ast.parse(new_caller).body[0])
+    assert [ast.dump(n) for n in a.body[6:]] == [ast.dump(n) for n in b.body[5:]]
+    print('ACTUAL_CALLER_SLICE list/grid GREEN; original consent/count assertions retained')
+
+def restore_picker_wiring_selftest(source=None):
+    """Guard actual call and both receipts; AST proof is not device proof."""
+    import ast
+    import copy
+    source = Path(__file__).read_text() if source is None else source
+    tree = ast.parse(source)
+    def check(tree):
+        native = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+                      and n.name == "_verify_native_ui")
+        caller = next(n for n in native.body if isinstance(n, ast.FunctionDef)
+                      and n.name == "import_backup")
+        calls = [n for n in ast.walk(caller) if isinstance(n, ast.Call)
+                 and isinstance(n.func, ast.Name) and n.func.id == "select_restore_file"]
+        assert len(calls) == 1, "restore picker caller omitted or duplicated"
+        assert ast.unparse(calls[0]) == "select_restore_file(nodes, tap_node, label, restore_picker_traces)", "restore picker callback binding differs"
+        assert not any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                       and n.func.id in ("find", "tap_node") for n in ast.walk(caller)), "old filename tap remains"
+        initialization = [n for n in native.body if isinstance(n, ast.Assign)
+                          and any(isinstance(t, ast.Name) and t.id == "restore_picker_traces"
+                                  for t in n.targets)]
+        assert len(initialization) == 1 and ast.unparse(initialization[0].value) == "[]", "trace lifetime differs"
+        trial = next(n for n in native.body if isinstance(n, ast.Try))
+        def receipt(body):
+            writes = [n for n in body if isinstance(n, ast.Assign)
+                      and any(ast.unparse(t) == "result['restore_picker_traces']"
+                              for t in n.targets)]
+            assert len(writes) == 1 and ast.unparse(writes[0].value) == "restore_picker_traces", "picker receipt missing or rewritten"
+        receipt(trial.body)
+        assert len(trial.handlers) == 1
+        failure = trial.handlers[0].body
+        receipt(failure)
+        assignment = next(i for i, n in enumerate(failure) if isinstance(n, ast.Assign)
+                          and any(ast.unparse(t) == "result['restore_picker_traces']" for t in n.targets))
+        write = next(i for i, n in enumerate(failure) if isinstance(n, ast.Expr)
+                     and isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Attribute)
+                     and n.value.func.attr == "write_text")
+        assert assignment < write, "failure evidence persisted too late"
+        assert isinstance(failure[-1], ast.Raise) and failure[-1].exc is None, "original failure swallowed or replaced"
+        parser = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+                      and n.name == "parser_selftest")
+        for name in ("restore_picker_selftest", "restore_picker_wiring_selftest"):
+            assert sum(isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                       and n.func.id == name for n in ast.walk(parser)) == 1, "permanent picker test missing"
+    check(tree)
+    for kind in ("caller", "success", "failure", "binding", "propagation", "entry"):
+        mutant = copy.deepcopy(tree)
+        native = next(n for n in mutant.body if isinstance(n, ast.FunctionDef)
+                      and n.name == "_verify_native_ui")
+        trial = next(n for n in native.body if isinstance(n, ast.Try))
+        if kind in ("success", "failure"):
+            body = trial.body if kind == "success" else trial.handlers[0].body
+            body[:] = [n for n in body if not (isinstance(n, ast.Assign) and
+                       any(ast.unparse(t) == "result['restore_picker_traces']" for t in n.targets))]
+        elif kind == "propagation":
+            trial.handlers[0].body[-1] = ast.Pass()
+        else:
+            for n in ast.walk(mutant):
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Name):
+                    if kind == "caller" and n.func.id == "select_restore_file":
+                        n.func.id = "omitted"
+                    elif kind == "binding" and n.func.id == "select_restore_file":
+                        n.args[-1] = ast.List(elts=[], ctx=ast.Load())
+                    elif kind == "entry" and n.func.id == "restore_picker_selftest":
+                        n.func.id = "omitted"
+        try:
+            check(mutant)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("picker wiring omission survived: " + kind)
+    print("RESTORE_PICKER_WIRING positive=1 negative=6 PASS; AST_ONLY", flush=True)
+
+
 def parser_selftest():
+    restore_picker_selftest()
+    restore_picker_wiring_selftest()
     full_native_observer_selftest()
     summary_navigation_selftest()
     database_directory_selftest()
@@ -431,6 +755,7 @@ def _verify_native_ui(adb,nodes):
     checks, shots = [], []
     infra_retries = []
     process_stops = []
+    restore_picker_traces = []
     def shell(*args):
         return subprocess.check_output([str(adb), '-s', SERIAL, 'shell', *args], text=True, timeout=40)
     def tap_node(n):
@@ -516,7 +841,7 @@ def _verify_native_ui(adb,nodes):
         tap('活动'); ready()
         if absent('恢复完整备份'): tap('备份 / 恢复'); ready()
         tap('恢复完整备份')
-        file=find(text=label); tap_node(file)
+        select_restore_file(nodes,tap_node,label,restore_picker_traces)
         dialog=desc('restore-consent')
         assert dialog.get('enabled')=='true' and dialog.get('checked')=='false','consent checkbox starts visible and unchecked'
         counts=desc('restore-counts').get('text')
@@ -1132,8 +1457,10 @@ public class ImageImportFixture {
         result.update(default_app_schema=3,default_schema3_ui='NATIVE_SCHEMA3_UI_PASS')
         result.update(derivative_ui='NATIVE_CROP_MASK_UI_SAVE_CANCEL_RESTART_PASS')
         result.update(derivative_geometry=derive_geometry,pixel_oracle=pixel_oracle,process_stops=process_stops)
+        result['restore_picker_traces']=restore_picker_traces
     except Exception as exc:
         result={'status':'FAIL','api':API,'count':len(checks),'checks':checks,'error':repr(exc),'screenshots':shots,'infra_retries':infra_retries,'release_ready':False,'process_stops':process_stops}
+        result['restore_picker_traces']=restore_picker_traces
         if 'derive_geometry' in locals():result['derivative_geometry']=derive_geometry
         if 'pixel_oracle' in locals():result['pixel_oracle']=pixel_oracle
         try: shot('failure.png')

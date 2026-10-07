@@ -1039,7 +1039,7 @@ jobs:
           python3 - <<'PY'
           import base64,json,os,tempfile,urllib.request,urllib.error
           from pathlib import Path
-          from tools.verify_evidence import initial_evidence_read
+          from tools.verify_evidence import initial_evidence_read, verify_readback
           source,run=os.environ['GITHUB_SHA'],os.environ['GITHUB_RUN_ID']
           def log_tail(path):
               try:
@@ -1090,8 +1090,7 @@ jobs:
           except urllib.error.HTTPError as exc:
             if exc.code!=404:raise
           written=api('contents/'+path,'PUT',body)
-          actual=api('contents/'+path+'?ref='+written['commit']['sha'])
-          assert base64.b64decode(actual['content'])==data
+          actual=verify_readback(api,path,written['commit']['sha'],data)
           print('EARLY_EXPORT_DIAGNOSTIC '+actual['html_url'],flush=True)
           PY
   database:
@@ -1730,8 +1729,8 @@ jobs:
           except urllib.error.HTTPError as exc:
             if exc.code!=404:raise
           written=api('contents/'+path,'PUT',body)
-          actual=api('contents/'+path+'?ref='+written['commit']['sha'])
-          assert base64.b64decode(actual['content'])==data
+          from tools.verify_evidence import verify_readback
+          actual=verify_readback(api,path,written['commit']['sha'],data)
           print('EXPORT_PROBE_EVIDENCE '+actual['html_url'],flush=True)
           assert passed,'independent export probe missing or failed; full regression is also still required'
           PY
@@ -1838,8 +1837,8 @@ jobs:
           data=(json.dumps(meta,ensure_ascii=False,indent=2)+'\n').encode()
           path='reports/preview-'+os.environ['GITHUB_SHA']+'-'+os.environ['GITHUB_RUN_ID']+'.json'
           written=api('contents/'+path,'PUT',{'message':'Record verified staged APK download','branch':'evidence','content':base64.b64encode(data).decode()})
-          actual=api('contents/'+path+'?ref='+written['commit']['sha'])
-          assert base64.b64decode(actual['content'])==data
+          from tools.verify_evidence import verify_readback
+          actual=verify_readback(api,path,written['commit']['sha'],data)
           print('PREVIEW_DOWNLOAD '+os.environ['ARTIFACT_URL'])
           print('PREVIEW_RECEIPT '+actual['html_url'])
           PY

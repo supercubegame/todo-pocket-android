@@ -6,13 +6,82 @@ import contextlib
 import hashlib
 import json
 import math
+import os
+import re
 import signal
 import time
 import urllib.error
+import urllib.request
 from urllib.parse import quote
 
 
-def publish(api, path, data, pause=time.sleep, emit=lambda row: None):
+def raw_evidence_read(route, limit):
+    """One authenticated raw GET; original 30s socket timeout, no retry.
+
+    Only repository-relative immutable routes built by evidence_bytes enter
+    here. Never follow a metadata download_url or send credentials to it.
+    The byte bound detects overlong/truncated responses without clipping proof.
+    """
+    repo = os.environ["GITHUB_REPOSITORY"]
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
+        raise ValueError("repository identity required")
+    request = urllib.request.Request(
+        "https://api.github.com/repos/" + repo + "/" + route,
+        headers={"Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                 "Accept": "application/vnd.github.raw+json"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return response.read(limit)
+
+
+def evidence_bytes(value, path, expected, *, commit=None, raw_get=None):
+    """Decode inline content or read immutable large-file bytes, fail closed."""
+    if (not isinstance(path, str) or not path.startswith(("reports/", "screenshots/"))
+            or any(p in ("", ".", "..") for p in path.split("/"))
+            or "?" in path or "#" in path):
+        raise ValueError("evidence path required")
+    if commit is not None and (not isinstance(commit, str)
+                              or not re.fullmatch(r"[0-9a-f]{40}", commit)):
+        raise ValueError("publication commit identity missing")
+    if value.get("encoding") == "base64":
+        return base64.b64decode("".join(value["content"].split()), validate=True)
+    if value.get("encoding") != "none" or value.get("content") != "":
+        raise ValueError("supported evidence encoding required")
+    sha, size = value.get("sha"), value.get("size")
+    if (value.get("type") != "file" or value.get("path") != path
+            or not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha)
+            or type(size) is not int or size != len(expected)):
+        raise ValueError("large evidence metadata identity mismatch")
+    expected_blob = hashlib.sha1(b"blob " + str(len(expected)).encode() + b"\0" + expected).hexdigest()
+    if sha != expected_blob:
+        raise AssertionError("large evidence blob differs from expected bytes")
+    # Final publication uses its exact commit/path. A conflict refresh has no
+    # commit identity, so read its immutable Git blob, never the moving branch.
+    route = ("contents/" + quote(path, safe="/") + "?ref=" + commit
+             if commit is not None else "git/blobs/" + sha)
+    raw = (raw_evidence_read if raw_get is None else raw_get)(route, size + 1)
+    if type(raw) is not bytes or len(raw) != size:
+        raise AssertionError("large evidence exact length mismatch")
+    blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
+    if blob != sha or raw != expected:
+        raise AssertionError("large evidence exact bytes mismatch")
+    return raw
+
+
+def verify_readback(api, path, commit, data, *, raw_get=None):
+    """Read the immutable PUT commit, preserving exact-byte acceptance."""
+    if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("publication commit identity missing")
+    if (not isinstance(path, str) or not path.startswith(("reports/", "screenshots/"))
+            or any(p in ("", ".", "..") for p in path.split("/"))
+            or "?" in path or "#" in path):
+        raise ValueError("evidence path required")
+    actual = api("contents/" + quote(path, safe="/") + "?ref=" + commit)
+    if evidence_bytes(actual, path, data, commit=commit, raw_get=raw_get) != data:
+        raise AssertionError("evidence exact readback mismatch: " + path)
+    return actual
+
+
+def publish(api, path, data, pause=time.sleep, emit=lambda row: None, *, raw_get=None):
     """Bounded PUT-409 recovery, pinned exact readback, concurrent-target guard.
 
     api is the existing authenticated repository-relative JSON transport.
@@ -35,9 +104,7 @@ def publish(api, path, data, pause=time.sleep, emit=lambda row: None):
             return None
 
     def content(value):
-        if value.get("encoding") != "base64":
-            raise ValueError("base64 evidence readback required")
-        return base64.b64decode("".join(value["content"].split()), validate=True)
+        return evidence_bytes(value, path, data, raw_get=raw_get)
 
     original = current()
     original_sha = None if original is None else original["sha"]
@@ -59,6 +126,10 @@ def publish(api, path, data, pause=time.sleep, emit=lambda row: None):
             observed = current()
             refreshed_sha = None if observed is None else observed["sha"]
             if refreshed_sha != original_sha:
+                if observed is not None and observed.get("encoding") == "none":
+                    expected_blob = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+                    if observed.get("sha") != expected_blob or observed.get("size") != len(data):
+                        raise RuntimeError("concurrent evidence target changed: " + path) from exc
                 if observed is None or content(observed) != data:
                     raise RuntimeError("concurrent evidence target changed: " + path) from exc
             continue
@@ -68,9 +139,7 @@ def publish(api, path, data, pause=time.sleep, emit=lambda row: None):
         if (not isinstance(commit, str) or len(commit) != 40
                 or any(c not in "0123456789abcdef" for c in commit)):
             raise ValueError("publication commit identity missing")
-        actual = api(endpoint + "?ref=" + commit)
-        if content(actual) != data:
-            raise AssertionError("evidence exact readback mismatch: " + path)
+        actual = verify_readback(api, path, commit, data, raw_get=raw_get)
         return {"url": actual["html_url"], "raw_url": actual["download_url"],
                 "sha256": hashlib.sha256(data).hexdigest()}
     raise AssertionError("unreachable evidence publication exit")
@@ -384,6 +453,214 @@ def initial_read_selftest():
         "release_ready": False}))
 
 
+def large_readback_selftest():
+    """Real helper/publisher with scripted HTTP, not live GitHub acceptance."""
+    import inspect
+    import io
+    from unittest.mock import patch
+
+    path, commit = "reports/large.json", "c"*40
+    data = (b'{"trace":"' + b"x"*1473569 + b'"}\n')
+    assert len(data) > 1024*1024
+    sha = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+    metadata = dict(type="file", path=path, size=len(data), sha=sha, encoding="none",
+                    content="", html_url="https://example.invalid/verified",
+                    download_url="https://untrusted.invalid/do-not-follow")
+    route = "contents/" + path + "?ref=" + commit
+    checks = 0
+
+    def controls(target):
+        nonlocal checks
+        calls = []
+
+        def api(url):
+            assert url == route, "immutable JSON route"
+            calls.append(("json", url))
+            return dict(metadata)
+
+        def raw(url, limit):
+            assert url == route and limit == len(data)+1, "immutable raw route/bound"
+            calls.append(("raw", url))
+            return data
+
+        assert target(api, path, commit, data, raw_get=raw) == metadata
+        assert calls == [("json", route), ("raw", route)]
+        checks += 1
+        # Text is never reserialized: unicode, whitespace and arbitrary bytes
+        # follow the same exact identity contract as JSON reports.
+        for payload in (b"small \xff\0\n", "\u6587\n".encode()):
+            inline = dict(encoding="base64", content=base64.b64encode(payload).decode())
+            assert target(lambda url: inline, path, commit, payload,
+                          raw_get=lambda *a: (_ for _ in ()).throw(AssertionError("raw on inline"))) == inline
+            checks += 1
+
+        negatives = [
+            ("wrong_size", dict(metadata, size=len(data)-1), data, ValueError, 0),
+            ("bool_size", dict(metadata, size=True), data, ValueError, 0),
+            ("wrong_path", dict(metadata, path="reports/other.json"), data, ValueError, 0),
+            ("wrong_type", dict(metadata, type="dir"), data, ValueError, 0),
+            ("wrong_blob", dict(metadata, sha="a"*40), data, AssertionError, 0),
+            ("missing_blob", dict(metadata, sha=None), data, ValueError, 0),
+            ("unexpected_inline", dict(metadata, content="not empty"), data, ValueError, 0),
+            ("encoding", dict(metadata, encoding="gzip"), data, ValueError, 0),
+            ("truncated", metadata, data[:-1], AssertionError, 1),
+            ("overlong", metadata, data+b"x", AssertionError, 1),
+            ("corrupt", metadata, b"!"+data[1:], AssertionError, 1),
+            ("not_bytes", metadata, data.decode(), AssertionError, 1),
+            ("inline_mismatch", dict(encoding="base64", content="eA=="), data, AssertionError, 0),
+        ]
+        for name, meta, payload, error, expected_raw in negatives:
+            seen = []
+            def get_raw(url, limit):
+                seen.append((url, limit))
+                return payload
+            try:
+                target(lambda url: dict(meta), path, commit, data, raw_get=get_raw)
+            except error:
+                pass
+            else:
+                raise AssertionError(name + ": invalid proof accepted")
+            assert len(seen) == expected_raw, name + ": unexpected read"
+            checks += 1
+        for invalid in ("evidence", "c"*39, "C"*40, None, 123):
+            seen = []
+            try:
+                target(lambda *a: seen.append(a), path, invalid, data, raw_get=raw)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("mutable/invalid commit accepted")
+            assert seen == [], "bad commit reached transport"
+            checks += 1
+        for invalid in ("reports/../x", "reports//x", "reports/a?ref=evidence", "reports/a#x"):
+            seen = []
+            try:
+                target(lambda *a: seen.append(a), invalid, commit, data, raw_get=raw)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("invalid path accepted")
+            assert seen == []
+            checks += 1
+        for stage in ("json", "raw"):
+            for failure in (TimeoutError("original"), urllib.error.HTTPError(
+                    "https://example.invalid", 503, "original", {}, None), ValueError("malformed")):
+                seen = []
+                def get_json(url):
+                    seen.append("json")
+                    if stage == "json":
+                        raise failure
+                    return dict(metadata)
+                def get_raw(url, limit):
+                    seen.append("raw")
+                    raise failure
+                try:
+                    target(get_json, path, commit, data, raw_get=get_raw)
+                except Exception as exc:
+                    assert exc is failure, "original exception replaced"
+                else:
+                    raise AssertionError("read failure accepted")
+                assert seen == (["json"] if stage == "json" else ["json", "raw"]), "read retried"
+                checks += 1
+
+    controls(verify_readback)
+    primary_checks = checks
+    # Run the actual shared publisher through large create + conflict routes.
+    for mode in ("create", "same", "different", "raw_error"):
+        calls, waits, raw_calls = [], [], []
+        answers = [urllib.error.HTTPError("https://example.invalid", 404, "absent", {}, None)]
+        written = {"commit": {"sha": commit}}
+        if mode != "create":
+            answers += [urllib.error.HTTPError("https://example.invalid", 409, "conflict", {}, None),
+                        dict(metadata, sha="a"*40) if mode == "different" else metadata]
+        if mode in ("create", "same"):
+            answers += [written, metadata]
+        failure = TimeoutError("conflict raw")
+        def api(url, method="GET", body=None):
+            assert len(calls) < len(answers), "publisher retry count"
+            if method == "PUT":
+                assert url == "contents/"+path and body["branch"] == "evidence"
+                assert base64.b64decode(body["content"]) == data
+            else:
+                assert url == "contents/"+path+"?ref="+(
+                    commit if calls and answers[len(calls)-1] == written else "evidence")
+            result = answers[len(calls)]
+            calls.append((url, method))
+            if isinstance(result, Exception):
+                raise result
+            return dict(result)
+        def raw(url, limit):
+            raw_calls.append(url)
+            assert limit == len(data)+1
+            assert url in (route, "git/blobs/"+sha)
+            if mode == "raw_error":
+                raise failure
+            return data
+        try:
+            result = publish(api, path, data, waits.append, raw_get=raw)
+        except Exception as exc:
+            assert (mode == "different" and type(exc) is RuntimeError) or (
+                mode == "raw_error" and exc is failure), (mode, repr(exc))
+        else:
+            assert mode in ("create", "same")
+            assert result["sha256"] == hashlib.sha256(data).hexdigest()
+        assert len(calls) == len(answers)
+        assert waits == ([] if mode == "create" else [1])
+        assert raw_calls == {"create": [route], "same": ["git/blobs/"+sha, route],
+                             "different": [], "raw_error": ["git/blobs/"+sha]}[mode]
+    # Exercise the real raw transport with a response double. No network or
+    # credentials leave this process; assert timeout/media/byte-limit exactly.
+    transport_calls = []
+    sentinel = "host-" + "sentinel"
+    class Response(io.BytesIO):
+        def read(self, limit=-1):
+            assert limit == len(data)+1, "raw byte bound changed"
+            return super().read(limit)
+    def open_request(request, timeout):
+        transport_calls.append(request.full_url)
+        assert timeout == 30
+        assert request.get_header("Accept") == "application/vnd.github.raw+json"
+        assert request.get_header("Authorization") == "Bearer "+sentinel
+        assert request.full_url == "https://api.github.com/repos/fixture/repo/"+route
+        return Response(data)
+    with patch.dict(os.environ, {"GITHUB_REPOSITORY": "fixture/repo", "GH_TOKEN": sentinel}):
+        with patch.object(urllib.request, "urlopen", open_request):
+            assert verify_readback(lambda url: metadata, path, commit, data) == metadata
+    assert len(transport_calls) == 1
+    # Witness each compiled mutation on valid data before testing rejection.
+    rejected = []
+    for name, function, before, after, expected_failure in (
+        ("skip_inline_identity", verify_readback,
+         'if evidence_bytes(actual, path, data, commit=commit, raw_get=raw_get) != data:',
+         'if evidence_bytes(actual, path, data, commit=commit, raw_get=raw_get) is None:',
+         "inline_mismatch"),
+        ("moving_raw_ref", evidence_bytes, '"?ref=" + commit', '"?ref=evidence"',
+         "immutable raw route"),
+    ):
+        source = inspect.getsource(function)
+        assert source.count(before) == 1
+        env = dict(globals())
+        exec(compile(source.replace(before, after, 1), "<large-readback-mutant>", "exec"), env)
+        # A valid inline observation is an independent positive witness.
+        assert env["evidence_bytes"]({"encoding":"base64","content":"eA=="}, path, b"x") == b"x"
+        if function is evidence_bytes:
+            exec(compile(inspect.getsource(verify_readback), "<readback-caller>", "exec"), env)
+        assert env["verify_readback"](lambda url: {"encoding":"base64","content":"eA=="},
+                                      path, commit, b"x")["content"] == "eA=="
+        try:
+            controls(env["verify_readback"])
+        except AssertionError as exc:
+            assert expected_failure in str(exc)
+            rejected.append(name)
+        else:
+            raise AssertionError("large readback mutant survived: "+name)
+    print("LARGE_EVIDENCE_READBACK " + json.dumps(dict(
+        status="PASS", readback_cases=primary_checks, publisher_cases=4,
+        transport_cases=1, witnessed_mutants=rejected,
+        scope="HOST_SCRIPTED_HTTP_NOT_LIVE_GITHUB_OR_ANDROID", release_ready=False)))
+
+
 if __name__ == "__main__":
     selftest()
     initial_read_selftest()
+    large_readback_selftest()

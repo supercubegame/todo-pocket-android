@@ -1610,11 +1610,12 @@ def report_entry_selftest(report_fn=None):
             value = json.loads(path.read_text())
             edit(value)
             path.write_text(json.dumps(value))
-        def invoke():
+        def invoke(large=False, corrupt=False):
             # Execute the report function itself, not a second model of its
             # aggregation. Only unrelated suites and network are host doubles.
             published = []
             reads = []
+            raw_reads = []
             def open_request(req, timeout):
                 assert timeout == 30 and req.full_url.startswith(
                     "https://api.github.com/repos/fixture/repo/contents/reports/schema3-")
@@ -1625,14 +1626,27 @@ def report_entry_selftest(report_fn=None):
                     response = {"commit": {"sha": "1"*40}}
                 elif published:
                     reads.append(req.full_url)
-                    response = {"content": base64.b64encode(published[-1]).decode(),
+                    response = {"encoding": "base64", "content": base64.b64encode(published[-1]).decode(),
                                 "html_url": "https://example.invalid/fixture-only"}
+                    if large:
+                        data = published[-1]
+                        assert len(data) > 1024*1024, "large report fixture did not reach boundary"
+                        response.update(type="file", path="reports/schema3-"+source+"-"+run+".json",
+                            size=len(data), encoding="none", content="",
+                            sha=hashlib.sha1(b"blob "+str(len(data)).encode()+b"\0"+data).hexdigest())
                 else:
                     raise urllib.error.HTTPError(req.full_url, 404, "host fixture", {}, None)
                 return io.BytesIO(json.dumps(response).encode())
+            def raw_read(route, limit):
+                raw_reads.append(route)
+                assert route == "contents/reports/schema3-"+source+"-"+run+".json?ref="+"1"*40
+                assert limit == len(published[-1])+1
+                return b"!"+published[-1][1:] if corrupt else published[-1]
             green = lambda *args, **kwargs: {"status": "PASS"}
             scope = dict(report_fn.__globals__)
-            scope.update(Path=lambda value: root/value, selftest=lambda: {"scope": "HOST_STUBS"},
+            scope.update(Path=lambda value: root/value, selftest=lambda: (
+                             {"scope": "HOST_STUBS", "large_fixture": "x"*(1024*1024+1)}
+                             if large else {"scope": "HOST_STUBS"}),
                          native_schema3=green, share_ui_observe=green, paged_observe=green,
                          registration=green, observe=green, derivative_summary=green,
                          LABELS={"seed": [], "reopen": [], "restore_seed": [], "restore_reopen": []},
@@ -1646,12 +1660,14 @@ def report_entry_selftest(report_fn=None):
             module = types.ModuleType("verify_note_management")
             module.aggregate = green
             error = None
-            with patch.dict(sys.modules, {"verify_note_management": module}), redirect_stdout(io.StringIO()):
+            with patch.dict(sys.modules, {"verify_note_management": module}), redirect_stdout(io.StringIO()), \
+                    patch("verify_evidence.raw_evidence_read", raw_read):
                 try:
                     runner()
                 except AssertionError as exc:
                     error = str(exc)
             assert len(published) == len(reads) == 1, "report not published and read back"
+            assert len(raw_reads) == int(large), "report raw read count"
             return json.loads(published[0]), error
         reset()
         doc, error = invoke()
@@ -1687,6 +1703,12 @@ def report_entry_selftest(report_fn=None):
         doc, error = invoke()
         assert error is None and doc["status"] == "PASS", "positive after negatives"
         positive += 1
+        doc, error = invoke(large=True)
+        assert error is None and doc["status"] == "PASS", "large actual report witness"
+        positive += 1
+        doc, error = invoke(large=True, corrupt=True)
+        assert error == "large evidence exact bytes mismatch", "corrupt large report accepted"
+        negative += 1
     return {"positive": positive, "negative": negative,
             "scope": "ACTUAL_REPORT_BODY_OTHER_SUITES_AND_HTTP_DOUBLED_NOT_ANDROID"}
 
@@ -1797,8 +1819,8 @@ def report():
         if exc.code != 404:
             raise
     written = api("contents/" + path, "PUT", body)
-    actual = api("contents/" + path + "?ref=" + written["commit"]["sha"])
-    assert base64.b64decode(actual["content"]) == data, "schema3 report readback differs"
+    from verify_evidence import verify_readback
+    actual = verify_readback(api, path, written["commit"]["sha"], data)
     print("SCHEMA3_EVIDENCE " + actual["html_url"], flush=True)
     assert passed, "schema3 suite absent or failed; read published evidence"
 

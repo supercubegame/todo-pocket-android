@@ -9,7 +9,7 @@ import sqlite3
 import subprocess
 import time
 import xml.etree.ElementTree as ET
-from verify_process_control import stop_verified
+from verify_process_control import stop_verified, isolated_directory_runner, capture_runtime_identity
 
 ROOT = Path(__file__).resolve().parents[1]
 os.chdir(ROOT)
@@ -825,6 +825,8 @@ def _verify_native_ui(adb,nodes):
     infra_retries = []
     process_stops = []
     restore_picker_traces = []
+    directory_traces = []
+    directory_runner = isolated_directory_runner(adb, SERIAL, PKG, directory_traces)
     def shell(*args):
         return subprocess.check_output([str(adb), '-s', SERIAL, 'shell', *args], text=True, timeout=40)
     def tap_node(n):
@@ -886,7 +888,7 @@ def _verify_native_ui(adb,nodes):
     def copy_db(name):
         local=out/name
         local.write_bytes(subprocess.check_output([str(adb),'-s',SERIAL,'exec-out','run-as',PKG,'cat','databases/pocket-v12.db'],timeout=30))
-        present=database_directory(adb,SERIAL,PKG).splitlines()
+        present=database_directory(adb,SERIAL,PKG,runner=directory_runner).splitlines()
         if 'pocket-v12.db-wal' in present:
             Path(str(local)+'-wal').write_bytes(subprocess.check_output([str(adb),'-s',SERIAL,'exec-out','run-as',PKG,'cat','databases/pocket-v12.db-wal'],timeout=30))
         return local
@@ -1527,9 +1529,11 @@ public class ImageImportFixture {
         result.update(derivative_ui='NATIVE_CROP_MASK_UI_SAVE_CANCEL_RESTART_PASS')
         result.update(derivative_geometry=derive_geometry,pixel_oracle=pixel_oracle,process_stops=process_stops)
         result['restore_picker_traces']=restore_picker_traces
+        result['database_directory_traces']=directory_traces
     except Exception as exc:
         result={'status':'FAIL','api':API,'count':len(checks),'checks':checks,'error':repr(exc),'screenshots':shots,'infra_retries':infra_retries,'release_ready':False,'process_stops':process_stops}
         result['restore_picker_traces']=restore_picker_traces
+        result['database_directory_traces']=directory_traces
         if 'derive_geometry' in locals():result['derivative_geometry']=derive_geometry
         if 'pixel_oracle' in locals():result['pixel_oracle']=pixel_oracle
         try: shot('failure.png')
@@ -1565,6 +1569,14 @@ def main():
     listed = run([emulator, '-list-avds'], capture=True).stdout.splitlines()
     print('AVD_DISCOVERY', listed, flush=True)
     assert NAME in listed, 'emulator cannot discover newly created AVD'
+    try:
+        identity = capture_runtime_identity(adb, emulator,
+            SDK / 'system-images' / ('android-' + str(API)) / 'google_apis/x86_64/source.properties',
+            avd / 'config.ini')
+        Path('ci-runtime-identity.json').write_text(json.dumps(identity, indent=2) + '\n')
+        print('CI_RUNTIME_IDENTITY ' + json.dumps(identity), flush=True)
+    except Exception as diagnostic:
+        print('CI_RUNTIME_IDENTITY_NOT_OBSERVED ' + repr(diagnostic), flush=True)
     log = open('emulator.log', 'w')
     proc = subprocess.Popen([str(emulator), '-avd', NAME, '-port', '5554', '-no-window', '-no-metrics',
                              '-no-audio', '-no-boot-anim', '-no-snapshot', '-gpu', 'swiftshader_indirect',

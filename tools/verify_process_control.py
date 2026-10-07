@@ -1169,8 +1169,8 @@ def adb_failure_wiring(workflow):
 
 
 def run_pidof_isolated(args, *, capture_output, text, stdin, timeout, receipt,
-                       environment=None, tracer="strace"):
-    """One CI pidof invocation; separate tracer pipes, bounded diagnostic tails.
+                       environment=None, tracer="strace", command_kind="pidof"):
+    """One allowlisted CI invocation; separate tracer pipes, bounded diagnostic tails.
 
     strace changes timing. This is diagnostic instrumentation, not an untraced
     reproduction, device-root-cause proof, or permission to accept exit 255.
@@ -1185,14 +1185,19 @@ def run_pidof_isolated(args, *, capture_output, text, stdin, timeout, receipt,
     import sys
     env = dict(os.environ if environment is None else environment)
     args = list(args)
-    if (env.get("GITHUB_ACTIONS") != "true" or len(args) != 8 or
-            args[1:7] != ["-s", "emulator-5554", "shell", "-n", "-T", "pidof"] or
+    pidof = (command_kind == "pidof" and len(args) == 8 and
+             args[1:7] == ["-s", "emulator-5554", "shell", "-n", "-T", "pidof"])
+    directory = (command_kind == "database_directory" and len(args) == 10 and
+                 args[1:7] == ["-s", "emulator-5554", "shell", "-n", "-T", "run-as"]
+                 and args[8:] == ["ls", "databases"])
+    if (env.get("GITHUB_ACTIONS") != "true" or not (pidof or directory) or
             not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+", args[7]) or
             capture_output is not True or text is not True or stdin != subprocess.DEVNULL or
             type(timeout) not in (int, float) or not math.isfinite(timeout) or
-            not 0 < timeout <= 10 or not isinstance(receipt, dict)):
-        raise ValueError("CI emulator exact pidof and original <=10s capture contract required")
+            not 0 < timeout <= (40 if directory else 10) or not isinstance(receipt, dict)):
+        raise ValueError("CI emulator exact pidof<=10s or database directory<=40s required")
     receipt.update(scope="HOST_SYSCALL_TAIL_NOT_DEVICE_ROOT_CAUSE", attempts=1,
+                   command_kind=command_kind,
                    command=args, timeout_seconds=timeout, status="NOT_OBSERVED",
                    stderr_kind="COMMAND_STDERR_SEPARATE_FROM_TRACER", timed_out=False,
                    trace_retention_bytes=65536, tracer_stderr_retention_bytes=4096,
@@ -1328,6 +1333,337 @@ def isolated_stop_runner(adb, serial, package, records, *, environment=None, tra
             raise ValueError("unexpected stop adapter command")
         return subprocess.run(args, env=env, **kwargs)
     return invoke
+
+
+def isolated_directory_runner(adb, serial, package, records, *, environment=None, tracer="strace"):
+    """Explicit directory-only adapter; original command, streams and 40s budget."""
+    import os
+    env = dict(os.environ if environment is None else environment)
+    if env.get("GITHUB_ACTIONS") != "true" or serial != "emulator-5554":
+        raise ValueError("directory tracing is CI emulator-only")
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+", package):
+        raise ValueError("exact package required")
+    command = [str(adb), "-s", serial, "shell", "-n", "-T", "run-as", package, "ls", "databases"]
+    import hashlib
+    binding = {k: env.get(k) for k in
+               ("GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "TEST_API")}
+    try:
+        with Path("ci-runtime-identity.json").open("rb") as handle:
+            identity = handle.read(65537)
+        if len(identity) > 65536:
+            raise ValueError("runtime identity receipt exceeds bound")
+        binding["setup_identity_receipt_sha256"] = hashlib.sha256(identity).hexdigest()
+        binding["setup_identity"] = json.loads(identity)
+    except Exception as diagnostic:
+        binding["setup_identity_not_observed"] = repr(diagnostic)
+    sequence = 0
+    def invoke(args, **kwargs):
+        nonlocal sequence
+        expected = dict(stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE, text=True, timeout=40, check=False)
+        if args != command or kwargs != expected:
+            raise ValueError("directory command or original capture contract changed")
+        sequence += 1
+        if len(records) >= 8:
+            records.pop(0)
+        receipt = {"observation_number": sequence, "retention": "LATEST_8_DIRECTORY_TRACES",
+                   "binding": dict(binding)}
+        records.append(receipt)
+        return run_pidof_isolated(args, capture_output=True, text=True,
+            stdin=subprocess.DEVNULL, timeout=40, receipt=receipt,
+            environment=env, tracer=tracer, command_kind="database_directory")
+    return invoke
+
+
+def capture_runtime_identity(adb, emulator, image_properties, avd_config, *, environment=None):
+    """Host setup receipt, not whole-image hashing or proof of a failed remote PID."""
+    import hashlib
+    import os
+    env = dict(os.environ if environment is None else environment)
+    if env.get("GITHUB_ACTIONS") != "true":
+        raise ValueError("runtime identity is CI-only")
+    result = {"scope": "HOST_FILES_AT_SETUP_NOT_DEVICE_OR_WHOLE_IMAGE_IDENTITY",
+              "release_ready": False, "files": {}, "versions": {},
+              "binding": {k: env.get(k) for k in
+                          ("GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "TEST_API")}}
+    for name, path in (("adb", adb), ("emulator", emulator),
+                       ("image_properties", image_properties), ("avd_config", avd_config)):
+        try:
+            path = Path(path).resolve(strict=True)
+            limit = 128 * 1024 * 1024 if name in ("adb", "emulator") else 1024 * 1024
+            digest = hashlib.sha256()
+            preview = bytearray()
+            with path.open("rb") as handle:
+                before = os.fstat(handle.fileno())
+                if not 0 < before.st_size <= limit:
+                    raise ValueError("identity file outside byte bound")
+                size = 0
+                while True:
+                    chunk = handle.read(min(1024 * 1024, limit + 1 - size))
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > limit:
+                        raise ValueError("identity file grew beyond bound")
+                    digest.update(chunk)
+                    if name in ("image_properties", "avd_config"):
+                        preview.extend(chunk[:max(0, 4096-len(preview))])
+                after = os.fstat(handle.fileno())
+            if (before.st_size, before.st_mtime_ns, before.st_ino) != (
+                    after.st_size, after.st_mtime_ns, after.st_ino) or size != before.st_size:
+                raise ValueError("identity file changed while hashing")
+            result["files"][name] = {"status": "OBSERVED", "path": str(path),
+                                     "bytes": size, "sha256": digest.hexdigest()}
+            if name in ("image_properties", "avd_config"):
+                result["files"][name].update(text=preview.decode("utf-8", "replace"),
+                                            text_truncated=size > 4096)
+        except Exception as exc:
+            result["files"][name] = {"status": "NOT_OBSERVED", "error": repr(exc)}
+    # Separate setup budget, never charged as an extension to a failed command.
+    # Version output uses disposable files, retaining at most 4096 bytes per stream.
+    import tempfile
+    for name, executable, flag in (("adb", adb, "version"), ("emulator", emulator, "-version")):
+        entry = {"status": "NOT_OBSERVED", "timeout_seconds": 2}
+        result["versions"][name] = entry
+        with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+            try:
+                p = subprocess.run([str(executable), flag], stdin=subprocess.DEVNULL,
+                                   stdout=out, stderr=err, timeout=2, env=env)
+                entry.update(status="OBSERVED" if p.returncode == 0 else "COMMAND_FAILED",
+                             returncode=p.returncode)
+            except Exception as exc:
+                entry["error"] = repr(exc)
+            for key, stream in (("stdout", out), ("stderr", err)):
+                stream.flush(); size = stream.seek(0, 2); stream.seek(max(0, size - 4096))
+                entry[key] = {"bytes": size, "truncated": size > 4096,
+                              "tail": stream.read(4096).decode("utf-8", "replace")}
+    result["status"] = ("OBSERVED_NOT_ACCEPTANCE"
+                        if all(v["status"] == "OBSERVED" for v in
+                               list(result["files"].values()) + list(result["versions"].values()))
+                        else "PARTIAL_NOT_ACCEPTANCE")
+    return result
+
+
+def directory_trace_selftest():
+    """Real host fake-tracer/ADB; execute actual directory caller and reject bypass."""
+    import ast
+    import base64
+    import inspect
+    import os
+    import tempfile
+    from unittest.mock import patch
+    source = Path("tools/emulator_gate.py").read_text()
+    tree = ast.parse(source)
+    selected = [n for n in tree.body if isinstance(n, ast.FunctionDef)
+                and n.name in ("database_directory", "database_directory_selftest")]
+    scope = {"subprocess": subprocess}
+    exec(compile(ast.Module(body=selected, type_ignores=[]), "<actual-directory>", "exec"), scope)
+    scope["database_directory_selftest"]()
+    def wiring(text, workflow, process):
+        tree = ast.parse(text)
+        native = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_verify_native_ui")
+        copy_db = next(n for n in native.body if isinstance(n, ast.FunctionDef) and n.name == "copy_db")
+        calls = [n for n in ast.walk(copy_db) if isinstance(n, ast.Call)
+                 and isinstance(n.func, ast.Name) and n.func.id == "database_directory"]
+        assert len(calls) == 1 and ast.unparse(calls[0]) == "database_directory(adb, SERIAL, PKG, runner=directory_runner)", "directory runner bypass"
+        bindings = [n for n in native.body if isinstance(n, ast.Assign)
+                    and any(isinstance(t, ast.Name) and t.id == "directory_runner" for t in n.targets)]
+        assert len(bindings) == 1 and ast.unparse(bindings[0].value) == "isolated_directory_runner(adb, SERIAL, PKG, directory_traces)", "directory binding"
+        saves = [n for n in ast.walk(native) if isinstance(n, ast.Assign)
+                 and any(isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant)
+                         and t.slice.value == "database_directory_traces" for t in n.targets)]
+        assert len(saves) == 2 and all(ast.unparse(n.value) == "directory_traces" for n in saves), "success/failure trace persistence"
+        assert workflow.count("          python3 tools/verify_process_control.py isolated-selftest\n") == 1, "existing host gate"
+        process_tree = ast.parse(process)
+        entries = [n for n in ast.walk(process_tree) if isinstance(n, ast.If)
+                   and ast.unparse(n.test) == "sys.argv[1:] == ['isolated-selftest']"]
+        assert len(entries) == 1
+        calls = [ast.unparse(n.value) for n in entries[0].body if isinstance(n, ast.Expr)]
+        assert "directory_trace_selftest()" in calls and "runtime_identity_selftest()" in calls, "permanent directory gate"
+        adapter = next(n for n in process_tree.body if isinstance(n, ast.FunctionDef) and n.name == "isolated_directory_runner")
+        assert any(isinstance(n, ast.Assign) and ast.unparse(n) == "binding['setup_identity'] = json.loads(identity)" for n in ast.walk(adapter)), "identity persisted with traces"
+        main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+        assert any(isinstance(n, ast.Call) and ast.unparse(n.func) == "Path('ci-runtime-identity.json').write_text" for n in ast.walk(main)), "identity receipt written"
+    workflow = Path(".github/workflows/android.yml").read_text()
+    process = Path(__file__).read_text()
+    wiring(source, workflow, process)
+    for target, before, after in (
+        (0, "runner=directory_runner", "runner=subprocess.run"),
+        (0, "PKG, directory_traces)", "PKG, [])"),
+        (0, "result['database_directory_traces']=directory_traces", "result['other_traces']=directory_traces"),
+        (1, "          python3 tools/verify_process_control.py isolated-selftest\n", ""),
+        (2, '        binding["setup_identity"] = json.loads(identity)', '        binding["other_identity"] = json.loads(identity)'),
+        (2, '        directory_trace_selftest()\n        runtime_identity_selftest()\n        isolated_stop_selftest()', '        isolated_stop_selftest()'),
+        (0, "Path('ci-runtime-identity.json').write_text", "Path('other-identity.json').write_text"),
+    ):
+        pair = [source, workflow, process]
+        assert before in pair[target]
+        pair[target] = pair[target].replace(before, after, 1)
+        compile(pair[0], "<directory-wiring-mutant>", "exec")
+        wiring(source, workflow, process)
+        try: wiring(*pair)
+        except AssertionError: pass
+        else: raise AssertionError("directory wiring omission survived")
+    fixtures = ast.parse(inspect.getsource(isolated_stop_selftest)).body[0]
+    literals = {n.targets[0].id: ast.literal_eval(n.value) for n in fixtures.body
+                if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Name)
+                and n.targets[0].id in ("fake_trace", "fake_adb")}
+    def exercise(factory, positive_only=False):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            trace, adb, log = root/"strace", root/"adb", root/"calls"
+            trace.write_text(literals["fake_trace"]); trace.chmod(0o700)
+            adb.write_text(literals["fake_adb"]); adb.chmod(0o700)
+            command = [str(adb), "-s", "emulator-5554", "shell", "-n", "-T",
+                       "run-as", "com.example.fixture", "ls", "databases"]
+            base = dict(os.environ, GITHUB_ACTIONS="true", CALL_FILE=str(log))
+            cases = [(0, b"pocket.db\n", b"", "normal")]
+            if not positive_only:
+                cases += [(0, b"", b"", "normal"), (1, b"", b"denied", "normal"),
+                          (255, b"", b"", "normal"), (255, b"partial\r\n", b"original", "normal"),
+                          (0, b"pocket.db\n", b"", "trace_stderr")]
+            for code, out, err, mode in cases:
+                log.unlink(missing_ok=True); records = []
+                env = dict(base, ADB_CODE=str(code), ADB_OUT=out.hex(), ADB_ERR=err.hex(),
+                           TRACE_FIXTURE=mode)
+                runner = factory(str(adb), "emulator-5554", "com.example.fixture", records,
+                                 environment=env, tracer=str(trace))
+                caught = None
+                try:
+                    value = scope["database_directory"](str(adb), "emulator-5554",
+                                                       "com.example.fixture", runner=runner)
+                except subprocess.CalledProcessError as exc:
+                    caught = exc
+                if code:
+                    assert caught is not None, "original directory failure accepted"
+                    assert (caught.returncode, caught.stdout, caught.stderr, caught.cmd) == (
+                        code, out.decode().replace("\r\n", "\n"), err.decode(), command)
+                else:
+                    assert caught is None and value == out.decode()
+                assert log.read_text().splitlines() == [" ".join(command[1:])]
+                assert len(records) == 1 and records[0]["command_returncode"] == code
+                assert records[0]["timeout_seconds"] == 40, "directory budget changed"
+                assert records[0]["command_kind"] == "database_directory"
+                assert len(base64.b64decode(records[0]["trace"]["tail_b64"])) == 65536
+                assert base64.b64decode(records[0]["tracer_stderr"]["tail_b64"]) == (
+                    b"TRACER_ONLY_SENTINEL" if mode == "trace_stderr" else b"")
+            if positive_only:
+                return
+            kwargs = dict(stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, text=True, timeout=40, check=False)
+            for tracer, mode, expected in ((str(root/"missing"), "normal", FileNotFoundError),
+                                           (str(trace), "missing_receipt", RuntimeError)):
+                log.unlink(missing_ok=True); records = []
+                runner = factory(str(adb), "emulator-5554", "com.example.fixture", records,
+                                 environment=dict(base, TRACE_FIXTURE=mode), tracer=tracer)
+                try: runner(command, **kwargs)
+                except expected: pass
+                else: raise AssertionError("trace setup failure accepted")
+                assert not log.exists(), "fallback invocation"
+            runner = factory(str(adb), "emulator-5554", "com.example.fixture", [],
+                             environment=base, tracer=str(trace))
+            for args, kw in ((command[:-1]+["files"], kwargs),
+                             (command, dict(kwargs, timeout=41)),
+                             (command, dict(kwargs, stdin=None)),
+                             (command, dict(kwargs, stderr=subprocess.STDOUT))):
+                log.unlink(missing_ok=True)
+                try: runner(args, **kw)
+                except ValueError: pass
+                else: raise AssertionError("directory adapter scope escaped")
+                assert not log.exists()
+            record = {}; log.unlink(missing_ok=True)
+            try:
+                run_pidof_isolated(command, capture_output=True, text=True,
+                    stdin=subprocess.DEVNULL, timeout=.5, receipt=record, tracer=str(trace),
+                    command_kind="database_directory",
+                    environment=dict(base, ADB_SLEEP="true", ADB_OUT=b"partial".hex(),
+                                     ADB_ERR=b"original-error".hex()))
+            except subprocess.TimeoutExpired as exc:
+                assert (exc.cmd, exc.timeout, exc.stdout, exc.stderr) == (
+                    command, .5, b"partial", b"original-error")
+            else: raise AssertionError("directory timeout accepted")
+            assert len(log.read_text().splitlines()) == 1
+            assert record["cleanup"] == "PROCESS_GROUP_KILLED_AND_REAPED"
+            # Adapter preserves the actual timeout exception object and 40s budget.
+            original = subprocess.TimeoutExpired(command, 40, b"out", b"err")
+            calls = []
+            def timeout(*a, **kw):
+                calls.append(kw); raise original
+            with patch(__name__ + ".run_pidof_isolated", timeout):
+                try: scope["database_directory"](str(adb), "emulator-5554",
+                                                "com.example.fixture", runner=runner)
+                except subprocess.TimeoutExpired as exc: assert exc is original
+                else: raise AssertionError("timeout swallowed")
+            assert len(calls) == 1 and calls[0]["timeout"] == 40
+    exercise(isolated_directory_runner)
+    import hashlib
+    import io
+    identity_bytes = b'{"scope":"HOST_FILES_AT_SETUP_NOT_DEVICE_OR_WHOLE_IMAGE_IDENTITY","binding":{"GITHUB_SHA":"fixture"}}'
+    for payload in (identity_bytes, b"invalid-json", b"x" * 65537):
+        records = []
+        with patch.object(Path, "open", return_value=io.BytesIO(payload)):
+            runner = isolated_directory_runner("adb", "emulator-5554", "com.example.fixture",
+                records, environment={"GITHUB_ACTIONS": "true", "GITHUB_SHA": "fixture"})
+        command = ["adb", "-s", "emulator-5554", "shell", "-n", "-T",
+                   "run-as", "com.example.fixture", "ls", "databases"]
+        with patch(__name__ + ".run_pidof_isolated",
+                   return_value=subprocess.CompletedProcess(command, 255, "", "")) as launch:
+            result = runner(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True, timeout=40, check=False)
+        assert launch.call_count == 1 and result.returncode == 255
+        binding = records[0]["binding"]
+        if payload == identity_bytes:
+            assert binding["setup_identity"] == json.loads(payload)
+            assert binding["setup_identity_receipt_sha256"] == hashlib.sha256(payload).hexdigest()
+        else:
+            assert "setup_identity" not in binding and "setup_identity_not_observed" in binding
+    print("DIRECTORY_IDENTITY_BINDING positive=1 diagnostic_negative=2 PASS; HOST_RECEIPT_ONLY", flush=True)
+    implementation = inspect.getsource(isolated_directory_runner)
+    for kind in ("accept_255", "change_budget"):
+        before = "return run_pidof_isolated(" if kind == "accept_255" else "timeout=40, receipt=receipt,"
+        if kind == "accept_255":
+            changed = implementation.replace(before, "value = run_pidof_isolated(", 1).replace(
+                'command_kind="database_directory")',
+                'command_kind="database_directory")\n        if value.returncode == 255: value.returncode = 0\n        return value', 1)
+        else:
+            changed = implementation.replace(before, "timeout=39, receipt=receipt,", 1)
+        assert implementation.count(before) == 1 and changed != implementation
+        namespace = dict(globals())
+        exec(compile(changed, "<directory-mutant>", "exec"), namespace)
+        # Valid original positive witness before every mutation rejection.
+        exercise(isolated_directory_runner, positive_only=True)
+        try: exercise(namespace["isolated_directory_runner"])
+        except AssertionError: pass
+        else: raise AssertionError("directory compiled mutant survived")
+    print("DIRECTORY_TRACE_HOST actual_caller=6 setup_negative=2 scope_negative=4 timeout=2 compiled_witnessed_mutants=2 PASS; NOT_ANDROID", flush=True)
+    print("DIRECTORY_TRACE_WIRING actual_source=1 negative=7 PASS; NOT_ANDROID", flush=True)
+
+
+def runtime_identity_selftest():
+    import hashlib
+    import tempfile
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        adb, emulator, props, config = [root/name for name in ("adb", "emulator", "source.properties", "config.ini")]
+        for path in (adb, emulator):
+            path.write_text("#!/bin/sh\nprintf 'fixture-version\\n'\n")
+            path.chmod(0o700)
+        props.write_text("Pkg.Revision=1\nAndroidVersion.ApiLevel=26\n")
+        config.write_text("image.sysdir.1=system-images/android-26/google_apis/x86_64/\n")
+        env = {"GITHUB_ACTIONS": "true", "GITHUB_SHA": "fixture", "GITHUB_RUN_ID": "1",
+               "GITHUB_RUN_ATTEMPT": "1", "TEST_API": "26"}
+        value = capture_runtime_identity(adb, emulator, props, config, environment=env)
+        assert value["status"] == "OBSERVED_NOT_ACCEPTANCE" and value["release_ready"] is False
+        assert value["binding"]["GITHUB_SHA"] == "fixture"
+        for key, path in (("adb", adb), ("emulator", emulator), ("image_properties", props), ("avd_config", config)):
+            assert value["files"][key]["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+        assert value["versions"]["adb"]["stdout"]["tail"] == "fixture-version\n"
+        props.unlink()
+        assert capture_runtime_identity(adb, emulator, props, config, environment=env)["status"] == "PARTIAL_NOT_ACCEPTANCE"
+        try: capture_runtime_identity(adb, emulator, props, config, environment={})
+        except ValueError: pass
+        else: raise AssertionError("identity collection escaped CI")
+    print("RUNTIME_IDENTITY_HOST positive=1 missing_file=1 scope_negative=1 PASS; SYNTHETIC_HOST_FILES_NOT_IMAGE_ATTESTATION", flush=True)
 
 
 def isolated_stop_selftest(module=None, witness_only=False):
@@ -1532,6 +1868,22 @@ def isolated_stop_real_tracer_selftest():
             assert record["tracer_exit_matches"] and record["trace"]["bytes"] > 0
             assert record["tracer_stderr"]["bytes"] == 0
             assert base64.b64decode(record["trace"]["tail_b64"])
+        for code, out, err in ((0, b"pocket.db\n", b""), (1, b"", b"denied\n"),
+                               (255, b"", b""), (255, b"partial\n", b"original\n")):
+            records = []
+            directory = [str(path), "-s", "emulator-5554", "shell", "-n", "-T",
+                         "run-as", "com.example.fixture", "ls", "databases"]
+            runner = isolated_directory_runner(str(path), "emulator-5554",
+                "com.example.fixture", records, tracer=tracer,
+                environment=dict(os.environ, ISOLATED_FIXTURE_CODE=str(code),
+                                 ISOLATED_OUT=out.hex(), ISOLATED_ERR=err.hex()))
+            value = runner(directory, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, text=True, timeout=40, check=False)
+            assert (value.args, value.returncode, value.stdout, value.stderr) == (
+                directory, code, out.decode(), err.decode())
+            assert len(records) == 1 and records[0]["tracer_exit_matches"]
+            assert records[0]["trace"]["bytes"] > 0 and records[0]["tracer_stderr"]["bytes"] == 0
+        print("DIRECTORY_REAL_STRACE_CONTROLS 4 exit cases PASS; SYNTHETIC_HOST_EXECUTABLE_NOT_DEVICE", flush=True)
         record = {}
         try:
             run_pidof_isolated(command, capture_output=True, text=True,
@@ -1851,6 +2203,10 @@ def absence_trace_selftest(workflow, schema):
 
 if __name__ == "__main__":
     import sys
+    if sys.argv[1:] == ["directory-selftest"]:
+        directory_trace_selftest()
+        runtime_identity_selftest()
+        sys.exit(0)
     if sys.argv[1:] == ["absence-selftest"]:
         absence_trace_selftest(Path(".github/workflows/android.yml").read_text(),
                                Path("tools/verify_schema3.py").read_text())
@@ -1859,6 +2215,8 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     import sys
     if sys.argv[1:] == ["isolated-selftest"]:
+        directory_trace_selftest()
+        runtime_identity_selftest()
         isolated_stop_selftest()
         isolated_stop_mutation_selftest()
         isolated_stop_wiring(Path(".github/workflows/android.yml").read_text())

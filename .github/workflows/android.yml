@@ -626,7 +626,7 @@ jobs:
               from verify_paged_exports import format_button
               from verify_schema3 import signal_target_identity,signal_identity_selftest
               from verify_schema3 import exception_evidence,native_failure_evidence,diagnostics_selftest
-              from verify_process_control import stop_verified,capture_crash_logs,isolated_stop_runner
+              from verify_process_control import stop_verified,capture_crash_logs,isolated_stop_runner,isolated_export_identity
               from verify_ui_observer import Observer
               out=Path("export-native");out.mkdir()
               prefix=[str(adb),"-s",gate.SERIAL]
@@ -634,6 +634,7 @@ jobs:
                   "api":gate.API,"scope":"SYNTHETIC_NATIVE_IMAGE_MULTIPAGE_SAF_WITH_PROCESS_LOSS_NOT_RECEIVER",
                   "labels":[],"outputs":{},"process_loss":{},"process_stops":[],"process_query_traces":[],"release_ready":False}
               stop_runner=isolated_stop_runner(adb,gate.SERIAL,gate.PKG,result["process_query_traces"])
+              identity_command=isolated_export_identity(adb,gate.SERIAL,gate.PKG,result)
               serial=0
               def command(*args,binary=False,timeout=40):
                   return subprocess.check_output(prefix+list(args),text=not binary,stderr=subprocess.PIPE,timeout=timeout,stdin=subprocess.DEVNULL)
@@ -709,16 +710,16 @@ jobs:
                   record={"status":"FAIL","injection":"CI_APP_UID_SIGKILL_NOT_LMK","labels":[]}
                   result["process_loss"][kind]=record
                   def step(label):record["labels"].append(label)
-                  uid=shell("run-as",gate.PKG,"id","-u").strip()
+                  uid=identity_command("shell","-n","-T","run-as",gate.PKG,"id","-u").strip()
                   def identity(phase):
                       trace={"phase":phase,"uid":uid,"stage":"PID_READ"}
                       record.setdefault("identity_reads",[]).append(trace)
-                      pid=shell("pidof",gate.PKG).strip()
+                      pid=identity_command("shell","-n","-T","pidof",gate.PKG).strip()
                       trace.update(pid=pid,stage="CMDLINE_READ")
                       assert re.fullmatch(r"[1-9][0-9]*",pid) and int(pid)>1
-                      raw=command("exec-out","run-as",gate.PKG,"cat","/proc/"+pid+"/cmdline",binary=True)
+                      raw=identity_command("exec-out","run-as",gate.PKG,"cat","/proc/"+pid+"/cmdline",binary=True)
                       trace.update(cmdline_bytes=len(raw),cmdline_sha256=hashlib.sha256(raw).hexdigest(),stage="STATUS_READ")
-                      status=shell("run-as",gate.PKG,"cat","/proc/"+pid+"/status")
+                      status=identity_command("shell","-n","-T","run-as",gate.PKG,"cat","/proc/"+pid+"/status")
                       observed=signal_target_identity(pid,raw,uid,status,gate.PKG)
                       trace.update(stage="IDENTITY_CHECK",observed=observed)
                       assert observed["status"]=="PASS","unverified process identity"

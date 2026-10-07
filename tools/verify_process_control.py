@@ -413,13 +413,14 @@ def capture_adb_connection(adb, serial, *, runner=subprocess.run, environment=No
 
 
 def capture_crash_logs(adb, serial, *, runner=subprocess.run, environment=None, snapshot_reader=None,
-                       host_connection_reader=None):
+                       host_connection_reader=None, monotonic=time.monotonic):
     """Read only disposable CI logs. Empty/missing tails never prove no crash."""
     import os
     import tempfile
     environment = os.environ if environment is None else environment
     if environment.get("GITHUB_ACTIONS") != "true" or not re.fullmatch(r"emulator-[0-9]+", serial):
         raise ValueError("isolated CI emulator required for log capture")
+    started = monotonic()
     prefix = [str(adb), "-s", serial]
     result = {"status": "SCOPE_NOT_VERIFIED", "logs": [], "release_ready": False,
               "scope": "CI_SYNTHETIC_LOG_TAILS_NOT_ACCEPTANCE_OR_NO_CRASH_PROOF",
@@ -451,8 +452,8 @@ def capture_crash_logs(adb, serial, *, runner=subprocess.run, environment=None, 
     result["identity"] = identity
     if not (identity["returncode"] == 0 and identity["stdout"]["tail"].strip() == "1"
             and not identity["stdout"]["truncated"] and identity["stderr"]["bytes"] == 0):
-        # Only this early-exit path has unused time: 3 + 6 <= original 19 seconds.
-        # Normal collection remains 19 + 32 = 51. No extra device query or retry.
+        # Early identity failure: 3 + 6 <= original 19 seconds.
+        # No extra device query or retry.
         if host_connection_reader is not None:
             try:
                 result["host_connection"] = host_connection_reader(
@@ -480,6 +481,23 @@ def capture_crash_logs(adb, serial, *, runner=subprocess.run, environment=None, 
         result["process_snapshot"] = reader(adb, serial, runner=runner, environment=environment)
     except Exception as diagnostic:
         result["process_snapshot_error"] = repr(diagnostic)
+    # Opt-in host-only collection uses measured unused time, never a new budget.
+    # Preserve every original device probe and its timeout. Reserve 0.5 seconds
+    # for bookkeeping around the existing bounded six-second host collector.
+    if host_connection_reader is not None:
+        remaining = 51 - (monotonic() - started)
+        if math.isfinite(remaining) and 0 <= remaining <= 51 and remaining >= 6.5:
+            try:
+                result["host_connection"] = host_connection_reader(
+                    adb, serial, runner=runner, environment=environment)
+            except Exception as diagnostic:
+                result["host_connection_error"] = repr(diagnostic)
+        else:
+            result["host_connection"] = {
+                "status": "NOT_OBSERVED_INSUFFICIENT_REMAINING_BUDGET",
+                "budget_seconds": 6,
+                "release_ready": False,
+            }
     return result
 
 
@@ -876,6 +894,93 @@ def process_snapshot_selftest():
     except (AssertionError, KeyError): pass
     else: raise AssertionError("missing diagnostic wiring accepted")
     print("PROCESS_SNAPSHOT_CONTROLS "+str(count)+" PASS; mutants=4/4 rejected; wiring=2/2 mutant=1/1; HOST_ONLY", flush=True)
+
+
+def normal_connection_contract(capture, *, with_clock=True):
+    """Actual capture function with injected I/O; no Android or strace claim."""
+    cases = [
+        ("room", 20.0, False, False, True),
+        ("boundary", 44.5, False, False, True),
+        ("late", 44.500001, False, False, False),
+        ("exhausted", 51.0, False, False, False),
+        ("clock_backwards", -1.0, False, False, False),
+        ("clock_nan", float("nan"), False, False, False),
+        ("clock_infinite", float("inf"), False, False, False),
+        ("host_error", 20.0, True, False, True),
+        ("snapshot_error", 20.0, False, True, True),
+    ]
+    for name, elapsed, host_error, snapshot_error, expected in cases:
+        now = [100.0]
+        commands, hosts, snapshots = [], [], []
+        def runner(args, **kw):
+            commands.append(args)
+            assert kw["stdin"] == subprocess.DEVNULL
+            assert kw["timeout"] == (3 if len(commands) == 1 else 8)
+            kw["stdout"].write(b"1\n" if len(commands) == 1 else b"original log\n")
+            return subprocess.CompletedProcess(args, 0)
+        sentinel = {"status": "ORIGINAL_SNAPSHOT"}
+        def snapshot(adb, serial, **kw):
+            snapshots.append(True)
+            now[0] = 100.0 + elapsed
+            if snapshot_error:
+                raise OSError("snapshot sentinel")
+            return sentinel
+        def host(adb, serial, **kw):
+            hosts.append(True)
+            assert len(commands) == 3 and len(snapshots) == 1
+            assert kw == {"runner": runner, "environment": {"GITHUB_ACTIONS": "true"}}
+            if host_error:
+                raise OSError("host sentinel")
+            return {"status": "DIAGNOSTIC_ONLY_NOT_DEVICE_PROOF"}
+        extra = {"monotonic": lambda: now[0]} if with_clock else {}
+        result = capture("adb", "emulator-5554", runner=runner,
+                         environment={"GITHUB_ACTIONS": "true"},
+                         snapshot_reader=snapshot, host_connection_reader=host, **extra)
+        assert len(hosts) == int(expected), "normal path host collection: " + name
+        assert len(commands) == 3 and len(snapshots) == 1, "device query repeated"
+        assert result["combined_collection_budget_seconds"] == 51
+        assert result["collection_budget_seconds"] == 19
+        assert result["identity"]["stdout"]["tail"] == "1\n"
+        assert all(row["stdout"]["tail"] == "original log\n" for row in result["logs"])
+        assert result["status"] == "OBSERVED_NOT_ACCEPTANCE" and not result["release_ready"]
+        if snapshot_error:
+            assert "snapshot sentinel" in result["process_snapshot_error"]
+        else:
+            assert result["process_snapshot"] is sentinel
+        if not expected:
+            assert result["host_connection"]["status"] == "NOT_OBSERVED_INSUFFICIENT_REMAINING_BUDGET"
+        elif host_error:
+            assert "host sentinel" in result["host_connection_error"]
+        else:
+            assert result["host_connection"]["status"] == "DIAGNOSTIC_ONLY_NOT_DEVICE_PROOF"
+        if not with_clock:
+            return 1
+    return len(cases)
+
+
+def normal_connection_selftest():
+    import inspect
+    assert normal_connection_contract(capture_crash_logs) == 9
+    source = inspect.getsource(capture_crash_logs)
+    changes = [
+        ("remaining >= 6.5", "remaining >= 0"),
+        ("remaining >= 6.5", "remaining > 6.5"),
+        ("remaining = 51 - (monotonic() - started)", "remaining = 57 - (monotonic() - started)"),
+        ("if host_connection_reader is not None:\n        remaining", "if False:\n        remaining"),
+        ("0 <= remaining <= 51", "True"),
+    ]
+    for old, new in changes:
+        assert source.count(old) == 1, old
+        namespace = dict(globals())
+        exec(compile(source.replace(old, new, 1), "<normal-connection-mutant>", "exec"), namespace)
+        assert normal_connection_contract(capture_crash_logs) == 9
+        try:
+            normal_connection_contract(namespace["capture_crash_logs"])
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("normal connection mutant survived: " + old)
+    print("NORMAL_CONNECTION_HOST cases=9 witnessed_mutants=5 PASS; NOT_ANDROID_OR_ROOT_CAUSE", flush=True)
 
 
 def adb_connection_selftest():
@@ -1765,12 +1870,14 @@ if __name__ == "__main__":
 if __name__ == "__main__":
     import sys
     if sys.argv[1:] == ["connection-selftest"]:
+        normal_connection_selftest()
         adb_trace_selftest()
         adb_connection_selftest()
         adb_failure_wiring(Path(".github/workflows/note-drafts.yml").read_text())
         sys.exit(0)
     assert sys.argv[1:] == ["selftest"], "usage: verify_process_control.py selftest"
     selftest()
+    normal_connection_selftest()
     crash_selftest(Path(".github/workflows/android.yml").read_text())
     process_snapshot_selftest()
     adb_trace_selftest()

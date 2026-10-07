@@ -147,6 +147,7 @@ def core():
     run(["java", "-cp", str(out), "CoreTest"])
 
 def v12():
+    print("MAIN_REPORT_SELFTEST " + json.dumps(report_selftest()), flush=True)
     core()
     base = Path("src/main/java/com/supercubegame/pockettodo")
     sources = [base / (name + ".java") for name in V12_SOURCES]
@@ -375,9 +376,167 @@ def report():
     except urllib.error.HTTPError as e:
         if e.code != 404: raise
     written = api("contents/" + path, "PUT", body)
-    actual = api("contents/" + path + "?ref=" + written["commit"]["sha"])
-    assert base64.b64decode(actual["content"]) == data, "report readback mismatch"
+    from verify_evidence import verify_readback
+    actual = verify_readback(api, path, written["commit"]["sha"], data)
     print("EVIDENCE " + actual["html_url"])
+
+def report_selftest(target=None, mutations=True):
+    """Actual report entry + raw transport; fixture HTTP/files, never Android."""
+    import hashlib
+    import inspect
+    import io
+    import tempfile
+    import types
+    from contextlib import redirect_stdout
+    from unittest.mock import patch
+    if target is None:
+        target = report
+    source, run_id, commit = "a"*40, "123", "c"*40
+    path = "reports/" + source + "-" + run_id + ".json"
+    endpoint = "https://api.github.com/repos/fixture/repo/"
+    sentinel = "fixture-" + "token"
+    checks = []
+    modes = ("small", "large", "new_branch", "replace", "corrupt", "truncated",
+             "overlong", "wrong_blob", "wrong_path", "raw_timeout", "read_http",
+             "put_conflict", "ambiguous")
+    for mode in modes:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            out = root/"collected"
+            out.mkdir()
+            ui = {"status": "PASS", "trace": "x"*(1048577 if mode != "small" else 3)}
+            (out/"ui-result.json").write_text(json.dumps(ui))
+            if mode == "ambiguous":
+                (out/"duplicate").mkdir()
+                (out/"duplicate/ui-result.json").write_text("{}")
+            env = {"NEEDS_JSON": '{"database":{"result":"success"}}',
+                   "GITHUB_SHA": source, "GITHUB_RUN_ID": run_id,
+                   "GITHUB_REPOSITORY": "fixture/repo", "GH_TOKEN": sentinel}
+            calls, published, raw_reads = [], [], []
+            injected = (TimeoutError("original raw timeout") if mode == "raw_timeout" else
+                        urllib.error.HTTPError(endpoint, 409 if mode == "put_conflict" else 503,
+                                               "original HTTP failure", {}, None))
+            class Raw(io.BytesIO):
+                def read(self, limit=-1):
+                    assert limit == len(published[0])+1, "raw limit drift"
+                    raw_reads.append(limit)
+                    return super().read(limit)
+            def open_request(req, timeout):
+                assert timeout == 30, "report timeout drift"
+                assert req.get_header("Authorization") == "Bearer "+sentinel
+                url = req.full_url
+                assert url.startswith(endpoint), "foreign transport endpoint"
+                route = url[len(endpoint):]
+                raw = req.get_header("Accept") == "application/vnd.github.raw+json"
+                calls.append((req.get_method(), route, raw))
+                if route == "git/ref/heads/evidence":
+                    if mode == "new_branch":
+                        raise urllib.error.HTTPError(url, 404, "absent branch", {}, None)
+                    value = {"ref":"refs/heads/evidence"}
+                elif route == "git/refs":
+                    assert req.get_method() == "POST" and json.loads(req.data) == {
+                        "ref":"refs/heads/evidence", "sha":source}
+                    value = {"ref":"refs/heads/evidence"}
+                elif route == "contents/"+path+"?ref=evidence":
+                    if mode != "replace":
+                        raise urllib.error.HTTPError(url, 404, "absent file", {}, None)
+                    value = {"sha":"d"*40}
+                elif req.get_method() == "PUT":
+                    assert route == "contents/"+path and not raw
+                    body = json.loads(req.data)
+                    assert body["branch"] == "evidence"
+                    assert body.get("sha") == ("d"*40 if mode == "replace" else None)
+                    published.append(base64.b64decode(body["content"], validate=True))
+                    if mode == "put_conflict":
+                        raise injected
+                    value = {"commit":{"sha":commit}}
+                else:
+                    assert route == "contents/"+path+"?ref="+commit, "mutable readback"
+                    data = published[0]
+                    if mode == "read_http":
+                        raise injected
+                    if raw:
+                        if mode == "raw_timeout":
+                            raise injected
+                        payload = {"corrupt": b"!"+data[1:], "truncated": data[:-1],
+                                   "overlong": data+b"!"}.get(mode, data)
+                        return Raw(payload)
+                    value = {"html_url":"https://example.invalid/verified"}
+                    if mode == "small":
+                        value.update(encoding="base64", content=base64.b64encode(data).decode())
+                    else:
+                        assert len(data) > 1048576, "large fixture below boundary"
+                        digest = hashlib.sha1(b"blob "+str(len(data)).encode()+b"\0"+data).hexdigest()
+                        value.update(encoding="none", content="", size=len(data), type="file",
+                                     path="reports/wrong.json" if mode == "wrong_path" else path,
+                                     sha="f"*40 if mode == "wrong_blob" else digest)
+                assert not raw, "raw request unexpectedly returned metadata"
+                return io.BytesIO(json.dumps(value).encode())
+            scope = dict(target.__globals__, Path=lambda value: root/value)
+            runner = types.FunctionType(target.__code__, scope)
+            error, output = None, io.StringIO()
+            with patch.dict(os.environ, env), patch.object(urllib.request, "urlopen", open_request), redirect_stdout(output):
+                try:
+                    runner()
+                except Exception as exc:
+                    error = exc
+            if mode in ("small", "large", "new_branch", "replace"):
+                assert error is None, mode + ": valid report failed: " + repr(error)
+                assert output.getvalue() == "EVIDENCE https://example.invalid/verified\n"
+            else:
+                expected = {"corrupt": AssertionError, "truncated": AssertionError,
+                            "overlong": AssertionError, "wrong_blob": AssertionError,
+                            "wrong_path": ValueError, "raw_timeout": TimeoutError,
+                            "read_http": urllib.error.HTTPError, "put_conflict": urllib.error.HTTPError,
+                            "ambiguous": RuntimeError}[mode]
+                assert type(error) is expected, mode + ": wrong failure: " + repr(error)
+                assert "EVIDENCE " not in output.getvalue(), mode + ": false success receipt"
+                if mode in ("raw_timeout", "read_http", "put_conflict"):
+                    assert error is injected, "original failure replaced"
+            if mode == "ambiguous":
+                assert calls == [] and published == [], "ambiguous input reached network"
+            else:
+                assert len(published) == 1, mode + ": publication count"
+                doc = json.loads(published[0])
+                assert doc["ui"] == ui and doc["commit"] == source and doc["run_id"] == run_id
+                assert doc["jobs"] == json.loads(env["NEEDS_JSON"])
+                assert doc["release_ready"] is False and doc["durable_upgrade_ready"] is False
+                assert doc["full_v12_acceptance"] == "NOT_TESTED"
+                assert all(v == "NOT_OBSERVED" for v in doc["logs"].values())
+                raw_expected = mode in ("large", "new_branch", "replace", "corrupt",
+                                        "truncated", "overlong", "raw_timeout")
+                assert sum(c[2] for c in calls) == int(raw_expected), mode + ": raw request count"
+                assert len(raw_reads) == int(raw_expected and mode != "raw_timeout")
+                expected_calls = 3 if mode == "put_conflict" else 4+int(raw_expected)+int(mode == "new_branch")
+                assert len(calls) == expected_calls, mode + ": unexpected retry/request"
+            checks.append(mode)
+    rejected = []
+    if mutations:
+        original = inspect.getsource(report)
+        anchor = "actual = verify_readback(api, path, written[\"commit\"][\"sha\"], data)"
+        for name, replacement, witness in (
+            ("old_inline_decoder",
+             'actual = api("contents/" + path + "?ref=" + written["commit"]["sha"])\n'
+             '    assert base64.b64decode(actual["content"]) == data, "report readback mismatch"',
+             "large: valid report failed"),
+            ("skip_verification",
+             'actual = api("contents/" + path + "?ref=" + written["commit"]["sha"])',
+             "large: raw request count"),
+        ):
+            assert original.count(anchor) == 1, "report mutation anchor drift"
+            namespace = dict(globals())
+            exec(compile(original.replace(anchor, replacement, 1), "<report-mutant>", "exec"), namespace)
+            try:
+                report_selftest(namespace["report"], mutations=False)
+            except AssertionError as exc:
+                # The first small-file case passed before the large-file rejection.
+                assert witness in str(exc), (name, str(exc))
+                rejected.append(name)
+            else:
+                raise AssertionError("report mutant survived: "+name)
+    return {"status":"PASS", "cases":len(checks), "witnessed_mutants":rejected,
+            "scope":"ACTUAL_REPORT_ENTRY_SCRIPTED_HTTP_NOT_GITHUB_OR_ANDROID",
+            "release_ready":False}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

@@ -8,8 +8,8 @@ import verify_todo_management as runner
 import verify_category_drag as shared
 PACKAGE = runner.PACKAGE
 SCOPE = "MANUAL_APPLICATION_CATALOG_AND_LINKED_ACTIVITY_NOT_EXTERNAL_LAUNCH_OR_FULL_PRODUCT"
-REQUIRED = {'seed': ['backend_fixture', 'application_insert', 'duplicate_package_readonly', 'invalid_package_readonly', 'prepare_readonly', 'create_linked_once', 'duplicate_plan_readonly', 'canceled_plan_readonly', 'second_category_reuse', 'unassigned_activity', 'stale_app_readonly', 'stale_category_readonly', 'late_rollback', 'consumed_failure_readonly', 'outer_transaction_readonly', 'backend_checkpoint', 'rename_fixture', 'rename_prepare_readonly', 'rename_exact_state', 'rename_duplicate', 'rename_same_readonly', 'rename_cancel', 'rename_blank', 'rename_blank_consumed', 'rename_stale', 'rename_unrelated_change', 'rename_late_rollback', 'rename_failure_consumed', 'rename_readback_rollback', 'rename_prepare_outer', 'rename_confirm_outer', 'rename_missing', 'rename_foreign', 'rename_owner_retained', 'rename_closed_helper', 'rename_reopened_state'], 'deleted': ['backend_restart', 'backend_backup', 'ui_fixture', 'catalog_open_readonly', 'invalid_name_readonly', 'invalid_package_ui_readonly', 'create_application_ui', 'duplicate_package_ui_readonly', 'same_title_distinct_ids', 'cancel_picker_readonly', 'first_category_link', 'duplicate_click_readonly', 'second_category_link', 'old_picker_readonly', 'unassigned_retained', 'ui_checkpoint', 'rename_ui_prepare', 'rename_ui_blank', 'rename_ui_exact', 'rename_ui_duplicate', 'rename_ui_cancel', 'rename_ui_same', 'rename_ui_stale', 'rename_ui_detached', 'rename_ui_final'], 'undone': ['ui_restart', 'ui_backup']}
-EXPECTED = {'seed': ['backend_fixture', 'application_insert', 'duplicate_package_readonly', 'invalid_package_readonly', 'prepare_readonly', 'create_linked_once', 'duplicate_plan_readonly', 'canceled_plan_readonly', 'second_category_reuse', 'unassigned_activity', 'stale_app_readonly', 'stale_category_readonly', 'late_rollback', 'consumed_failure_readonly', 'outer_transaction_readonly', 'backend_checkpoint', 'rename_fixture', 'rename_prepare_readonly', 'rename_exact_state', 'rename_duplicate', 'rename_same_readonly', 'rename_cancel', 'rename_blank', 'rename_blank_consumed', 'rename_stale', 'rename_unrelated_change', 'rename_late_rollback', 'rename_failure_consumed', 'rename_readback_rollback', 'rename_prepare_outer', 'rename_confirm_outer', 'rename_missing', 'rename_foreign', 'rename_owner_retained', 'rename_closed_helper', 'rename_reopened_state'], 'deleted': ['backend_restart', 'backend_backup', 'ui_fixture', 'catalog_open_readonly', 'invalid_name_readonly', 'invalid_package_ui_readonly', 'create_application_ui', 'duplicate_package_ui_readonly', 'same_title_distinct_ids', 'cancel_picker_readonly', 'first_category_link', 'duplicate_click_readonly', 'second_category_link', 'old_picker_readonly', 'unassigned_retained', 'ui_checkpoint', 'rename_ui_prepare', 'rename_ui_blank', 'rename_ui_exact', 'rename_ui_duplicate', 'rename_ui_cancel', 'rename_ui_same', 'rename_ui_stale', 'rename_ui_detached', 'rename_ui_final'], 'undone': ['ui_restart', 'ui_backup']}
+REQUIRED = {'seed': ['backend_fixture', 'application_insert', 'duplicate_package_readonly', 'invalid_package_readonly', 'prepare_readonly', 'create_linked_once', 'duplicate_plan_readonly', 'canceled_plan_readonly', 'second_category_reuse', 'unassigned_activity', 'stale_app_readonly', 'stale_category_readonly', 'late_rollback', 'consumed_failure_readonly', 'outer_transaction_readonly', 'backend_checkpoint', 'rename_fixture', 'rename_prepare_readonly', 'rename_exact_state', 'rename_duplicate', 'rename_same_readonly', 'rename_cancel', 'rename_blank', 'rename_blank_consumed', 'rename_stale', 'rename_unrelated_change', 'rename_late_rollback', 'rename_failure_consumed', 'rename_readback_rollback', 'rename_prepare_outer', 'rename_confirm_outer', 'rename_missing', 'rename_foreign', 'rename_owner_retained', 'rename_closed_helper', 'rename_reopened_state', 'relation_prepare', 'relation_path_order', 'relation_duplicate', 'relation_tag_order', 'relation_same', 'relation_clear', 'relation_blank', 'relation_blank_consumed', 'relation_cancel', 'relation_stale', 'relation_late_rollback', 'relation_failure_consumed', 'relation_readback_rollback', 'relation_foreign', 'relation_owner_retained', 'relation_prepare_outer', 'relation_confirm_outer', 'relation_missing', 'relation_closed', 'relation_final'], 'deleted': ['backend_restart', 'backend_backup', 'ui_fixture', 'catalog_open_readonly', 'invalid_name_readonly', 'invalid_package_ui_readonly', 'create_application_ui', 'duplicate_package_ui_readonly', 'same_title_distinct_ids', 'cancel_picker_readonly', 'first_category_link', 'duplicate_click_readonly', 'second_category_link', 'old_picker_readonly', 'unassigned_retained', 'ui_checkpoint', 'rename_ui_prepare', 'rename_ui_blank', 'rename_ui_exact', 'rename_ui_duplicate', 'rename_ui_cancel', 'rename_ui_same', 'rename_ui_stale', 'rename_ui_detached', 'rename_ui_final', 'relation_ui_prepare', 'relation_ui_blank', 'relation_ui_path', 'relation_ui_duplicate', 'relation_ui_tags', 'relation_ui_same', 'relation_ui_cancel', 'relation_ui_clear', 'relation_ui_other_owner', 'relation_ui_other_tags', 'relation_ui_stale', 'relation_ui_detached', 'relation_ui_final'], 'undone': ['ui_restart', 'ui_backup']}
+EXPECTED = {'seed': ['backend_fixture', 'application_insert', 'duplicate_package_readonly', 'invalid_package_readonly', 'prepare_readonly', 'create_linked_once', 'duplicate_plan_readonly', 'canceled_plan_readonly', 'second_category_reuse', 'unassigned_activity', 'stale_app_readonly', 'stale_category_readonly', 'late_rollback', 'consumed_failure_readonly', 'outer_transaction_readonly', 'backend_checkpoint', 'rename_fixture', 'rename_prepare_readonly', 'rename_exact_state', 'rename_duplicate', 'rename_same_readonly', 'rename_cancel', 'rename_blank', 'rename_blank_consumed', 'rename_stale', 'rename_unrelated_change', 'rename_late_rollback', 'rename_failure_consumed', 'rename_readback_rollback', 'rename_prepare_outer', 'rename_confirm_outer', 'rename_missing', 'rename_foreign', 'rename_owner_retained', 'rename_closed_helper', 'rename_reopened_state', 'relation_prepare', 'relation_path_order', 'relation_duplicate', 'relation_tag_order', 'relation_same', 'relation_clear', 'relation_blank', 'relation_blank_consumed', 'relation_cancel', 'relation_stale', 'relation_late_rollback', 'relation_failure_consumed', 'relation_readback_rollback', 'relation_foreign', 'relation_owner_retained', 'relation_prepare_outer', 'relation_confirm_outer', 'relation_missing', 'relation_closed', 'relation_final'], 'deleted': ['backend_restart', 'backend_backup', 'ui_fixture', 'catalog_open_readonly', 'invalid_name_readonly', 'invalid_package_ui_readonly', 'create_application_ui', 'duplicate_package_ui_readonly', 'same_title_distinct_ids', 'cancel_picker_readonly', 'first_category_link', 'duplicate_click_readonly', 'second_category_link', 'old_picker_readonly', 'unassigned_retained', 'ui_checkpoint', 'rename_ui_prepare', 'rename_ui_blank', 'rename_ui_exact', 'rename_ui_duplicate', 'rename_ui_cancel', 'rename_ui_same', 'rename_ui_stale', 'rename_ui_detached', 'rename_ui_final', 'relation_ui_prepare', 'relation_ui_blank', 'relation_ui_path', 'relation_ui_duplicate', 'relation_ui_tags', 'relation_ui_same', 'relation_ui_cancel', 'relation_ui_clear', 'relation_ui_other_owner', 'relation_ui_other_tags', 'relation_ui_stale', 'relation_ui_detached', 'relation_ui_final'], 'undone': ['ui_restart', 'ui_backup']}
 SHARED_SHA256 = "9b1b435b21b630e1230f1e112a794962825665982ceabdbb41cc68583ce3d70d"
 # Reuse unchanged transport/receipt infrastructure, never the category cases.
 # Pin the whole dependency: a future edit must explicitly review this adapter.
@@ -17,6 +17,106 @@ assert hashlib.sha256(Path(shared.__file__).read_bytes()).hexdigest() == SHARED_
 for marker in (" static Map<String,List<List<String>>> expected(", " void save(", " void seed(", " @Override public void onCreate"):
     assert shared.JAVA.count(marker) == 1, "ambiguous Java scaffold boundary"
 CASES = r'''
+ Object relationPlan(AppDatabase h,long id,boolean tags)throws Exception{
+  return invoke(h,"prepareActivityStrings",new Class<?>[]{long.class,boolean.class},id,tags);
+ }
+ boolean relationConfirm(AppDatabase h,Object p,List<String> input)throws Exception{
+  return (Boolean)invoke(h,"confirmActivityStrings",new Class<?>[]{p.getClass(),List.class},p,input);
+ }
+ static Map<String,List<List<String>>> relationExpected(Map<String,List<List<String>>> before,String table,long owner,List<String> values){
+  Map<String,List<List<String>>> out=new TreeMap<>();
+  for(Map.Entry<String,List<List<String>>> e:before.entrySet()){
+   List<List<String>> rows=new ArrayList<>();for(List<String> r:e.getValue())rows.add(new ArrayList<>(r));out.put(e.getKey(),rows);
+  }
+  List<List<String>> rows=out.get(table);need(rows.get(0).equals(Arrays.asList("rowid","activity_id","position","text")),"relation oracle columns");
+  for(int i=rows.size()-1;i>0;i--)if(rows.get(i).get(1).equals("1:"+owner))rows.remove(i);
+  long rowid=rows.size()==1?0:Long.parseLong(rows.get(rows.size()-1).get(0).substring(2));
+  for(int i=0;i<values.size();i++)rows.add(Arrays.asList("1:"+Math.incrementExact(rowid+i),"1:"+owner,"1:"+i,"3:"+values.get(i)));
+  List<List<String>> rev=out.get("revision");int v=rev.get(0).indexOf("value");
+  rev.get(1).set(v,"1:"+Math.incrementExact(Long.parseLong(rev.get(1).get(v).substring(2))));return out;
+ }
+ void relationsBackend(AppDatabase h)throws Exception{
+  Map<String,List<List<String>>> before=state(h);Object p=relationPlan(h,5,false);
+  pass(state(h).equals(before),"relation_prepare");
+  pass(relationConfirm(h,p,Arrays.asList(" A ","B","A"))&&state(h).equals(relationExpected(before,"paths",5,Arrays.asList("A","B","A"))),"relation_path_order");
+  Object used=p;readonly(h,IllegalStateException.class,()->relationConfirm(h,used,Arrays.asList("Again")),"relation_duplicate");
+  before=state(h);p=relationPlan(h,6,true);
+  pass(relationConfirm(h,p,Arrays.asList(" z ","a","z"))&&state(h).equals(relationExpected(before,"tags",6,Arrays.asList("z","a"))),"relation_tag_order");
+  before=state(h);p=relationPlan(h,6,true);
+  pass(!relationConfirm(h,p,Arrays.asList("z","a","z"))&&state(h).equals(before),"relation_same");
+  before=state(h);p=relationPlan(h,5,false);
+  pass(relationConfirm(h,p,Collections.emptyList())&&state(h).equals(relationExpected(before,"paths",5,Collections.emptyList())),"relation_clear");
+  Object blank=relationPlan(h,5,false);
+  readonly(h,IllegalArgumentException.class,()->relationConfirm(h,blank,Arrays.asList("A"," ")),"relation_blank");
+  readonly(h,IllegalStateException.class,()->relationConfirm(h,blank,Arrays.asList("A")),"relation_blank_consumed");
+  Object canceled=relationPlan(h,5,false);close(canceled);
+  readonly(h,IllegalStateException.class,()->relationConfirm(h,canceled,Arrays.asList("A")),"relation_cancel");
+  Object stale=relationPlan(h,5,false);h.savePath(6,Arrays.asList("Other activity"));
+  readonly(h,IllegalStateException.class,()->relationConfirm(h,stale,Arrays.asList("Overwrite")),"relation_stale");
+  Object late=relationPlan(h,5,false);before=state(h);
+  h.getWritableDatabase().execSQL("CREATE TRIGGER relation_fault BEFORE UPDATE OF value ON revision BEGIN SELECT RAISE(ABORT,'relation_late_fault'); END");
+  Throwable error=null;try{relationConfirm(h,late,Arrays.asList("Bad"));}catch(Throwable t){error=t;}
+  boolean found=false;for(Throwable t=error;t!=null;t=t.getCause())if(String.valueOf(t.getMessage()).contains("relation_late_fault"))found=true;
+  pass(found&&state(h).equals(before),"relation_late_rollback");h.getWritableDatabase().execSQL("DROP TRIGGER relation_fault");
+  readonly(h,IllegalStateException.class,()->relationConfirm(h,late,Arrays.asList("Bad")),"relation_failure_consumed");
+  Object corrupt=relationPlan(h,5,false);before=state(h);
+  h.getWritableDatabase().execSQL("CREATE TRIGGER relation_damage AFTER INSERT ON paths WHEN NEW.activity_id=5 BEGIN UPDATE applications SET name='Damaged' WHERE id=10; END");
+  error=null;try{relationConfirm(h,corrupt,Arrays.asList("Bad"));}catch(Throwable t){error=t;}
+  found=false;for(Throwable t=error;t!=null;t=t.getCause())if(String.valueOf(t.getMessage()).contains("路径标签回读不一致"))found=true;
+  pass(found&&state(h).equals(before),"relation_readback_rollback");h.getWritableDatabase().execSQL("DROP TRIGGER relation_damage");
+  Object foreignPlan=relationPlan(h,5,false);
+  try(AppDatabase foreign=AppDatabase.openSchema3(getTargetContext(),name())){
+   readonly(h,IllegalArgumentException.class,()->relationConfirm(foreign,foreignPlan,Arrays.asList("Bad")),"relation_foreign");
+  }
+  before=state(h);pass(relationConfirm(h,foreignPlan,Arrays.asList("Final path"))&&state(h).equals(relationExpected(before,"paths",5,Arrays.asList("Final path"))),"relation_owner_retained");
+  Object outer=relationPlan(h,5,true);h.getWritableDatabase().beginTransaction();
+  try{
+   readonly(h,IllegalStateException.class,()->relationPlan(h,5,false),"relation_prepare_outer");
+   readonly(h,IllegalStateException.class,()->relationConfirm(h,outer,Arrays.asList("Bad")),"relation_confirm_outer");
+  }finally{h.getWritableDatabase().endTransaction();}
+  readonly(h,IllegalArgumentException.class,()->relationPlan(h,999,false),"relation_missing");
+  Object closed=relationPlan(h,5,false);h.close();
+  readonly(h,IllegalStateException.class,()->relationConfirm(h,closed,Arrays.asList("Bad")),"relation_closed");
+  before=state(h);p=relationPlan(h,5,true);
+  pass(relationConfirm(h,p,Arrays.asList("Final tag"))&&state(h).equals(relationExpected(before,"tags",5,Arrays.asList("Final tag"))),"relation_final");
+ }
+ void relationText(String value)throws Exception{
+  ui(()->{List<View> out=new ArrayList<>();find(root(),"活动路径",true,out);find(root(),"活动标签",true,out);
+   need(out.size()==1&&out.get(0) instanceof EditText,"one relation input");((EditText)out.get(0)).setText(value);
+   need(value.contentEquals(((EditText)out.get(0)).getText()),"exact relation input");});
+ }
+ void relationsUI(AppDatabase h)throws Exception{
+  click("activity-2",true);Map<String,List<List<String>>> before=state(h);
+  click("activity-path-edit-2",true);
+  boolean[] okay={false};ui(()->okay[0]=((TextView)one("relation-identity",true)).getText().toString().contains("#2"));
+  pass(okay[0]&&state(h).equals(before),"relation_ui_prepare");
+  relationText("A\n \nB");click("relation-save",true);
+  ui(()->okay[0]=((TextView)one("relation-validation",true)).getText().length()>0);
+  pass(okay[0]&&state(h).equals(before),"relation_ui_blank");
+  relationText(" A\nB\nA");final View[] old={null};
+  ui(()->{old[0]=one("relation-save",true);need(old[0].performClick(),"relation first click");old[0].performClick();});ready();
+  pass(state(h).equals(relationExpected(before,"paths",2,Arrays.asList("A","B","A"))),"relation_ui_path");
+  before=state(h);ui(()->old[0].performClick());ready();pass(state(h).equals(before),"relation_ui_duplicate");
+  click("activity-tags-edit-2",true);relationText(" z\na\nz");click("relation-save",true);
+  pass(state(h).equals(relationExpected(before,"tags",2,Arrays.asList("z","a"))),"relation_ui_tags");
+  before=state(h);click("activity-tags-edit-2",true);click("relation-save",true);pass(state(h).equals(before),"relation_ui_same");
+  click("activity-path-edit-2",true);relationText("Cancel");ui(()->old[0]=one("relation-save",true));click("relation-cancel",true);
+  ui(()->old[0].performClick());ready();pass(state(h).equals(before),"relation_ui_cancel");
+  click("activity-path-edit-2",true);relationText("");click("relation-save",true);
+  pass(state(h).equals(relationExpected(before,"paths",2,Collections.emptyList())),"relation_ui_clear");
+  before=state(h);click("返回分类",false);click("activity-3",true);click("activity-path-edit-3",true);relationText("Other\nPath");click("relation-save",true);
+  pass(state(h).equals(relationExpected(before,"paths",3,Arrays.asList("Other","Path"))),"relation_ui_other_owner");
+  before=state(h);click("activity-tags-edit-3",true);relationText("Independent");click("relation-save",true);
+  pass(state(h).equals(relationExpected(before,"tags",3,Arrays.asList("Independent"))),"relation_ui_other_tags");
+  click("activity-tags-edit-3",true);h.saveTags(2,Arrays.asList("External"));before=state(h);relationText("Overwrite");click("relation-save",true);
+  ui(()->okay[0]=!one("relation-save",true).isEnabled()&&((TextView)one("relation-validation",true)).getText().length()>0);
+  pass(okay[0]&&state(h).equals(before),"relation_ui_stale");click("relation-cancel",true);
+  click("activity-tags-edit-3",true);ui(()->old[0]=one("relation-save",true));click("今天",false);
+  ui(()->old[0].performClick());ready();pass(state(h).equals(before),"relation_ui_detached");
+  click("活动",false);click("activity-tags-edit-3",true);relationText("Final");
+  click("relation-save",true);pass(state(h).equals(relationExpected(before,"tags",3,Arrays.asList("Final"))),"relation_ui_final");
+  click("返回分类",false);
+ }
  Object renamePlan(AppDatabase h,long id)throws Exception{
   return invoke(h,"prepareApplicationRename",new Class<?>[]{long.class},id);
  }
@@ -85,6 +185,7 @@ CASES = r'''
   Object closed=renamePlan(h,10);before=state(h);h.close();
   readonly(h,IllegalStateException.class,()->renameConfirm(h,closed,"Bad"),"rename_closed_helper");
   pass(state(h).equals(before),"rename_reopened_state");
+  relationsBackend(h);
   save("backend-rename-state",state(h).toString());
  }
  void renameUI(AppDatabase h)throws Exception{
@@ -112,7 +213,7 @@ CASES = r'''
   before=state(h);ui(()->old[0].performClick());ready();pass(state(h).equals(before),"rename_ui_detached");
   click("应用目录",false);click("catalog-rename-1",true);text("catalog-rename-name","Final UI");before=state(h);click("catalog-rename-save",true);
   pass(state(h).equals(renamed(before,1,"Final UI")),"rename_ui_final");
-  click("catalog-back",true);save("ui-rename-state",state(h).toString());save("ui-rename-media",media().toString());
+  click("catalog-back",true);relationsUI(h);save("ui-rename-state",state(h).toString());save("ui-rename-media",media().toString());
  }
  static Object invoke(Object target,String method,Class<?>[] types,Object... args)throws Exception{
   try{return target.getClass().getMethod(method,types).invoke(target,args);}
@@ -247,7 +348,7 @@ def bind_infrastructure():
         s=s.replace("category","catalog").replace("Category","Catalog").replace("CATEGORY","CATALOG")
         if name=="fixture":
             assert s.count("checks=40")==1
-            s=s.replace("checks=40","checks=63")
+            s=s.replace("checks=40","checks=96")
         if name=="report":
             old='["physical_phone_gestures", "all_lifecycle_stale_duplicate_UI_cases", "referenced_media_fixture", "ordinary_todo_sorting"]'
             assert s.count(old)==1
@@ -549,11 +650,12 @@ class Checkpoint{
 
 
 def selftest():
+    relation_host_selftest()
     snapshot_selftest()
     rename_host_selftest()
     catalog_ui_selftest()
     assert REQUIRED == EXPECTED
-    assert [len(EXPECTED[p]) for p in ("seed", "deleted", "undone")] == [36,25,2]
+    assert [len(EXPECTED[p]) for p in ("seed", "deleted", "undone")] == [56,38,2]
     rejected = 0
     for api in (26,34):
         value, manifest, logs = fixture(api)
@@ -717,6 +819,82 @@ public static void main(String[]a)throws Exception{
     print("RENAME_HOST "+json.dumps(dict(status="PASS",receipts=receipts,
         scope="EXTRACTED_CURRENT_JAVA_AND_CURRENT_UI_WITH_HOST_DOUBLES_NOT_ANDROID_SQLITE_OR_BACKUP",
         release_ready=False),sort_keys=True),flush=True)
+
+
+def relation_host_selftest():
+    """Extract actual current members; explicit SQL/widget doubles, not device proof."""
+    assets={'backend-prelude': 'import java.util.*;import java.io.*;import java.nio.charset.StandardCharsets;\nclass Ledger{static void positive(long id){if(id<=0)throw new IllegalArgumentException();}}\nclass Cursor implements AutoCloseable{\n static final int FIELD_TYPE_NULL=0,FIELD_TYPE_INTEGER=1,FIELD_TYPE_STRING=3,FIELD_TYPE_BLOB=4;\n boolean moveToFirst(){return true;}String getString(int i){return "Same";}public void close(){}\n}\nclass SQLiteDatabase{\n List<String> values=new ArrayList<>(Arrays.asList("Old")),tags=new ArrayList<>(Arrays.asList("Tag")),other=new ArrayList<>(Arrays.asList("Keep"));\n long rev=9,external=0;boolean outer,fault,corrupt;long pathFirst=1,tagFirst=1;\n SQLiteDatabase copy(){SQLiteDatabase d=new SQLiteDatabase();d.values=new ArrayList<>(values);d.tags=new ArrayList<>(tags);d.other=new ArrayList<>(other);d.rev=rev;d.external=external;d.pathFirst=pathFirst;d.tagFirst=tagFirst;return d;}\n boolean inTransaction(){return outer;}void beginTransaction(){}void endTransaction(){}void setTransactionSuccessful(){}boolean isOpen(){return true;}\n Cursor rawQuery(String q,String[]a){if(!q.equals("SELECT title FROM activities WHERE id=? AND archived=0"))throw new AssertionError(q);if(!a[0].equals("10"))throw new IllegalArgumentException();return new Cursor();}\n int delete(String table,String where,String[]a){if(!where.equals("activity_id=?")||!a[0].equals("10"))throw new AssertionError("owner");List<String> v=table.equals("paths")?values:tags;int n=v.size();v.clear();if(table.equals("paths"))pathFirst=6;else tagFirst=6;return n;}\n void execSQL(String q,Object[]a){String table=q.contains("paths")?"paths":"tags";if(!q.equals("INSERT INTO "+table+" VALUES(?,?,?)")||!a[0].equals(10L))throw new AssertionError(q);List<String> v=table.equals("paths")?values:tags;if(!a[1].equals(v.size()))throw new AssertionError("position");v.add((String)a[2]);if(corrupt)external++;}\n}\nclass AppDatabase {\n Object restoreSession=new Object();SQLiteDatabase sql=new SQLiteDatabase();\n interface Work<T>{T run(SQLiteDatabase db);}\n <T>T tx(Work<T>a){SQLiteDatabase b=sql.copy();try{return a.run(sql);}catch(RuntimeException e){sql.values=b.values;sql.tags=b.tags;sql.other=b.other;sql.rev=b.rev;sql.external=b.external;sql.pathFirst=b.pathFirst;sql.tagFirst=b.tagFirst;throw e;}}\n SQLiteDatabase getReadableDatabase(){return sql;}SQLiteDatabase getWritableDatabase(){return sql;}\n static void noteDeletionNoOuterTransaction(SQLiteDatabase d){if(d.outer)throw new IllegalStateException();}\n static String text(String s){if(s==null||s.trim().isEmpty())throw new IllegalArgumentException();return s.trim();}\n List<String> orderedStrings(String t,long id){return new ArrayList<>(t.equals("paths")?sql.values:sql.tags);}\n static long revision(SQLiteDatabase d){return d.rev;}static long bump(SQLiteDatabase d){if(d.fault)throw new IllegalStateException("late");return ++d.rev;}\n static void require(boolean b,String s){if(!b)throw new IllegalArgumentException(s);}\n static final String[] SNAPSHOT_TABLES={"revision","paths","tags","ledger"};\n static class LimitedBytes extends ByteArrayOutputStream{}\n static void blob(DataOutputStream o,byte[]b)throws IOException{o.writeInt(b.length);o.write(b);}\n static void utf8(DataOutputStream o,String s)throws IOException{blob(o,s.getBytes(StandardCharsets.UTF_8));}\n static byte[] readBlob(DataInputStream i)throws IOException{int n=i.readInt();require(n>=0&&n<=i.available(),"length");byte[]b=new byte[n];i.readFully(b);return b;}\n static String readText(DataInputStream i)throws IOException{return new String(readBlob(i),StandardCharsets.UTF_8);}\n static void table(DataOutputStream o,String t,String[] names,List<Object[]> rows)throws IOException{\n  utf8(o,t);o.writeInt(names.length);for(String n:names)utf8(o,n);o.writeInt(rows.size());\n  for(Object[]row:rows)for(Object v:row){if(v instanceof Long){o.writeByte(1);o.writeLong((Long)v);}else if(v instanceof String){o.writeByte(3);utf8(o,(String)v);}else if(v instanceof byte[]){o.writeByte(4);blob(o,(byte[])v);}else o.writeByte(0);}\n }\n static byte[] noteDeletionState(SQLiteDatabase d){\n  try{var b=new ByteArrayOutputStream();var o=new DataOutputStream(b);o.writeInt(0x4e444c31);o.writeInt(3);o.writeInt(4);\n   table(o,"revision",new String[]{"id","id","value"},Collections.singletonList(new Object[]{1L,1L,d.rev}));\n   for(String t:Arrays.asList("paths","tags")){\n    List<Object[]>rows=new ArrayList<>();List<String>v=t.equals("paths")?d.values:d.tags;long first=t.equals("paths")?d.pathFirst:d.tagFirst;\n    for(int j=0;j<v.size();j++)rows.add(new Object[]{first+j,10L,(long)j,v.get(j)});\n    rows.add(new Object[]{5L,20L,0L,"Keep"});rows.sort(Comparator.comparingLong(r->(Long)r[0]));\n    table(o,t,new String[]{"rowid","activity_id","position","text"},rows);\n   }\n   table(o,"ledger",new String[]{"rowid","value","bytes","nullable"},Collections.singletonList(new Object[]{1L,d.external,new byte[]{0,-1,2},null}));return b.toByteArray();\n  }catch(IOException e){throw new RuntimeException(e);}\n }\n', 'backend-test': 'import java.util.*;\nclass Test {\n static int checks;\n static void need(boolean b,String s){if(!b)throw new AssertionError(s);checks++;System.out.println("RELATION_CHECK "+s);}\n interface Action{void run()throws Exception;}\n static void refuse(Class<?> type,Action a,String label)throws Exception{\n  try{a.run();}catch(Exception e){need(type.isInstance(e),label);return;}throw new AssertionError(label);\n }\n public static void main(String[]args)throws Exception{\n  AppDatabase h=new AppDatabase();var p=h.prepareActivityStrings(10,false);\n  need(p.activityId()==10&&p.title().equals("Same")&&p.values().equals(Arrays.asList("Old"))&&h.sql.rev==9,"prepare");\n  System.out.println("RELATION_VALID_WITNESS");\n  need(h.confirmActivityStrings(p,Arrays.asList(" A ","B","A"))&&h.sql.values.equals(Arrays.asList("A","B","A"))&&h.sql.rev==10,"path_order_duplicates");\n  need(h.sql.other.equals(Arrays.asList("Keep"))&&h.sql.tags.equals(Arrays.asList("Tag")),"unrelated");\n  final var used=p;refuse(IllegalStateException.class,()->h.confirmActivityStrings(used,Arrays.asList("Again")),"duplicate");\n  p=h.prepareActivityStrings(10,true);need(h.confirmActivityStrings(p,Arrays.asList(" z ","a","z"))&&h.sql.tags.equals(Arrays.asList("z","a")),"tag_dedup_order");\n  p=h.prepareActivityStrings(10,true);long rev=h.sql.rev;\n  need(!h.confirmActivityStrings(p,Arrays.asList("z","a","z"))&&h.sql.rev==rev,"same_readonly");\n  p=h.prepareActivityStrings(10,false);need(h.confirmActivityStrings(p,Collections.emptyList())&&h.sql.values.isEmpty(),"clear");\n  final var blank=h.prepareActivityStrings(10,false);\n  refuse(IllegalArgumentException.class,()->h.confirmActivityStrings(blank,Arrays.asList("A"," ")),"blank");\n  refuse(IllegalStateException.class,()->h.confirmActivityStrings(blank,Arrays.asList("A")),"blank_consumed");\n  final var cancel=h.prepareActivityStrings(10,false);cancel.close();\n  refuse(IllegalStateException.class,()->h.confirmActivityStrings(cancel,Arrays.asList("A")),"cancel");\n  final var stale=h.prepareActivityStrings(10,false);h.sql.external++;\n  refuse(IllegalStateException.class,()->h.confirmActivityStrings(stale,Collections.emptyList()),"stale");\n  final var session=h.prepareActivityStrings(10,false);h.restoreSession=new Object();\n  refuse(IllegalStateException.class,()->h.confirmActivityStrings(session,Arrays.asList("A")),"session");\n  final var connection=h.prepareActivityStrings(10,false);h.sql=h.sql.copy();\n  refuse(IllegalStateException.class,()->h.confirmActivityStrings(connection,Arrays.asList("A")),"connection");\n  final var foreign=h.prepareActivityStrings(10,false);\n  refuse(IllegalArgumentException.class,()->new AppDatabase().confirmActivityStrings(foreign,Arrays.asList("A")),"foreign");\n  need(h.confirmActivityStrings(foreign,Arrays.asList("A")),"owner_retained");\n  final var fault=h.prepareActivityStrings(10,false);byte[] before=AppDatabase.noteDeletionState(h.sql);h.sql.fault=true;\n  refuse(IllegalStateException.class,()->h.confirmActivityStrings(fault,Arrays.asList("B")),"late_fault");\n  need(Arrays.equals(before,AppDatabase.noteDeletionState(h.sql)),"rollback");h.sql.fault=false;\n  refuse(IllegalStateException.class,()->h.confirmActivityStrings(fault,Arrays.asList("B")),"failure_consumed");\n  final var damage=h.prepareActivityStrings(10,false);before=AppDatabase.noteDeletionState(h.sql);h.sql.corrupt=true;\n  refuse(IllegalStateException.class,()->h.confirmActivityStrings(damage,Arrays.asList("B")),"readback");\n  need(Arrays.equals(before,AppDatabase.noteDeletionState(h.sql)),"readback_rollback");h.sql.corrupt=false;\n  final var outer=h.prepareActivityStrings(10,false);h.sql.outer=true;\n  refuse(IllegalStateException.class,()->h.confirmActivityStrings(outer,Arrays.asList("B")),"outer");\n  refuse(IllegalStateException.class,()->h.prepareActivityStrings(10,false),"prepare_outer");h.sql.outer=false;\n  refuse(IllegalArgumentException.class,()->h.prepareActivityStrings(11,false),"missing");\n  System.out.println("RELATION_BACKEND_PASS "+checks+" HOST_DOUBLES_NOT_SQLITE");\n }\n}\n', 'ui-db': 'package com.supercubegame.pockettodo;\nimport java.util.*;\nclass AppDatabase{\n List<String> path=new ArrayList<>(Arrays.asList("Old")),tags=new ArrayList<>(Arrays.asList("Tag"));int writes,attempts,external;\n ActivityStringsPlan last;\n static class ActivityStringsPlan implements AutoCloseable{\n  boolean terminal,tags;int external;List<String> values;\n  public void close(){terminal=true;}long activityId(){return 10;}String title(){return "Same";}List<String> values(){return values;}\n }\n ActivityStringsPlan prepareActivityStrings(long id,boolean tags){\n  if(id!=10)throw new AssertionError("wrong owner");last=new ActivityStringsPlan();last.tags=tags;last.external=external;last.values=new ArrayList<>(tags?this.tags:path);return last;\n }\n boolean confirmActivityStrings(ActivityStringsPlan p,List<String> input){\n  attempts++;if(p.terminal||p.external!=external)throw new IllegalStateException();p.close();\n  List<String>v=new ArrayList<>();for(String s:input){s=s.trim();if(s.isEmpty())throw new IllegalArgumentException();if(!p.tags||!v.contains(s))v.add(s);}\n  if(v.equals(p.values))return false;if(p.tags)tags=v;else path=v;writes++;return true;\n }\n}\n', 'ui-test': 'package com.supercubegame.pockettodo;\nimport android.view.View;import android.widget.*;import java.util.*;\nclass Test {\n static int checks;\n static void need(boolean b,String s){if(!b)throw new AssertionError(s);checks++;System.out.println("RELATION_UI_CHECK "+s);}\n static TodayScreen fresh(){return new TodayScreen();}\n static void input(TodayScreen h,String value){((EditText)h.one(h.outer.find("活动路径")==null?"活动标签":"活动路径")).setText(value);}\n static View open(TodayScreen h,boolean tags){\n  View a=new View();h.outer.addView(a);\n  RelationEditor r=new RelationEditor(h,10,"Same",tags,Arrays.asList(tags?"Tag":"Old"),()->h.content());\n  r.open(a);h.drain();return h.one("relation-save");\n }\n public static void main(String[]args){\n  TodayScreen h=fresh();View save=open(h,false);\n  need(((TextView)h.one("relation-identity")).text.contains("#10")&&h.db.writes==0,"prepare");\n  System.out.println("RELATION_UI_VALID_WITNESS");\n  input(h,"A\\n \\nB");save.performClick();\n  need(h.queue.isEmpty()&&h.db.writes==0&&!((TextView)h.one("relation-validation")).text.isEmpty(),"blank_visible");\n  input(h," A\\nB\\nA");save.performClick();save.performClick();\n  need(h.queue.size()==1,"pending_once");h.drain();\n  need(h.db.path.equals(Arrays.asList("A","B","A"))&&h.db.writes==1,"path_order");save.performClick();need(h.queue.isEmpty(),"old_save");\n  h=fresh();save=open(h,true);input(h," z\\na\\nz");save.performClick();h.drain();\n  need(h.db.tags.equals(Arrays.asList("z","a"))&&h.db.path.equals(Arrays.asList("Old")),"tag_order");\n  h=fresh();save=open(h,false);input(h,"");save.performClick();h.drain();need(h.db.path.isEmpty(),"clear");\n  h=fresh();save=open(h,false);save.performClick();h.drain();need(h.db.writes==0,"same");\n  h=fresh();save=open(h,false);h.one("relation-cancel").performClick();save.performClick();h.drain();need(h.db.writes==0&&h.db.last.terminal,"cancel");\n  h=fresh();save=open(h,false);h.content();save.performClick();h.drain();need(h.db.writes==0&&h.db.last.terminal,"detached");\n  h=fresh();save=open(h,false);input(h,"Change");save.performClick();h.content();h.drain();need(h.db.writes==0&&h.db.last.terminal,"queued_detached");\n  h=fresh();save=open(h,false);h.db.external++;input(h,"Change");save.performClick();h.drain();\n  need(h.db.writes==0&&!save.isEnabled()&&!((TextView)h.one("relation-validation")).text.isEmpty(),"stale");\n  save.performClick();h.drain();need(h.db.attempts==1,"failure_terminal");\n  h=fresh();View anchor=new View();h.outer.addView(anchor);\n  new RelationEditor(h,10,"Wrong",false,Arrays.asList("Old"),h::content).open(anchor);h.drain();\n  need(h.db.last.terminal&&h.outer.find("relation-save")==null,"stale_title");\n  h=fresh();anchor=new View();h.outer.addView(anchor);\n  new RelationEditor(h,10,"Same",false,Arrays.asList("Wrong"),h::content).open(anchor);h.drain();\n  need(h.db.last.terminal&&h.outer.find("relation-save")==null,"stale_values");\n  h=fresh();anchor=new View();h.outer.addView(anchor);\n  new RelationEditor(h,10,"Same",false,Arrays.asList("Old"),h::content).open(anchor);h.content();h.drain();\n  need(h.db.last.terminal&&h.outer.find("relation-save")==null,"prepare_detached");\n  h=fresh();save=open(h,false);h.activity.destroyed=true;input(h,"X");save.performClick();h.drain();need(h.db.writes==0,"destroyed");\n  System.out.println("RELATION_UI_PASS "+checks+" HOST_WIDGET_DOUBLES");\n }\n}\n', 'ui-fixtures': {'android/view/View.java': 'package android.view;\nimport java.util.*;\npublic class View {\n public boolean attached,enabled=true;public String description="";\n public List<View> children=new ArrayList<>();\n public interface OnClickListener{void onClick(View v);}\n public interface OnAttachStateChangeListener{void onViewAttachedToWindow(View v);void onViewDetachedFromWindow(View v);}\n public OnClickListener click;public List<OnAttachStateChangeListener> listeners=new ArrayList<>();\n public boolean isAttachedToWindow(){return attached;}public boolean isEnabled(){return enabled;}\n public void setEnabled(boolean b){enabled=b;}public void setContentDescription(String s){description=s;}\n public void setOnClickListener(OnClickListener l){click=l;}\n public boolean performClick(){if(click==null)return false;click.onClick(this);return true;}\n public void addOnAttachStateChangeListener(OnAttachStateChangeListener l){listeners.add(l);}\n public void attach(boolean yes){attached=yes;for(View v:new ArrayList<>(children))v.attach(yes);for(OnAttachStateChangeListener l:listeners){if(yes)l.onViewAttachedToWindow(this);else l.onViewDetachedFromWindow(this);}}\n public void setPadding(int a,int b,int c,int d){}public void setBackground(Object o){}\n public View find(String s){if(description.equals(s))return this;for(View v:children){View x=v.find(s);if(x!=null)return x;}return null;}\n}', 'android/widget/LinearLayout.java': 'package android.widget;import android.view.View;\npublic class LinearLayout extends View{\n public LinearLayout(Object c){} public static class LayoutParams{public LayoutParams(int a,int b){}public LayoutParams(int a,int b,int c){}}\n public void addView(View v){children.add(v);if(attached)v.attach(true);}\n public void addView(View v,LayoutParams p){addView(v);}\n public void removeAllViews(){for(View v:children)v.attach(false);children.clear();}\n}', 'android/widget/TextView.java': 'package android.widget;import android.view.View;\npublic class TextView extends View{public String text="";public TextView(Object c){}public void setText(String s){text=s;}public CharSequence getText(){return text;}}', 'android/widget/EditText.java': 'package android.widget;public class EditText extends TextView{public EditText(Object c){super(c);}public void setHint(String s){}}', 'android/widget/Button.java': 'package android.widget;public class Button extends TextView{public Button(Object c){super(c);}}', 'android/widget/ScrollView.java': 'package android.widget;public class ScrollView extends LinearLayout{public ScrollView(Object c){super(c);}public void setFillViewport(boolean b){}}', 'android/database/Cursor.java': 'package android.database;import java.util.*;\npublic class Cursor implements AutoCloseable{\n List<Object[]>rows;int i=-1;public Cursor(List<Object[]>r){rows=r;}\n public boolean moveToNext(){return ++i<rows.size();}public boolean moveToFirst(){i=0;return !rows.isEmpty();}\n public long getLong(int c){return((Number)rows.get(i)[c]).longValue();}public String getString(int c){return(String)rows.get(i)[c];}\n public boolean isNull(int c){return rows.get(i)[c]==null;}public void close(){}\n}', 'com/supercubegame/pockettodo/TodayScreen.java': 'package com.supercubegame.pockettodo;\nimport android.view.View;import android.widget.*;import java.util.*;import java.util.concurrent.Callable;import java.util.function.Consumer;\nclass TodayScreen{\n static final int INK=1,MUTED=2,ERROR=3,WHITE=4;\n static class Activity{boolean finishing,destroyed;boolean isFinishing(){return finishing;}boolean isDestroyed(){return destroyed;}}\n Activity activity=new Activity();AppDatabase db=new AppDatabase();LinearLayout outer=new LinearLayout(activity);\n ArrayDeque<Runnable> queue=new ArrayDeque<>();boolean busy;String message;\n TodayScreen(){outer.attach(true);}\n <T>void work(Callable<T>a,Consumer<T>s,Runnable f){\n  if(busy)throw new AssertionError("unexpected concurrent work");busy=true;\n  queue.add(()->{T x;try{x=a.call();}catch(Exception e){busy=false;if(f!=null)f.run();return;}busy=false;s.accept(x);});\n }\n void drain(){int n=0;while(!queue.isEmpty()){if(++n>20)throw new AssertionError("queue cycle");queue.remove().run();}}\n LinearLayout content(){outer.removeAllViews();return outer;}LinearLayout column(){return new LinearLayout(activity);}\n TextView text(String s,int size,int color){TextView v=new TextView(activity);v.setText(s);return v;}\n EditText field(String key,boolean multi){EditText v=new EditText(activity);v.setContentDescription(key);return v;}\n Button button(String s,Runnable r){Button v=new Button(activity);v.setText(s);v.setOnClickListener(w->{if(!busy)r.run();});return v;}\n int dp(int n){return n;}Object shape(int c,int r){return null;}\n void addRow(LinearLayout p,View v){p.addView(v);}void message(String s,boolean e){message=s;}\n View one(String s){View v=outer.find(s);if(v==null)throw new AssertionError("missing "+s);return v;}\n void text(String s,String v){((EditText)one(s)).setText(v);}\n}', 'com/supercubegame/pockettodo/AppDatabase.java': 'package com.supercubegame.pockettodo;\nimport android.database.Cursor;import java.util.*;\nclass AppDatabase{\n TreeMap<Long,String[]>apps=new TreeMap<>();int writes,links,attempts;boolean fail,failRead;\n class SQL{Cursor rawQuery(String q,String[]args){\n  List<Object[]>r=new ArrayList<>();if(q.equals("SELECT MAX(id) FROM applications"))r.add(new Object[]{apps.isEmpty()?null:apps.lastKey()});\n  else if(q.equals("SELECT id,name,package_name FROM applications ORDER BY id")){if(failRead)throw new IllegalStateException("read failed");for(Map.Entry<Long,String[]>e:apps.entrySet())r.add(new Object[]{e.getKey(),e.getValue()[0],e.getValue()[1]});}\n  else throw new AssertionError(q);return new Cursor(r);\n }}\n SQL getReadableDatabase(){return new SQL();}\n void addApplication(long id,String name,String pkg){for(String[]a:apps.values())if(!pkg.isEmpty()&&a[1].equals(pkg))throw new IllegalArgumentException("duplicate");apps.put(id,new String[]{name,pkg});writes++;}\n static class ApplicationActivityPlan implements AutoCloseable{\n  long category,app;String name;boolean terminal;public void close(){terminal=true;}\n  long applicationId(){return app;}String categoryName(){return "Category";}String applicationName(){return name;}\n }\n ApplicationActivityPlan last;\n ApplicationActivityPlan prepareApplicationActivity(long c,long a){ApplicationActivityPlan p=new ApplicationActivityPlan();p.category=c;p.app=a;p.name=apps.get(a)[0];last=p;return p;}\n long confirmApplicationActivity(ApplicationActivityPlan p,String title){attempts++;if(p.terminal)throw new IllegalStateException();p.close();if(fail)throw new IllegalStateException("late");links++;writes++;return links;}\n}'}}
+    extract=r'''import javax.tools.*;import com.sun.source.util.*;import com.sun.source.tree.*;import java.nio.file.*;import java.util.*;
+class Extract{
+ public static void main(String[]a)throws Exception{
+  JavaCompiler c=ToolProvider.getSystemJavaCompiler();DiagnosticCollector<JavaFileObject>d=new DiagnosticCollector<>();
+  try(StandardJavaFileManager f=c.getStandardFileManager(d,null,null)){
+   JavacTask t=(JavacTask)c.getTask(null,f,d,Arrays.asList("-proc:none"),null,f.getJavaFileObjects(a[0]));
+   CompilationUnitTree u=t.parse().iterator().next();for(Diagnostic<?>e:d.getDiagnostics())if(e.getKind()==Diagnostic.Kind.ERROR)throw new AssertionError(e.toString());
+   String s=Files.readString(Path.of(a[0]));SourcePositions p=Trees.instance(t).getSourcePositions();
+   Set<String>w=new HashSet<>(Arrays.asList(a[2].split(",")));StringBuilder out=new StringBuilder();
+   for(Tree type:u.getTypeDecls())if(type instanceof ClassTree)for(Tree m:((ClassTree)type).getMembers()){
+    String n=m instanceof ClassTree?((ClassTree)m).getSimpleName().toString():m instanceof MethodTree?((MethodTree)m).getName().toString():"";
+    if(w.remove(n))out.append(s.substring((int)p.getStartPosition(u,m),(int)p.getEndPosition(u,m))).append("\n");
+   }
+   if(!w.isEmpty())throw new AssertionError("missing relation API "+w);Files.writeString(Path.of(a[1]),out.toString());
+  }
+ }
+}'''
+    with tempfile.TemporaryDirectory() as tmp:
+        p=Path(tmp);(p/"Extract.java").write_text(extract)
+        (p/"Compile.java").write_text('import javax.tools.*;class Compile{public static void main(String[]a){System.exit(ToolProvider.getSystemJavaCompiler().run(null,null,null,a));}}')
+        def members(file,names):
+            result=subprocess.run(["java",str(p/"Extract.java"),str(ROOT/"src/main/java/com/supercubegame/pockettodo"/file),str(p/"members"),names],capture_output=True,text=True,timeout=30)
+            assert result.returncode==0,(result.stdout,result.stderr)
+            return (p/"members").read_text()
+        backend=members("AppDatabase.java","ActivityStringsPlan,prepareActivityStrings,confirmActivityStrings,activityStringsExpected")
+        ui=members("ActivitiesScreen.java","RelationEditor")
+        def execute(code,kind):
+            target=p/kind;target.mkdir(exist_ok=True)
+            if kind=="BACKEND":
+                files={"AppDatabase.java":assets["backend-prelude"]+code+"\n}\n","Test.java":assets["backend-test"]}
+                entry="Test"
+            else:
+                files=dict(assets["ui-fixtures"])
+                files["com/supercubegame/pockettodo/AppDatabase.java"]=assets["ui-db"]
+                files["com/supercubegame/pockettodo/RelationEditor.java"]="package com.supercubegame.pockettodo;import android.widget.*;import java.util.*;\n"+code.replace("private static final class RelationEditor","final class RelationEditor",1)
+                files["com/supercubegame/pockettodo/Test.java"]=assets["ui-test"]
+                entry="com.supercubegame.pockettodo.Test"
+            for name,text in files.items():
+                f=target/name;f.parent.mkdir(parents=True,exist_ok=True);f.write_text(text)
+            compiled=subprocess.run(["java",str(p/"Compile.java"),"-d",str(target)]+[str(target/n) for n in files],capture_output=True,text=True,timeout=30)
+            assert compiled.returncode==0,("relation host compile",compiled.stdout,compiled.stderr)
+            return subprocess.run(["java","-cp",str(target),entry],capture_output=True,text=True,timeout=30)
+        for kind,code,count,mutants in [
+            ("BACKEND",backend,23,[
+                ('if(!plan.tags||!clean.contains(s))','if(true)',"tag_dedup_order"),
+                ('terminal=true;before=null;',';',"cancel"),
+                ('if(!Arrays.equals(plan.before,noteDeletionState(db)))','if(false)',"stale"),
+                ('plan.session!=restoreSession','false',"session"),
+                ('connection!=plan.connection||!connection.isOpen()','!connection.isOpen()',"connection"),
+                ('||!Arrays.equals(expected,noteDeletionState(db))','||false',"readback"),
+                ('if(clean.equals(plan.values))return false;','if(false)return false;',"same_readonly"),
+            ]),
+            ("UI",ui,17,[
+                ('if(clean.isEmpty())','if(false)',"blank_visible"),
+                ('@Override public void onViewDetachedFromWindow(android.view.View v){close();}','@Override public void onViewDetachedFromWindow(android.view.View v){}',"detached"),
+                ('||!title.equals(p.title())','',"stale_title"),
+                ('||!shown.equals(p.values())','',"stale_values"),
+            ])
+        ]:
+            result=execute(code,kind);assert result.returncode==0,(result.stdout,result.stderr)
+            expected_prefix="RELATION_CHECK " if kind=="BACKEND" else "RELATION_UI_CHECK "
+            labels=[l[len(expected_prefix):] for l in result.stdout.splitlines() if l.startswith(expected_prefix)]
+            assert len(labels)==count and len(set(labels))==count,(kind,labels)
+            print(result.stdout.strip(),flush=True)
+            witness="RELATION_VALID_WITNESS" if kind=="BACKEND" else "RELATION_UI_VALID_WITNESS"
+            for old,new,label in mutants:
+                assert code.count(old)==1,(kind,"mutation anchor",old)
+                result=execute(code.replace(old,new),kind)
+                assert result.returncode!=0 and witness in result.stdout and "AssertionError: "+label in result.stderr,(kind,label,result.stdout,result.stderr)
+                print("RELATION_MUTANT_REJECTED "+kind+" "+label,flush=True)
+        print("RELATION_HOST backend=23 ui=17 witnessed_mutants=11 PASS; extracted Java, SQL/widget doubles")
 
 
 if __name__ == "__main__":

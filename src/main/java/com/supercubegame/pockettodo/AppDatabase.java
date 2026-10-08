@@ -324,6 +324,119 @@ public final class AppDatabase extends SQLiteOpenHelper {
             out.flush();return bytes.toByteArray();
         }catch(IOException e){throw new IllegalStateException("无法读取应用改名预览",e);}
     }
+    /** One activity's ordered path or tags, bound to the previewed full state.
+     * No schema change or persistent concurrency-history/ABA guarantee. */
+    public static final class ActivityStringsPlan implements AutoCloseable {
+        private final AppDatabase owner;
+        private final Object session;
+        private final SQLiteDatabase connection;
+        private final long activity;
+        private final boolean tags;
+        private final String title;
+        private final List<String> values;
+        private byte[] before;
+        private boolean terminal;
+        private ActivityStringsPlan(AppDatabase owner,SQLiteDatabase connection,long activity,boolean tags,
+                                    String title,List<String> values,byte[] before){
+            this.owner=owner;session=owner.restoreSession;this.connection=connection;
+            this.activity=activity;this.tags=tags;this.title=title;
+            this.values=Collections.unmodifiableList(new ArrayList<>(values));this.before=before;
+        }
+        public long activityId(){return activity;}
+        public String title(){return title;}
+        public List<String> values(){return values;}
+        @Override public void close(){synchronized(owner){terminal=true;before=null;}}
+    }
+    public synchronized ActivityStringsPlan prepareActivityStrings(long activity,boolean tags){
+        Ledger.positive(activity);
+        SQLiteDatabase db=getReadableDatabase();noteDeletionNoOuterTransaction(db);db.beginTransaction();
+        try{
+            String title;
+            try(Cursor c=db.rawQuery("SELECT title FROM activities WHERE id=? AND archived=0",new String[]{Long.toString(activity)})){
+                if(!c.moveToFirst())throw new IllegalArgumentException("活动不存在或已归档");title=c.getString(0);
+            }
+            ActivityStringsPlan plan=new ActivityStringsPlan(this,db,activity,tags,title,
+                orderedStrings(tags?"tags":"paths",activity),noteDeletionState(db));
+            db.setTransactionSuccessful();return plan;
+        }finally{db.endTransaction();}
+    }
+    public synchronized boolean confirmActivityStrings(ActivityStringsPlan plan,List<String> input){
+        if(plan==null||plan.owner!=this)throw new IllegalArgumentException("编辑不属于当前数据库");
+        if(plan.terminal||plan.session!=restoreSession){plan.close();throw new IllegalStateException("编辑已取消、使用或失效");}
+        plan.terminal=true;
+        try{
+            if(input==null)throw new IllegalArgumentException("缺少有序内容");
+            List<String> clean=new ArrayList<>();
+            for(String value:input){String s=text(value);if(!plan.tags||!clean.contains(s))clean.add(s);}
+            SQLiteDatabase connection=getWritableDatabase();noteDeletionNoOuterTransaction(connection);
+            if(connection!=plan.connection||!connection.isOpen())throw new IllegalStateException("数据库连接已变化");
+            return tx(db->{
+                if(!Arrays.equals(plan.before,noteDeletionState(db)))throw new IllegalStateException("本机内容已变化，请重新打开");
+                if(clean.equals(plan.values))return false;
+                String table=plan.tags?"tags":"paths";long next=Math.incrementExact(revision(db));
+                byte[] expected=activityStringsExpected(plan.before,table,plan.activity,clean,next);
+                db.delete(table,"activity_id=?",new String[]{Long.toString(plan.activity)});
+                for(int i=0;i<clean.size();i++)db.execSQL("INSERT INTO "+table+" VALUES(?,?,?)",new Object[]{plan.activity,i,clean.get(i)});
+                if(bump(db)!=next||!Arrays.equals(expected,noteDeletionState(db)))
+                    throw new IllegalStateException("路径标签回读不一致，本次修改已回滚");
+                return true;
+            });
+        }finally{plan.close();}
+    }
+    /** Calculate before SQL. Preserve all unrelated typed cells and rowids.
+     * Target rowids follow SQLite's max-remaining-rowid+1 rule; overflow refuses. */
+    private static byte[] activityStringsExpected(byte[] before,String target,long activity,List<String> values,long next){
+        require(target.equals("paths")||target.equals("tags"),"未知有序内容");
+        try{
+            DataInputStream in=new DataInputStream(new ByteArrayInputStream(before));
+            LimitedBytes bytes=new LimitedBytes();DataOutputStream out=new DataOutputStream(bytes);
+            int magic=in.readInt(),version=in.readInt(),count=in.readInt();
+            require(magic==0x4e444c31&&count==SNAPSHOT_TABLES.length,"编辑预览格式无效");
+            out.writeInt(magic);out.writeInt(version);out.writeInt(count);
+            int targets=0,revisions=0;
+            for(String expected:SNAPSHOT_TABLES){
+                String table=readText(in);require(table.equals(expected),"预览表顺序无效");
+                int columns=in.readInt();require(columns>0&&columns<=in.available()/4,"预览列无效");
+                List<String> names=new ArrayList<>();for(int i=0;i<columns;i++)names.add(readText(in));
+                int size=in.readInt();require(size>=0&&size<=in.available()/columns,"预览行无效");
+                List<Object[]> rows=new ArrayList<>();List<int[]> types=new ArrayList<>();
+                for(int r=0;r<size;r++){
+                    Object[] row=new Object[columns];int[] tags=new int[columns];
+                    for(int i=0;i<columns;i++){
+                        int tag=in.readUnsignedByte();tags[i]=tag;
+                        if(tag==1)row[i]=in.readLong();
+                        else if(tag==3)row[i]=readText(in);
+                        else if(tag==4)row[i]=readBlob(in);
+                        else require(tag==0,"预览值类型无效");
+                    }
+                    rows.add(row);types.add(tags);
+                }
+                if(table.equals(target)){
+                    require(names.equals(Arrays.asList("rowid","activity_id","position","text")),"有序内容列已变化");
+                    for(int r=rows.size()-1;r>=0;r--)if(Long.valueOf(activity).equals(rows.get(r)[1])){rows.remove(r);types.remove(r);}
+                    long rowid=rows.isEmpty()?0:(Long)rows.get(rows.size()-1)[0];
+                    for(int i=0;i<values.size();i++){
+                        rowid=Math.incrementExact(rowid);
+                        rows.add(new Object[]{rowid,activity,(long)i,values.get(i)});types.add(new int[]{1,1,1,3});
+                    }
+                    targets++;
+                }else if(table.equals("revision")){
+                    require(names.equals(Arrays.asList("id","id","value"))&&rows.size()==1,"修订记录无效");
+                    rows.get(0)[2]=next;revisions++;
+                }
+                utf8(out,table);out.writeInt(columns);for(String name:names)utf8(out,name);out.writeInt(rows.size());
+                for(int r=0;r<rows.size();r++)for(int i=0;i<columns;i++){
+                    Object value=rows.get(r)[i];out.writeByte(types.get(r)[i]);
+                    if(value instanceof Long)out.writeLong((Long)value);
+                    else if(value instanceof String)utf8(out,value.toString());
+                    else if(value instanceof byte[])blob(out,(byte[])value);
+                }
+            }
+            require(targets==1&&revisions==1&&in.available()==0,"预览不完整");
+            out.flush();return bytes.toByteArray();
+        }catch(IOException e){throw new IllegalStateException("无法读取编辑预览",e);}
+    }
+
     private void orderedStrings(String table,long activity,List<String> values,boolean deduplicate){if(values==null)throw new IllegalArgumentException("缺少有序内容");List<String> clean=new ArrayList<>();for(String value:values){String s=text(value);if(!deduplicate||!clean.contains(s))clean.add(s);}tx(db->{exists(db,"activities",activity);db.delete(table,"activity_id=?",new String[]{Long.toString(activity)});for(int i=0;i<clean.size();i++)db.execSQL("INSERT INTO "+table+" VALUES(?,?,?)",new Object[]{activity,i,clean.get(i)});bump(db);return null;});}
     private List<String> orderedStrings(String table,long activity){SQLiteDatabase db=getReadableDatabase();exists(db,"activities",activity);List<String> out=new ArrayList<>();try(Cursor c=db.rawQuery("SELECT text FROM "+table+" WHERE activity_id=? ORDER BY position",new String[]{Long.toString(activity)})){while(c.moveToNext())out.add(c.getString(0));}return Collections.unmodifiableList(out);}
     public synchronized void savePath(long activity,List<String> steps){orderedStrings("paths",activity,steps,false);}

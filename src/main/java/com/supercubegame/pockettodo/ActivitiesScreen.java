@@ -32,7 +32,7 @@ public final class ActivitiesScreen {
         final String id,title,text;
         NoteSummary(String id,String title,String text){this.id=id;this.title=title;this.text=text;}
     }
-    private static final class Detail {String title,status;List<String> path;LocalDate day;final List<NoteSummary> notes=new ArrayList<>();}
+    private static final class Detail {String title,status;List<String> path,tags;LocalDate day;final List<NoteSummary> notes=new ArrayList<>();}
     void load(){if(categorySession!=null)categorySession.alive=false;if(backupPanel)renderBackup();else if(selected==0)loadCategories();else if(historyPanel)loadHistory(selected);else loadDetail(selected);}
     private long nextId(String table){
         // Only fixed internal table names, and one UI writer on the shared executor.
@@ -181,7 +181,7 @@ public final class ActivitiesScreen {
                 try{
                     Detail d=new Detail();
                     try(Cursor c=sql.rawQuery("SELECT title FROM activities WHERE id=?",new String[]{Long.toString(id)})){if(!c.moveToFirst())throw new IllegalArgumentException("活动不存在");d.title=c.getString(0);}
-                    d.path=host.db.path(id);d.day=LocalDate.now(CN);d.status="未记录";
+                    d.path=host.db.path(id);d.tags=host.db.tags(id);d.day=LocalDate.now(CN);d.status="未记录";
                     for(CalendarRules.Mark mark:host.db.marks(id))if(mark.date.equals(d.day))d.status=mark.status==CalendarRules.Status.DONE?"已完成":"已跳过";
                     try(Cursor c=sql.rawQuery("SELECT id,title FROM notes WHERE activity_id=? ORDER BY rowid",new String[]{Long.toString(id)})){
                         while(c.moveToNext()){
@@ -231,10 +231,15 @@ public final class ActivitiesScreen {
         TextView pathTitle=host.text("去哪里操作",20,TodayScreen.INK);pathTitle.setPadding(0,host.dp(18),0,host.dp(8));details.addView(pathTitle);
         if(d.path.isEmpty())details.addView(host.text("把入口一行行记下来，下次不用找。",16,TodayScreen.MUTED));
         for(int i=0;i<d.path.size();i++){TextView step=host.text((i+1)+". "+d.path.get(i),17,TodayScreen.INK);step.setPadding(host.dp(8),host.dp(8),host.dp(8),host.dp(8));details.addView(step);}
-        details.addView(host.button("编辑路径",()->host.editor("编辑操作路径","活动路径",String.join("\n",d.path),true,value->{
-            List<String> steps=new ArrayList<>();if(!value.isEmpty())for(String step:value.split("\\r?\\n",-1)){if(step.trim().isEmpty())throw new IllegalArgumentException("步骤不能为空");steps.add(step.trim());}
-            host.db.savePath(id,steps);
-        },this::load)));
+        RelationEditor pathEditor=new RelationEditor(host,id,d.title,false,d.path,this::load);
+        Button pathEdit=host.button("编辑路径",()->{});pathEdit.setContentDescription("activity-path-edit-"+id);
+        pathEdit.setOnClickListener(v->pathEditor.open(pathEdit));details.addView(pathEdit,new LinearLayout.LayoutParams(-1,-2));
+        details.addView(host.text("标签",20,TodayScreen.INK));
+        TextView tagText=host.text(d.tags.isEmpty()?"还没有标签":String.join(" · ",d.tags),16,TodayScreen.MUTED);
+        tagText.setContentDescription("activity-tags-"+id);details.addView(tagText);
+        RelationEditor tagEditor=new RelationEditor(host,id,d.title,true,d.tags,this::load);
+        Button tagEdit=host.button("编辑标签",()->{});tagEdit.setContentDescription("activity-tags-edit-"+id);
+        tagEdit.setOnClickListener(v->tagEditor.open(tagEdit));details.addView(tagEdit,new LinearLayout.LayoutParams(-1,-2));
     }
     /** Buttons retain the displayed stable-ID sequence, never a title lookup.
      * The backend rejects stale membership/order and owns the single transaction.
@@ -309,6 +314,71 @@ public final class ActivitiesScreen {
             dialog.show();
         },null);
     }
+    /** Dedicated editor owns its preview until queued work has completed.
+     * Detachment closes it before execution; no old dialog can edit another activity. */
+    private static final class RelationEditor {
+        private final TodayScreen host;
+        private final long id;
+        private final String title;
+        private final boolean tags;
+        private final List<String> shown;
+        private final Runnable back;
+        private AppDatabase.ActivityStringsPlan plan;
+        private LinearLayout root;
+        private boolean opening,alive,submitted;
+        RelationEditor(TodayScreen host,long id,String title,boolean tags,List<String> shown,Runnable back){
+            this.host=host;this.id=id;this.title=title;this.tags=tags;
+            this.shown=new ArrayList<>(shown);this.back=back;
+        }
+        private boolean active(){
+            return alive&&root!=null&&root.isAttachedToWindow()&&!host.activity.isFinishing()&&!host.activity.isDestroyed();
+        }
+        private void close(){alive=false;if(plan!=null){plan.close();plan=null;}}
+        void open(android.view.View anchor){
+            if(opening||!anchor.isAttachedToWindow()||!anchor.isEnabled()||host.activity.isFinishing()||host.activity.isDestroyed())return;
+            opening=true;
+            host.work(()->host.db.prepareActivityStrings(id,tags),p->{
+                if(!anchor.isAttachedToWindow()||host.activity.isFinishing()||host.activity.isDestroyed()
+                    ||p.activityId()!=id||!title.equals(p.title())||!shown.equals(p.values())){
+                    p.close();host.message("活动内容已变化，请重新进入后编辑。",true);return;
+                }
+                plan=p;render();
+            },()->host.message("未能读取编辑内容，请重新进入活动。",true));
+        }
+        private void render(){
+            LinearLayout body=host.content();root=host.column();body.addView(root,new LinearLayout.LayoutParams(-1,-1));alive=true;
+            root.addOnAttachStateChangeListener(new android.view.View.OnAttachStateChangeListener(){
+                @Override public void onViewAttachedToWindow(android.view.View v){}
+                @Override public void onViewDetachedFromWindow(android.view.View v){close();}
+            });
+            root.addView(host.text(tags?"编辑标签":"编辑操作路径",24,TodayScreen.INK));
+            TextView identity=host.text(title+" · #"+id,16,TodayScreen.MUTED);identity.setContentDescription("relation-identity");root.addView(identity);
+            ScrollView scroll=new ScrollView(host.activity);LinearLayout fields=host.column();scroll.addView(fields);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+            fields.addView(host.text(tags?"每行一个标签，重复标签保留首次出现的位置。清空全部文字可移除标签。":"每行一步，顺序和重复步骤保留。清空全部文字可移除路径。",15,TodayScreen.MUTED));
+            EditText input=host.field(tags?"活动标签":"活动路径",true);input.setText(String.join("\n",plan.values()));fields.addView(input,new LinearLayout.LayoutParams(-1,-2));
+            TextView validation=host.text("",14,TodayScreen.ERROR);validation.setContentDescription("relation-validation");fields.addView(validation);
+            Button save=host.button("保存",()->{});save.setContentDescription("relation-save");
+            Button cancel=host.button("取消",()->{});cancel.setContentDescription("relation-cancel");
+            cancel.setOnClickListener(v->{if(active()&&cancel.isEnabled()){close();back.run();}});
+            save.setOnClickListener(v->{
+                if(!active()||submitted||!save.isEnabled())return;
+                String value=input.getText().toString();List<String> values=new ArrayList<>();
+                if(!value.isEmpty())for(String part:value.split("\\r?\\n",-1)){
+                    String clean=part.trim();if(clean.isEmpty()){validation.setText(tags?"标签不能为空行":"步骤不能为空");return;}values.add(clean);
+                }
+                submitted=true;save.setEnabled(false);cancel.setEnabled(false);input.setEnabled(false);
+                final AppDatabase.ActivityStringsPlan attempt=plan;
+                host.work(()->host.db.confirmActivityStrings(attempt,values),changed->{
+                    boolean present=active();close();if(present)back.run();
+                },()->{
+                    attempt.close();
+                    if(active()){validation.setText("未能保存；内容可能已变化，请取消后重新打开。");cancel.setEnabled(true);}
+                });
+            });
+            root.addView(save,new LinearLayout.LayoutParams(-1,-2));root.addView(cancel,new LinearLayout.LayoutParams(-1,-2));
+        }
+    }
+
     private void loadHistory(long id){host.work(()->host.db.marks(id),marks->renderHistory(id,marks),null);}
     private void renderHistory(long id,List<CalendarRules.Mark> marks){
         LinearLayout body=host.content();body.addView(host.text("打卡记录",24,TodayScreen.INK));

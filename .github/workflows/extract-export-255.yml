@@ -1,10 +1,11 @@
-name: Isolated immutable export 255 extraction
+name: Isolated original API34 failure extraction
 on:
   push:
     branches: [diagnostic/extract-export-255-20261008]
     paths: [.github/workflows/extract-export-255.yml]
 permissions:
   contents: write
+  actions: read
 concurrency:
   group: isolated-export-255-20261008
   cancel-in-progress: false
@@ -14,261 +15,253 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Verify pinned b3af sources and publish bounded extraction
+      - name: Verify immutable reports and original artifact before isolated publication
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import base64, copy, hashlib, json, os, re, urllib.request, urllib.error
+          import base64, copy, hashlib, io, json, os, re, urllib.request, urllib.error, urllib.parse, zipfile
+          REPO="supercubegame/todo-pocket-android"
+          BRANCH="diagnostic/extract-export-255-20261008"
+          PARENT="d21e531304729c0c98f4124b389b675a65e3bf28"
+          PRODUCT_BRANCH="feature/v1.2-activity-notes-ledger"
+          PRODUCT="f0354a13c8f739d8d082b01944aa74efffd6db52"
+          OUTPUT="reports/isolated-api34-ff6-f035-original-failures.json"
+          ARTIFACT=11556106491
+          ARTIFACT_SHA="968f71d63b380539385ba806be49f7ae4cd3685ab4195353cfa2f491544c1f65"
+          SPECS=[
+              dict(product="ff6a43c00e9abfe0f36740bdc4e02da81c9a239e",run="37777248696",
+                   source="1fad36f0b9e24fa2a501a1da3bde950517bebabf"),
+              dict(product=PRODUCT,run="37787550835",source="23b1b059dd8d5ec962351360e70442ddccac1b48")
+          ]
           
-          REPO = "supercubegame/todo-pocket-android"
-          BRANCH = "diagnostic/extract-export-255-20261008"
-          PARENT = "8c84a965e6f1291b739b750d9a69e7ec106f91e0"
-          SOURCE = "93cba372cf2c80715b29d18f80769b153073e6f9"
-          PRODUCT = "b3afaa6a8a0ba2c59800078710e143025aab39b2"
-          RUN = "37719605793"
-          PRODUCT_BRANCH = "feature/v1.2-activity-notes-ledger"
-          OUTPUT = "reports/isolated-b3af-database-255-and-export-server-37719605793.json"
-          PATHS = {k:"reports/"+prefix+PRODUCT+"-"+RUN+".json"
-                   for k,prefix in (("schema","schema3-"),("exports","export-probe-"),("main",""))}
-          SCHEMA_SCOPE = "SCHEMA3_STORAGE_ARCHIVE_GUARDED_RESTORE_AND_DEFAULT_NATIVE_UI"
-          EXPORT_SCOPE = "PARALLEL_EXPORT_BACKEND_PREVIEW_AND_SYNTHETIC_NATIVE_MULTIPAGE_NOT_FULL_REGRESSION"
-          COMMAND = ["/usr/local/lib/android/sdk/platform-tools/adb","-s","emulator-5554","shell","-n","-T",
-                     "run-as","com.supercubegame.pockettodo.v12.preview","ls","databases"]
-          
-          def digest(data):
-              return hashlib.sha256(data).hexdigest()
-          
-          def blob(data):
-              return hashlib.sha1(b"blob "+str(len(data)).encode()+b"\0"+data).hexdigest()
-          
+          def digest(data):return hashlib.sha256(data).hexdigest()
+          def blob(data):return hashlib.sha1(b"blob "+str(len(data)).encode()+b"\0"+data).hexdigest()
           def exact(data,meta,path):
               assert meta["type"]=="file" and meta["path"]==path
-              assert 0 < len(data)==meta["size"] <= 8000000
-              assert blob(data)==meta["sha"], "source byte identity"
+              assert 0<len(data)==meta["size"]<=8000000
+              assert blob(data)==meta["sha"],"source byte identity"
+          def canonical(value):return json.dumps(value,sort_keys=True,separators=(",",":")).encode()
           
-          def bound(doc,api=None):
-              assert doc["commit"]==PRODUCT and doc["run_id"]==RUN, "source binding"
-              if api is not None:
-                  assert type(doc["api"]) is int and doc["api"]==api, "device binding"
+          def extract(main,schema,spec):
+              for doc in (main,schema):
+                  assert doc["commit"]==spec["product"] and str(doc["run_id"])==spec["run"],"source binding"
+              native=main["ui"]["native"]["34"]
+              peer=schema["devices"]["34"]["default_ui"]["evidence"]
+              assert native["api"]==34 and type(native["api"]) is int
+              assert native["status"]=="FAIL" and isinstance(native["error"],str) and native["error"]
+              clean={k:v for k,v in native.items() if k!="published_screenshots"}
+              assert clean==peer,"independent published native disagreement"
+              return dict(product=spec["product"],run=spec["run"],api=34,
+                          failure=copy.deepcopy(clean),
+                          existing_published_device_result_and_log_tails=copy.deepcopy(main["ui"]["devices"]["34"]),
+                          native_json_sha256=digest(canonical(clean)),
+                          scope="Original native evidence and already-published tails, not complete job logs")
           
-          def binding(row,api):
-              assert row==dict(GITHUB_SHA=PRODUCT,GITHUB_RUN_ID=RUN,GITHUB_RUN_ATTEMPT="1",TEST_API=str(api)) or (
-                  all(row.get(k)==v for k,v in dict(GITHUB_SHA=PRODUCT,GITHUB_RUN_ID=RUN,
-                      GITHUB_RUN_ATTEMPT="1",TEST_API=str(api)).items())), "trace binding"
+          def storage_url(url):
+              p=urllib.parse.urlsplit(url)
+              assert p.scheme=="https" and not p.username and not p.password and p.port in (None,443)
+              assert p.hostname and p.hostname.endswith(".blob.core.windows.net"),"untrusted storage redirect"
+              return url
           
-          def snapshot(value,api):
-              assert value["status"] in ("NOT_OBSERVED","OBSERVED_NOT_ACCEPTANCE")
-              if "binding" in value:binding(value["binding"],api)
-              if value["status"]=="OBSERVED_NOT_ACCEPTANCE":
-                  binding(value["binding"],api)
-                  log=value["log"]; raw=base64.b64decode(log["tail_b64"],validate=True)
-                  assert 0 <= len(raw) <= 65536
-                  assert len(raw)==log["bytes_at_read"]-log["offset"]
-                  assert log["offset"]==max(0,log["bytes_at_read"]-65536)
-                  assert log["truncated"] is (log["offset"]>0)
-                  assert digest(raw)==log["tail_sha256"], "server log byte identity"
-          
-          def logs(obj,api):
-              out={}
-              for key in ("server_log_before","server_log_after"):
-                  present=key in obj
-                  if present:snapshot(obj[key],api)
-                  out[key]={"present":present,"value":obj.get(key)}
-              return out
-          
-          def extract(schema,exports,main):
-              for doc in (schema,exports,main):bound(doc)
-              assert schema["scope"]==SCHEMA_SCOPE and exports["scope"]==EXPORT_SCOPE
-              native=schema["devices"]["26"]["default_ui"]["evidence"]
-              assert native["status"]=="FAIL" and type(native["api"]) is int and native["api"]==26
-              assert main["ui"]["native"]["26"]["error"]==native["error"], "failure disagreement"
-              assert main["ui"]["native"]["26"]["database_directory_traces"]==native["database_directory_traces"]
-              assert "CalledProcessError(255," in native["error"]
-              matches=[t for t in native["database_directory_traces"]
-                       if t.get("command_returncode")==255 and t.get("command")==COMMAND]
-              assert len(matches)==1, "missing or ambiguous failed trace"
-              trace=matches[0]; binding(trace["binding"],26)
-              assert trace["command_kind"]=="database_directory" and trace["timeout_seconds"]==40
-              assert trace["attempts"]==1 and trace["timed_out"] is False
-              assert trace["tracer_returncode"]==255 and trace["tracer_exit_matches"] is True
-              raw=base64.b64decode(trace["trace"]["tail_b64"],validate=True)
-              assert trace["trace"]["truncated"] is False and 0 < len(raw)==trace["trace"]["bytes"] <= 65536
-              text=raw.decode("utf-8",errors="strict")
-              servers={}
-              for api in (26,34):
-                  device=exports["devices"][str(api)];bound(device,api)
-                  page=device["native_image_pages"];bound(page,api)
-                  servers[str(api)]={"device_status":device["status"],"native_status":page["status"],
-                                    **logs(page,api)}
-              fields=("status","api","count","error","original_failure","traceback","crash_logs",
-                      "crash_diagnostic_error","failure_diagnostics","diagnostic_error")
-              selected={k:{"present":k in native,"value":native.get(k)} for k in fields}
-              return dict(status="EXTRACTED_NOT_ROOT_CAUSE_OR_ACCEPTANCE",release_ready=False,durable_upgrade_ready=False,
-                  database_failure=selected, failed_trace=trace, decoded_trace=text,
-                  decoded_trace_sha256=digest(raw), decoded_trace_complete=True,
-                  retained_directory_observations=[{k:t.get(k) for k in ("observation_number","command_returncode",
-                      "timeout_seconds","timed_out","elapsed_seconds")} for t in native["database_directory_traces"]],
-                  database_server_logs=logs(native,26),
-                  database_result_and_existing_log_tails=main["ui"]["devices"]["26"],
-                  existing_log_scope="Previously published tails only; not complete job logs",
-                  export_server_logs=servers,
-                  server_log_scope="Export jobs are separate from failed database job; never cross-correlate their servers",
-                  snapshot_validation="Observed tail bytes verified; reported correlation preserved, not reclassified")
+          def artifact_check(data,meta,main,pinned=ARTIFACT_SHA):
+              assert meta["id"]==ARTIFACT and meta["name"]=="database-api-34" and meta["expired"] is False
+              assert meta["workflow_run"]["id"]==int(SPECS[1]["run"])
+              assert meta["workflow_run"]["head_sha"]==PRODUCT
+              assert 0<len(data)==meta["size_in_bytes"]<=8000000
+              assert meta["digest"]=="sha256:"+digest(data),"artifact digest"
+              if pinned is not None:assert digest(data)==pinned,"pinned artifact digest"
+              inventory={};files={}
+              with zipfile.ZipFile(io.BytesIO(data)) as z:
+                  entries=z.infolist()
+                  assert len(entries)<=300 and sum(x.file_size for x in entries)<=32000000
+                  for item in entries:
+                      name=item.filename
+                      assert name not in inventory and not name.startswith("/") and "\\" not in name
+                      assert all(part not in ("..","") for part in name.rstrip("/").split("/"))
+                      assert (item.external_attr>>16)&0o170000 != 0o120000,"zip symlink"
+                      assert not item.flag_bits&1 and item.file_size<=8000000
+                      raw=z.read(item)
+                      assert len(raw)==item.file_size
+                      inventory[name]=dict(bytes=len(raw),sha256=digest(raw))
+                      if name in ("native-ui/native-result.json","ui.log"):files[name]=raw
+              native=json.loads(files["native-ui/native-result.json"])
+              expected={k:v for k,v in main["ui"]["native"]["34"].items() if k!="published_screenshots"}
+              assert native==expected,"artifact versus published native"
+              log=files["ui.log"]
+              return dict(id=ARTIFACT,bytes=len(data),sha256=digest(data),inventory=inventory,
+                          native_equal_to_published=True,
+                          ui_log=log.decode("utf-8",errors="strict") if len(log)<=65536 else None,
+                          ui_log_scope="COMPLETE" if len(log)<=65536 else "NOT_EMBEDDED_SIZE; full original artifact retained; bytes/hash in inventory")
           
           class NoRedirect(urllib.request.HTTPRedirectHandler):
-              def redirect_request(self,req,fp,code,msg,headers,newurl):
-                  raise RuntimeError("Redirect refused")
+              def redirect_request(self,*args,**kwargs):return None
           
           def execute():
               assert os.environ["GITHUB_REPOSITORY"]==REPO
               assert os.environ["GITHUB_REF"]=="refs/heads/"+BRANCH
               assert os.environ["GITHUB_EVENT_NAME"]=="push" and os.environ["GITHUB_RUN_ATTEMPT"]=="1"
-              head=os.environ["GITHUB_SHA"]
-              assert re.fullmatch("[0-9a-f]{40}",head)
+              head=os.environ["GITHUB_SHA"];assert re.fullmatch("[0-9a-f]{40}",head)
               opener=urllib.request.build_opener(NoRedirect())
-              def api(route,payload=None,raw_limit=None,method=None):
+              def request(route,payload=None,raw_limit=None,method=None):
                   assert not route.startswith("/") and "://" not in route and ".." not in route
-                  request=urllib.request.Request("https://api.github.com/repos/"+REPO+"/"+route,
+                  return urllib.request.Request("https://api.github.com/repos/"+REPO+"/"+route,
                       data=None if payload is None else json.dumps(payload).encode(),method=method,
                       headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],
                                "Accept":"application/vnd.github.raw+json" if raw_limit is not None else "application/vnd.github+json"})
-                  limit=raw_limit if raw_limit is not None else 2000000
-                  with opener.open(request,timeout=30) as response:data=response.read(limit+1)
-                  assert len(data)<=limit, "response overflow"
-                  return data if raw_limit is not None else json.loads(data)
+              def api(route,payload=None,raw_limit=None,method=None):
+                  limit=2000000 if raw_limit is None else raw_limit
+                  with opener.open(request(route,payload,raw_limit,method),timeout=30) as r:data=r.read(limit+1)
+                  assert len(data)<=limit,"response overflow"
+                  return json.loads(data) if raw_limit is None else data
               def context():
-                  assert api("git/ref/heads/"+BRANCH)["object"]["sha"]==head, "diagnostic head changed"
-                  assert api("git/ref/heads/"+PRODUCT_BRANCH)["object"]["sha"]==PRODUCT, "product head changed"
+                  assert api("git/ref/heads/"+BRANCH)["object"]["sha"]==head,"diagnostic head changed"
+                  assert api("git/ref/heads/"+PRODUCT_BRANCH)["object"]["sha"]==PRODUCT,"product head changed"
               context()
               commit=api("git/commits/"+head)
-              assert [p["sha"] for p in commit["parents"]]==[PARENT], "bootstrap parent changed"
+              assert [p["sha"] for p in commit["parents"]]==[PARENT],"parent changed"
               try:api("contents/"+OUTPUT+"?ref="+head)
-              except urllib.error.HTTPError as exc:
-                  if exc.code!=404:raise
-              else:raise AssertionError("output already exists; never overwrite")
-              docs={};sources={}
-              for key,path in PATHS.items():
-                  route="contents/"+path+"?ref="+SOURCE
-                  meta=api(route)
-                  assert meta["type"]=="file" and meta["path"]==path
-                  assert type(meta["size"]) is int and 0 < meta["size"]<=8000000
-                  data=api(route,raw_limit=meta["size"]);exact(data,meta,path)
-                  docs[key]=json.loads(data)
-                  sources[key]=dict(commit=SOURCE,path=path,bytes=len(data),blob=blob(data),sha256=digest(data))
-              result=extract(docs["schema"],docs["exports"],docs["main"])
-              result.update(sources=sources,product_commit=PRODUCT,source_run=RUN,diagnostic_commit=head,
-                            diagnostic_run=os.environ["GITHUB_RUN_ID"],diagnostic_attempt=1)
-              encoded=(json.dumps(result,ensure_ascii=True,indent=2)+"\n").encode()
-              assert len(encoded)<=900000, "report overflow; refuse rather than truncate"
+              except urllib.error.HTTPError as e:
+                  if e.code!=404:raise
+              else:raise AssertionError("never overwrite existing report")
+              reports=[];sources=[];latest=None
+              for spec in SPECS:
+                  docs={}
+                  for kind,prefix in (("main",""),("schema","schema3-")):
+                      path="reports/"+prefix+spec["product"]+"-"+spec["run"]+".json"
+                      route="contents/"+path+"?ref="+spec["source"]
+                      meta=api(route)
+                      assert type(meta["size"]) is int and 0<meta["size"]<=8000000
+                      raw=api(route,raw_limit=meta["size"]);exact(raw,meta,path)
+                      docs[kind]=json.loads(raw)
+                      sources.append(dict(commit=spec["source"],path=path,bytes=len(raw),blob=blob(raw),sha256=digest(raw)))
+                  reports.append(extract(docs["main"],docs["schema"],spec))
+                  latest=docs["main"]
+              meta=api("actions/artifacts/"+str(ARTIFACT))
+              assert meta["id"]==ARTIFACT and meta["digest"]=="sha256:"+ARTIFACT_SHA and not meta["expired"]
+              assert meta["workflow_run"]["id"]==int(SPECS[1]["run"]) and meta["workflow_run"]["head_sha"]==PRODUCT
+              run=api("actions/runs/"+SPECS[1]["run"])
+              assert run["head_sha"]==PRODUCT and run["run_attempt"]==1 and run["status"]=="completed"
+              try:
+                  opener.open(request("actions/artifacts/"+str(ARTIFACT)+"/zip"),timeout=30)
+              except urllib.error.HTTPError as e:
+                  assert e.code==302,"artifact redirect required"
+                  location=storage_url(e.headers["Location"])
+              else:raise AssertionError("expected storage redirect")
+              # Never send the GitHub token to the signed storage URL.
+              with opener.open(urllib.request.Request(location),timeout=30) as r:data=r.read(8000001)
+              artifact=artifact_check(data,meta,latest)
+              result=dict(status="EXTRACTED_NOT_ROOT_CAUSE_OR_ACCEPTANCE",release_ready=False,durable_upgrade_ready=False,
+                          sources=sources,failures=reports,artifact=artifact,
+                          diagnostic_commit=head,diagnostic_run=os.environ["GITHUB_RUN_ID"],diagnostic_attempt=1,
+                          source_scope="Unchanged immutable reports and original artifact; no device command or rerun")
+              encoded=(json.dumps(result,ensure_ascii=True,separators=(",",":"))+"\n").encode()
+              assert len(encoded)<=900000,"report overflow; refuse rather than truncate"
               context()
-              tree=api("git/trees",{"base_tree":commit["tree"]["sha"],"tree":[
-                  {"path":OUTPUT,"mode":"100644","type":"blob","content":encoded.decode()}]})
-              written=api("git/commits",{"message":"Record pinned b3af failure trace and export server logs",
-                  "tree":tree["sha"],"parents":[head]})
+              tree=api("git/trees",{"base_tree":commit["tree"]["sha"],
+                                   "tree":[{"path":OUTPUT,"mode":"100644","type":"blob","content":encoded.decode()}]})
+              written=api("git/commits",{"message":"Record original API34 failures with immutable source identities",
+                                        "tree":tree["sha"],"parents":[head]})
+              actual=api("contents/"+OUTPUT+"?ref="+written["sha"],raw_limit=len(encoded))
+              assert actual==encoded and blob(actual)==blob(encoded),"immutable report readback"
               context()
               api("git/refs/heads/"+BRANCH,{"sha":written["sha"],"force":False},method="PATCH")
-              actual=api("contents/"+OUTPUT+"?ref="+written["sha"],raw_limit=len(encoded))
-              assert actual==encoded and blob(actual)==blob(encoded)
+              assert api("git/ref/heads/"+BRANCH)["object"]["sha"]==written["sha"]
               assert api("git/ref/heads/"+PRODUCT_BRANCH)["object"]["sha"]==PRODUCT
               print("REPORT_VERIFIED",written["sha"],len(encoded),blob(encoded),digest(encoded))
-              print("https://github.com/"+REPO+"/blob/"+written["sha"]+"/"+OUTPUT)
+          
+          import copy, io, json, zipfile
+          
+          def tests(m):
+              spec=m.SPECS[1]
+              native={"status":"FAIL","api":34,"error":"original failure, not an assumed 255",
+                      "traceback":"original stack\n","count":17,"checks":["original"],
+                      "database_directory_traces":[{"command_returncode":0,"trace":{"tail_b64":"YWJj"}}]}
+              main={"commit":spec["product"],"run_id":spec["run"],
+                    "ui":{"native":{"34":copy.deepcopy(native)},
+                          "devices":{"34":{"result":{"status":"FAIL"},"logs":{"ui.log":"existing tail"}}}}}
+              main["ui"]["native"]["34"]["published_screenshots"]=[]
+              schema={"commit":spec["product"],"run_id":spec["run"],
+                      "devices":{"34":{"default_ui":{"evidence":copy.deepcopy(native)}}}}
+              original=copy.deepcopy([main,schema])
+              result=m.extract(main,schema,spec)
+              assert result["failure"]["error"]==native["error"]
+              assert result["failure"]["traceback"]==native["traceback"]
+              assert [main,schema]==original
+              assert result["failure"]["database_directory_traces"]==native["database_directory_traces"]
+              print("POSITIVE_WITNESS extraction")
+              mutations=[
+                  lambda a,b:a.update(commit="wrong"),
+                  lambda a,b:a.update(run_id="wrong"),
+                  lambda a,b:b.update(commit="wrong"),
+                  lambda a,b:b.update(run_id="wrong"),
+                  lambda a,b:a["ui"]["native"]["34"].update(api=26),
+                  lambda a,b:a["ui"]["native"]["34"].update(status="PASS"),
+                  lambda a,b:a["ui"]["native"]["34"].pop("error"),
+                  lambda a,b:b["devices"]["34"]["default_ui"]["evidence"].update(error="different"),
+                  lambda a,b:a["ui"]["native"].pop("34"),
+              ]
+              for change in mutations:
+                  a,b=copy.deepcopy(original);change(a,b)
+                  try:m.extract(a,b,spec)
+                  except (AssertionError,KeyError):pass
+                  else:raise AssertionError("extraction negative survived")
+              raw=b"exact source\n";meta=dict(type="file",path="p",size=len(raw),sha=m.blob(raw))
+              m.exact(raw,meta,"p")
+              for corrupt in (raw[:-1],raw+b"x",b"x"+raw[1:]):
+                  try:m.exact(corrupt,meta,"p")
+                  except AssertionError:pass
+                  else:raise AssertionError("bytes negative survived")
+              def archive(n=native,extra=None):
+                  stream=io.BytesIO()
+                  with zipfile.ZipFile(stream,"w") as z:
+                      z.writestr("native-ui/native-result.json",json.dumps(n))
+                      z.writestr("ui.log","full original device log")
+                      if extra:z.writestr(extra,"bad")
+                  return stream.getvalue()
+              data=archive()
+              info=dict(id=m.ARTIFACT,name="database-api-34",expired=False,size_in_bytes=len(data),
+                        digest="sha256:"+m.digest(data),
+                        workflow_run=dict(id=int(spec["run"]),head_sha=spec["product"]))
+              good=m.artifact_check(data,info,main,None)
+              assert good["native_equal_to_published"] and good["ui_log"]=="full original device log"
+              print("POSITIVE_WITNESS artifact")
+              for key,value in [("id",0),("name","database-api-26"),("expired",True),
+                                ("size_in_bytes",1),("digest","sha256:"+"0"*64)]:
+                  bad=copy.deepcopy(info);bad[key]=value
+                  try:m.artifact_check(data,bad,main,None)
+                  except AssertionError:pass
+                  else:raise AssertionError("artifact negative survived")
+              for key,value in [("id",0),("head_sha","wrong")]:
+                  bad=copy.deepcopy(info);bad["workflow_run"][key]=value
+                  try:m.artifact_check(data,bad,main,None)
+                  except AssertionError:pass
+                  else:raise AssertionError("binding negative survived")
+              for data2 in (data[:-1],data+b"x",archive(dict(native,error="other")),archive(extra="../escape")):
+                  bad=copy.deepcopy(info);bad.update(size_in_bytes=len(data2),digest="sha256:"+m.digest(data2))
+                  try:m.artifact_check(data2,bad,main,m.digest(data))
+                  except (AssertionError,zipfile.BadZipFile):pass
+                  else:raise AssertionError("artifact corruption survived")
+              for extra in ("../escape","/absolute","a\\b"):
+                  data2=archive(extra=extra);bad=copy.deepcopy(info)
+                  bad.update(size_in_bytes=len(data2),digest="sha256:"+m.digest(data2))
+                  try:m.artifact_check(data2,bad,main,None)
+                  except AssertionError:pass
+                  else:raise AssertionError("unsafe zip survived")
+              for url in ("http://example.blob.core.windows.net/file",
+                          "https://evil.example/file","https://user@x.blob.core.windows.net/file",
+                          "https://x.blob.core.windows.net:444/file"):
+                  try:m.storage_url(url)
+                  except AssertionError:pass
+                  else:raise AssertionError("redirect negative survived")
+              m.storage_url("https://production.blob.core.windows.net/file?signature=not-a-real-credential")
+              print("PASS extraction=9 byte=3 artifact=14 redirect=4 negative controls")
+          
           
           from types import SimpleNamespace
-          m = SimpleNamespace(**globals())
-          raw = b'12 <... read resumed>"", 5) = 0\n12 exit_group(255) = ?\n'
-          fixture_binding = lambda api: dict(GITHUB_SHA=m.PRODUCT, GITHUB_RUN_ID=m.RUN, GITHUB_RUN_ATTEMPT="1", TEST_API=str(api))
-          trace = dict(command=m.COMMAND, command_returncode=255, tracer_returncode=255,
-                       tracer_exit_matches=True, attempts=1, timed_out=False, timeout_seconds=40,
-                       command_kind="database_directory", binding=fixture_binding(26),
-                       trace=dict(tail_b64=base64.b64encode(raw).decode(), bytes=len(raw), truncated=False))
-          native = dict(status="FAIL", api=26, error="CalledProcessError(255, "+repr(m.COMMAND)+", '', '')",
-                        count=123, checks=["sentinel"], database_directory_traces=[trace])
-          schema = dict(commit=m.PRODUCT, run_id=m.RUN, scope=m.SCHEMA_SCOPE,
-                        devices={"26": {"default_ui": {"status":"NOT_VERIFIED","evidence":native}}})
-          main = dict(commit=m.PRODUCT, run_id=m.RUN,
-                      ui={"native":{"26":copy.deepcopy(native)}, "devices":{"26":{"result":{"status":"FAIL"},"logs":{"ui.log":"original tail"}}}})
-          exports = dict(commit=m.PRODUCT, run_id=m.RUN, scope=m.EXPORT_SCOPE, status="PASS", devices={})
-          for api in (26,34):
-              snap = dict(status="OBSERVED_NOT_ACCEPTANCE", binding=fixture_binding(api),
-                          log=dict(bytes_at_read=len(raw), offset=0, truncated=False,
-                                   tail_b64=base64.b64encode(raw).decode(), tail_sha256=m.digest(raw)))
-              exports["devices"][str(api)] = dict(commit=m.PRODUCT, run_id=m.RUN, api=api, status="PASS",
-                  native_image_pages=dict(commit=m.PRODUCT, run_id=m.RUN, api=api, status="PASS",
-                                          server_log_before=copy.deepcopy(snap),server_log_after=copy.deepcopy(snap)))
-          docs = [schema,exports,main]
-          before = copy.deepcopy(docs)
-          result = m.extract(*docs)
-          assert result["failed_trace"] == trace and docs == before
-          assert result["decoded_trace"] == raw.decode()
-          assert "<... read resumed>" in result["decoded_trace"]
-          assert result["database_server_logs"]["server_log_before"]["present"] is False
-          assert result["export_server_logs"]["34"]["server_log_before"]["value"] == exports["devices"]["34"]["native_image_pages"]["server_log_before"]
-          print("PASS complete trace and both API logs, original input unchanged")
-          cases = [
-           lambda d:d[0].update(commit="wrong"),
-           lambda d:d[0].update(run_id="wrong"),
-           lambda d:d[0].update(scope="wrong"),
-           lambda d:d[2]["ui"]["native"]["26"].update(error="other"),
-           lambda d:d[0]["devices"]["26"]["default_ui"]["evidence"].update(api=34),
-           lambda d:d[0]["devices"]["26"]["default_ui"]["evidence"].update(status="PASS"),
-           lambda d:d[1]["devices"]["34"].update(api=26),
-           lambda d:d[1]["devices"]["26"]["native_image_pages"].update(run_id="wrong"),
-           lambda d:d[1]["devices"].pop("34"),
-           lambda d:d[1]["devices"]["26"]["native_image_pages"]["server_log_before"]["binding"].update(TEST_API="34"),
-           lambda d:d[1]["devices"]["26"]["native_image_pages"]["server_log_before"]["log"].update(tail_sha256="0"*64),
-           lambda d:d[1]["devices"]["26"]["native_image_pages"]["server_log_before"]["log"].update(offset=1),
-           lambda d:d[1]["devices"]["26"]["native_image_pages"]["server_log_before"]["log"].update(truncated=True),
-          ]
-          trace_cases = [
-           lambda t:t.update(command=m.COMMAND[:-1]),
-           lambda t:t.update(command_returncode=0),
-           lambda t:t.update(attempts=2),
-           lambda t:t.update(timed_out=True),
-           lambda t:t.update(timeout_seconds=41),
-           lambda t:t.update(tracer_exit_matches=False),
-           lambda t:t["binding"].update(GITHUB_SHA="wrong"),
-           lambda t:t["binding"].update(TEST_API="34"),
-           lambda t:t["trace"].update(bytes=999),
-           lambda t:t["trace"].update(truncated=True),
-           lambda t:t["trace"].update(tail_b64="!"),
-          ]
-          for change in trace_cases:
-              def case(d, change=change):
-                  change(d[0]["devices"]["26"]["default_ui"]["evidence"]["database_directory_traces"][0])
-                  d[2]["ui"]["native"]["26"] = copy.deepcopy(d[0]["devices"]["26"]["default_ui"]["evidence"])
-              cases.append(case)
-          def duplicate(d):
-              n=d[0]["devices"]["26"]["default_ui"]["evidence"]
-              n["database_directory_traces"].append(copy.deepcopy(n["database_directory_traces"][0]))
-              d[2]["ui"]["native"]["26"]=copy.deepcopy(n)
-          cases.append(duplicate)
-          for case in cases:
-              changed=copy.deepcopy(docs); case(changed)
-              assert changed != docs
-              try:m.extract(*changed)
-              except (AssertionError,KeyError,ValueError):pass
-              else:raise AssertionError("negative survived")
-          print("PASS",len(cases),"negative extraction controls")
-          for status in ("missing","NOT_OBSERVED"):
-              d=copy.deepcopy(docs)
-              n=d[1]["devices"]["26"]["native_image_pages"]
-              if status=="missing":del n["server_log_before"]
-              else:n["server_log_before"]={"status":"NOT_OBSERVED","reason":"fixture"}
-              out=m.extract(*d)["export_server_logs"]["26"]["server_log_before"]
-              assert out["present"] is (status!="missing")
-              assert out["value"] == n.get("server_log_before")
-          print("PASS missing and unobserved remain explicitly unobserved")
-          p=m.PATHS["schema"]; meta=dict(type="file",path=p,size=len(raw),sha=m.blob(raw))
-          m.exact(raw,meta,p)
-          for data in (raw[:-1],raw+b"x",b"x"+raw[1:]):
-              try:m.exact(data,meta,p)
-              except AssertionError:pass
-              else:raise AssertionError("corruption survived")
-          print("PASS exact bytes: positive plus 3 corruptions rejected")
+          tests(SimpleNamespace(**globals()))
           
-          # LOCAL_GATE_END
           execute()
           PY

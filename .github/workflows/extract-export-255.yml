@@ -35,6 +35,11 @@ jobs:
           def exact(data, meta):
               assert meta["type"] == "file" and meta["path"] == PATH
               assert len(data) == meta["size"] and blob(data) == meta["sha"]
+          def existing_diagnostics(device, native):
+              keys = ("crash_logs", "crash_diagnostic_error", "failure_diagnostics", "diagnostic_error")
+              return {scope: {key: {"present": key in obj, "value": obj.get(key)}
+                              for key in keys}
+                      for scope, obj in (("device", device), ("native_image_pages", native))}
           def extract(doc):
               assert doc["commit"] == PRODUCT and doc["run_id"] == RUN
               assert doc["scope"] == "EARLY_DIAGNOSTIC_NOT_ACCEPTANCE"
@@ -58,6 +63,7 @@ jobs:
               lines = [line for line in readable.splitlines() if any(word in line for word in ("connect(", "write(", "read(", "exit_group(", "SIGCHLD", "ECONN", "EPIPE"))]
               return {"status":"EXTRACTED_NOT_ROOT_CAUSE_OR_ACCEPTANCE", "original_failure":failure,
                       "traceback":device["traceback"], "process_loss":native["process_loss"],
+                      "existing_diagnostics":existing_diagnostics(device, native),
                       "failed_trace":trace, "decoded_trace_sha256":hashlib.sha256(raw).hexdigest(),
                       "readable_tail": "\n".join(lines)[-12000:],
                       "readable_tail_is_excerpt":len("\n".join(lines)) > 12000,
@@ -72,6 +78,12 @@ jobs:
                         "original_failure":{"returncode":255,"command":COMMAND},"traceback":"fixture"}
               doc = {"commit":PRODUCT,"run_id":RUN,"scope":"EARLY_DIAGNOSTIC_NOT_ACCEPTANCE","devices":{"26":device}}
               assert extract(doc)["failed_trace"] == trace
+              assert not extract(doc)["existing_diagnostics"]["native_image_pages"]["crash_logs"]["present"]
+              native["crash_logs"] = {"status":"SCOPE_NOT_VERIFIED","identity":{"returncode":255}}
+              native["failure_diagnostics"] = {"probes":[{"name":"transport","returncode":0,"stdout":{"tail":"device\n"}}]}
+              collected = extract(doc)["existing_diagnostics"]["native_image_pages"]
+              assert collected["crash_logs"] == {"present":True,"value":native["crash_logs"]}
+              assert collected["failure_diagnostics"] == {"present":True,"value":native["failure_diagnostics"]}
               negatives = [
                   lambda d:d.update(commit="wrong"),
                   lambda d:d.update(run_id="wrong"),
@@ -93,7 +105,7 @@ jobs:
                   try: exact(changed,meta)
                   except AssertionError: pass
                   else: raise AssertionError("Byte corruption survived")
-              print("PASS extraction: 2 positive, 12 negative controls")
+              print("PASS extraction: 5 positive, 12 negative controls")
           selftest()
           # LOCAL_GATE_END: network is deliberately outside the local host gate.
           assert os.environ["GITHUB_REPOSITORY"] == REPO
@@ -115,6 +127,8 @@ jobs:
           assert 0 < meta["size"] <= 8000000
           data = api("contents/"+PATH+"?ref="+SOURCE, raw_limit=meta["size"])
           exact(data, meta)
+          assert len(data) == 1388120 and blob(data) == "9180475aadd58a0612b1a759ef96f326f186eabf"
+          assert hashlib.sha256(data).hexdigest() == "bb98ab09f236c7b7a303a5c0864d4f7bb45bd9e83272ec4c6f26e85218569ab7"
           result = extract(json.loads(data))
           result.update(source_commit=SOURCE, product_commit=PRODUCT, source_run=RUN,
                         source_path=PATH, source_bytes=len(data), source_blob=blob(data),

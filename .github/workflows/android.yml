@@ -35,6 +35,7 @@ jobs:
             timeout 60s sudo apt-get -o Acquire::Retries=0 install --no-install-recommends -y strace
           fi
           strace --version
+          python3 tools/verify_process_control.py server-log-selftest
           python3 tools/verify_process_control.py isolated-selftest
           python3 tools/verify_process_control.py absence-selftest
           python3 tools/verify_process_control.py isolated-real-selftest
@@ -627,6 +628,7 @@ jobs:
               from verify_schema3 import signal_target_identity,signal_identity_selftest
               from verify_schema3 import exception_evidence,native_failure_evidence,diagnostics_selftest
               from verify_process_control import stop_verified,capture_crash_logs,isolated_stop_runner,isolated_export_identity
+              from verify_process_control import capture_existing_server_log
               from verify_ui_observer import Observer
               out=Path("export-native");out.mkdir()
               prefix=[str(adb),"-s",gate.SERIAL]
@@ -754,6 +756,7 @@ jobs:
               started=time.monotonic()
               result["ui_observer"]={}
               observer=Observer(adb,gate.SERIAL,gate.SDK,out,result["ui_observer"])
+              result["server_log_before"]=capture_existing_server_log(adb,gate.SERIAL)
               try:
                   assert os.environ.get("GITHUB_ACTIONS")=="true" and shell("getprop","ro.kernel.qemu").strip()=="1"
                   observer.start()
@@ -841,6 +844,7 @@ jobs:
               except Exception as exc:
                   result["error"]=repr(exc)
                   result["original_failure"]=exception_evidence(exc)
+                  result["server_log_after"]=capture_existing_server_log(adb,gate.SERIAL,previous=result["server_log_before"])
                   try:result["crash_logs"]=capture_crash_logs(adb,gate.SERIAL)
                   except Exception as diagnostic:result["crash_diagnostic_error"]=exception_evidence(diagnostic)
                   try:result["failure_diagnostics"]=native_failure_evidence(adb,gate,exc)
@@ -850,6 +854,8 @@ jobs:
                   raise
               finally:
                   observer.close(primary_failed=True)
+                  if "server_log_after" not in result:
+                      result["server_log_after"]=capture_existing_server_log(adb,gate.SERIAL,previous=result["server_log_before"])
                   result.update(checks=len(result["labels"]),elapsed_seconds=round(time.monotonic()-started,3))
                   Path("export-native.json").write_text(json.dumps(result,ensure_ascii=False,indent=2)+"\n")
                   print("EXPORT_NATIVE_RESULT "+json.dumps(result,ensure_ascii=False),flush=True)

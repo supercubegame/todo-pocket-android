@@ -616,7 +616,12 @@ def crash_wiring_contract(workflow):
     for fail_capture, fail_old in ((False, False), (True, False), (False, True), (True, True)):
         calls = []; original = AssertionError("ORIGINAL_NATIVE_FAILURE")
         sentinel = {"status": "OBSERVED_NOT_ACCEPTANCE", "tail": "FATAL EXCEPTION: synthetic"}
-        result = {"status": "FAIL", "labels": ["fresh_ui_database"]}
+        baseline = {"status":"NOT_OBSERVED","scope":"synthetic-baseline"}
+        result = {"status": "FAIL", "labels": ["fresh_ui_database"], "server_log_before":baseline}
+        def server_capture(adb, serial, *, previous):
+            assert adb == "adb" and serial == "emulator-5554" and previous is baseline
+            calls.append("server")
+            return {"status":"NOT_OBSERVED" if fail_capture else "OBSERVED_NOT_ACCEPTANCE"}
         def capture(adb, serial):
             assert adb == "adb" and serial == "emulator-5554"
             calls.append("crash")
@@ -635,6 +640,7 @@ def crash_wiring_contract(workflow):
             namespace = {"original": original, "result": result, "adb": "adb",
                          "gate": type("Gate", (), {"SERIAL": "emulator-5554"}),
                          "capture_crash_logs": capture, "native_failure_evidence": old,
+                         "capture_existing_server_log": server_capture,
                          "exception_evidence": lambda exc: {"error": repr(exc)}, "command": command,
                          "out": Path(folder)}
             try:
@@ -643,7 +649,9 @@ def crash_wiring_contract(workflow):
                 assert exc is original
             else:
                 raise AssertionError("original native failure swallowed")
-        assert calls == ["crash", "old", "screenshot"]
+        assert calls == ["server", "crash", "old", "screenshot"]
+        assert result["server_log_before"] is baseline
+        assert result["server_log_after"]["status"] == ("NOT_OBSERVED" if fail_capture else "OBSERVED_NOT_ACCEPTANCE")
         assert result["status"] == "FAIL" and result["labels"] == ["fresh_ui_database"]
         assert result["error"] == repr(original) and result["original_failure"] == {"error": repr(original)}
         if fail_capture:
@@ -2476,8 +2484,351 @@ def absence_trace_selftest(workflow, schema):
         else: raise AssertionError("workflow omission survived")
     print("ABSENCE_TRACE_CONTROLS both observers 11 cases; 5 compiled witnessed mutants rejected; 10 actual-call host-subprocess integrations; 4 caller negatives; 4 workflow negatives PASS; NOT_ANDROID", flush=True)
 
+def server_log_snapshot(adb, serial, *, environment=None, proc_root=Path("/proc"),
+                        temp_root=Path("/tmp"), uid=None):
+    """Passive Linux host reads only. Never launch ADB, attach, reset, or reconnect."""
+    import base64
+    import hashlib
+    import itertools
+    import os
+    import stat
+    env = os.environ if environment is None else environment
+    uid = os.getuid() if uid is None else uid
+    result = {"status":"NOT_OBSERVED", "scope":"EXISTING_HOST_SERVER_LOG_NOT_DEVICE_OR_ROOT_CAUSE",
+              "release_ready":False, "reads_only":True, "retention_bytes":65536}
+    try:
+        assert env.get("GITHUB_ACTIONS") == "true" and serial == "emulator-5554", "scope"
+        assert not any(env.get(k) for k in ("ADB_SERVER_SOCKET", "ANDROID_ADB_SERVER_ADDRESS",
+                                           "ANDROID_ADB_SERVER_PORT", "TMPDIR")), "custom_endpoint_or_tmpdir"
+        binding = {k:env[k] for k in ("GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "TEST_API")}
+        assert re.fullmatch(r"[0-9a-f]{40}", binding["GITHUB_SHA"]), "commit_binding"
+        assert all(re.fullmatch(r"[1-9][0-9]*", binding[k]) for k in
+                   ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT")), "run_binding"
+        assert binding["TEST_API"] in ("26","34"), "api_binding"
+        result["binding"] = binding
+        def small(path, limit):
+            with path.open("rb") as stream:
+                raw = stream.read(limit+1)
+            assert len(raw) <= limit, "host_metadata_overflow"
+            return raw
+        executable = os.stat(adb)
+        assert stat.S_ISREG(executable.st_mode), "adb_not_regular"
+        def file_id(value):
+            return [value.st_dev, value.st_ino]
+        tcp = small(proc_root/"net/tcp", 131072).decode("ascii")
+        listeners = [line.split()[9] for line in tcp.splitlines()[1:]
+                     if len(line.split()) >= 10 and line.split()[1] == "0100007F:13AD"
+                     and line.split()[3] == "0A"]
+        assert len(listeners) == 1 and listeners[0].isdigit(), "listener_missing_or_ambiguous"
+        socket_target = "socket:["+listeners[0]+"]"
+        with os.scandir(proc_root) as scan:
+            entries = list(itertools.islice(scan, 513))
+        assert len(entries) <= 512, "process_scan_limit"
+        servers = []
+        for entry in entries:
+            if not entry.name.isdigit():
+                continue
+            process = proc_root/entry.name
+            try:
+                if process.stat().st_uid != uid or file_id((process/"exe").stat()) != file_id(executable):
+                    continue
+                argv = small(process/"cmdline", 4096).split(b"\0")
+                if b"fork-server" not in argv or b"server" not in argv:
+                    continue
+                with os.scandir(process/"fd") as scan:
+                    fds = list(itertools.islice(scan, 257))
+                assert len(fds) <= 256, "server_fd_limit"
+                if not any(fd.name.isdigit() and os.readlink(fd.path) == socket_target for fd in fds):
+                    continue
+                servers.append(process)
+            except (FileNotFoundError, ProcessLookupError, PermissionError):
+                continue
+        assert len(servers) == 1, "server_missing_or_ambiguous"
+        process = servers[0]
+        def identity():
+            raw = small(process/"stat", 4096)
+            fields = raw[raw.rfind(b")")+2:].split()
+            assert len(fields) >= 20 and fields[19].isdigit(), "start_time_missing"
+            assert process.stat().st_uid == uid, "server_owner_changed"
+            assert file_id((process/"exe").stat()) == file_id(executable), "server_executable_changed"
+            return {"pid":int(process.name), "start_ticks":fields[19].decode(), "uid":uid,
+                    "executable":file_id(executable), "listener_inode":listeners[0]}
+        before = identity()
+        log = temp_root/("adb."+str(uid)+".log")
+        fd = os.open(log, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            meta = os.fstat(fd)
+            assert stat.S_ISREG(meta.st_mode) and meta.st_uid == uid, "log_type_or_owner"
+            # The discovered server itself must hold this exact file, not merely a same-name log.
+            with os.scandir(process/"fd") as scan:
+                fds = list(itertools.islice(scan, 257))
+            assert len(fds) <= 256, "server_fd_limit"
+            held = False
+            for entry in fds:
+                if not entry.name.isdigit():
+                    continue
+                try:
+                    info = os.stat(entry.path)
+                    held = held or (stat.S_ISREG(info.st_mode) and file_id(info) == file_id(meta))
+                except FileNotFoundError:
+                    continue
+            assert held, "log_not_held_by_server"
+            start = max(0, meta.st_size-65536)
+            raw = os.pread(fd, min(meta.st_size,65536), start)
+            after_meta = os.fstat(fd)
+            assert len(raw) == meta.st_size-start and after_meta.st_size >= meta.st_size, "log_shrank_or_short_read"
+            assert file_id(os.stat(log, follow_symlinks=False)) == file_id(meta), "log_rotated"
+            assert identity() == before, "server_changed_during_read"
+            result.update(status="OBSERVED_NOT_ACCEPTANCE", identity=before,
+                          log={"file":file_id(meta), "bytes_at_read":meta.st_size, "offset":start,
+                               "truncated":start>0, "tail_b64":base64.b64encode(raw).decode(),
+                               "tail_sha256":hashlib.sha256(raw).hexdigest()})
+        finally:
+            os.close(fd)
+    except Exception as exc:
+        result.update(status="NOT_OBSERVED", error_type=type(exc).__name__,
+                      reason=str(exc) if isinstance(exc, AssertionError) else "host_read_unavailable")
+    return result
+
+
+def correlate_server_logs(before, after):
+    """Only correlate exact process/file/binding and overlapping bytes; never acceptance."""
+    import base64
+    import hashlib
+    result = {"status":"NOT_BOUND", "release_ready":False, "scope":"HOST_LOG_INTERVAL_NOT_ROOT_CAUSE"}
+    try:
+        assert before["status"] == after["status"] == "OBSERVED_NOT_ACCEPTANCE", "snapshot_missing"
+        assert before["binding"] == after["binding"], "run_binding_changed"
+        assert before["identity"] == after["identity"], "server_identity_changed"
+        old, new = before["log"], after["log"]
+        assert old["file"] == new["file"], "log_file_changed"
+        decoded = []
+        for record in (old,new):
+            raw = base64.b64decode(record["tail_b64"], validate=True)
+            assert len(raw) <= 65536 and len(raw) == record["bytes_at_read"]-record["offset"], "log_size"
+            assert record["offset"] == max(0,record["bytes_at_read"]-65536), "log_offset"
+            assert record["truncated"] is (record["offset"]>0), "truncation_metadata"
+            assert hashlib.sha256(raw).hexdigest() == record["tail_sha256"], "log_hash"
+            decoded.append(raw)
+        assert new["bytes_at_read"] >= old["bytes_at_read"], "log_shrank"
+        anchor = decoded[0][-256:]
+        start = old["bytes_at_read"]-len(anchor)-new["offset"]
+        assert start >= 0, "overlap_not_retained"
+        assert decoded[1][start:start+len(anchor)] == anchor, "overlap_changed"
+        delta = decoded[1][old["bytes_at_read"]-new["offset"]:]
+        result.update(status="SAME_OBSERVED_SERVER_LOG_INTERVAL", new_bytes=len(delta),
+                      delta_sha256=hashlib.sha256(delta).hexdigest(),
+                      note="Same observed boundaries; not continuous server liveness or proof of cause")
+    except Exception as exc:
+        result["reason"] = str(exc) if isinstance(exc, AssertionError) else "invalid_snapshot"
+    return result
+
+
+def capture_existing_server_log(adb, serial, *, previous=None, runner=subprocess.run):
+    """Three-second separate host worker; diagnostic errors never replace original failure."""
+    import sys
+    import tempfile
+    result = {"status":"NOT_OBSERVED", "scope":"EXISTING_HOST_SERVER_LOG_NOT_DEVICE_OR_ROOT_CAUSE",
+              "release_ready":False, "worker_budget_seconds":3}
+    try:
+        with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+            value = runner([sys.executable,str(Path(__file__).resolve()),"server-log-snapshot",str(adb),serial],
+                           stdin=subprocess.DEVNULL, stdout=out, stderr=err, timeout=3, check=False)
+            assert value.returncode == 0, "worker_failed"
+            out.seek(0); raw = out.read(131073)
+            err.seek(0); errors = err.read(1)
+            assert len(raw) <= 131072 and not errors, "worker_output_invalid"
+            observed = json.loads(raw)
+            assert observed["scope"] == result["scope"] and observed["release_ready"] is False, "worker_scope"
+            assert observed["status"] in ("NOT_OBSERVED","OBSERVED_NOT_ACCEPTANCE"), "worker_status"
+            result.update(observed)
+    except Exception as exc:
+        result.update(status="NOT_OBSERVED", error_type=type(exc).__name__,
+                      reason=str(exc) if isinstance(exc, AssertionError) else "worker_not_observed")
+    if previous is not None:
+        result["correlation"] = correlate_server_logs(previous,result)
+    return result
+
+
+def server_log_wiring(workflow):
+    import ast
+    marker = '          cat > "$RUNNER_TEMP/export_native_probe.py" <<'+"'PY'"+'\n'
+    assert workflow.count(marker)==1, "native driver missing"
+    source="\n".join(line[10:] if line else "" for line in
+                     workflow.split(marker,1)[1].split('          PY\n',1)[0].splitlines())+"\n"
+    native=next(n for n in ast.parse(source).body if isinstance(n,ast.FunctionDef) and n.name=="standalone_native")
+    def dump(code):
+        return ast.dump(ast.parse(code).body[0])
+    before='result["server_log_before"]=capture_existing_server_log(adb,gate.SERIAL)'
+    after='result["server_log_after"]=capture_existing_server_log(adb,gate.SERIAL,previous=result["server_log_before"])'
+    assignment=next((i for i,n in enumerate(native.body) if ast.dump(n)==dump(before)),None)
+    assert assignment is not None and isinstance(native.body[assignment+1],ast.Try), "before binding missing"
+    main=native.body[assignment+1]
+    failure=main.handlers[0].body
+    assert ast.dump(failure[1])==dump('result["original_failure"]=exception_evidence(exc)'), "original failure changed"
+    assert ast.dump(failure[2])==dump(after), "failure snapshot missing or wrong baseline"
+    assert isinstance(failure[-1],ast.Raise) and failure[-1].exc is None, "original failure swallowed"
+    fallback='if "server_log_after" not in result:\n    '+after
+    assert any(ast.dump(n)==dump(fallback) for n in main.finalbody), "success snapshot missing"
+    assert sum(isinstance(n,ast.Call) and isinstance(n.func,ast.Name)
+               and n.func.id=="capture_existing_server_log" for n in ast.walk(native))==3, "snapshot count"
+    required="          python3 tools/verify_process_control.py server-log-selftest\n"
+    setup=workflow.split("        run: &isolated_trace_setup |\n",1)[1].split("      - ",1)[0]
+    assert setup.count(required)==1, "server host gate missing"
+    return source
+
+
+def server_log_selftest():
+    """Real temporary /proc-shaped files; no Android, server start, or device claim."""
+    import base64
+    import copy
+    import hashlib
+    import os
+    import tempfile
+    from unittest.mock import patch
+    env = {"GITHUB_ACTIONS":"true","GITHUB_SHA":"a"*40,"GITHUB_RUN_ID":"123",
+           "GITHUB_RUN_ATTEMPT":"1","TEST_API":"26"}
+    positives = negatives = 0
+    with tempfile.TemporaryDirectory() as folder:
+        root=Path(folder); proc=root/"proc"; tmp=root/"tmp"
+        (proc/"net").mkdir(parents=True); tmp.mkdir()
+        adb=root/"adb"; adb.write_bytes(b"host-fixture-not-executable")
+        server=proc/"321"; (server/"fd").mkdir(parents=True)
+        (server/"exe").symlink_to(adb)
+        (server/"cmdline").write_bytes(b"adb\0fork-server\0server\0--reply-fd\0"+"4".encode()+b"\0")
+        (server/"stat").write_text("321 (adb fixture) "+" ".join(["S"]+["0"]*18+["12345"])+"\n")
+        (proc/"net/tcp").write_text("header\n0: 0100007F:13AD 00000000:0000 0A 0 0 0 0 0 555\n")
+        (server/"fd/3").symlink_to("socket:[555]")
+        log=tmp/("adb."+str(os.getuid())+".log"); log.write_bytes(b"server-start\n")
+        (server/"fd/2").symlink_to(log)
+        def snapshot(settings=env):
+            return server_log_snapshot(adb,"emulator-5554",environment=settings,proc_root=proc,temp_root=tmp)
+        before=snapshot(); assert before["status"]=="OBSERVED_NOT_ACCEPTANCE", before
+        assert base64.b64decode(before["log"]["tail_b64"])==log.read_bytes(); positives+=1
+        with log.open("ab") as stream: stream.write(b"server-stream-event\n")
+        after=snapshot(); result=correlate_server_logs(before,after)
+        assert result["status"]=="SAME_OBSERVED_SERVER_LOG_INTERVAL" and result["new_bytes"]==20; positives+=1
+        assert correlate_server_logs(after,after)["new_bytes"]==0; positives+=1
+        for key,value in (("GITHUB_ACTIONS","false"),("GITHUB_SHA","wrong"),("GITHUB_RUN_ID",""),
+                          ("GITHUB_RUN_ATTEMPT","0"),("TEST_API","35"),("ADB_SERVER_SOCKET","custom"),
+                          ("TMPDIR","/other")):
+            assert snapshot(dict(env,**{key:value}))["status"]=="NOT_OBSERVED"; negatives+=1
+        for target in (log,server/"fd/2",server/"stat",server/"exe",proc/"net/tcp"):
+            saved=target.with_name(target.name+".saved"); target.rename(saved)
+            try: assert snapshot()["status"]=="NOT_OBSERVED", str(target)
+            finally: saved.rename(target)
+            negatives+=1
+        saved=tmp/"actual"; log.rename(saved); log.symlink_to(saved)
+        try: assert snapshot()["status"]=="NOT_OBSERVED"
+        finally: log.unlink(); saved.rename(log)
+        negatives+=1
+        for target,replacement in ((server/"cmdline",b"adb\0version\0"),
+                                   (proc/"net/tcp",b"header\n"),
+                                   (server/"stat",b"malformed")):
+            original=target.read_bytes(); target.write_bytes(replacement)
+            try: assert snapshot()["status"]=="NOT_OBSERVED"
+            finally: target.write_bytes(original)
+            negatives+=1
+        unrelated=tmp/"unrelated"; unrelated.write_bytes(b"not-server-log")
+        (server/"fd/2").unlink(); (server/"fd/2").symlink_to(unrelated)
+        try: assert snapshot()["status"]=="NOT_OBSERVED"
+        finally: (server/"fd/2").unlink(); (server/"fd/2").symlink_to(log)
+        negatives+=1
+        actual_pread=os.pread
+        def changed_process(fd,size,offset):
+            raw=actual_pread(fd,size,offset)
+            (server/"stat").write_text("321 (adb fixture) "+" ".join(["S"]+["0"]*18+["99999"])+"\n")
+            return raw
+        original=(server/"stat").read_bytes()
+        with patch.object(os,"pread",changed_process):
+            assert snapshot()["reason"]=="server_changed_during_read"
+        (server/"stat").write_bytes(original); negatives+=1
+        def changed_log(fd,size,offset):
+            raw=actual_pread(fd,size,offset); log.rename(saved); log.write_bytes(b"new-log")
+            return raw
+        with patch.object(os,"pread",changed_log):
+            assert snapshot()["reason"]=="log_rotated"
+        log.unlink(); saved.rename(log); negatives+=1
+        for edit in (
+            lambda x:x.update(status="NOT_OBSERVED"),
+            lambda x:x["binding"].update(GITHUB_SHA="b"*40),
+            lambda x:x["binding"].update(TEST_API="34"),
+            lambda x:x["identity"].update(start_ticks="999"),
+            lambda x:x["identity"].update(pid=322),
+            lambda x:x["log"].update(file=[0,0]),
+            lambda x:x["log"].update(tail_sha256="0"*64),
+            lambda x:x["log"].update(bytes_at_read=1),
+            lambda x:x["log"].update(truncated=True)):
+            bad=copy.deepcopy(after); edit(bad)
+            assert correlate_server_logs(before,bad)["status"]=="NOT_BOUND"; negatives+=1
+        log.write_bytes(b"x"*70000)
+        large=snapshot(); assert large["status"]=="OBSERVED_NOT_ACCEPTANCE"
+        assert large["log"]["truncated"] and len(base64.b64decode(large["log"]["tail_b64"]))==65536
+        assert correlate_server_logs(before,large)["status"]=="NOT_BOUND"; positives+=1; negatives+=1
+        log.write_bytes(b"x"*len(b"server-start\n"))
+        overwritten=snapshot(); assert correlate_server_logs(before,overwritten)["status"]=="NOT_BOUND"; negatives+=1
+        def worker(args,**kwargs):
+            assert args[-3:]==["server-log-snapshot",str(adb),"emulator-5554"]
+            assert kwargs["timeout"]==3 and kwargs["stdin"]==subprocess.DEVNULL and kwargs["check"] is False
+            kwargs["stdout"].write(json.dumps(after).encode())
+            return subprocess.CompletedProcess(args,0)
+        observed=capture_existing_server_log(adb,"emulator-5554",previous=before,runner=worker)
+        assert observed["correlation"]["status"]=="SAME_OBSERVED_SERVER_LOG_INTERVAL"; positives+=1
+        for mode in ("timeout","exit","stderr","json","oversize"):
+            def broken(args,**kwargs):
+                if mode=="timeout": raise subprocess.TimeoutExpired(args,3)
+                if mode=="stderr": kwargs["stderr"].write(b"failure")
+                kwargs["stdout"].write(b"x"*131073 if mode=="oversize" else b"invalid")
+                return subprocess.CompletedProcess(args,1 if mode=="exit" else 0)
+            value=capture_existing_server_log(adb,"emulator-5554",previous=before,runner=broken)
+            assert value["status"]=="NOT_OBSERVED" and value["correlation"]["status"]=="NOT_BOUND"; negatives+=1
+        # Real subprocess boundary, without CI scope and without an ADB executable.
+        with patch.dict(os.environ, {"GITHUB_ACTIONS":"false"}):
+            value=capture_existing_server_log(root/"missing-adb","emulator-5554")
+        assert value["status"]=="NOT_OBSERVED" and value.get("reason")=="scope"; positives+=1
+    print("SERVER_LOG_HOST",positives,"positive",negatives,"negative PASS; NOT_DEVICE_OR_ROOT_CAUSE",flush=True)
+    workflow=Path(".github/workflows/android.yml").read_text()
+    server_log_wiring(workflow)
+    for old,new in (
+        ('result["server_log_before"]=capture_existing_server_log(adb,gate.SERIAL)',
+         'result["server_log_before"]={}'),
+        ('previous=result["server_log_before"]','previous={}'),
+        ("          python3 tools/verify_process_control.py server-log-selftest\n",""),
+        ('if "server_log_after" not in result:','if False:'),
+    ):
+        assert old in workflow
+        changed=workflow.replace(old,new)
+        try: server_log_wiring(changed)
+        except AssertionError: pass
+        else: raise AssertionError("server log wiring mutant survived")
+    # Executable negative controls mutate actual correlator and keep a positive witness.
+    import inspect
+    source=inspect.getsource(correlate_server_logs)
+    for old,new,bad in (
+        ('assert before["identity"] == after["identity"], "server_identity_changed"',
+         'pass',dict(after,identity=dict(after["identity"],start_ticks="changed"))),
+        ('assert before["binding"] == after["binding"], "run_binding_changed"',
+         'pass',dict(after,binding=dict(after["binding"],TEST_API="34"))),
+        ('assert old["file"] == new["file"], "log_file_changed"',
+         'pass',dict(after,log=dict(after["log"],file=[0,0]))),
+    ):
+        assert source.count(old)==1
+        namespace={}; exec(compile(source.replace(old,new),"<server-log-mutant>","exec"),namespace)
+        mutant=namespace["correlate_server_logs"]
+        assert mutant(before,after)["status"]=="SAME_OBSERVED_SERVER_LOG_INTERVAL"
+        assert correlate_server_logs(before,bad)["status"]=="NOT_BOUND"
+        assert mutant(before,bad)["status"]=="SAME_OBSERVED_SERVER_LOG_INTERVAL"
+    print("SERVER_LOG_WIRING 1 actual positive 4 omissions; 3 compiled witnessed mutants rejected PASS",flush=True)
+
+
 if __name__ == "__main__":
     import sys
+    if len(sys.argv)==4 and sys.argv[1]=="server-log-snapshot":
+        print(json.dumps(server_log_snapshot(sys.argv[2],sys.argv[3])))
+        sys.exit(0)
+    if sys.argv[1:] == ["server-log-selftest"]:
+        server_log_selftest()
+        sys.exit(0)
     if sys.argv[1:] == ["directory-selftest"]:
         directory_trace_selftest()
         runtime_identity_selftest()

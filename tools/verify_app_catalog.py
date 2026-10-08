@@ -8,8 +8,8 @@ import verify_todo_management as runner
 import verify_category_drag as shared
 PACKAGE = runner.PACKAGE
 SCOPE = "MANUAL_APPLICATION_CATALOG_AND_LINKED_ACTIVITY_NOT_EXTERNAL_LAUNCH_OR_FULL_PRODUCT"
-REQUIRED = {'seed': ['backend_fixture', 'application_insert', 'duplicate_package_readonly', 'invalid_package_readonly', 'prepare_readonly', 'create_linked_once', 'duplicate_plan_readonly', 'canceled_plan_readonly', 'second_category_reuse', 'unassigned_activity', 'stale_app_readonly', 'stale_category_readonly', 'late_rollback', 'consumed_failure_readonly', 'outer_transaction_readonly', 'backend_checkpoint', 'rename_fixture', 'rename_prepare_readonly', 'rename_exact_state', 'rename_duplicate', 'rename_same_readonly', 'rename_cancel', 'rename_blank', 'rename_blank_consumed', 'rename_stale', 'rename_unrelated_change', 'rename_late_rollback', 'rename_failure_consumed', 'rename_readback_rollback', 'rename_prepare_outer', 'rename_confirm_outer', 'rename_missing', 'rename_foreign', 'rename_owner_retained', 'rename_closed_helper', 'rename_reopened_state', 'relation_prepare', 'relation_path_order', 'relation_duplicate', 'relation_tag_order', 'relation_same', 'relation_clear', 'relation_blank', 'relation_blank_consumed', 'relation_cancel', 'relation_stale', 'relation_late_rollback', 'relation_failure_consumed', 'relation_readback_rollback', 'relation_foreign', 'relation_owner_retained', 'relation_prepare_outer', 'relation_confirm_outer', 'relation_missing', 'relation_closed', 'relation_final'], 'deleted': ['backend_restart', 'backend_backup', 'ui_fixture', 'catalog_open_readonly', 'invalid_name_readonly', 'invalid_package_ui_readonly', 'create_application_ui', 'duplicate_package_ui_readonly', 'same_title_distinct_ids', 'cancel_picker_readonly', 'first_category_link', 'duplicate_click_readonly', 'second_category_link', 'old_picker_readonly', 'unassigned_retained', 'ui_checkpoint', 'rename_ui_prepare', 'rename_ui_blank', 'rename_ui_exact', 'rename_ui_duplicate', 'rename_ui_cancel', 'rename_ui_same', 'rename_ui_stale', 'rename_ui_detached', 'rename_ui_final', 'relation_ui_prepare', 'relation_ui_blank', 'relation_ui_path', 'relation_ui_duplicate', 'relation_ui_tags', 'relation_ui_same', 'relation_ui_cancel', 'relation_ui_clear', 'relation_ui_other_owner', 'relation_ui_other_tags', 'relation_ui_stale', 'relation_ui_detached', 'relation_ui_final'], 'undone': ['ui_restart', 'ui_backup']}
-EXPECTED = {'seed': ['backend_fixture', 'application_insert', 'duplicate_package_readonly', 'invalid_package_readonly', 'prepare_readonly', 'create_linked_once', 'duplicate_plan_readonly', 'canceled_plan_readonly', 'second_category_reuse', 'unassigned_activity', 'stale_app_readonly', 'stale_category_readonly', 'late_rollback', 'consumed_failure_readonly', 'outer_transaction_readonly', 'backend_checkpoint', 'rename_fixture', 'rename_prepare_readonly', 'rename_exact_state', 'rename_duplicate', 'rename_same_readonly', 'rename_cancel', 'rename_blank', 'rename_blank_consumed', 'rename_stale', 'rename_unrelated_change', 'rename_late_rollback', 'rename_failure_consumed', 'rename_readback_rollback', 'rename_prepare_outer', 'rename_confirm_outer', 'rename_missing', 'rename_foreign', 'rename_owner_retained', 'rename_closed_helper', 'rename_reopened_state', 'relation_prepare', 'relation_path_order', 'relation_duplicate', 'relation_tag_order', 'relation_same', 'relation_clear', 'relation_blank', 'relation_blank_consumed', 'relation_cancel', 'relation_stale', 'relation_late_rollback', 'relation_failure_consumed', 'relation_readback_rollback', 'relation_foreign', 'relation_owner_retained', 'relation_prepare_outer', 'relation_confirm_outer', 'relation_missing', 'relation_closed', 'relation_final'], 'deleted': ['backend_restart', 'backend_backup', 'ui_fixture', 'catalog_open_readonly', 'invalid_name_readonly', 'invalid_package_ui_readonly', 'create_application_ui', 'duplicate_package_ui_readonly', 'same_title_distinct_ids', 'cancel_picker_readonly', 'first_category_link', 'duplicate_click_readonly', 'second_category_link', 'old_picker_readonly', 'unassigned_retained', 'ui_checkpoint', 'rename_ui_prepare', 'rename_ui_blank', 'rename_ui_exact', 'rename_ui_duplicate', 'rename_ui_cancel', 'rename_ui_same', 'rename_ui_stale', 'rename_ui_detached', 'rename_ui_final', 'relation_ui_prepare', 'relation_ui_blank', 'relation_ui_path', 'relation_ui_duplicate', 'relation_ui_tags', 'relation_ui_same', 'relation_ui_cancel', 'relation_ui_clear', 'relation_ui_other_owner', 'relation_ui_other_tags', 'relation_ui_stale', 'relation_ui_detached', 'relation_ui_final'], 'undone': ['ui_restart', 'ui_backup']}
+REQUIRED = {'seed': ['backend_fixture', 'application_insert', 'duplicate_package_readonly', 'invalid_package_readonly', 'prepare_readonly', 'create_linked_once', 'duplicate_plan_readonly', 'canceled_plan_readonly', 'second_category_reuse', 'unassigned_activity', 'stale_app_readonly', 'stale_category_readonly', 'late_rollback', 'consumed_failure_readonly', 'outer_transaction_readonly', 'backend_checkpoint', 'rename_fixture', 'rename_prepare_readonly', 'rename_exact_state', 'rename_duplicate', 'rename_same_readonly', 'rename_cancel', 'rename_blank', 'rename_blank_consumed', 'rename_stale', 'rename_unrelated_change', 'rename_late_rollback', 'rename_failure_consumed', 'rename_readback_rollback', 'rename_prepare_outer', 'rename_confirm_outer', 'rename_missing', 'rename_foreign', 'rename_owner_retained', 'rename_closed_helper', 'rename_reopened_state', 'relation_prepare', 'relation_path_order', 'relation_duplicate', 'relation_tag_order', 'relation_same', 'relation_clear', 'relation_blank', 'relation_blank_consumed', 'relation_cancel', 'relation_stale', 'relation_late_rollback', 'relation_failure_consumed', 'relation_readback_rollback', 'relation_foreign', 'relation_owner_retained', 'relation_prepare_outer', 'relation_confirm_outer', 'relation_missing', 'relation_closed', 'relation_final', 'archive_prepare', 'archive_exact', 'archive_duplicate', 'archive_same', 'archive_relation_refused', 'archive_restore_exact', 'archive_cancel', 'archive_stale_same', 'archive_late_rollback', 'archive_failure_consumed', 'archive_readback_rollback', 'archive_foreign', 'archive_owner_retained', 'archive_prepare_outer', 'archive_confirm_outer', 'archive_missing', 'archive_closed', 'archive_reopened_restore', 'archive_final', 'archive_schema2_compatible'], 'deleted': ['backend_restart', 'backend_backup', 'ui_fixture', 'catalog_open_readonly', 'invalid_name_readonly', 'invalid_package_ui_readonly', 'create_application_ui', 'duplicate_package_ui_readonly', 'same_title_distinct_ids', 'cancel_picker_readonly', 'first_category_link', 'duplicate_click_readonly', 'second_category_link', 'old_picker_readonly', 'unassigned_retained', 'ui_checkpoint', 'rename_ui_prepare', 'rename_ui_blank', 'rename_ui_exact', 'rename_ui_duplicate', 'rename_ui_cancel', 'rename_ui_same', 'rename_ui_stale', 'rename_ui_detached', 'rename_ui_final', 'relation_ui_prepare', 'relation_ui_blank', 'relation_ui_path', 'relation_ui_duplicate', 'relation_ui_tags', 'relation_ui_same', 'relation_ui_cancel', 'relation_ui_clear', 'relation_ui_other_owner', 'relation_ui_other_tags', 'relation_ui_stale', 'relation_ui_detached', 'relation_ui_final', 'archive_ui_preview', 'archive_ui_cancel', 'archive_ui_exact', 'archive_ui_duplicate', 'archive_ui_readonly_history', 'archive_ui_list', 'archive_ui_active_filter', 'archive_ui_restore_cancel', 'archive_ui_restore', 'archive_ui_stale', 'archive_ui_detached', 'archive_ui_final'], 'undone': ['ui_restart', 'ui_backup', 'archive_ui_restart_history']}
+EXPECTED = {'seed': ['backend_fixture', 'application_insert', 'duplicate_package_readonly', 'invalid_package_readonly', 'prepare_readonly', 'create_linked_once', 'duplicate_plan_readonly', 'canceled_plan_readonly', 'second_category_reuse', 'unassigned_activity', 'stale_app_readonly', 'stale_category_readonly', 'late_rollback', 'consumed_failure_readonly', 'outer_transaction_readonly', 'backend_checkpoint', 'rename_fixture', 'rename_prepare_readonly', 'rename_exact_state', 'rename_duplicate', 'rename_same_readonly', 'rename_cancel', 'rename_blank', 'rename_blank_consumed', 'rename_stale', 'rename_unrelated_change', 'rename_late_rollback', 'rename_failure_consumed', 'rename_readback_rollback', 'rename_prepare_outer', 'rename_confirm_outer', 'rename_missing', 'rename_foreign', 'rename_owner_retained', 'rename_closed_helper', 'rename_reopened_state', 'relation_prepare', 'relation_path_order', 'relation_duplicate', 'relation_tag_order', 'relation_same', 'relation_clear', 'relation_blank', 'relation_blank_consumed', 'relation_cancel', 'relation_stale', 'relation_late_rollback', 'relation_failure_consumed', 'relation_readback_rollback', 'relation_foreign', 'relation_owner_retained', 'relation_prepare_outer', 'relation_confirm_outer', 'relation_missing', 'relation_closed', 'relation_final', 'archive_prepare', 'archive_exact', 'archive_duplicate', 'archive_same', 'archive_relation_refused', 'archive_restore_exact', 'archive_cancel', 'archive_stale_same', 'archive_late_rollback', 'archive_failure_consumed', 'archive_readback_rollback', 'archive_foreign', 'archive_owner_retained', 'archive_prepare_outer', 'archive_confirm_outer', 'archive_missing', 'archive_closed', 'archive_reopened_restore', 'archive_final', 'archive_schema2_compatible'], 'deleted': ['backend_restart', 'backend_backup', 'ui_fixture', 'catalog_open_readonly', 'invalid_name_readonly', 'invalid_package_ui_readonly', 'create_application_ui', 'duplicate_package_ui_readonly', 'same_title_distinct_ids', 'cancel_picker_readonly', 'first_category_link', 'duplicate_click_readonly', 'second_category_link', 'old_picker_readonly', 'unassigned_retained', 'ui_checkpoint', 'rename_ui_prepare', 'rename_ui_blank', 'rename_ui_exact', 'rename_ui_duplicate', 'rename_ui_cancel', 'rename_ui_same', 'rename_ui_stale', 'rename_ui_detached', 'rename_ui_final', 'relation_ui_prepare', 'relation_ui_blank', 'relation_ui_path', 'relation_ui_duplicate', 'relation_ui_tags', 'relation_ui_same', 'relation_ui_cancel', 'relation_ui_clear', 'relation_ui_other_owner', 'relation_ui_other_tags', 'relation_ui_stale', 'relation_ui_detached', 'relation_ui_final', 'archive_ui_preview', 'archive_ui_cancel', 'archive_ui_exact', 'archive_ui_duplicate', 'archive_ui_readonly_history', 'archive_ui_list', 'archive_ui_active_filter', 'archive_ui_restore_cancel', 'archive_ui_restore', 'archive_ui_stale', 'archive_ui_detached', 'archive_ui_final'], 'undone': ['ui_restart', 'ui_backup', 'archive_ui_restart_history']}
 SHARED_SHA256 = "9b1b435b21b630e1230f1e112a794962825665982ceabdbb41cc68583ce3d70d"
 # Reuse unchanged transport/receipt infrastructure, never the category cases.
 # Pin the whole dependency: a future edit must explicitly review this adapter.
@@ -17,6 +17,138 @@ assert hashlib.sha256(Path(shared.__file__).read_bytes()).hexdigest() == SHARED_
 for marker in (" static Map<String,List<List<String>>> expected(", " void save(", " void seed(", " @Override public void onCreate"):
     assert shared.JAVA.count(marker) == 1, "ambiguous Java scaffold boundary"
 CASES = r'''
+ Object archivePlan(AppDatabase h,long id,boolean target)throws Exception{
+  return invoke(h,"prepareActivityArchive",new Class<?>[]{long.class,boolean.class},id,target);
+ }
+ boolean archiveConfirm(AppDatabase h,Object p)throws Exception{
+  return (Boolean)invoke(h,"confirmActivityArchive",new Class<?>[]{p.getClass()},p);
+ }
+ static Map<String,List<List<String>>> archiveExpected(Map<String,List<List<String>>> before,long owner,boolean value){
+  Map<String,List<List<String>>> out=new TreeMap<>();
+  for(Map.Entry<String,List<List<String>>> e:before.entrySet()){
+   List<List<String>> rows=new ArrayList<>();for(List<String> r:e.getValue())rows.add(new ArrayList<>(r));out.put(e.getKey(),rows);
+  }
+  List<List<String>> rows=out.get("activities");int col=rows.get(0).indexOf("archived"),matched=0;
+  need(col==5,"archive independent oracle columns");
+  for(int i=1;i<rows.size();i++)if(rows.get(i).get(1).equals("1:"+owner)){rows.get(i).set(col,value?"1:1":"1:0");matched++;}
+  need(matched==1,"archive one stable identity");
+  List<List<String>> rev=out.get("revision");int v=rev.get(0).indexOf("value");
+  rev.get(1).set(v,"1:"+Math.incrementExact(Long.parseLong(rev.get(1).get(v).substring(2))));return out;
+ }
+ void archiveBackend(AppDatabase h)throws Exception{
+  h.defineField("archive-field","Archive field","TEXT",Collections.emptyList());
+  h.putField(5,"archive-field",Arrays.asList("Preserved field"));
+  h.createFieldNote("archive-note",5,"archive-field","Preserved linked note");
+  h.saveNote("archive-note",Arrays.asList(com.supercubegame.pockettodo.NoteDocument.Block.text("archive-body","Preserved full history",true)));
+  h.putMark(new com.supercubegame.pockettodo.CalendarRules.Mark(5,java.time.LocalDate.of(2026,10,8),com.supercubegame.pockettodo.CalendarRules.Status.DONE,"Preserved mark",java.time.Instant.parse("2026-10-08T00:00:00Z")));
+  Map<String,List<List<String>>> before=state(h);Object p=archivePlan(h,5,true);
+  pass(state(h).equals(before)&&((Number)invoke(p,"activityId",new Class<?>[]{})).longValue()==5
+      &&!(Boolean)invoke(p,"wasArchived",new Class<?>[]{})&&(Boolean)invoke(p,"willArchive",new Class<?>[]{}),"archive_prepare");
+  pass(archiveConfirm(h,p)&&state(h).equals(archiveExpected(before,5,true)),"archive_exact");
+  Object used=p;readonly(h,IllegalStateException.class,()->archiveConfirm(h,used),"archive_duplicate");
+  before=state(h);pass(!archiveConfirm(h,archivePlan(h,5,true))&&state(h).equals(before),"archive_same");
+  readonly(h,IllegalArgumentException.class,()->relationPlan(h,5,false),"archive_relation_refused");
+  before=state(h);pass(archiveConfirm(h,archivePlan(h,5,false))&&state(h).equals(archiveExpected(before,5,false)),"archive_restore_exact");
+  Object canceled=archivePlan(h,5,true);close(canceled);readonly(h,IllegalStateException.class,()->archiveConfirm(h,canceled),"archive_cancel");
+  Object stale=archivePlan(h,5,false);h.getWritableDatabase().execSQL("UPDATE applications SET name='Archive intervening' WHERE id=11");
+  readonly(h,IllegalStateException.class,()->archiveConfirm(h,stale),"archive_stale_same");
+  Object late=archivePlan(h,5,true);before=state(h);
+  h.getWritableDatabase().execSQL("CREATE TRIGGER archive_fault BEFORE UPDATE OF value ON revision BEGIN SELECT RAISE(ABORT,'archive_late_fault'); END");
+  Throwable error=null;try{archiveConfirm(h,late);}catch(Throwable t){error=t;}
+  boolean found=false;for(Throwable t=error;t!=null;t=t.getCause())if(String.valueOf(t.getMessage()).contains("archive_late_fault"))found=true;
+  pass(found&&state(h).equals(before),"archive_late_rollback");h.getWritableDatabase().execSQL("DROP TRIGGER archive_fault");
+  readonly(h,IllegalStateException.class,()->archiveConfirm(h,late),"archive_failure_consumed");
+  Object damage=archivePlan(h,5,true);before=state(h);
+  h.getWritableDatabase().execSQL("CREATE TRIGGER archive_damage AFTER UPDATE OF archived ON activities WHEN NEW.id=5 BEGIN UPDATE notes SET title='Damaged' WHERE id='archive-note'; END");
+  error=null;try{archiveConfirm(h,damage);}catch(Throwable t){error=t;}
+  found=false;for(Throwable t=error;t!=null;t=t.getCause())if(String.valueOf(t.getMessage()).contains("活动归档回读不一致"))found=true;
+  pass(found&&state(h).equals(before),"archive_readback_rollback");h.getWritableDatabase().execSQL("DROP TRIGGER archive_damage");
+  Object foreignPlan=archivePlan(h,5,true);
+  try(AppDatabase foreign=AppDatabase.openSchema3(getTargetContext(),name())){
+   readonly(h,IllegalArgumentException.class,()->archiveConfirm(foreign,foreignPlan),"archive_foreign");
+  }
+  before=state(h);pass(archiveConfirm(h,foreignPlan)&&state(h).equals(archiveExpected(before,5,true)),"archive_owner_retained");
+  Object outer=archivePlan(h,5,false);h.getWritableDatabase().beginTransaction();
+  try{
+   readonly(h,IllegalStateException.class,()->archivePlan(h,5,false),"archive_prepare_outer");
+   readonly(h,IllegalStateException.class,()->archiveConfirm(h,outer),"archive_confirm_outer");
+  }finally{h.getWritableDatabase().endTransaction();}
+  readonly(h,IllegalArgumentException.class,()->archivePlan(h,999,true),"archive_missing");
+  Object closed=archivePlan(h,5,false);h.close();
+  readonly(h,IllegalStateException.class,()->archiveConfirm(h,closed),"archive_closed");
+  before=state(h);pass(archiveConfirm(h,archivePlan(h,5,false))&&state(h).equals(archiveExpected(before,5,false)),"archive_reopened_restore");
+  before=state(h);pass(archiveConfirm(h,archivePlan(h,5,true))&&state(h).equals(archiveExpected(before,5,true)),"archive_final");
+  try(AppDatabase legacy=new AppDatabase(getTargetContext(),"archive-schema2-"+nonce+".db")){
+   legacy.addCategory(1,"Legacy");legacy.addActivity(1,1,0,"Legacy");before=state(legacy);
+   need(archiveConfirm(legacy,archivePlan(legacy,1,true)),"schema2 archive operation");
+   byte[] wire=legacy.exportState();
+   pass(state(legacy).equals(archiveExpected(before,1,true))&&wire.length>0&&legacy.getReadableDatabase().getVersion()==2,"archive_schema2_compatible");
+  }
+ }
+ boolean archiveAbsent(String key)throws Exception{
+  boolean[] absent={false};ui(()->{List<View> found=new ArrayList<>();find(root(),key,true,found);absent[0]=found.isEmpty();});return absent[0];
+ }
+ void archiveReadOnlyViews(View view){
+  need(!(view instanceof EditText),"archive history has no editor");
+  if(view instanceof Button){
+   String key=String.valueOf(view.getContentDescription());
+   need(key.equals("archive-detail-back")||key.equals("activity-restore-1"),"archive history has no business write button "+key);
+  }else if(view instanceof TextView)need(!view.hasOnClickListeners(),"archive history text is read-only");
+  if(view instanceof ViewGroup){ViewGroup g=(ViewGroup)view;for(int i=0;i<g.getChildCount();i++)archiveReadOnlyViews(g.getChildAt(i));}
+ }
+ void archiveHistoryCheck()throws Exception{
+  ui(()->{
+   View history=one("archive-history-1",true);
+   need(history instanceof ViewGroup,"archive historical rows");
+   archiveReadOnlyViews((View)history.getParent().getParent());
+   for(String expected:Arrays.asList("History full text","History field value","History mark","history-batch","History path")){
+    List<View> found=new ArrayList<>();archiveContains(history,expected,found);need(!found.isEmpty(),"archive retained history visible "+expected);
+   }
+  });
+ }
+ void archiveContains(View view,String text,List<View> found){
+  if(view instanceof TextView&&((TextView)view).getText().toString().contains(text))found.add(view);
+  if(view instanceof ViewGroup){ViewGroup g=(ViewGroup)view;for(int i=0;i<g.getChildCount();i++)archiveContains(g.getChildAt(i),text,found);}
+ }
+ void archiveUI(AppDatabase h)throws Exception{
+  h.savePath(1,Arrays.asList("History path"));h.saveTags(1,Arrays.asList("History tag"));
+  h.defineField("history-field","History field","TEXT",Collections.emptyList());h.putField(1,"history-field",Arrays.asList("History field value"));
+  h.createFieldNote("history-note",1,"history-field","History note");
+  h.saveNote("history-note",Arrays.asList(com.supercubegame.pockettodo.NoteDocument.Block.text("history-body","History full text",true)));
+  h.putMark(new com.supercubegame.pockettodo.CalendarRules.Mark(1,java.time.LocalDate.of(2026,10,8),com.supercubegame.pockettodo.CalendarRules.Status.DONE,"History mark",java.time.Instant.parse("2026-10-08T00:00:00Z")));
+  h.recordBatch("history-batch",Arrays.asList(new com.supercubegame.pockettodo.Ledger.Entry("history-entry",1,java.time.LocalDate.of(2026,10,8),com.supercubegame.pockettodo.Ledger.Kind.EXPENSE,123,"History memo")));
+  click("activity-1",true);Map<String,List<List<String>>> before=state(h);
+  click("activity-archive-1",true);final View[] old={null};boolean[] okay={false};
+  ui(()->{old[0]=one("archive-confirm",true);okay[0]=((TextView)one("archive-identity",true)).getText().toString().contains("#1");});
+  pass(okay[0]&&state(h).equals(before),"archive_ui_preview");
+  click("archive-cancel",true);ui(()->old[0].performClick());ready();pass(state(h).equals(before),"archive_ui_cancel");
+  click("activity-archive-1",true);
+  ui(()->{old[0]=one("archive-confirm",true);need(old[0].performClick(),"archive explicit click");old[0].performClick();});ready();
+  pass(state(h).equals(archiveExpected(before,1,true)),"archive_ui_exact");
+  before=state(h);ui(()->old[0].performClick());ready();pass(state(h).equals(before),"archive_ui_duplicate");
+  archiveHistoryCheck();pass(state(h).equals(before),"archive_ui_readonly_history");
+  click("archive-detail-back",true);pass(!archiveAbsent("archived-activity-1"),"archive_ui_list");
+  click("archive-list-back",true);pass(archiveAbsent("activity-1")&&!archiveAbsent("activity-2")&&!archiveAbsent("activity-3")&&state(h).equals(before),"archive_ui_active_filter");
+  click("archived-activities",true);click("archived-activity-1",true);click("activity-restore-1",true);
+  click("archive-cancel",true);pass(state(h).equals(before),"archive_ui_restore_cancel");
+  click("activity-restore-1",true);click("archive-confirm",true);
+  pass(state(h).equals(archiveExpected(before,1,false))&&!archiveAbsent("activity-path-edit-1"),"archive_ui_restore");
+  click("activity-archive-1",true);h.getWritableDatabase().execSQL("UPDATE applications SET name='Archive stale UI' WHERE id=2");before=state(h);
+  click("archive-confirm",true);
+  ui(()->okay[0]=!one("archive-confirm",true).isEnabled()&&((TextView)one("archive-validation",true)).getText().length()>0);
+  pass(okay[0]&&state(h).equals(before),"archive_ui_stale");click("archive-cancel",true);
+  click("activity-archive-1",true);ui(()->old[0]=one("archive-confirm",true));click("今天",false);
+  ui(()->old[0].performClick());ready();pass(state(h).equals(before),"archive_ui_detached");
+  click("活动",false);click("activity-archive-1",true);click("archive-confirm",true);
+  pass(state(h).equals(archiveExpected(before,1,true)),"archive_ui_final");
+  click("archive-detail-back",true);click("archive-list-back",true);
+ }
+ void archiveRestartUI()throws Exception{
+  AppDatabase h=db();Map<String,List<List<String>>> before=state(h);
+  need(archiveAbsent("activity-1"),"restart active filter");
+  click("archived-activities",true);click("archived-activity-1",true);archiveHistoryCheck();
+  pass(state(h).equals(before),"archive_ui_restart_history");
+ }
  // Backup wire transports declared columns, not hidden paths/tags rowids.
  // Keep full physical equality everywhere else, including in-place writes/rollback.
  static Map<String,List<List<String>>> backupProjection(Map<String,List<List<String>>> input){
@@ -262,7 +394,7 @@ CASES = r'''
   Object closed=renamePlan(h,10);before=state(h);h.close();
   readonly(h,IllegalStateException.class,()->renameConfirm(h,closed,"Bad"),"rename_closed_helper");
   pass(state(h).equals(before),"rename_reopened_state");
-  relationsBackend(h);
+  relationsBackend(h);archiveBackend(h);
   save("backend-rename-state",state(h).toString());
  }
  void renameUI(AppDatabase h)throws Exception{
@@ -290,7 +422,7 @@ CASES = r'''
   before=state(h);ui(()->old[0].performClick());ready();pass(state(h).equals(before),"rename_ui_detached");
   click("应用目录",false);click("catalog-rename-1",true);text("catalog-rename-name","Final UI");before=state(h);click("catalog-rename-save",true);
   pass(state(h).equals(renamed(before,1,"Final UI")),"rename_ui_final");
-  click("catalog-back",true);relationsUI(h);save("ui-rename-state",state(h).toString());save("ui-rename-media",media().toString());
+  click("catalog-back",true);relationsUI(h);archiveUI(h);save("ui-rename-state",state(h).toString());save("ui-rename-media",media().toString());
  }
  static Object invoke(Object target,String method,Class<?>[] types,Object... args)throws Exception{
   try{return target.getClass().getMethod(method,types).invoke(target,args);}
@@ -412,7 +544,7 @@ CASES = r'''
  }
  void undone()throws Exception{
   launch();click("活动",false);
-  pass(state(db()).toString().equals(read("ui-rename-state"))&&media().toString().equals(read("ui-rename-media")),"ui_restart");backup(db(),"ui");
+  pass(state(db()).toString().equals(read("ui-rename-state"))&&media().toString().equals(read("ui-rename-media")),"ui_restart");backup(db(),"ui");archiveRestartUI();
  }
 '''
 JAVA = (shared.JAVA[:shared.JAVA.index(" static Map<String,List<List<String>>> expected(")] + CASES
@@ -425,7 +557,7 @@ def bind_infrastructure():
         s=s.replace("category","catalog").replace("Category","Catalog").replace("CATEGORY","CATALOG")
         if name=="fixture":
             assert s.count("checks=40")==1
-            s=s.replace("checks=40","checks=96")
+            s=s.replace("checks=40","checks=129")
         if name=="report":
             old='["physical_phone_gestures", "all_lifecycle_stale_duplicate_UI_cases", "referenced_media_fixture", "ordinary_todo_sorting"]'
             assert s.count(old)==1
@@ -727,13 +859,14 @@ class Checkpoint{
 
 
 def selftest():
+    archive_host_selftest()
     repair_selftest()
     relation_host_selftest()
     snapshot_selftest()
     rename_host_selftest()
     catalog_ui_selftest()
     assert REQUIRED == EXPECTED
-    assert [len(EXPECTED[p]) for p in ("seed", "deleted", "undone")] == [56,38,2]
+    assert [len(EXPECTED[p]) for p in ("seed", "deleted", "undone")] == [76,50,3]
     rejected = 0
     for api in (26,34):
         value, manifest, logs = fixture(api)
@@ -1088,6 +1221,69 @@ class Check{
                 r=run([p/"Extract.java",p/"ActivitiesScreen.java",p/"unused","layout"])
                 assert r.returncode!=0 and "checkin must stay outside scroll" in r.stderr,r.stderr
             print("REPAIR_MUTANTS 5 comparator and 2 layout rejected; host only")
+
+
+def archive_host_selftest():
+    """Actual extracted members; SQL/widget doubles are not Android acceptance."""
+    assets={'prelude': 'import java.util.*;import java.io.*;import java.nio.charset.StandardCharsets;\nclass Ledger{static void positive(long id){if(id<=0)throw new IllegalArgumentException("id");}}\nclass Cursor implements AutoCloseable{\n static final int FIELD_TYPE_NULL=0,FIELD_TYPE_INTEGER=1,FIELD_TYPE_STRING=3,FIELD_TYPE_BLOB=4;\n Object[] row;Cursor(Object[]r){row=r;}\n boolean moveToFirst(){return row!=null;}String getString(int i){return (String)row[i];}\n long getLong(int i){return (Long)row[i];}public void close(){}\n}\nclass SQLiteDatabase{\n long rev=9,archived=0,otherArchived=0,external=0;boolean outer,open=true,fault,corrupt,noWrite,wrongOwner;\n SQLiteDatabase copy(){SQLiteDatabase b=new SQLiteDatabase();b.rev=rev;b.archived=archived;b.otherArchived=otherArchived;b.external=external;return b;}\n void restore(SQLiteDatabase b){rev=b.rev;archived=b.archived;otherArchived=b.otherArchived;external=b.external;}\n boolean inTransaction(){return outer;}void beginTransaction(){}void endTransaction(){}void setTransactionSuccessful(){}boolean isOpen(){return open;}\n Cursor rawQuery(String q,String[]a){\n  if(!q.equals("SELECT title,archived FROM activities WHERE id=?"))throw new AssertionError(q);\n  return new Cursor(a[0].equals("10")?new Object[]{"Same",archived}:null);\n }\n void execSQL(String q,Object[]a){\n  if(!q.equals("UPDATE activities SET archived=? WHERE id=? AND archived=?")||!a[1].equals(10L))throw new AssertionError(q);\n  if(noWrite)return;\n  if(archived==((Number)a[2]).longValue()){if(wrongOwner)otherArchived=((Number)a[0]).longValue();else archived=((Number)a[0]).longValue();}\n  if(corrupt)external++;\n }\n}\nclass AppDatabase{\n Object restoreSession=new Object();SQLiteDatabase sql=new SQLiteDatabase();\n interface Work<T>{T run(SQLiteDatabase d);}\n <T>T tx(Work<T>a){SQLiteDatabase b=sql.copy();try{return a.run(sql);}catch(RuntimeException e){sql.restore(b);throw e;}}\n SQLiteDatabase getReadableDatabase(){return sql;}SQLiteDatabase getWritableDatabase(){return sql;}\n static void noteDeletionNoOuterTransaction(SQLiteDatabase d){if(d.outer)throw new IllegalStateException("outer");}\n static long revision(SQLiteDatabase d){return d.rev;}static long bump(SQLiteDatabase d){if(d.fault)throw new IllegalStateException("late");return ++d.rev;}\n static void require(boolean b,String s){if(!b)throw new IllegalArgumentException(s);}\n static final String[] SNAPSHOT_TABLES={"revision","categories","applications","activities","paths","tags","batches","ledger","checkins","media","notes","blocks","fields","field_options","field_values","field_notes","todos","legacy_imports"};\n static class LimitedBytes extends ByteArrayOutputStream{}\n static void blob(DataOutputStream o,byte[]b)throws IOException{o.writeInt(b.length);o.write(b);}\n static void utf8(DataOutputStream o,String s)throws IOException{blob(o,s.getBytes(StandardCharsets.UTF_8));}\n static byte[] readBlob(DataInputStream i)throws IOException{int n=i.readInt();require(n>=0&&n<=i.available(),"length");byte[]b=new byte[n];i.readFully(b);return b;}\n static String readText(DataInputStream i)throws IOException{return new String(readBlob(i),StandardCharsets.UTF_8);}\n static void table(DataOutputStream o,String t,String[]names,List<Object[]>rows)throws IOException{\n  utf8(o,t);o.writeInt(names.length);for(String n:names)utf8(o,n);o.writeInt(rows.size());\n  for(Object[]r:rows)for(Object v:r){if(v instanceof Long){o.writeByte(1);o.writeLong((Long)v);}else if(v instanceof String){o.writeByte(3);utf8(o,(String)v);}else if(v instanceof byte[]){o.writeByte(4);blob(o,(byte[])v);}else o.writeByte(0);}\n }\n static byte[] noteDeletionState(SQLiteDatabase d){\n  try{var b=new ByteArrayOutputStream();var o=new DataOutputStream(b);o.writeInt(0x4e444c31);o.writeInt(3);o.writeInt(SNAPSHOT_TABLES.length);\n   for(String t:SNAPSHOT_TABLES){\n    if(t.equals("revision"))table(o,t,new String[]{"id","id","value"},Collections.singletonList(new Object[]{1L,1L,d.rev}));\n    else if(t.equals("activities"))table(o,t,new String[]{"id","id","category_id","application_id","title","archived"},\n     Arrays.asList(new Object[]{10L,10L,2L,3L,"Same",d.archived},new Object[]{20L,20L,4L,null,"Same",d.otherArchived}));\n    else table(o,t,new String[]{"rowid","counter","text","payload","nullable"},Collections.singletonList(new Object[]{7L,d.external,t+" 中文",new byte[]{0,-1,2},null}));\n   }return b.toByteArray();\n  }catch(IOException e){throw new RuntimeException(e);}\n }\n', 'backend-test': 'import java.util.*;\nclass Test{\n static int checks;\n static void need(boolean b,String s){if(!b)throw new AssertionError(s);checks++;System.out.println("ARCHIVE_CHECK "+s);}\n interface Action{void run()throws Exception;}\n static void refuse(Class<?>type,Action a,String label)throws Exception{\n  try{a.run();}catch(Exception e){need(type.isInstance(e),label);return;}throw new AssertionError(label);\n }\n static void same(AppDatabase h,byte[]before,String label){need(Arrays.equals(before,AppDatabase.noteDeletionState(h.sql)),label);}\n public static void main(String[]args)throws Exception{\n  AppDatabase h=new AppDatabase();byte[]before=AppDatabase.noteDeletionState(h.sql);\n  var p=h.prepareActivityArchive(10,true);\n  need(p.activityId()==10&&p.title().equals("Same")&&!p.wasArchived()&&p.willArchive(),"preview_identity");\n  same(h,before,"prepare_readonly");System.out.println("ARCHIVE_VALID_WITNESS");\n  var expected=h.sql.copy();expected.archived=1;expected.rev++;\n  need(h.confirmActivityArchive(p)&&Arrays.equals(AppDatabase.noteDeletionState(expected),AppDatabase.noteDeletionState(h.sql)),"archive_exact");\n  refuse(IllegalStateException.class,()->h.confirmActivityArchive(p),"duplicate");\n  before=AppDatabase.noteDeletionState(h.sql);\n  need(!h.confirmActivityArchive(h.prepareActivityArchive(10,true)),"same_result");same(h,before,"same_readonly");\n  expected=h.sql.copy();expected.archived=0;expected.rev++;\n  need(h.confirmActivityArchive(h.prepareActivityArchive(10,false))&&Arrays.equals(AppDatabase.noteDeletionState(expected),AppDatabase.noteDeletionState(h.sql)),"restore_exact");\n  final var canceled=h.prepareActivityArchive(10,true);canceled.close();before=AppDatabase.noteDeletionState(h.sql);\n  refuse(IllegalStateException.class,()->h.confirmActivityArchive(canceled),"cancel");same(h,before,"cancel_readonly");\n  final var stale=h.prepareActivityArchive(10,false);h.sql.external++;\n  before=AppDatabase.noteDeletionState(h.sql);refuse(IllegalStateException.class,()->h.confirmActivityArchive(stale),"stale_same");same(h,before,"stale_readonly");\n  final var session=h.prepareActivityArchive(10,true);h.restoreSession=new Object();\n  refuse(IllegalStateException.class,()->h.confirmActivityArchive(session),"session");\n  final var connection=h.prepareActivityArchive(10,true);h.sql=h.sql.copy();\n  refuse(IllegalStateException.class,()->h.confirmActivityArchive(connection),"connection");\n  final var closed=h.prepareActivityArchive(10,true);h.sql.open=false;\n  refuse(IllegalStateException.class,()->h.confirmActivityArchive(closed),"closed");h.sql.open=true;\n  final var foreign=h.prepareActivityArchive(10,true);\n  refuse(IllegalArgumentException.class,()->new AppDatabase().confirmActivityArchive(foreign),"foreign");\n  need(h.confirmActivityArchive(foreign),"foreign_retains_owner");\n  final var fault=h.prepareActivityArchive(10,false);h.sql.fault=true;before=AppDatabase.noteDeletionState(h.sql);\n  refuse(IllegalStateException.class,()->h.confirmActivityArchive(fault),"late_fault");same(h,before,"late_rollback");h.sql.fault=false;\n  refuse(IllegalStateException.class,()->h.confirmActivityArchive(fault),"failure_consumed");\n  final var corrupt=h.prepareActivityArchive(10,false);h.sql.corrupt=true;before=AppDatabase.noteDeletionState(h.sql);\n  refuse(IllegalStateException.class,()->h.confirmActivityArchive(corrupt),"readback");same(h,before,"readback_rollback");h.sql.corrupt=false;\n  final var missingWrite=h.prepareActivityArchive(10,false);h.sql.noWrite=true;before=AppDatabase.noteDeletionState(h.sql);\n  refuse(IllegalStateException.class,()->h.confirmActivityArchive(missingWrite),"missing_write");same(h,before,"missing_write_rollback");h.sql.noWrite=false;\n  final var wrong=h.prepareActivityArchive(10,false);h.sql.wrongOwner=true;before=AppDatabase.noteDeletionState(h.sql);\n  refuse(IllegalStateException.class,()->h.confirmActivityArchive(wrong),"wrong_owner");same(h,before,"wrong_owner_rollback");h.sql.wrongOwner=false;\n  final var outer=h.prepareActivityArchive(10,false);h.sql.outer=true;\n  refuse(IllegalStateException.class,()->h.confirmActivityArchive(outer),"outer");\n  refuse(IllegalStateException.class,()->h.prepareActivityArchive(10,true),"prepare_outer");h.sql.outer=false;\n  refuse(IllegalStateException.class,()->h.confirmActivityArchive(outer),"outer_consumed");\n  refuse(IllegalArgumentException.class,()->h.prepareActivityArchive(11,true),"missing");\n  refuse(IllegalArgumentException.class,()->h.prepareActivityArchive(0,true),"invalid_id");\n  refuse(IllegalArgumentException.class,()->h.confirmActivityArchive(null),"null_plan");\n  h.sql.rev=Long.MAX_VALUE;final var overflow=h.prepareActivityArchive(10,false);before=AppDatabase.noteDeletionState(h.sql);\n  refuse(ArithmeticException.class,()->h.confirmActivityArchive(overflow),"overflow");same(h,before,"overflow_readonly");\n  System.out.println("ARCHIVE_BACKEND_PASS "+checks+" EXPLICIT_SQL_DOUBLES_NOT_ANDROID");\n }\n}\n', 'ui-db': 'package com.supercubegame.pockettodo;\nclass AppDatabase{\n boolean archived,fail;int writes,attempts,external;ActivityArchivePlan last;\n static class ActivityArchivePlan implements AutoCloseable{\n  boolean terminal,archived,target;int external;\n  public void close(){terminal=true;}long activityId(){return 10;}String title(){return "Same";}\n  boolean wasArchived(){return archived;}boolean willArchive(){return target;}\n }\n ActivityArchivePlan prepareActivityArchive(long id,boolean target){\n  if(id!=10)throw new AssertionError("wrong owner");\n  last=new ActivityArchivePlan();last.archived=archived;last.target=target;last.external=external;return last;\n }\n boolean confirmActivityArchive(ActivityArchivePlan p){\n  attempts++;if(p.terminal)throw new IllegalStateException();p.close();\n  if(fail||p.external!=external)throw new IllegalStateException();\n  if(archived==p.target)return false;archived=p.target;writes++;return true;\n }\n}\n', 'ui-test': 'package com.supercubegame.pockettodo;\nimport android.view.View;import android.widget.*;\nclass Test{\n static int checks;\n static void need(boolean b,String s){if(!b)throw new AssertionError(s);checks++;System.out.println("ARCHIVE_UI_CHECK "+s);}\n static View open(TodayScreen h,boolean archived){\n  h.db.archived=archived;View anchor=new View();h.outer.addView(anchor);\n  new ArchiveAction(h,10,"Same",archived,h::content).open(anchor);h.drain();return h.one("archive-confirm");\n }\n public static void main(String[]args){\n  TodayScreen h=new TodayScreen();View confirm=open(h,false);\n  need(((TextView)h.one("archive-identity")).text.contains("#10")&&((TextView)h.one("archive-impact")).text.contains("保留")&&h.db.writes==0,"preview");\n  System.out.println("ARCHIVE_UI_VALID_WITNESS");\n  confirm.performClick();confirm.performClick();need(h.queue.size()==1,"pending_once");h.drain();\n  need(h.db.archived&&h.db.writes==1,"archive");confirm.performClick();need(h.queue.isEmpty(),"old_callback");\n  h=new TodayScreen();confirm=open(h,true);need(((TextView)confirm).text.equals("确认恢复活动"),"restore_preview");\n  confirm.performClick();h.drain();need(!h.db.archived&&h.db.writes==1,"restore");\n  h=new TodayScreen();confirm=open(h,false);h.one("archive-cancel").performClick();confirm.performClick();h.drain();\n  need(h.db.writes==0&&h.db.last.terminal,"cancel");\n  h=new TodayScreen();confirm=open(h,false);h.content();confirm.performClick();h.drain();\n  need(h.db.writes==0&&h.db.last.terminal,"detached");\n  h=new TodayScreen();confirm=open(h,false);confirm.performClick();h.content();h.drain();\n  need(h.db.writes==0&&h.db.last.terminal,"queued_detached");\n  h=new TodayScreen();confirm=open(h,false);h.db.external++;confirm.performClick();h.drain();\n  need(h.db.writes==0&&!confirm.isEnabled()&&h.one("archive-cancel").isEnabled()&&!((TextView)h.one("archive-validation")).text.isEmpty(),"stale");\n  confirm.performClick();h.drain();need(h.db.attempts==1,"failure_terminal");\n  h=new TodayScreen();confirm=open(h,false);h.db.fail=true;confirm.performClick();h.drain();\n  need(h.db.writes==0&&h.db.last.terminal&&h.one("archive-cancel").isEnabled(),"late_failure");\n  h=new TodayScreen();View a=new View();h.outer.addView(a);\n  new ArchiveAction(h,10,"Wrong",false,h::content).open(a);h.drain();\n  need(h.db.last.terminal&&h.outer.find("archive-confirm")==null,"stale_title");\n  h=new TodayScreen();a=new View();h.outer.addView(a);h.db.archived=true;\n  new ArchiveAction(h,10,"Same",false,h::content).open(a);h.drain();\n  need(h.db.last.terminal&&h.outer.find("archive-confirm")==null,"stale_state");\n  h=new TodayScreen();a=new View();h.outer.addView(a);\n  ArchiveAction action=new ArchiveAction(h,10,"Same",false,h::content);action.open(a);action.open(a);\n  need(h.queue.size()==1,"open_once");h.content();h.drain();\n  need(h.db.last.terminal&&h.outer.find("archive-confirm")==null,"prepare_detached");\n  h=new TodayScreen();confirm=open(h,false);h.activity.destroyed=true;confirm.performClick();h.drain();need(h.db.writes==0,"destroyed");\n  h=new TodayScreen();a=new View();h.outer.addView(a);a.setEnabled(false);\n  new ArchiveAction(h,10,"Same",false,h::content).open(a);need(h.queue.isEmpty(),"disabled_anchor");\n  System.out.println("ARCHIVE_UI_PASS "+checks+" HOST_WIDGET_DOUBLES_NOT_DEVICE");\n }\n}\n', 'ui-fixtures': {'android/view/View.java': 'package android.view;\nimport java.util.*;\npublic class View {\n public boolean attached,enabled=true;public String description="";\n public List<View> children=new ArrayList<>();\n public interface OnClickListener{void onClick(View v);}\n public interface OnAttachStateChangeListener{void onViewAttachedToWindow(View v);void onViewDetachedFromWindow(View v);}\n public OnClickListener click;public List<OnAttachStateChangeListener> listeners=new ArrayList<>();\n public boolean isAttachedToWindow(){return attached;}public boolean isEnabled(){return enabled;}\n public void setEnabled(boolean b){enabled=b;}public void setContentDescription(String s){description=s;}\n public void setOnClickListener(OnClickListener l){click=l;}\n public boolean performClick(){if(click==null)return false;click.onClick(this);return true;}\n public void addOnAttachStateChangeListener(OnAttachStateChangeListener l){listeners.add(l);}\n public void attach(boolean yes){attached=yes;for(View v:new ArrayList<>(children))v.attach(yes);for(OnAttachStateChangeListener l:listeners){if(yes)l.onViewAttachedToWindow(this);else l.onViewDetachedFromWindow(this);}}\n public void setPadding(int a,int b,int c,int d){}public void setBackground(Object o){}\n public View find(String s){if(description.equals(s))return this;for(View v:children){View x=v.find(s);if(x!=null)return x;}return null;}\n}', 'android/widget/LinearLayout.java': 'package android.widget;import android.view.View;\npublic class LinearLayout extends View{\n public LinearLayout(Object c){} public static class LayoutParams{public LayoutParams(int a,int b){}public LayoutParams(int a,int b,int c){}}\n public void addView(View v){children.add(v);if(attached)v.attach(true);}\n public void addView(View v,LayoutParams p){addView(v);}\n public void removeAllViews(){for(View v:children)v.attach(false);children.clear();}\n}', 'android/widget/TextView.java': 'package android.widget;import android.view.View;\npublic class TextView extends View{public String text="";public TextView(Object c){}public void setText(String s){text=s;}public CharSequence getText(){return text;}}', 'android/widget/EditText.java': 'package android.widget;public class EditText extends TextView{public EditText(Object c){super(c);}public void setHint(String s){}}', 'android/widget/Button.java': 'package android.widget;public class Button extends TextView{public Button(Object c){super(c);}}', 'android/widget/ScrollView.java': 'package android.widget;public class ScrollView extends LinearLayout{public ScrollView(Object c){super(c);}public void setFillViewport(boolean b){}}', 'android/database/Cursor.java': 'package android.database;import java.util.*;\npublic class Cursor implements AutoCloseable{\n List<Object[]>rows;int i=-1;public Cursor(List<Object[]>r){rows=r;}\n public boolean moveToNext(){return ++i<rows.size();}public boolean moveToFirst(){i=0;return !rows.isEmpty();}\n public long getLong(int c){return((Number)rows.get(i)[c]).longValue();}public String getString(int c){return(String)rows.get(i)[c];}\n public boolean isNull(int c){return rows.get(i)[c]==null;}public void close(){}\n}', 'com/supercubegame/pockettodo/TodayScreen.java': 'package com.supercubegame.pockettodo;\nimport android.view.View;import android.widget.*;import java.util.*;import java.util.concurrent.Callable;import java.util.function.Consumer;\nclass TodayScreen{\n static final int INK=1,MUTED=2,ERROR=3,WHITE=4;\n static class Activity{boolean finishing,destroyed;boolean isFinishing(){return finishing;}boolean isDestroyed(){return destroyed;}}\n Activity activity=new Activity();AppDatabase db=new AppDatabase();LinearLayout outer=new LinearLayout(activity);\n ArrayDeque<Runnable> queue=new ArrayDeque<>();boolean busy;String message;\n TodayScreen(){outer.attach(true);}\n <T>void work(Callable<T>a,Consumer<T>s,Runnable f){\n  if(busy)throw new AssertionError("unexpected concurrent work");busy=true;\n  queue.add(()->{T x;try{x=a.call();}catch(Exception e){busy=false;if(f!=null)f.run();return;}busy=false;s.accept(x);});\n }\n void drain(){int n=0;while(!queue.isEmpty()){if(++n>20)throw new AssertionError("queue cycle");queue.remove().run();}}\n LinearLayout content(){outer.removeAllViews();return outer;}LinearLayout column(){return new LinearLayout(activity);}\n TextView text(String s,int size,int color){TextView v=new TextView(activity);v.setText(s);return v;}\n EditText field(String key,boolean multi){EditText v=new EditText(activity);v.setContentDescription(key);return v;}\n Button button(String s,Runnable r){Button v=new Button(activity);v.setText(s);v.setOnClickListener(w->{if(!busy)r.run();});return v;}\n int dp(int n){return n;}Object shape(int c,int r){return null;}\n void addRow(LinearLayout p,View v){p.addView(v);}void message(String s,boolean e){message=s;}\n View one(String s){View v=outer.find(s);if(v==null)throw new AssertionError("missing "+s);return v;}\n void text(String s,String v){((EditText)one(s)).setText(v);}\n}', 'com/supercubegame/pockettodo/AppDatabase.java': 'package com.supercubegame.pockettodo;\nimport android.database.Cursor;import java.util.*;\nclass AppDatabase{\n TreeMap<Long,String[]>apps=new TreeMap<>();int writes,links,attempts;boolean fail,failRead;\n class SQL{Cursor rawQuery(String q,String[]args){\n  List<Object[]>r=new ArrayList<>();if(q.equals("SELECT MAX(id) FROM applications"))r.add(new Object[]{apps.isEmpty()?null:apps.lastKey()});\n  else if(q.equals("SELECT id,name,package_name FROM applications ORDER BY id")){if(failRead)throw new IllegalStateException("read failed");for(Map.Entry<Long,String[]>e:apps.entrySet())r.add(new Object[]{e.getKey(),e.getValue()[0],e.getValue()[1]});}\n  else throw new AssertionError(q);return new Cursor(r);\n }}\n SQL getReadableDatabase(){return new SQL();}\n void addApplication(long id,String name,String pkg){for(String[]a:apps.values())if(!pkg.isEmpty()&&a[1].equals(pkg))throw new IllegalArgumentException("duplicate");apps.put(id,new String[]{name,pkg});writes++;}\n static class ApplicationActivityPlan implements AutoCloseable{\n  long category,app;String name;boolean terminal;public void close(){terminal=true;}\n  long applicationId(){return app;}String categoryName(){return "Category";}String applicationName(){return name;}\n }\n ApplicationActivityPlan last;\n ApplicationActivityPlan prepareApplicationActivity(long c,long a){ApplicationActivityPlan p=new ApplicationActivityPlan();p.category=c;p.app=a;p.name=apps.get(a)[0];last=p;return p;}\n long confirmApplicationActivity(ApplicationActivityPlan p,String title){attempts++;if(p.terminal)throw new IllegalStateException();p.close();if(fail)throw new IllegalStateException("late");links++;writes++;return links;}\n}'}, 'backend-mutants': [('terminal=true;before=null;', ';', 'cancel'), ('if(!Arrays.equals(plan.before,noteDeletionState(db)))', 'if(false)', 'stale_same'), ('plan.session!=restoreSession', 'false', 'session'), ('connection!=plan.connection||!connection.isOpen()', '!connection.isOpen()', 'connection'), ('connection!=plan.connection||!connection.isOpen()', 'connection!=plan.connection', 'closed'), ('||!Arrays.equals(expected,noteDeletionState(db))', '||false', 'readback'), ('if(plan.archived==plan.target)return false;', 'if(false)return false;', 'same_result')], 'ui-mutants': [('@Override public void onViewDetachedFromWindow(android.view.View v){close();}', '@Override public void onViewDetachedFromWindow(android.view.View v){}', 'detached'), ('||!title.equals(p.title())', '', 'stale_title'), ('||p.wasArchived()!=archived', '', 'stale_state')]}
+    extract=r'''import javax.tools.*;import com.sun.source.util.*;import com.sun.source.tree.*;import java.nio.file.*;import java.util.*;
+class Extract{
+ public static void main(String[]a)throws Exception{
+  JavaCompiler c=ToolProvider.getSystemJavaCompiler();DiagnosticCollector<JavaFileObject>d=new DiagnosticCollector<>();
+  try(StandardJavaFileManager f=c.getStandardFileManager(d,null,null)){
+   JavacTask t=(JavacTask)c.getTask(null,f,d,Arrays.asList("-proc:none"),null,f.getJavaFileObjects(a[0]));
+   CompilationUnitTree u=t.parse().iterator().next();for(Diagnostic<?>e:d.getDiagnostics())if(e.getKind()==Diagnostic.Kind.ERROR)throw new AssertionError(e.toString());
+   String s=Files.readString(Path.of(a[0]));SourcePositions p=Trees.instance(t).getSourcePositions();
+   Set<String>w=new HashSet<>(Arrays.asList(a[2].split(",")));StringBuilder out=new StringBuilder();
+   for(Tree type:u.getTypeDecls())if(type instanceof ClassTree)for(Tree m:((ClassTree)type).getMembers()){
+    String n=m instanceof ClassTree?((ClassTree)m).getSimpleName().toString():m instanceof MethodTree?((MethodTree)m).getName().toString():"";
+    if(w.remove(n))out.append(s.substring((int)p.getStartPosition(u,m),(int)p.getEndPosition(u,m))).append("\n");
+   }
+   if(!w.isEmpty())throw new AssertionError("missing archive API "+w);Files.writeString(Path.of(a[1]),out.toString());
+  }
+ }
+}'''
+    with tempfile.TemporaryDirectory() as tmp:
+        p=Path(tmp);(p/"Extract.java").write_text(extract)
+        (p/"Compile.java").write_text('import javax.tools.*;class Compile{public static void main(String[]a){System.exit(ToolProvider.getSystemJavaCompiler().run(null,null,null,a));}}')
+        def members(file,names):
+            result=subprocess.run(["java",str(p/"Extract.java"),str(ROOT/"src/main/java/com/supercubegame/pockettodo"/file),str(p/"members"),names],capture_output=True,text=True,timeout=30)
+            assert result.returncode==0,(result.stdout,result.stderr)
+            return (p/"members").read_text()
+        backend=members("AppDatabase.java","ActivityArchivePlan,prepareActivityArchive,confirmActivityArchive,activityArchiveExpected")
+        ui=members("ActivitiesScreen.java","ArchiveAction")
+        def execute(code,kind):
+            target=p/kind;target.mkdir(exist_ok=True)
+            if kind=="BACKEND":
+                files={"AppDatabase.java":assets["prelude"]+code+"\n}\n","Test.java":assets["backend-test"]}
+                entry="Test"
+            else:
+                files=dict(assets["ui-fixtures"])
+                files["com/supercubegame/pockettodo/AppDatabase.java"]=assets["ui-db"]
+                files["com/supercubegame/pockettodo/ArchiveAction.java"]="package com.supercubegame.pockettodo;import android.widget.*;\n"+code.replace("private static final class ArchiveAction","final class ArchiveAction",1)
+                files["com/supercubegame/pockettodo/Test.java"]=assets["ui-test"]
+                entry="com.supercubegame.pockettodo.Test"
+            for name,text in files.items():
+                f=target/name;f.parent.mkdir(parents=True,exist_ok=True);f.write_text(text)
+            compiled=subprocess.run(["java",str(p/"Compile.java"),"-d",str(target)]+[str(target/n) for n in files],capture_output=True,text=True,timeout=30)
+            assert compiled.returncode==0,("archive host compile",compiled.stdout,compiled.stderr)
+            return subprocess.run(["java","-cp",str(target),entry],capture_output=True,text=True,timeout=30)
+        for kind,code,count,mutants in [
+            ("BACKEND",backend,33,assets["backend-mutants"]),
+            ("UI",ui,18,assets["ui-mutants"])
+        ]:
+            result=execute(code,kind);assert result.returncode==0,(result.stdout,result.stderr)
+            prefix="ARCHIVE_CHECK " if kind=="BACKEND" else "ARCHIVE_UI_CHECK "
+            labels=[l[len(prefix):] for l in result.stdout.splitlines() if l.startswith(prefix)]
+            assert len(labels)==count and len(set(labels))==count,(kind,labels)
+            print(result.stdout.strip(),flush=True)
+            witness="ARCHIVE_VALID_WITNESS" if kind=="BACKEND" else "ARCHIVE_UI_VALID_WITNESS"
+            for old,new,label in mutants:
+                assert code.count(old)==1,(kind,"mutation anchor",old)
+                result=execute(code.replace(old,new),kind)
+                assert result.returncode!=0 and witness in result.stdout and "AssertionError: "+label in result.stderr,(kind,label,result.stdout,result.stderr)
+                print("ARCHIVE_MUTANT_REJECTED "+kind+" "+label,flush=True)
+        print("ARCHIVE_HOST backend=33 ui=18 witnessed_mutants=10 PASS; actual extracted Java, SQL/widget doubles",flush=True)
 
 
 if __name__ == "__main__":

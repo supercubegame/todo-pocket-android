@@ -17,7 +17,7 @@ import java.util.List;
 public final class ActivitiesScreen {
     private final TodayScreen host;
     long selected;
-    private boolean backupPanel, historyPanel;
+    private boolean backupPanel, historyPanel, archivePanel;
     private static final ZoneId CN=ZoneId.of("Asia/Shanghai");
     ActivitiesScreen(TodayScreen host){this.host=host;}
     private static final class Item {
@@ -32,8 +32,8 @@ public final class ActivitiesScreen {
         final String id,title,text;
         NoteSummary(String id,String title,String text){this.id=id;this.title=title;this.text=text;}
     }
-    private static final class Detail {String title,status;List<String> path,tags;LocalDate day;final List<NoteSummary> notes=new ArrayList<>();}
-    void load(){if(categorySession!=null)categorySession.alive=false;if(backupPanel)renderBackup();else if(selected==0)loadCategories();else if(historyPanel)loadHistory(selected);else loadDetail(selected);}
+    private static final class Detail {String title,status;boolean archived;List<String> path,tags;LocalDate day;List<String> history=new ArrayList<>();final List<NoteSummary> notes=new ArrayList<>();}
+    void load(){if(categorySession!=null)categorySession.alive=false;if(backupPanel)renderBackup();else if(selected==0){if(archivePanel)loadArchivedActivities();else loadCategories();}else if(historyPanel)loadHistory(selected);else loadDetail(selected);}
     private long nextId(String table){
         // Only fixed internal table names, and one UI writer on the shared executor.
         if(!table.equals("categories")&&!table.equals("activities"))throw new IllegalArgumentException();
@@ -58,7 +58,9 @@ public final class ActivitiesScreen {
         LinearLayout top=new LinearLayout(host.activity);
         top.addView(host.button("新建分类",()->host.editor("新建分类","分类名称","",false,value->host.db.addCategory(nextId("categories"),value),this::load)),new LinearLayout.LayoutParams(0,host.dp(48),1));
         top.addView(host.button("备份 / 恢复",()->{backupPanel=true;load();}),new LinearLayout.LayoutParams(0,host.dp(48),1));
-        top.addView(host.button("应用目录",()->{if(categoryCurrent(session,top))new AppCatalog(host,0,this::load).open(top);}),new LinearLayout.LayoutParams(0,host.dp(48),1));body.addView(top);
+        top.addView(host.button("应用目录",()->{if(categoryCurrent(session,top))new AppCatalog(host,0,this::load).open(top);}),new LinearLayout.LayoutParams(0,host.dp(48),1));
+        Button archived=host.button("已归档",()->{archivePanel=true;historyPanel=false;load();});
+        archived.setContentDescription("archived-activities");top.addView(archived,new LinearLayout.LayoutParams(0,host.dp(48),1));body.addView(top);
         ScrollView scroll=new ScrollView(host.activity);LinearLayout list=host.column();scroll.addView(list);body.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         if(categories.isEmpty()){TextView empty=host.text("建一个自己的分类。\n例如：每日打卡、农场、提现。",18,TodayScreen.MUTED);empty.setPadding(0,host.dp(24),0,0);list.addView(empty);}
         for(int index=0;index<categories.size();index++){
@@ -91,7 +93,7 @@ public final class ActivitiesScreen {
     private CategorySession categorySession;
     private boolean categoryCurrent(CategorySession session,android.view.View anchor){
         return categorySession==session&&session.alive&&!session.submitted&&selected==0&&!backupPanel
-            &&anchor.isAttachedToWindow()&&anchor.isEnabled()
+            &&!archivePanel&&anchor.isAttachedToWindow()&&anchor.isEnabled()
             &&!host.activity.isFinishing()&&!host.activity.isDestroyed();
     }
     private void moveCategory(long id,int position,CategorySession session,android.view.View anchor){
@@ -180,7 +182,7 @@ public final class ActivitiesScreen {
                 sql.beginTransaction();
                 try{
                     Detail d=new Detail();
-                    try(Cursor c=sql.rawQuery("SELECT title FROM activities WHERE id=?",new String[]{Long.toString(id)})){if(!c.moveToFirst())throw new IllegalArgumentException("活动不存在");d.title=c.getString(0);}
+                    try(Cursor c=sql.rawQuery("SELECT title,archived FROM activities WHERE id=?",new String[]{Long.toString(id)})){if(!c.moveToFirst())throw new IllegalArgumentException("活动不存在");d.title=c.getString(0);d.archived=c.getLong(1)==1;}
                     d.path=host.db.path(id);d.tags=host.db.tags(id);d.day=LocalDate.now(CN);d.status="未记录";
                     for(CalendarRules.Mark mark:host.db.marks(id))if(mark.date.equals(d.day))d.status=mark.status==CalendarRules.Status.DONE?"已完成":"已跳过";
                     try(Cursor c=sql.rawQuery("SELECT id,title FROM notes WHERE activity_id=? ORDER BY rowid",new String[]{Long.toString(id)})){
@@ -189,14 +191,16 @@ public final class ActivitiesScreen {
                             d.notes.add(new NoteSummary(noteId,c.getString(1),NoteDocument.summary(host.db.noteBlocks(noteId))));
                         }
                     }
+                    if(d.archived)d.history=archiveHistory(sql,id);
                     sql.setTransactionSuccessful();return d;
                 }finally{sql.endTransaction();}
             }
         },d->renderDetail(id,d),null);
     }
     private void renderDetail(long id,Detail d){
+        if(d.archived){renderArchived(id,d);return;}
         LinearLayout body=host.content();LinearLayout toolbar=new LinearLayout(host.activity);
-        toolbar.addView(host.button("返回分类",()->{selected=0;load();}),new LinearLayout.LayoutParams(0,host.dp(48),1));
+        toolbar.addView(host.button("返回分类",()->{selected=0;archivePanel=false;historyPanel=false;load();}),new LinearLayout.LayoutParams(0,host.dp(48),1));
         toolbar.addView(host.button("日历账本",()->new CalendarScreen(host,id,d.title,this::load).load()),new LinearLayout.LayoutParams(0,host.dp(48),1));body.addView(toolbar);
         FieldScreen fields=new FieldScreen(host,id,this::load);
         Button fieldEntry=host.button("字段",()->{});fieldEntry.setContentDescription("activity-fields-"+id);
@@ -230,6 +234,9 @@ public final class ActivitiesScreen {
             preview.setMaxLines(2);preview.setPadding(0,0,0,host.dp(8));details.addView(preview);
             details.addView(noteOrderActions(id,shown,summary,i,actions));
         }
+        ArchiveAction archive=new ArchiveAction(host,id,d.title,false,this::load);
+        Button archiveEntry=host.button("归档活动",()->{});archiveEntry.setContentDescription("activity-archive-"+id);
+        archiveEntry.setOnClickListener(v->archive.open(archiveEntry));details.addView(archiveEntry,new LinearLayout.LayoutParams(-1,-2));
         details.addView(host.text("标签",20,TodayScreen.INK));
         TextView tagText=host.text(d.tags.isEmpty()?"还没有标签":String.join(" · ",d.tags),16,TodayScreen.MUTED);
         tagText.setContentDescription("activity-tags-"+id);details.addView(tagText);
@@ -381,7 +388,144 @@ public final class ActivitiesScreen {
         }
     }
 
-    private void loadHistory(long id){host.work(()->host.db.marks(id),marks->renderHistory(id,marks),null);}
+    private void loadArchivedActivities(){
+        host.work(()->{
+            List<Item> items=new ArrayList<>();
+            try(Cursor c=host.db.getReadableDatabase().rawQuery("SELECT id,category_id,title FROM activities WHERE archived=1 ORDER BY id",null)){
+                while(c.moveToNext())items.add(new Item(c));
+            }
+            return items;
+        },items->{
+            LinearLayout body=host.content();body.addView(host.text("已归档活动",24,TodayScreen.INK));
+            Button back=host.button("返回分类",()->{archivePanel=false;selected=0;historyPanel=false;load();});
+            back.setContentDescription("archive-list-back");body.addView(back);
+            ScrollView scroll=new ScrollView(host.activity);LinearLayout list=host.column();scroll.addView(list);body.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+            if(items.isEmpty())list.addView(host.text("没有已归档活动",18,TodayScreen.MUTED));
+            for(Item item:items){
+                Button open=host.button(item.title+" · #"+item.id,()->{selected=item.id;historyPanel=false;load();});
+                open.setContentDescription("archived-activity-"+item.id);list.addView(open,new LinearLayout.LayoutParams(-1,-2));
+            }
+        },null);
+    }
+    /** Fixed SELECTs only. No editor, image decoder, draft access or write API.
+     * Images are listed by immutable identity/caption, not opened or exported. */
+    private List<String> archiveHistory(android.database.sqlite.SQLiteDatabase sql,long id){
+        List<String> out=new ArrayList<>();String[] owner={Long.toString(id)};
+        try(Cursor c=sql.rawQuery("SELECT c.name,a.application_id FROM activities a JOIN categories c ON c.id=a.category_id WHERE a.id=?",owner)){
+            if(!c.moveToFirst())throw new IllegalArgumentException("活动不存在");
+            out.add("原分类："+c.getString(0)+"\n应用标识："+(c.isNull(1)?"无":Long.toString(c.getLong(1))));
+        }
+        for(CalendarRules.Mark mark:host.db.marks(id))
+            out.add("打卡："+mark.date+" · "+(mark.status==CalendarRules.Status.DONE?"已完成":"已跳过")+"\n"+mark.memo+"\n录入："+mark.recordedAt);
+        try(Cursor c=sql.rawQuery("SELECT day,kind,cents,memo,batch_id FROM ledger WHERE activity_id=? ORDER BY day,rowid",owner)){
+            while(c.moveToNext())out.add("账目："+c.getString(0)+" · "+c.getString(1)+" · "+c.getLong(2)+" 分\n"+c.getString(3)+"\n批次："+c.getString(4));
+        }
+        try(Cursor c=sql.rawQuery("SELECT f.name,f.type,v.value FROM field_values v JOIN fields f ON f.id=v.field_id WHERE v.activity_id=? ORDER BY f.rowid,v.position",owner)){
+            while(c.moveToNext())out.add("字段："+c.getString(0)+" · "+c.getString(1)+"\n"+c.getString(2));
+        }
+        try(Cursor notes=sql.rawQuery("SELECT n.id,n.title,f.name FROM notes n LEFT JOIN field_notes fn ON fn.note_id=n.id LEFT JOIN fields f ON f.id=fn.field_id WHERE n.activity_id=? ORDER BY n.rowid",owner)){
+            while(notes.moveToNext()){
+                String noteId=notes.getString(0);
+                out.add("笔记："+notes.getString(1)+"\n标识："+noteId+(notes.isNull(2)?"":"\n关联字段："+notes.getString(2)));
+                try(Cursor c=sql.rawQuery("SELECT kind,text,asset_id,caption,private FROM blocks WHERE note_id=? ORDER BY position",new String[]{noteId})){
+                    while(c.moveToNext()){
+                        String content=c.getString(0).equals("TEXT")?c.getString(1):"图片："+c.getString(2)+"\n"+c.getString(3);
+                        out.add((c.getLong(4)==0?"":"私密内容\n")+content);
+                    }
+                }
+            }
+        }
+        return out;
+    }
+    private void renderArchived(long id,Detail d){
+        LinearLayout body=host.content();body.addView(host.text("已归档 · 只读历史",24,TodayScreen.INK));
+        Button back=host.button("返回归档列表",()->{selected=0;historyPanel=false;archivePanel=true;load();});
+        back.setContentDescription("archive-detail-back");body.addView(back);
+        ArchiveAction action=new ArchiveAction(host,id,d.title,true,this::load);
+        Button restore=host.button("恢复活动",()->{});restore.setContentDescription("activity-restore-"+id);
+        restore.setOnClickListener(v->action.open(restore));body.addView(restore);
+        ScrollView scroll=new ScrollView(host.activity);LinearLayout rows=host.column();scroll.addView(rows);
+        body.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        rows.setContentDescription("archive-history-"+id);
+        rows.addView(host.text(d.title+" · #"+id,22,TodayScreen.INK));
+        rows.addView(host.text("此页不修改历史。图片只列出标识和说明，恢复活动后可进入原编辑界面查看。",14,TodayScreen.MUTED));
+        rows.addView(host.text("路径",20,TodayScreen.INK));
+        for(int i=0;i<d.path.size();i++)rows.addView(host.text((i+1)+". "+d.path.get(i),16,TodayScreen.INK));
+        rows.addView(host.text("标签："+String.join(" · ",d.tags),16,TodayScreen.INK));
+        for(String value:d.history){TextView line=host.text(value,16,TodayScreen.INK);line.setPadding(0,host.dp(8),0,host.dp(8));rows.addView(line);}
+    }
+
+    /** Preview is not a write. One explicit attempt, closed on page detachment. */
+    private static final class ArchiveAction {
+        private final TodayScreen host;
+        private final long id;
+        private final String title;
+        private final boolean archived;
+        private final Runnable back;
+        private AppDatabase.ActivityArchivePlan plan;
+        private LinearLayout root;
+        private boolean opening,alive,submitted;
+        ArchiveAction(TodayScreen host,long id,String title,boolean archived,Runnable back){
+            this.host=host;this.id=id;this.title=title;this.archived=archived;this.back=back;
+        }
+        private boolean active(){
+            return alive&&root!=null&&root.isAttachedToWindow()&&!host.activity.isFinishing()&&!host.activity.isDestroyed();
+        }
+        private void close(){alive=false;if(plan!=null){plan.close();plan=null;}}
+        void open(android.view.View anchor){
+            if(opening||!anchor.isAttachedToWindow()||!anchor.isEnabled()||host.activity.isFinishing()||host.activity.isDestroyed())return;
+            opening=true;
+            host.work(()->host.db.prepareActivityArchive(id,!archived),p->{
+                if(!anchor.isAttachedToWindow()||host.activity.isFinishing()||host.activity.isDestroyed()
+                    ||p.activityId()!=id||!title.equals(p.title())||p.wasArchived()!=archived||p.willArchive()==archived){
+                    p.close();host.message("活动状态已变化，请重新打开后确认。",true);return;
+                }
+                plan=p;render();
+            },()->host.message("未能读取归档预览，请重新进入活动。",true));
+        }
+        private void render(){
+            LinearLayout body=host.content();root=host.column();body.addView(root,new LinearLayout.LayoutParams(-1,-1));alive=true;
+            root.addOnAttachStateChangeListener(new android.view.View.OnAttachStateChangeListener(){
+                @Override public void onViewAttachedToWindow(android.view.View v){}
+                @Override public void onViewDetachedFromWindow(android.view.View v){close();}
+            });
+            root.addView(host.text(archived?"恢复活动":"归档活动",24,TodayScreen.INK));
+            ScrollView scroll=new ScrollView(host.activity);LinearLayout preview=host.column();scroll.addView(preview);
+            root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+            TextView identity=host.text(title+" · #"+id,18,TodayScreen.INK);identity.setContentDescription("archive-identity");preview.addView(identity);
+            TextView impact=host.text(archived
+                ?"恢复后重新出现在原分类，可继续记录。全部历史、路径、标签、字段、笔记、账目和图片保持不变。"
+                :"只归档这一项活动，从活动列表隐藏。全部历史、路径、标签、字段、笔记、账目和图片保留；应用目录记录不变。可在「已归档活动」只读查看历史，再明确恢复。",16,TodayScreen.MUTED);
+            impact.setContentDescription("archive-impact");preview.addView(impact);
+            TextView validation=host.text("",14,TodayScreen.ERROR);validation.setContentDescription("archive-validation");preview.addView(validation);
+            Button confirm=host.button(archived?"确认恢复活动":"确认归档活动",()->{});confirm.setContentDescription("archive-confirm");
+            Button cancel=host.button("取消",()->{});cancel.setContentDescription("archive-cancel");
+            cancel.setOnClickListener(v->{if(active()&&cancel.isEnabled()){close();back.run();}});
+            confirm.setOnClickListener(v->{
+                if(!active()||submitted||!confirm.isEnabled())return;
+                submitted=true;confirm.setEnabled(false);cancel.setEnabled(false);
+                final AppDatabase.ActivityArchivePlan attempt=plan;
+                host.work(()->host.db.confirmActivityArchive(attempt),changed->{
+                    boolean present=active();close();if(present)back.run();
+                },()->{
+                    attempt.close();
+                    if(active()){validation.setText("未能修改；内容可能已变化。请取消后重新预览。");cancel.setEnabled(true);}
+                });
+            });
+            root.addView(confirm,new LinearLayout.LayoutParams(-1,-2));
+            root.addView(cancel,new LinearLayout.LayoutParams(-1,-2));
+        }
+    }
+
+    private void loadHistory(long id){
+        host.work(()->{
+            try(Cursor c=host.db.getReadableDatabase().rawQuery("SELECT archived FROM activities WHERE id=?",new String[]{Long.toString(id)})){
+                if(!c.moveToFirst())throw new IllegalArgumentException("活动不存在");
+                if(c.getLong(0)==1)return (List<CalendarRules.Mark>)null;
+            }
+            return host.db.marks(id);
+        },marks->{if(marks==null){historyPanel=false;loadDetail(id);}else renderHistory(id,marks);},null);
+    }
     private void renderHistory(long id,List<CalendarRules.Mark> marks){
         LinearLayout body=host.content();body.addView(host.text("打卡记录",24,TodayScreen.INK));
         TextView note=host.text("记录的是哪一天，与哪天写下它分开保存。可以补记过去或改回未记录。",15,TodayScreen.MUTED);note.setPadding(0,host.dp(8),0,host.dp(16));body.addView(note);

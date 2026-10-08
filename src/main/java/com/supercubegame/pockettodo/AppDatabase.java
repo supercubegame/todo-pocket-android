@@ -437,6 +437,109 @@ public final class AppDatabase extends SQLiteOpenHelper {
         }catch(IOException e){throw new IllegalStateException("无法读取编辑预览",e);}
     }
 
+    /** One archive/restore attempt for an activity, never an application record.
+     * All history and relationships are retained. No schema/backup-format change
+     * or persistent concurrency-history token is introduced. */
+    public static final class ActivityArchivePlan implements AutoCloseable {
+        private final AppDatabase owner;
+        private final Object session;
+        private final SQLiteDatabase connection;
+        private final long activity;
+        private final String title;
+        private final boolean archived,target;
+        private byte[] before;
+        private boolean terminal;
+        private ActivityArchivePlan(AppDatabase owner,SQLiteDatabase connection,long activity,String title,
+                                    boolean archived,boolean target,byte[] before){
+            this.owner=owner;session=owner.restoreSession;this.connection=connection;
+            this.activity=activity;this.title=title;this.archived=archived;this.target=target;this.before=before;
+        }
+        public long activityId(){return activity;}
+        public String title(){return title;}
+        public boolean wasArchived(){return archived;}
+        public boolean willArchive(){return target;}
+        @Override public void close(){synchronized(owner){terminal=true;before=null;}}
+    }
+    public synchronized ActivityArchivePlan prepareActivityArchive(long activity,boolean target){
+        Ledger.positive(activity);
+        SQLiteDatabase db=getReadableDatabase();noteDeletionNoOuterTransaction(db);db.beginTransaction();
+        try{
+            String title;long archived;
+            try(Cursor c=db.rawQuery("SELECT title,archived FROM activities WHERE id=?",new String[]{Long.toString(activity)})){
+                if(!c.moveToFirst())throw new IllegalArgumentException("活动不存在");
+                title=c.getString(0);archived=c.getLong(1);
+                require(archived==0||archived==1,"活动归档状态无效");
+            }
+            ActivityArchivePlan plan=new ActivityArchivePlan(this,db,activity,title,archived==1,target,noteDeletionState(db));
+            db.setTransactionSuccessful();return plan;
+        }finally{db.endTransaction();}
+    }
+    public synchronized boolean confirmActivityArchive(ActivityArchivePlan plan){
+        if(plan==null||plan.owner!=this)throw new IllegalArgumentException("归档预览不属于当前数据库");
+        if(plan.terminal||plan.session!=restoreSession){plan.close();throw new IllegalStateException("归档预览已取消、使用或失效");}
+        plan.terminal=true;
+        try{
+            SQLiteDatabase connection=getWritableDatabase();noteDeletionNoOuterTransaction(connection);
+            if(connection!=plan.connection||!connection.isOpen())throw new IllegalStateException("数据库连接已变化");
+            return tx(db->{
+                if(!Arrays.equals(plan.before,noteDeletionState(db)))throw new IllegalStateException("本机内容已变化，请重新预览归档");
+                if(plan.archived==plan.target)return false;
+                long next=Math.incrementExact(revision(db));
+                byte[] expected=activityArchiveExpected(plan.before,plan.activity,plan.target,next);
+                db.execSQL("UPDATE activities SET archived=? WHERE id=? AND archived=?",
+                    new Object[]{plan.target?1:0,plan.activity,plan.archived?1:0});
+                if(bump(db)!=next||!Arrays.equals(expected,noteDeletionState(db)))
+                    throw new IllegalStateException("活动归档回读不一致，本次修改已回滚");
+                return true;
+            });
+        }finally{plan.close();}
+    }
+    /** Transform only one archived flag and the revision BEFORE any SQL write.
+     * All other typed cells, physical rowids, order and binary payloads stay exact. */
+    private static byte[] activityArchiveExpected(byte[] before,long activity,boolean archived,long next){
+        try{
+            DataInputStream in=new DataInputStream(new ByteArrayInputStream(before));
+            LimitedBytes bytes=new LimitedBytes();DataOutputStream out=new DataOutputStream(bytes);
+            int magic=in.readInt(),version=in.readInt(),count=in.readInt();
+            require(magic==0x4e444c31&&count==SNAPSHOT_TABLES.length,"归档预览格式无效");
+            out.writeInt(magic);out.writeInt(version);out.writeInt(count);
+            int matched=0,revisions=0;
+            for(String expectedTable:SNAPSHOT_TABLES){
+                String table=readText(in);require(table.equals(expectedTable),"归档预览表顺序无效");
+                int columns=in.readInt();require(columns>0&&columns<=in.available()/4,"归档预览列无效");
+                List<String> names=new ArrayList<>();for(int i=0;i<columns;i++)names.add(readText(in));
+                int size=in.readInt();require(size>=0&&size<=in.available()/columns,"归档预览行无效");
+                boolean act=table.equals("activities"),rev=table.equals("revision");
+                if(act)require(names.equals(Arrays.asList("id","id","category_id","application_id","title","archived")),"活动列已变化");
+                if(rev)require(names.equals(Arrays.asList("id","id","value"))&&size==1,"归档修订记录无效");
+                utf8(out,table);out.writeInt(columns);for(String column:names)utf8(out,column);out.writeInt(size);
+                for(int r=0;r<size;r++){
+                    Object[] row=new Object[columns];int[] tags=new int[columns];
+                    for(int i=0;i<columns;i++){
+                        int tag=in.readUnsignedByte();tags[i]=tag;
+                        if(tag==Cursor.FIELD_TYPE_INTEGER)row[i]=in.readLong();
+                        else if(tag==Cursor.FIELD_TYPE_STRING)row[i]=readText(in);
+                        else if(tag==Cursor.FIELD_TYPE_BLOB)row[i]=readBlob(in);
+                        else require(tag==Cursor.FIELD_TYPE_NULL,"归档预览值类型无效");
+                    }
+                    if(act&&Long.valueOf(activity).equals(row[1])){
+                        require(tags[5]==Cursor.FIELD_TYPE_INTEGER,"活动归档类型无效");
+                        row[5]=Long.valueOf(archived?1:0);matched++;
+                    }
+                    if(rev){require(tags[2]==Cursor.FIELD_TYPE_INTEGER,"归档修订类型无效");row[2]=next;revisions++;}
+                    for(int i=0;i<columns;i++){
+                        Object value=row[i];out.writeByte(tags[i]);
+                        if(value instanceof Long)out.writeLong((Long)value);
+                        else if(value instanceof String)utf8(out,(String)value);
+                        else if(value instanceof byte[])blob(out,(byte[])value);
+                    }
+                }
+            }
+            require(matched==1&&revisions==1&&in.available()==0,"归档预览不完整");
+            out.flush();return bytes.toByteArray();
+        }catch(IOException e){throw new IllegalStateException("无法读取归档预览",e);}
+    }
+
     private void orderedStrings(String table,long activity,List<String> values,boolean deduplicate){if(values==null)throw new IllegalArgumentException("缺少有序内容");List<String> clean=new ArrayList<>();for(String value:values){String s=text(value);if(!deduplicate||!clean.contains(s))clean.add(s);}tx(db->{exists(db,"activities",activity);db.delete(table,"activity_id=?",new String[]{Long.toString(activity)});for(int i=0;i<clean.size();i++)db.execSQL("INSERT INTO "+table+" VALUES(?,?,?)",new Object[]{activity,i,clean.get(i)});bump(db);return null;});}
     private List<String> orderedStrings(String table,long activity){SQLiteDatabase db=getReadableDatabase();exists(db,"activities",activity);List<String> out=new ArrayList<>();try(Cursor c=db.rawQuery("SELECT text FROM "+table+" WHERE activity_id=? ORDER BY position",new String[]{Long.toString(activity)})){while(c.moveToNext())out.add(c.getString(0));}return Collections.unmodifiableList(out);}
     public synchronized void savePath(long activity,List<String> steps){orderedStrings("paths",activity,steps,false);}

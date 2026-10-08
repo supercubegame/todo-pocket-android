@@ -223,6 +223,107 @@ public final class AppDatabase extends SQLiteOpenHelper {
             });
         }finally{plan.close();}
     }
+    /** One in-memory rename attempt, bound to this helper/session/connection.
+     * Existing schema and backup formats stay unchanged. Full typed-state equality
+     * refuses intervening edits, but is not a persistent concurrency-history log.
+     */
+    public static final class ApplicationRenamePlan implements AutoCloseable {
+        private final AppDatabase owner;
+        private final Object session;
+        private final SQLiteDatabase connection;
+        private final long application;
+        private final String name,packageName;
+        private byte[] before;
+        private boolean terminal;
+        private ApplicationRenamePlan(AppDatabase owner,SQLiteDatabase connection,long application,
+                                      String name,String packageName,byte[] before){
+            this.owner=owner;this.session=owner.restoreSession;this.connection=connection;
+            this.application=application;this.name=name;this.packageName=packageName;this.before=before;
+        }
+        public long applicationId(){return application;}
+        public String name(){return name;}
+        public String packageName(){return packageName;}
+        @Override public void close(){synchronized(owner){terminal=true;before=null;}}
+    }
+    public synchronized ApplicationRenamePlan prepareApplicationRename(long application){
+        Ledger.positive(application);
+        SQLiteDatabase db=getReadableDatabase();noteDeletionNoOuterTransaction(db);db.beginTransaction();
+        try{
+            String name,packageName;
+            try(Cursor c=db.rawQuery("SELECT name,package_name FROM applications WHERE id=?",new String[]{Long.toString(application)})){
+                if(!c.moveToFirst())throw new IllegalArgumentException("应用不存在");
+                name=c.getString(0);packageName=c.getString(1);
+            }
+            ApplicationRenamePlan plan=new ApplicationRenamePlan(this,db,application,name,packageName,noteDeletionState(db));
+            db.setTransactionSuccessful();return plan;
+        }finally{db.endTransaction();}
+    }
+    public synchronized boolean confirmApplicationRename(ApplicationRenamePlan plan,String name){
+        if(plan==null||plan.owner!=this)throw new IllegalArgumentException("改名预览不属于当前数据库");
+        if(plan.terminal||plan.session!=restoreSession){plan.close();throw new IllegalStateException("改名已取消、使用或失效，请重新打开");}
+        plan.terminal=true;
+        try{
+            String clean=text(name);
+            SQLiteDatabase connection=getWritableDatabase();noteDeletionNoOuterTransaction(connection);
+            if(connection!=plan.connection||!connection.isOpen())throw new IllegalStateException("数据库连接已变化，请重新打开改名");
+            return tx(db->{
+                if(!Arrays.equals(plan.before,noteDeletionState(db)))throw new IllegalStateException("本机内容已变化，请重新打开改名");
+                if(clean.equals(plan.name))return false;
+                long next=Math.incrementExact(revision(db));
+                byte[] expected=applicationRenameExpected(plan.before,plan.application,clean,next);
+                db.execSQL("UPDATE applications SET name=? WHERE id=?",new Object[]{clean,plan.application});
+                if(bump(db)!=next||!Arrays.equals(expected,noteDeletionState(db)))
+                    throw new IllegalStateException("应用改名回读不一致，本次修改已回滚");
+                return true;
+            });
+        }finally{plan.close();}
+    }
+    /** Transform the frozen pre-write snapshot, not SQL after the update.
+     * Only the selected name and revision may change; all typed cells and rowids,
+     * including same-name applications and every activity relationship, survive.
+     */
+    private static byte[] applicationRenameExpected(byte[] before,long application,String name,long next){
+        try{
+            DataInputStream in=new DataInputStream(new ByteArrayInputStream(before));
+            LimitedBytes bytes=new LimitedBytes();DataOutputStream out=new DataOutputStream(bytes);
+            int magic=in.readInt(),version=in.readInt(),count=in.readInt();
+            require(magic==0x4e444c31&&count==SNAPSHOT_TABLES.length,"应用改名预览格式无效");
+            out.writeInt(magic);out.writeInt(version);out.writeInt(count);
+            int matched=0,revisions=0;
+            for(String expectedTable:SNAPSHOT_TABLES){
+                String table=readText(in);require(table.equals(expectedTable),"应用改名预览表顺序无效");
+                int columns=in.readInt();require(columns>0&&columns<=in.available()/4,"应用改名预览列无效");
+                List<String> names=new ArrayList<>();for(int i=0;i<columns;i++)names.add(readText(in));
+                int size=in.readInt();require(size>=0&&size<=in.available()/columns,"应用改名预览行无效");
+                boolean app=table.equals("applications"),rev=table.equals("revision");
+                if(app)require(names.equals(Arrays.asList("id","id","name","package_name")),"应用目录列已变化");
+                if(rev)require(names.equals(Arrays.asList("id","id","value"))&&size==1,"应用改名修订记录无效");
+                utf8(out,table);out.writeInt(columns);for(String column:names)utf8(out,column);out.writeInt(size);
+                for(int r=0;r<size;r++){
+                    Object[] row=new Object[columns];int[] tags=new int[columns];
+                    for(int i=0;i<columns;i++){
+                        int tag=in.readUnsignedByte();tags[i]=tag;
+                        if(tag==Cursor.FIELD_TYPE_INTEGER)row[i]=in.readLong();
+                        else if(tag==Cursor.FIELD_TYPE_STRING)row[i]=readText(in);
+                        else if(tag==Cursor.FIELD_TYPE_BLOB)row[i]=readBlob(in);
+                        else require(tag==Cursor.FIELD_TYPE_NULL,"应用改名预览值类型无效");
+                    }
+                    if(app&&Long.valueOf(application).equals(row[1])){
+                        require(tags[2]==Cursor.FIELD_TYPE_STRING,"应用名称类型无效");row[2]=name;matched++;
+                    }
+                    if(rev){require(tags[2]==Cursor.FIELD_TYPE_INTEGER,"应用改名修订类型无效");row[2]=next;revisions++;}
+                    for(int i=0;i<columns;i++){
+                        Object value=row[i];out.writeByte(tags[i]);
+                        if(value instanceof Long)out.writeLong((Long)value);
+                        else if(value instanceof String)utf8(out,(String)value);
+                        else if(value instanceof byte[])blob(out,(byte[])value);
+                    }
+                }
+            }
+            require(matched==1&&revisions==1&&in.available()==0,"应用改名预览不完整");
+            out.flush();return bytes.toByteArray();
+        }catch(IOException e){throw new IllegalStateException("无法读取应用改名预览",e);}
+    }
     private void orderedStrings(String table,long activity,List<String> values,boolean deduplicate){if(values==null)throw new IllegalArgumentException("缺少有序内容");List<String> clean=new ArrayList<>();for(String value:values){String s=text(value);if(!deduplicate||!clean.contains(s))clean.add(s);}tx(db->{exists(db,"activities",activity);db.delete(table,"activity_id=?",new String[]{Long.toString(activity)});for(int i=0;i<clean.size();i++)db.execSQL("INSERT INTO "+table+" VALUES(?,?,?)",new Object[]{activity,i,clean.get(i)});bump(db);return null;});}
     private List<String> orderedStrings(String table,long activity){SQLiteDatabase db=getReadableDatabase();exists(db,"activities",activity);List<String> out=new ArrayList<>();try(Cursor c=db.rawQuery("SELECT text FROM "+table+" WHERE activity_id=? ORDER BY position",new String[]{Long.toString(activity)})){while(c.moveToNext())out.add(c.getString(0));}return Collections.unmodifiableList(out);}
     public synchronized void savePath(long activity,List<String> steps){orderedStrings("paths",activity,steps,false);}

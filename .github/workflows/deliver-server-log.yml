@@ -1,4 +1,4 @@
-name: Read saved server log delivery failure
+name: Authorized bounded server log delivery
 on:
   push:
     branches: [diagnostic/server-log-delivery-20261008]
@@ -9,220 +9,123 @@ concurrency:
   group: bounded-server-log-delivery-20261008
   cancel-in-progress: false
 jobs:
-  extract:
+  deliver:
     if: github.repository == 'supercubegame/todo-pocket-android' && github.ref == 'refs/heads/diagnostic/server-log-delivery-20261008'
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: write
-      actions: read
+    timeout-minutes: 15
     steps:
-      - name: Verify saved archive and publish isolated evidence only
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require actual tracer without retry
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v strace >/dev/null 2>&1; then
+            timeout 90s sudo apt-get -o Acquire::Retries=0 update
+            timeout 60s sudo apt-get -o Acquire::Retries=0 install --no-install-recommends -y strace
+          fi
+          strace --version
+      - name: Verify authorized credential on isolated ref before product submission
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.POCKET_DELIVERY_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
+          import ast
           import base64
           import hashlib
-          import io
-          import json
           import os
-          import re
-          import stat
-          import urllib.error
-          import urllib.parse
-          import urllib.request
-          import zipfile
+          from pathlib import Path
+          import subprocess
           
-          REPO = "supercubegame/todo-pocket-android"
-          RUN = 37712476544
           SOURCE = "81f448f28d072dfa2a98d1d79c732ce635895fca"
-          BASE = "0c4f5d8707a79d4b28ff4f8ed28b12ce659e04b8"
-          BRANCH = "diagnostic/server-log-delivery-20261008"
-          PRODUCT = "feature/v1.2-activity-notes-ledger"
-          NAME = "server-log-delivery-37712476544"
-          DIGEST = "fcb14f0d48ac415f2d1e41cb7e01b24f4edc53756dc4251ca531c8a5e25ca241"
-          REPORT = "reports/server-log-delivery-failure-37712476544.json"
+          PARENT = "2ae52bb0e3ab136ed380fb136f9717e84aae1158"
+          OLD_BLOB = "6d7656b5541a3af2db8e26e2eae0f73b17e328c1"
+          OLD_SHA256 = "07fade1a06ca4c8cdaf7699d6174f04cc32df963cd61f49b306dcd02aa0032ec"
+          WORKFLOW = ".github/workflows/deliver-server-log.yml"
           
-          def binding(run, artifact):
-              expected = dict(id=RUN, head_sha=SOURCE, head_branch=BRANCH, run_attempt=1,
-                              status="completed", conclusion="failure", event="push",
-                              path=".github/workflows/deliver-server-log.yml")
-              assert all(run.get(k) == v for k,v in expected.items()), "Run binding mismatch"
-              assert isinstance(run.get("repository"),dict)
-              assert run["repository"].get("full_name") == REPO
-              assert artifact.get("name") == NAME and artifact.get("expired") is False
-              assert artifact.get("digest") == "sha256:"+DIGEST
-              assert type(artifact.get("id")) is int and artifact["id"] > 0
-              assert type(artifact.get("size_in_bytes")) is int and 0 < artifact["size_in_bytes"] <= 1048576
-              assert isinstance(artifact.get("workflow_run"),dict)
-              assert artifact["workflow_run"].get("id") == RUN
-              assert artifact["workflow_run"].get("head_sha") == SOURCE
+          def build(data):
+              assert len(data) == 25341, "Historical delivery size mismatch"
+              assert hashlib.sha1(b"blob 25341\0"+data).hexdigest() == OLD_BLOB
+              assert hashlib.sha256(data).hexdigest() == OLD_SHA256
+              text = data.decode()
+              start = "          python3 - <<'PY'\n"
+              end = "          PY\n"
+              assert text.count(start) == text.count(end) == 1
+              lines = text.split(start)[1].split(end)[0].splitlines(True)
+              assert all(line.startswith("          ") for line in lines)
+              code = "".join(line[10:] for line in lines)
+              def replace(old, new):
+                  nonlocal code
+                  assert code.count(old) == 1, "Historical script boundary mismatch"
+                  code = code.replace(old,new,1)
+              replace('assert git("rev-parse",HEAD+"^")==BASE, "Unexpected bootstrap parent"',
+                      'assert git("rev-parse",HEAD+"^")=="'+PARENT+'", "Unexpected authorized bootstrap parent"')
+              replace('TOKEN = os.environ["GH_TOKEN"]',
+                      'TOKEN = os.environ["GH_TOKEN"]\nassert TOKEN.strip(), "POCKET_DELIVERY_TOKEN is missing; no fallback"\nAUTH = base64.b64encode(("x-access-token:"+TOKEN).encode()).decode()\nprint("::add-mask::"+TOKEN)\nprint("::add-mask::"+AUTH)')
+              replace('error=value.stderr.decode(errors="replace").replace(TOKEN,"[REDACTED]")',
+                      'error=value.stderr.decode(errors="replace").replace(TOKEN,"[REDACTED]").replace(AUTH,"[REDACTED]")')
+              replace('receipt["error"]=str(exc).replace(TOKEN,"[REDACTED]")[-4000:]',
+                      'receipt["error"]=str(exc).replace(TOKEN,"[REDACTED]").replace(AUTH,"[REDACTED]")[-4000:]')
+              replace('    raise\n', '    raise RuntimeError("Delivery stopped; inspect retained receipt") from None\n')
+              replace('assert "  workflow_dispatch:\\n" in header, "Existing CI dispatch unavailable"',
+                      'assert "  push:\\n    branches: [feature/v1.2-activity-notes-ledger]\\n" in header and "paths:" not in header and "paths-ignore:" not in header, "Existing CI push binding changed"')
+              left = "    def dispatch():\n"
+              right = "    sequence(check,probe_write,probe_verify,product_write,product_verify,dispatch)\n"
+              assert code.count(left)==code.count(right)==1
+              old = code.split(left)[1].split(right)[0]
+              replace(left+old, left+'''        # The authorized PAT push triggers existing workflows. Do not duplicate dispatch.
+                  receipt["ci"]={"trigger":"AUTHORIZED_PAT_PUSH","expected_commit":product,
+                                 "workflows":list(WORKFLOWS),"status":"EXPECTED_NOT_YET_OBSERVED"}
+                  receipt["status"]="SUBMITTED_REMOTE_VERIFIED_PUSH_CI_PENDING"
+                  save()
+          ''')
+              ast.parse(code)
+              assert "/dispatches" not in code
+              assert 'push(probe,BRANCH)' in code and 'push(product,PRODUCT)' in code
+              assert 'verify_remote(probe)' in code and 'verify_remote(product)' in code
+              return code
           
-          def exact_archive(data, size, digest):
-              assert len(data) == size and hashlib.sha256(data).hexdigest() == digest, "Archive identity mismatch"
+          def controls(data):
+              code = build(data)
+              for bad in (data[:-1],data+b"x",data.replace(b"timeout=30",b"timeout=31",1)):
+                  assert bad != data
+                  try:
+                      build(bad)
+                  except AssertionError:
+                      pass
+                  else:
+                      raise AssertionError("Corrupt historical source accepted")
+              exec(compile(code.split("# LOCAL_CONTROLS_END")[0],"<delivery-controls>","exec"),{})
+              # Raw and encoded credentials must both disappear from retained errors.
+              sentinel = "SENTINEL_NOT_A_REAL_SECRET"
+              auth = base64.b64encode(("x-access-token:"+sentinel).encode()).decode()
+              raw = "failure "+sentinel+" "+auth
+              redacted = raw.replace(sentinel,"[REDACTED]").replace(auth,"[REDACTED]")
+              assert sentinel not in redacted and auth not in redacted
+              print("AUTHORIZED_LOADER exact_source=1 corruptions=3 credential_redaction=2 PASS")
+              return code
           
-          def unpack(data):
-              assert 0 < len(data) <= 1048576
-              entries = []
-              with zipfile.ZipFile(io.BytesIO(data)) as z:
-                  rows = z.infolist()
-                  assert 0 < len(rows) <= 32
-                  names = [row.filename for row in rows]
-                  assert len(names) == len(set(names)), "Duplicate ZIP entry"
-                  assert "receipt.json" in names, "Missing receipt"
-                  assert sum(row.file_size for row in rows) <= 262144
-                  for row in rows:
-                      name = row.filename
-                      assert re.fullmatch(r"[A-Za-z0-9_.-]+",name) and name not in (".",".."), "Unsafe ZIP path"
-                      mode = row.external_attr >> 16
-                      assert not stat.S_ISLNK(mode) and not row.is_dir()
-                      assert not row.flag_bits & 1 and row.file_size <= 65536
-                      with z.open(row) as stream:
-                          content = stream.read(65537)
-                      assert len(content) == row.file_size and len(content) <= 65536
-                      item = dict(name=name, bytes=len(content), sha256=hashlib.sha256(content).hexdigest(),
-                                  truncated=False, base64=base64.b64encode(content).decode())
-                      try:
-                          item["text"] = content.decode("utf-8")
-                      except UnicodeDecodeError:
-                          item["text"] = None
-                      entries.append(item)
-              receipt = json.loads(next(row["text"] for row in entries if row["name"] == "receipt.json"))
-              expected = dict(run=str(RUN), bootstrap=SOURCE, base=BASE,
-                              diagnostic_branch=BRANCH, product_branch=PRODUCT)
-              assert all(receipt.get(k) == v for k,v in expected.items()), "Receipt binding mismatch"
-              return dict(receipt=receipt, entries=entries, complete_archive_entries=True)
-          
-          class NoRedirect(urllib.request.HTTPRedirectHandler):
-              def redirect_request(self, req, fp, code, msg, headers, newurl):
-                  return None
-          
-          def main():
-              assert os.environ["GITHUB_REPOSITORY"] == REPO
-              assert os.environ["GITHUB_REF"] == "refs/heads/"+BRANCH
-              assert os.environ["GITHUB_EVENT_NAME"] == "push"
+          if __name__ == "__main__":
+              assert os.environ["GITHUB_REPOSITORY"] == "supercubegame/todo-pocket-android"
+              assert os.environ["GITHUB_REF"] == "refs/heads/diagnostic/server-log-delivery-20261008"
               assert os.environ["GITHUB_RUN_ATTEMPT"] == "1"
-              head = os.environ["GITHUB_SHA"]
-              assert re.fullmatch("[0-9a-f]{40}",head) and head != SOURCE
-              token = os.environ["GH_TOKEN"]
-              opener = urllib.request.build_opener(NoRedirect())
-              def api(route, data=None, method=None, raw=False, limit=1048576):
-                  assert not route.startswith("/") and "://" not in route
-                  request = urllib.request.Request("https://api.github.com/repos/"+REPO+"/"+route,
-                      data=None if data is None else json.dumps(data).encode(), method=method,
-                      headers={"Authorization":"Bearer "+token,
-                               "Accept":"application/vnd.github.raw+json" if raw else "application/vnd.github+json",
-                               "X-GitHub-Api-Version":"2022-11-28"})
-                  with opener.open(request,timeout=30) as response:
-                      body=response.read(limit+1)
-                  assert len(body)<=limit, "API response overflow"
-                  return body if raw else json.loads(body)
-              def ref(branch):
-                  return api("git/ref/heads/"+branch)["object"]["sha"]
-              assert ref(BRANCH)==head and ref(PRODUCT)==BASE, "Unexpected branch state"
-              parent = api("git/commits/"+head)
-              assert [row["sha"] for row in parent["parents"]] == [SOURCE], "Extractor parent changed"
-              run = api("actions/runs/"+str(RUN))
-              listing = api("actions/runs/"+str(RUN)+"/artifacts?per_page=100")
-              assert listing["total_count"] == len(listing["artifacts"]) <= 100, "Artifact listing incomplete"
-              matches = [row for row in listing["artifacts"] if row["name"] == NAME]
-              assert len(matches)==1, "Expected exactly one artifact"
-              artifact = matches[0]
-              binding(run,artifact)
-              try:
-                  archive = api("actions/artifacts/"+str(artifact["id"])+"/zip",raw=True)
-              except urllib.error.HTTPError as exc:
-                  assert exc.code == 302, "Artifact download refused"
-                  location = exc.headers["Location"]
-                  parsed = urllib.parse.urlsplit(location)
-                  assert parsed.scheme=="https" and not parsed.username and not parsed.password and parsed.port in (None,443)
-                  assert parsed.hostname and (parsed.hostname.endswith(".blob.core.windows.net") or parsed.hostname.endswith(".githubusercontent.com"))
-                  # Signed download URL gets NO Authorization header and is never published.
-                  with opener.open(urllib.request.Request(location),timeout=30) as response:
-                      archive=response.read(1048577)
-              exact_archive(archive,artifact["size_in_bytes"],DIGEST)
-              extracted=unpack(archive)
-              report=dict(scope="FAILED_DELIVERY_EVIDENCE_NOT_PRODUCT_ACCEPTANCE",
-                          source_run=RUN,source_commit=SOURCE,artifact_name=NAME,
-                          artifact_id=artifact["id"],archive_bytes=len(archive),archive_sha256=DIGEST,
-                          extractor_commit=head,extractor_run=os.environ["GITHUB_RUN_ID"],
-                          product_head_before=BASE,product_write_attempted=False,
-                          delivery_retry=False,device_execution=False,release_ready=False,**extracted)
-              body=(json.dumps(report,indent=2,ensure_ascii=False)+"\n").encode()
-              assert len(body)<=1048576, "Report overflow; no truncation permitted"
-              assert token.encode() not in body, "Credential detected; refusing publication"
-              assert ref(BRANCH)==head and ref(PRODUCT)==BASE, "Concurrent branch change"
-              tree=api("git/trees",{"base_tree":parent["tree"]["sha"],"tree":[
-                  {"path":REPORT,"mode":"100644","type":"blob","content":body.decode()}]})
-              commit=api("git/commits",{"message":"ci: preserve verified failed delivery receipt without retry",
-                         "tree":tree["sha"],"parents":[head]})["sha"]
-              # Only this diagnostic ref can be written. No product push or Actions dispatch exists.
-              assert ref(BRANCH)==head
-              api("git/refs/heads/"+BRANCH,{"sha":commit,"force":False},method="PATCH")
-              actual=api("contents/"+REPORT+"?ref="+commit,raw=True,limit=len(body))
-              assert actual==body, "Immutable report readback mismatch"
-              assert ref(PRODUCT)==BASE, "Product head changed externally"
-              print("REPORT_EXACT_READBACK_PASS "+commit+" "+hashlib.sha256(body).hexdigest())
-              print("Receipt status: "+str(extracted["receipt"].get("status")))
-              print("Receipt failure: "+str(extracted["receipt"].get("error")))
-          
-          
-          import copy
-          from types import SimpleNamespace
-          m = SimpleNamespace(**globals())
-          def rejected(fn, *args):
-              try:
-                  fn(*args)
-              except (AssertionError, ValueError, KeyError, zipfile.BadZipFile):
-                  return
-              raise AssertionError("negative accepted")
-          
-          run = dict(id=m.RUN, head_sha=m.SOURCE, head_branch=m.BRANCH, run_attempt=1,
-                     status="completed", conclusion="failure", event="push",
-                     repository={"full_name":m.REPO}, path=".github/workflows/deliver-server-log.yml")
-          artifact = dict(id=123, name=m.NAME, expired=False, digest="sha256:"+m.DIGEST,
-                          size_in_bytes=100, workflow_run={"id":m.RUN,"head_sha":m.SOURCE})
-          m.binding(run, artifact)
-          negative = 0
-          for key in ("id","head_sha","head_branch","run_attempt","status","conclusion","event","path","repository"):
-              bad = copy.deepcopy(run); bad[key] = "wrong"
-              rejected(m.binding,bad,artifact); negative += 1
-          for key in ("id","name","expired","digest","size_in_bytes","workflow_run"):
-              bad = copy.deepcopy(artifact); bad[key] = "wrong"
-              rejected(m.binding,run,bad); negative += 1
-          receipt = dict(run=str(m.RUN),bootstrap=m.SOURCE,base=m.BASE,
-                         diagnostic_branch=m.BRANCH,product_branch=m.PRODUCT,
-                         status="STOPPED_NO_FALLBACK",error="test failure")
-          def archive(rows):
-              out = io.BytesIO()
-              with zipfile.ZipFile(out,"w",zipfile.ZIP_DEFLATED) as z:
-                  for name,data in rows:
-                      z.writestr(name,data)
-              return out.getvalue()
-          good = archive([("receipt.json",json.dumps(receipt)),("selftest.log","exact\n")])
-          result = m.unpack(good)
-          assert result["receipt"] == receipt
-          assert result["entries"][1]["text"] == "exact\n"
-          for rows in (
-              [("missing.log","x")],
-              [("../receipt.json","{}")],
-              [("/receipt.json","{}")],
-              [("receipt.json","{}")],
-              [("receipt.json",json.dumps(receipt)),("receipt.json",json.dumps(receipt))],
-              [("receipt.json",json.dumps(receipt)),("oversize.log","x"*65537)],
-          ):
-              rejected(m.unpack,archive(rows)); negative += 1
-          for key in ("run","bootstrap","base","diagnostic_branch","product_branch"):
-              bad = dict(receipt);bad[key]="wrong"
-              rejected(m.unpack,archive([("receipt.json",json.dumps(bad))]));negative+=1
-          m.exact_archive(good, len(good), hashlib.sha256(good).hexdigest())
-          for data,size,digest in ((good+b"x",len(good),hashlib.sha256(good).hexdigest()),
-                                   (good,len(good),"0"*64)):
-              rejected(m.exact_archive,data,size,digest);negative+=1
-          print("RECEIPT_EXTRACT positive=3 negative="+str(negative)+" PASS")
-          
-          main()
+              assert os.environ.get("GH_TOKEN","").strip(), "Required delivery Secret missing; no fallback"
+              source = subprocess.run(["git","show",SOURCE+":"+WORKFLOW],check=True,
+                                      stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=30).stdout
+              code = controls(source)
+              exec(compile(code,"<pinned-authorized-delivery>","exec"),{"__name__":"__main__"})
           PY
+      - name: Preserve exact delivery evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: server-log-authorized-delivery-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/server-log-delivery/receipt.json
+            ${{ runner.temp }}/server-log-delivery/*.log
+          if-no-files-found: warn

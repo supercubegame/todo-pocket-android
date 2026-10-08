@@ -15,253 +15,297 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Verify immutable reports and original artifact before isolated publication
+      - name: Add readable index with exact original report preservation
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import base64, copy, hashlib, io, json, os, re, urllib.request, urllib.error, urllib.parse, zipfile
-          REPO="supercubegame/todo-pocket-android"
-          BRANCH="diagnostic/extract-export-255-20261008"
-          PARENT="d21e531304729c0c98f4124b389b675a65e3bf28"
-          PRODUCT_BRANCH="feature/v1.2-activity-notes-ledger"
-          PRODUCT="f0354a13c8f739d8d082b01944aa74efffd6db52"
-          OUTPUT="reports/isolated-api34-ff6-f035-original-failures.json"
-          ARTIFACT=11556106491
-          ARTIFACT_SHA="968f71d63b380539385ba806be49f7ae4cd3685ab4195353cfa2f491544c1f65"
-          SPECS=[
-              dict(product="ff6a43c00e9abfe0f36740bdc4e02da81c9a239e",run="37777248696",
-                   source="1fad36f0b9e24fa2a501a1da3bde950517bebabf"),
-              dict(product=PRODUCT,run="37787550835",source="23b1b059dd8d5ec962351360e70442ddccac1b48")
+          cat > /tmp/readable_index.py <<'PY'
+          import copy, hashlib, json, os, re, urllib.request
+
+          REPO = "supercubegame/todo-pocket-android"
+          BRANCH = "diagnostic/extract-export-255-20261008"
+          PARENT = "d2b5eb7079b2997cf3c6eb093924d2b4aff2fb3d"
+          PRODUCT_BRANCH = "feature/v1.2-activity-notes-ledger"
+          PRODUCT = "f0354a13c8f739d8d082b01944aa74efffd6db52"
+          OUTPUT = "reports/isolated-api34-ff6-f035-original-failures.json"
+          SOURCE_BLOB = "b70aaacd0af1ccdc349064bf29a65e0c3b9c2e67"
+          PAIRS = [
+              ("ff6a43c00e9abfe0f36740bdc4e02da81c9a239e", "37777248696"),
+              (PRODUCT, "37787550835"),
           ]
-          
-          def digest(data):return hashlib.sha256(data).hexdigest()
-          def blob(data):return hashlib.sha1(b"blob "+str(len(data)).encode()+b"\0"+data).hexdigest()
-          def exact(data,meta,path):
-              assert meta["type"]=="file" and meta["path"]==path
-              assert 0<len(data)==meta["size"]<=8000000
-              assert blob(data)==meta["sha"],"source byte identity"
-          def canonical(value):return json.dumps(value,sort_keys=True,separators=(",",":")).encode()
-          
-          def extract(main,schema,spec):
-              for doc in (main,schema):
-                  assert doc["commit"]==spec["product"] and str(doc["run_id"])==spec["run"],"source binding"
-              native=main["ui"]["native"]["34"]
-              peer=schema["devices"]["34"]["default_ui"]["evidence"]
-              assert native["api"]==34 and type(native["api"]) is int
-              assert native["status"]=="FAIL" and isinstance(native["error"],str) and native["error"]
-              clean={k:v for k,v in native.items() if k!="published_screenshots"}
-              assert clean==peer,"independent published native disagreement"
-              return dict(product=spec["product"],run=spec["run"],api=34,
-                          failure=copy.deepcopy(clean),
-                          existing_published_device_result_and_log_tails=copy.deepcopy(main["ui"]["devices"]["34"]),
-                          native_json_sha256=digest(canonical(clean)),
-                          scope="Original native evidence and already-published tails, not complete job logs")
-          
-          def storage_url(url):
-              p=urllib.parse.urlsplit(url)
-              assert p.scheme=="https" and not p.username and not p.password and p.port in (None,443)
-              assert p.hostname and p.hostname.endswith(".blob.core.windows.net"),"untrusted storage redirect"
-              return url
-          
-          def artifact_check(data,meta,main,pinned=ARTIFACT_SHA):
-              assert meta["id"]==ARTIFACT and meta["name"]=="database-api-34" and meta["expired"] is False
-              assert meta["workflow_run"]["id"]==int(SPECS[1]["run"])
-              assert meta["workflow_run"]["head_sha"]==PRODUCT
-              assert 0<len(data)==meta["size_in_bytes"]<=8000000
-              assert meta["digest"]=="sha256:"+digest(data),"artifact digest"
-              if pinned is not None:assert digest(data)==pinned,"pinned artifact digest"
-              inventory={};files={}
-              with zipfile.ZipFile(io.BytesIO(data)) as z:
-                  entries=z.infolist()
-                  assert len(entries)<=300 and sum(x.file_size for x in entries)<=32000000
-                  for item in entries:
-                      name=item.filename
-                      assert name not in inventory and not name.startswith("/") and "\\" not in name
-                      assert all(part not in ("..","") for part in name.rstrip("/").split("/"))
-                      assert (item.external_attr>>16)&0o170000 != 0o120000,"zip symlink"
-                      assert not item.flag_bits&1 and item.file_size<=8000000
-                      raw=z.read(item)
-                      assert len(raw)==item.file_size
-                      inventory[name]=dict(bytes=len(raw),sha256=digest(raw))
-                      if name in ("native-ui/native-result.json","ui.log"):files[name]=raw
-              native=json.loads(files["native-ui/native-result.json"])
-              expected={k:v for k,v in main["ui"]["native"]["34"].items() if k!="published_screenshots"}
-              assert native==expected,"artifact versus published native"
-              log=files["ui.log"]
-              return dict(id=ARTIFACT,bytes=len(data),sha256=digest(data),inventory=inventory,
-                          native_equal_to_published=True,
-                          ui_log=log.decode("utf-8",errors="strict") if len(log)<=65536 else None,
-                          ui_log_scope="COMPLETE" if len(log)<=65536 else "NOT_EMBEDDED_SIZE; full original artifact retained; bytes/hash in inventory")
-          
+
+          def blob(data):
+              return hashlib.sha1(b"blob "+str(len(data)).encode()+b"\0"+data).hexdigest()
+
+          def sha(data):
+              return hashlib.sha256(data).hexdigest()
+
+          def canonical(value):
+              return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+
+          def unique(pairs):
+              result = {}
+              for key, value in pairs:
+                  assert key not in result, "duplicate JSON key"
+                  result[key] = value
+              return result
+
+          def decode(data):
+              return json.loads(data, object_pairs_hook=unique)
+
+          def source_check(raw, expected=SOURCE_BLOB):
+              assert 0 < len(raw) <= 900000 and blob(raw) == expected, "source blob mismatch"
+              assert raw.startswith(b"{") and raw.endswith(b"\n"), "source representation changed"
+              doc = decode(raw)
+              assert "readable_index" not in doc, "already indexed"
+              assert doc["status"] == "EXTRACTED_NOT_ROOT_CAUSE_OR_ACCEPTANCE"
+              assert doc["release_ready"] is False and doc["durable_upgrade_ready"] is False
+              failures = doc["failures"]
+              assert len(failures) == 2
+              for item, (product, run) in zip(failures, PAIRS):
+                  assert (item["product"], item["run"], item["api"]) == (product, run, 34), "failure binding"
+                  native = item["failure"]
+                  assert native["status"] == "FAIL" and type(native["api"]) is int and native["api"] == 34
+                  assert isinstance(native["error"], str) and native["error"]
+                  assert item["native_json_sha256"] == sha(canonical(native)), "native hash mismatch"
+              artifact = doc["artifact"]
+              assert artifact["id"] == 11556106491 and artifact["bytes"] == 667622
+              assert artifact["sha256"] == "968f71d63b380539385ba806be49f7ae4cd3685ab4195353cfa2f491544c1f65"
+              assert artifact["native_equal_to_published"] is True
+              assert len(doc["sources"]) == 4
+              return doc
+
+          def project(doc, raw):
+              rows = []
+              for item in doc["failures"]:
+                  native = item["failure"]
+                  row = {key: item[key] for key in ("product", "run", "api", "native_json_sha256")}
+                  for key in ("status", "error", "count", "traceback"):
+                      if key in native:
+                          value = native[key]
+                          assert isinstance(value, (str, int)) and not isinstance(value, bool)
+                          row[key] = value
+                  checks = native.get("checks", [])
+                  assert isinstance(checks, list)
+                  row["last_checks"] = checks[-8:]
+                  row["total_check_entries"] = len(checks)
+                  row["omitted_from_index_only"] = "Earlier checks and all trace payloads remain unchanged in full report"
+                  rows.append(row)
+              artifact = doc["artifact"]
+              index = dict(
+                  scope="Navigation aid only; original report fields and exact original byte suffix retained",
+                  original_commit=PARENT, original_blob=blob(raw), original_bytes=len(raw), original_sha256=sha(raw),
+                  failures=rows,
+                  artifact={key: artifact[key] for key in ("id", "bytes", "sha256", "native_equal_to_published", "ui_log_scope")},
+                  relevant_inventory={key: value for key, value in artifact["inventory"].items()
+                                      if key in ("ui.log", "native-ui/native-result.json") or key.endswith("failure.png")},
+              )
+              assert len(canonical(index)) <= 24000, "index overflow; refuse, do not truncate"
+              return index
+
+          def validate_output(original, encoded, index):
+              prefix = b'{"readable_index":' + json.dumps(index, ensure_ascii=True, separators=(",", ":")).encode() + b","
+              assert encoded.startswith(prefix), "index prefix"
+              assert b"{" + encoded[len(prefix):] == original, "original bytes altered"
+              result = decode(encoded)
+              recovered_index = result.pop("readable_index")
+              assert recovered_index == index and result == decode(original), "original fields altered"
+
+          def build(raw, expected=SOURCE_BLOB):
+              doc = source_check(raw, expected)
+              index = project(doc, raw)
+              encoded = b'{"readable_index":' + json.dumps(index, ensure_ascii=True, separators=(",", ":")).encode() + b"," + raw[1:]
+              assert len(encoded) <= 900000, "report overflow"
+              validate_output(raw, encoded, index)
+              return encoded
+
           class NoRedirect(urllib.request.HTTPRedirectHandler):
-              def redirect_request(self,*args,**kwargs):return None
-          
-          def execute():
-              assert os.environ["GITHUB_REPOSITORY"]==REPO
-              assert os.environ["GITHUB_REF"]=="refs/heads/"+BRANCH
-              assert os.environ["GITHUB_EVENT_NAME"]=="push" and os.environ["GITHUB_RUN_ATTEMPT"]=="1"
-              head=os.environ["GITHUB_SHA"];assert re.fullmatch("[0-9a-f]{40}",head)
-              opener=urllib.request.build_opener(NoRedirect())
-              def request(route,payload=None,raw_limit=None,method=None):
-                  assert not route.startswith("/") and "://" not in route and ".." not in route
-                  return urllib.request.Request("https://api.github.com/repos/"+REPO+"/"+route,
-                      data=None if payload is None else json.dumps(payload).encode(),method=method,
-                      headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],
-                               "Accept":"application/vnd.github.raw+json" if raw_limit is not None else "application/vnd.github+json"})
-              def api(route,payload=None,raw_limit=None,method=None):
-                  limit=2000000 if raw_limit is None else raw_limit
-                  with opener.open(request(route,payload,raw_limit,method),timeout=30) as r:data=r.read(limit+1)
-                  assert len(data)<=limit,"response overflow"
-                  return json.loads(data) if raw_limit is None else data
+              def redirect_request(self, *args, **kwargs):
+                  return None
+
+          def execute(api, env):
+              assert env["GITHUB_REPOSITORY"] == REPO and env["GITHUB_REF"] == "refs/heads/" + BRANCH
+              assert env["GITHUB_EVENT_NAME"] == "push" and env["GITHUB_RUN_ATTEMPT"] == "1"
+              head = env["GITHUB_SHA"]
+              assert re.fullmatch("[0-9a-f]{40}", head)
               def context():
-                  assert api("git/ref/heads/"+BRANCH)["object"]["sha"]==head,"diagnostic head changed"
-                  assert api("git/ref/heads/"+PRODUCT_BRANCH)["object"]["sha"]==PRODUCT,"product head changed"
+                  assert api("git/ref/heads/" + BRANCH)["object"]["sha"] == head, "diagnostic head changed"
+                  assert api("git/ref/heads/" + PRODUCT_BRANCH)["object"]["sha"] == PRODUCT, "product head changed"
               context()
-              commit=api("git/commits/"+head)
-              assert [p["sha"] for p in commit["parents"]]==[PARENT],"parent changed"
-              try:api("contents/"+OUTPUT+"?ref="+head)
-              except urllib.error.HTTPError as e:
-                  if e.code!=404:raise
-              else:raise AssertionError("never overwrite existing report")
-              reports=[];sources=[];latest=None
-              for spec in SPECS:
-                  docs={}
-                  for kind,prefix in (("main",""),("schema","schema3-")):
-                      path="reports/"+prefix+spec["product"]+"-"+spec["run"]+".json"
-                      route="contents/"+path+"?ref="+spec["source"]
-                      meta=api(route)
-                      assert type(meta["size"]) is int and 0<meta["size"]<=8000000
-                      raw=api(route,raw_limit=meta["size"]);exact(raw,meta,path)
-                      docs[kind]=json.loads(raw)
-                      sources.append(dict(commit=spec["source"],path=path,bytes=len(raw),blob=blob(raw),sha256=digest(raw)))
-                  reports.append(extract(docs["main"],docs["schema"],spec))
-                  latest=docs["main"]
-              meta=api("actions/artifacts/"+str(ARTIFACT))
-              assert meta["id"]==ARTIFACT and meta["digest"]=="sha256:"+ARTIFACT_SHA and not meta["expired"]
-              assert meta["workflow_run"]["id"]==int(SPECS[1]["run"]) and meta["workflow_run"]["head_sha"]==PRODUCT
-              run=api("actions/runs/"+SPECS[1]["run"])
-              assert run["head_sha"]==PRODUCT and run["run_attempt"]==1 and run["status"]=="completed"
-              try:
-                  opener.open(request("actions/artifacts/"+str(ARTIFACT)+"/zip"),timeout=30)
-              except urllib.error.HTTPError as e:
-                  assert e.code==302,"artifact redirect required"
-                  location=storage_url(e.headers["Location"])
-              else:raise AssertionError("expected storage redirect")
-              # Never send the GitHub token to the signed storage URL.
-              with opener.open(urllib.request.Request(location),timeout=30) as r:data=r.read(8000001)
-              artifact=artifact_check(data,meta,latest)
-              result=dict(status="EXTRACTED_NOT_ROOT_CAUSE_OR_ACCEPTANCE",release_ready=False,durable_upgrade_ready=False,
-                          sources=sources,failures=reports,artifact=artifact,
-                          diagnostic_commit=head,diagnostic_run=os.environ["GITHUB_RUN_ID"],diagnostic_attempt=1,
-                          source_scope="Unchanged immutable reports and original artifact; no device command or rerun")
-              encoded=(json.dumps(result,ensure_ascii=True,separators=(",",":"))+"\n").encode()
-              assert len(encoded)<=900000,"report overflow; refuse rather than truncate"
+              commit = api("git/commits/" + head)
+              assert [p["sha"] for p in commit["parents"]] == [PARENT], "parent changed"
+              route = "contents/" + OUTPUT + "?ref="
+              meta = api(route + PARENT)
+              assert meta["type"] == "file" and meta["path"] == OUTPUT and meta["sha"] == SOURCE_BLOB
+              assert type(meta["size"]) is int and 0 < meta["size"] <= 900000
+              raw = api(route + PARENT, raw_limit=meta["size"])
+              assert len(raw) == meta["size"]
+              current = api(route + head, raw_limit=meta["size"])
+              assert current == raw, "current report changed"
+              encoded = build(raw)
               context()
-              tree=api("git/trees",{"base_tree":commit["tree"]["sha"],
-                                   "tree":[{"path":OUTPUT,"mode":"100644","type":"blob","content":encoded.decode()}]})
-              written=api("git/commits",{"message":"Record original API34 failures with immutable source identities",
-                                        "tree":tree["sha"],"parents":[head]})
-              actual=api("contents/"+OUTPUT+"?ref="+written["sha"],raw_limit=len(encoded))
-              assert actual==encoded and blob(actual)==blob(encoded),"immutable report readback"
+              tree = api("git/trees", {"base_tree": commit["tree"]["sha"], "tree": [
+                  {"path": OUTPUT, "mode": "100644", "type": "blob", "content": encoded.decode()}]})
+              written = api("git/commits", {"message": "Add bounded failure index while preserving original report bytes",
+                                          "tree": tree["sha"], "parents": [head]})
+              actual = api(route + written["sha"], raw_limit=len(encoded))
+              assert actual == encoded and blob(actual) == blob(encoded), "immutable report readback"
               context()
-              api("git/refs/heads/"+BRANCH,{"sha":written["sha"],"force":False},method="PATCH")
-              assert api("git/ref/heads/"+BRANCH)["object"]["sha"]==written["sha"]
-              assert api("git/ref/heads/"+PRODUCT_BRANCH)["object"]["sha"]==PRODUCT
-              print("REPORT_VERIFIED",written["sha"],len(encoded),blob(encoded),digest(encoded))
-          
-          import copy, io, json, zipfile
-          
+              api("git/refs/heads/" + BRANCH, {"sha": written["sha"], "force": False}, method="PATCH")
+              assert api("git/ref/heads/" + BRANCH)["object"]["sha"] == written["sha"]
+              assert api("git/ref/heads/" + PRODUCT_BRANCH)["object"]["sha"] == PRODUCT
+              print("INDEX_VERIFIED", written["sha"], len(encoded), blob(encoded), sha(encoded))
+
+          def remote():
+              opener = urllib.request.build_opener(NoRedirect())
+              def api(route, payload=None, raw_limit=None, method=None):
+                  assert not route.startswith("/") and "://" not in route and ".." not in route
+                  limit = 2000000 if raw_limit is None else raw_limit
+                  request = urllib.request.Request(
+                      "https://api.github.com/repos/" + REPO + "/" + route,
+                      data=None if payload is None else json.dumps(payload).encode(), method=method,
+                      headers={"Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                               "Accept": "application/vnd.github.raw+json" if raw_limit is not None else "application/vnd.github+json"})
+                  with opener.open(request, timeout=30) as response:
+                      data = response.read(limit + 1)
+                  assert len(data) <= limit, "response overflow"
+                  return decode(data) if raw_limit is None else data
+              execute(api, os.environ)
+
+          # END_IMPLEMENTATION
+          import copy, json
+
+          def fixtures(m):
+              failures = []
+              for product, run in m.PAIRS:
+                  native = dict(status="FAIL", api=34, error="ORIGINAL:"+product, count=66,
+                                checks=["check"+str(i) for i in range(66)], traceback="exact stack\n",
+                                database_directory_traces=[{"tail_b64":"A"*40000}])
+                  failures.append(dict(product=product, run=run, api=34, failure=native,
+                                       native_json_sha256=m.sha(m.canonical(native))))
+              doc = dict(status="EXTRACTED_NOT_ROOT_CAUSE_OR_ACCEPTANCE", release_ready=False, durable_upgrade_ready=False,
+                         sources=[{}, {}, {}, {}], failures=failures,
+                         artifact=dict(id=11556106491,bytes=667622,
+                                       sha256="968f71d63b380539385ba806be49f7ae4cd3685ab4195353cfa2f491544c1f65",
+                                       native_equal_to_published=True,ui_log_scope="COMPLETE",
+                                       inventory={"ui.log":{"bytes":19,"sha256":"fixture"}},ui_log="original log"))
+              return doc
+
           def tests(m):
-              spec=m.SPECS[1]
-              native={"status":"FAIL","api":34,"error":"original failure, not an assumed 255",
-                      "traceback":"original stack\n","count":17,"checks":["original"],
-                      "database_directory_traces":[{"command_returncode":0,"trace":{"tail_b64":"YWJj"}}]}
-              main={"commit":spec["product"],"run_id":spec["run"],
-                    "ui":{"native":{"34":copy.deepcopy(native)},
-                          "devices":{"34":{"result":{"status":"FAIL"},"logs":{"ui.log":"existing tail"}}}}}
-              main["ui"]["native"]["34"]["published_screenshots"]=[]
-              schema={"commit":spec["product"],"run_id":spec["run"],
-                      "devices":{"34":{"default_ui":{"evidence":copy.deepcopy(native)}}}}
-              original=copy.deepcopy([main,schema])
-              result=m.extract(main,schema,spec)
-              assert result["failure"]["error"]==native["error"]
-              assert result["failure"]["traceback"]==native["traceback"]
-              assert [main,schema]==original
-              assert result["failure"]["database_directory_traces"]==native["database_directory_traces"]
-              print("POSITIVE_WITNESS extraction")
-              mutations=[
-                  lambda a,b:a.update(commit="wrong"),
-                  lambda a,b:a.update(run_id="wrong"),
-                  lambda a,b:b.update(commit="wrong"),
-                  lambda a,b:b.update(run_id="wrong"),
-                  lambda a,b:a["ui"]["native"]["34"].update(api=26),
-                  lambda a,b:a["ui"]["native"]["34"].update(status="PASS"),
-                  lambda a,b:a["ui"]["native"]["34"].pop("error"),
-                  lambda a,b:b["devices"]["34"]["default_ui"]["evidence"].update(error="different"),
-                  lambda a,b:a["ui"]["native"].pop("34"),
-              ]
-              for change in mutations:
-                  a,b=copy.deepcopy(original);change(a,b)
-                  try:m.extract(a,b,spec)
-                  except (AssertionError,KeyError):pass
-                  else:raise AssertionError("extraction negative survived")
-              raw=b"exact source\n";meta=dict(type="file",path="p",size=len(raw),sha=m.blob(raw))
-              m.exact(raw,meta,"p")
-              for corrupt in (raw[:-1],raw+b"x",b"x"+raw[1:]):
-                  try:m.exact(corrupt,meta,"p")
-                  except AssertionError:pass
-                  else:raise AssertionError("bytes negative survived")
-              def archive(n=native,extra=None):
-                  stream=io.BytesIO()
-                  with zipfile.ZipFile(stream,"w") as z:
-                      z.writestr("native-ui/native-result.json",json.dumps(n))
-                      z.writestr("ui.log","full original device log")
-                      if extra:z.writestr(extra,"bad")
-                  return stream.getvalue()
-              data=archive()
-              info=dict(id=m.ARTIFACT,name="database-api-34",expired=False,size_in_bytes=len(data),
-                        digest="sha256:"+m.digest(data),
-                        workflow_run=dict(id=int(spec["run"]),head_sha=spec["product"]))
-              good=m.artifact_check(data,info,main,None)
-              assert good["native_equal_to_published"] and good["ui_log"]=="full original device log"
-              print("POSITIVE_WITNESS artifact")
-              for key,value in [("id",0),("name","database-api-26"),("expired",True),
-                                ("size_in_bytes",1),("digest","sha256:"+"0"*64)]:
-                  bad=copy.deepcopy(info);bad[key]=value
-                  try:m.artifact_check(data,bad,main,None)
-                  except AssertionError:pass
-                  else:raise AssertionError("artifact negative survived")
-              for key,value in [("id",0),("head_sha","wrong")]:
-                  bad=copy.deepcopy(info);bad["workflow_run"][key]=value
-                  try:m.artifact_check(data,bad,main,None)
-                  except AssertionError:pass
-                  else:raise AssertionError("binding negative survived")
-              for data2 in (data[:-1],data+b"x",archive(dict(native,error="other")),archive(extra="../escape")):
-                  bad=copy.deepcopy(info);bad.update(size_in_bytes=len(data2),digest="sha256:"+m.digest(data2))
-                  try:m.artifact_check(data2,bad,main,m.digest(data))
-                  except (AssertionError,zipfile.BadZipFile):pass
-                  else:raise AssertionError("artifact corruption survived")
-              for extra in ("../escape","/absolute","a\\b"):
-                  data2=archive(extra=extra);bad=copy.deepcopy(info)
-                  bad.update(size_in_bytes=len(data2),digest="sha256:"+m.digest(data2))
-                  try:m.artifact_check(data2,bad,main,None)
-                  except AssertionError:pass
-                  else:raise AssertionError("unsafe zip survived")
-              for url in ("http://example.blob.core.windows.net/file",
-                          "https://evil.example/file","https://user@x.blob.core.windows.net/file",
-                          "https://x.blob.core.windows.net:444/file"):
-                  try:m.storage_url(url)
-                  except AssertionError:pass
-                  else:raise AssertionError("redirect negative survived")
-              m.storage_url("https://production.blob.core.windows.net/file?signature=not-a-real-credential")
-              print("PASS extraction=9 byte=3 artifact=14 redirect=4 negative controls")
-          
-          
-          from types import SimpleNamespace
-          tests(SimpleNamespace(**globals()))
-          
-          execute()
+              encode=lambda d:(json.dumps(d,separators=(",",":"))+"\n").encode()
+              doc=fixtures(m);raw=encode(doc);frozen=copy.deepcopy(doc)
+              encoded=m.build(raw,m.blob(raw));result=m.decode(encoded)
+              assert doc==frozen
+              assert result.pop("readable_index")["failures"][1]["error"]==doc["failures"][1]["failure"]["error"]
+              assert result==doc
+              assert encoded.index(doc["failures"][1]["failure"]["error"].encode()) < 10000
+              assert len(encoded)>len(raw) and raw[1:] in encoded
+              print("POSITIVE_WITNESS readable both failures and exact-byte recovery")
+              negatives=0
+              def reject(fn):
+                  nonlocal negatives
+                  try:fn()
+                  except (AssertionError,KeyError,ValueError):negatives+=1
+                  else:raise AssertionError("negative survived")
+              for corrupt in (raw[:-1],b"X"+raw[1:],raw+b"x"):
+                  reject(lambda c=corrupt:m.build(c,m.blob(raw)))
+              for change in (
+                  lambda d:d.update(readable_index={}),
+                  lambda d:d.update(release_ready=True),
+                  lambda d:d["failures"][1].update(product="wrong"),
+                  lambda d:d["failures"][1].update(run="wrong"),
+                  lambda d:d["failures"][1]["failure"].update(error="corrupt"),
+                  lambda d:d["artifact"].update(native_equal_to_published=False),
+                  lambda d:d["artifact"].update(sha256="wrong"),
+                  lambda d:d["failures"].pop(),
+              ):
+                  bad=copy.deepcopy(doc);change(bad);data=encode(bad)
+                  reject(lambda:m.build(data,m.blob(data)))
+              duplicate=b'{"status":"other",'+raw[1:]
+              reject(lambda:m.build(duplicate,m.blob(duplicate)))
+              index=m.project(doc,raw)
+              changed=encoded[:-2]+b" \n"
+              reject(lambda:m.validate_output(raw,changed,index))
+              print("PASS projection negative controls",negatives)
+
+          def network(m, positive_only=False):
+              doc=fixtures(m);raw=(json.dumps(doc,separators=(",",":"))+"\n").encode()
+              old_blob=m.SOURCE_BLOB;old_build=m.build
+              m.SOURCE_BLOB=m.blob(raw)
+              m.build=lambda value:old_build(value,m.blob(raw))
+              head="a"*40;written="b"*40
+              env=dict(GITHUB_REPOSITORY=m.REPO,GITHUB_REF="refs/heads/"+m.BRANCH,
+                       GITHUB_EVENT_NAME="push",GITHUB_RUN_ATTEMPT="1",GITHUB_SHA=head)
+              def run(bad=None):
+                  state={"head":head,"published":False}
+                  def api(route,payload=None,raw_limit=None,method=None):
+                      if route=="git/ref/heads/"+m.BRANCH:return {"object":{"sha":"c"*40 if bad=="head" else state["head"]}}
+                      if route=="git/ref/heads/"+m.PRODUCT_BRANCH:return {"object":{"sha":"d"*40 if bad=="product" else m.PRODUCT}}
+                      if route=="git/commits/"+head:return {"parents":[{"sha":"e"*40 if bad=="parent" else m.PARENT}],"tree":{"sha":"t"*40}}
+                      if route.startswith("contents/"):
+                          ref=route.split("?ref=")[1]
+                          if raw_limit is None:return dict(type="file",path=m.OUTPUT,size=len(raw),sha=m.SOURCE_BLOB)
+                          if ref==written:
+                              data=state["encoded"]
+                              return b"X"+data[1:] if bad=="readback" else data
+                          if bad=="source" or bad=="current" and ref==head:return b"X"+raw[1:]
+                          return raw
+                      if route=="git/trees":
+                          assert len(payload["tree"])==1 and payload["tree"][0]["path"]==m.OUTPUT
+                          state["encoded"]=payload["tree"][0]["content"].encode()
+                          return {"sha":"f"*40}
+                      if route=="git/commits":
+                          assert payload["parents"]==[head]
+                          return {"sha":written}
+                      if route=="git/refs/heads/"+m.BRANCH:
+                          assert method=="PATCH" and payload=={"sha":written,"force":False}
+                          state.update(head=written,published=True)
+                          return {}
+                      raise AssertionError("unexpected endpoint "+route)
+                  try:m.execute(api,dict(env,GITHUB_EVENT_NAME="other") if bad=="event" else env)
+                  except AssertionError:
+                      assert bad is not None and not state["published"]
+                      return False
+                  assert state["published"] and bad is None,"publication negative survived"
+                  return True
+              try:
+                  assert run()
+                  if positive_only:
+                      return
+                  for bad in ("head","product","parent","source","current","readback","event"):
+                      assert run(bad) is False
+                  print("PASS publication positive=1 negative=7 no product writes or Actions calls")
+              finally:
+                  m.SOURCE_BLOB=old_blob;m.build=old_build
+
+          def mutants(source):
+              import types
+              for old, replacement, checker in (
+                  ('assert item["native_json_sha256"] == sha(canonical(native)), "native hash mismatch"', 'pass', tests),
+                  ('assert actual == encoded and blob(actual) == blob(encoded), "immutable report readback"', 'pass', network),
+              ):
+                  assert source.count(old)==1
+                  changed=source.replace(old,replacement)
+                  assert changed!=source
+                  m=types.ModuleType("mutated_index")
+                  exec(compile(changed,"mutated_index","exec"),m.__dict__)
+                  doc=fixtures(m);raw=(json.dumps(doc,separators=(",",":"))+"\n").encode()
+                  assert m.decode(m.build(raw,m.blob(raw)))["readable_index"]["failures"][1]["error"]==doc["failures"][1]["failure"]["error"]
+                  network(m,positive_only=True)
+                  print("POSITIVE_WITNESS mutant",old)
+                  try:checker(m)
+                  except AssertionError:print("MUTANT_REJECTED",old)
+                  else:raise AssertionError("mutant survived")
+
+
+          import sys
+          from pathlib import Path
+          tests(sys.modules[__name__])
+          network(sys.modules[__name__])
+          mutants(Path(__file__).read_text().split("\n# END_IMPLEMENTATION\n")[0])
+          remote()
+
           PY
+          python3 /tmp/readable_index.py

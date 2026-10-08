@@ -64,6 +64,7 @@ jobs:
               return {"status":"EXTRACTED_NOT_ROOT_CAUSE_OR_ACCEPTANCE", "original_failure":failure,
                       "traceback":device["traceback"], "process_loss":native["process_loss"],
                       "existing_diagnostics":existing_diagnostics(device, native),
+                      "existing_logs":{"present": "26" in doc.get("logs", {}), "value": doc.get("logs", {}).get("26")},
                       "failed_trace":trace, "decoded_trace_sha256":hashlib.sha256(raw).hexdigest(),
                       "readable_tail": "\n".join(lines)[-12000:],
                       "readable_tail_is_excerpt":len("\n".join(lines)) > 12000,
@@ -84,6 +85,13 @@ jobs:
               collected = extract(doc)["existing_diagnostics"]["native_image_pages"]
               assert collected["crash_logs"] == {"present":True,"value":native["crash_logs"]}
               assert collected["failure_diagnostics"] == {"present":True,"value":native["failure_diagnostics"]}
+              assert extract(doc)["existing_logs"] == {"present":False,"value":None}
+              logs = {"export-probe-emulator.log":{"status":"OBSERVED_NOT_ACCEPTANCE","bytes":24001,"truncated":True,"tail":"EOF"},
+                      "export-probe-setup.log":{"status":"NOT_OBSERVED","error":"fixture"}}
+              doc["logs"] = {"26":logs,"34":{"wrong_api":True}}
+              before = copy.deepcopy(doc)
+              assert extract(doc)["existing_logs"] == {"present":True,"value":logs}
+              assert doc == before
               negatives = [
                   lambda d:d.update(commit="wrong"),
                   lambda d:d.update(run_id="wrong"),
@@ -105,7 +113,7 @@ jobs:
                   try: exact(changed,meta)
                   except AssertionError: pass
                   else: raise AssertionError("Byte corruption survived")
-              print("PASS extraction: 5 positive, 12 negative controls")
+              print("PASS extraction: 8 positive, 12 negative controls")
           selftest()
           # LOCAL_GATE_END: network is deliberately outside the local host gate.
           assert os.environ["GITHUB_REPOSITORY"] == REPO

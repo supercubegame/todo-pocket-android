@@ -85,7 +85,7 @@ CASES = r'''
   Object closed=renamePlan(h,10);before=state(h);h.close();
   readonly(h,IllegalStateException.class,()->renameConfirm(h,closed,"Bad"),"rename_closed_helper");
   pass(state(h).equals(before),"rename_reopened_state");
-  save("backend-state",state(h).toString());
+  save("backend-rename-state",state(h).toString());
  }
  void renameUI(AppDatabase h)throws Exception{
   click("应用目录",false);Map<String,List<List<String>>> before=state(h);
@@ -112,7 +112,7 @@ CASES = r'''
   before=state(h);ui(()->old[0].performClick());ready();pass(state(h).equals(before),"rename_ui_detached");
   click("应用目录",false);click("catalog-rename-1",true);text("catalog-rename-name","Final UI");before=state(h);click("catalog-rename-save",true);
   pass(state(h).equals(renamed(before,1,"Final UI")),"rename_ui_final");
-  click("catalog-back",true);save("ui-state",state(h).toString());save("ui-media",media().toString());
+  click("catalog-back",true);save("ui-rename-state",state(h).toString());save("ui-rename-media",media().toString());
  }
  static Object invoke(Object target,String method,Class<?>[] types,Object... args)throws Exception{
   try{return target.getClass().getMethod(method,types).invoke(target,args);}
@@ -197,7 +197,7 @@ CASES = r'''
  }
  void deleted()throws Exception{
   try(AppDatabase h=AppDatabase.openSchema3(getTargetContext(),name())){
-   pass(state(h).toString().equals(read("backend-state")),"backend_restart");backup(h,"backend");
+   pass(state(h).toString().equals(read("backend-rename-state")),"backend_restart");backup(h,"backend");
   }
   launch();AppDatabase h=db();need(h.count("categories")==0&&h.count("applications")==0,"fresh UI database");
   h.addCategory(1,"Same");h.addCategory(2,"Same");h.addActivity(1,1,0,"Keep");h.addTodo("keep","Keep");
@@ -234,7 +234,7 @@ CASES = r'''
  }
  void undone()throws Exception{
   launch();click("活动",false);
-  pass(state(db()).toString().equals(read("ui-state"))&&media().toString().equals(read("ui-media")),"ui_restart");backup(db(),"ui");
+  pass(state(db()).toString().equals(read("ui-rename-state"))&&media().toString().equals(read("ui-rename-media")),"ui_restart");backup(db(),"ui");
  }
 '''
 JAVA = (shared.JAVA[:shared.JAVA.index(" static Map<String,List<List<String>>> expected(")] + CASES
@@ -447,7 +447,109 @@ def catalog_ui_selftest():
     print("CATALOG_UI_HOST "+json.dumps(receipt,sort_keys=True),flush=True)
     return receipt
 
+def snapshot_selftest(source=None):
+    """Actual generated Java save/read and AST-derived checkpoint calls.
+    Host filesystem checks, not Android lifecycle or database acceptance."""
+    if source is None:
+        source = JAVA
+    extract = r'''import javax.tools.*;import com.sun.source.util.*;import com.sun.source.tree.*;import java.nio.file.*;import java.util.*;
+class Extract{
+ public static void main(String[]a)throws Exception{
+  JavaCompiler c=ToolProvider.getSystemJavaCompiler();DiagnosticCollector<JavaFileObject>d=new DiagnosticCollector<>();
+  try(StandardJavaFileManager f=c.getStandardFileManager(d,null,null)){
+   JavacTask t=(JavacTask)c.getTask(null,f,d,Arrays.asList("-proc:none"),null,f.getJavaFileObjects(a[0]));
+   CompilationUnitTree u=t.parse().iterator().next();for(Diagnostic<?>e:d.getDiagnostics())if(e.getKind()==Diagnostic.Kind.ERROR)throw new AssertionError(e.toString());
+   String s=Files.readString(Path.of(a[0]));SourcePositions p=Trees.instance(t).getSourcePositions();
+   Map<String,MethodTree> methods=new HashMap<>();StringBuilder helpers=new StringBuilder();
+   for(Tree type:u.getTypeDecls())if(type instanceof ClassTree)for(Tree m:((ClassTree)type).getMembers())if(m instanceof MethodTree){
+    MethodTree mt=(MethodTree)m;String n=mt.getName().toString();if(methods.put(n,mt)!=null)throw new AssertionError("duplicate method");
+    if(n.equals("save")||n.equals("read"))helpers.append(s.substring((int)p.getStartPosition(u,m),(int)p.getEndPosition(u,m))).append("\n");
+   }
+   if(!methods.keySet().containsAll(Arrays.asList("save","read","seed","renameBackend","deleted","renameUI","undone")))throw new AssertionError("missing checkpoint method");
+   Files.writeString(Path.of(a[1]),helpers);
+   List<String> events=new ArrayList<>();
+   for(String name:Arrays.asList("seed","renameBackend","deleted","renameUI","undone")){
+    new TreeScanner<Void,Void>(){
+     @Override public Void visitMethodInvocation(MethodInvocationTree call,Void unused){
+      String n=call.getMethodSelect().toString();
+      if(n.equals("save")||n.equals("read")){
+       Tree key=call.getArguments().get(0);if(!(key instanceof LiteralTree)||!(((LiteralTree)key).getValue() instanceof String))throw new AssertionError("literal checkpoint key");
+       events.add(name+"\t"+n+"\t"+((LiteralTree)key).getValue());
+      }else if(n.equals("renameBackend")||n.equals("renameUI"))events.add(name+"\tcall\t"+n);
+      return super.visitMethodInvocation(call,unused);
+     }
+    }.scan(methods.get(name).getBody(),null);
+   }
+   Files.write(Path.of(a[2]),events);
+  }
+ }
+}'''
+    harness = r'''import java.nio.file.*;import java.util.*;
+class Checkpoint{
+ Path folder;
+ __HELPERS__
+ static void need(boolean b,String s){if(!b)throw new AssertionError(s);}
+ public static void main(String[]a)throws Exception{
+  Checkpoint h=new Checkpoint();h.folder=Files.createTempDirectory("catalog-checkpoint-");
+  try{
+   h.save("witness","unchanged");need(h.read("witness").equals("unchanged"),"valid_save_read");
+   System.out.println("SNAPSHOT_VALID_WITNESS");
+   Map<String,String> original=new HashMap<>();int writes=0,reads=0,calls=0;
+   for(String event:Files.readAllLines(Path.of(a[0]))){
+    String[] v=event.split("\t",-1);String method=v[0],op=v[1],key=v[2];
+    if(op.equals("call")){
+     need((method.equals("seed")&&key.equals("renameBackend"))||(method.equals("deleted")&&key.equals("renameUI")),"rename_phase_binding");calls++;continue;
+    }
+    if(op.equals("save")){
+     String value=method+":"+key;h.save(key,value);original.put(key,value);writes++;
+    }else{
+     String wanted=method.equals("deleted")?"renameBackend:backend-rename-state":
+         key.endsWith("media")?"renameUI:ui-rename-media":"renameUI:ui-rename-state";
+     need(h.read(key).equals(wanted),"restart_reads_renamed_checkpoint");reads++;
+    }
+   }
+   need(writes==6&&reads==3&&calls==2&&original.size()==6,"exact_checkpoint_population");
+   for(Map.Entry<String,String> e:original.entrySet())need(h.read(e.getKey()).equals(e.getValue()),"original_snapshots_preserved");
+   boolean refused=false;try{h.save("witness","overwrite");}catch(FileAlreadyExistsException e){refused=true;}
+   need(refused&&h.read("witness").equals("unchanged"),"duplicate_snapshot_rejected");
+   System.out.println("SNAPSHOT_PASS writes=6 reads=3 originals=6 duplicate_rejected=true");
+  }finally{
+   try(java.util.stream.Stream<Path> ps=Files.walk(h.folder)){for(Path p:(Iterable<Path>)ps.sorted(Comparator.reverseOrder())::iterator)Files.delete(p);}
+  }
+ }
+}'''
+    with tempfile.TemporaryDirectory() as tmp:
+        p = Path(tmp)
+        (p/"Extract.java").write_text(extract)
+        def execute(text):
+            (p/"TodoInstrumentation.java").write_text(text)
+            parsed = subprocess.run(["java", str(p/"Extract.java"), str(p/"TodoInstrumentation.java"),
+                str(p/"helpers"), str(p/"events")], capture_output=True, text=True, timeout=30)
+            assert parsed.returncode == 0, (parsed.stdout, parsed.stderr)
+            (p/"Checkpoint.java").write_text(harness.replace("__HELPERS__", (p/"helpers").read_text()))
+            return subprocess.run(["java", str(p/"Checkpoint.java"), str(p/"events")],
+                                  capture_output=True, text=True, timeout=30)
+        good = execute(source)
+        assert good.returncode == 0, (good.stdout, good.stderr)
+        print(good.stdout.strip())
+        mutations = (
+            ('save("backend-rename-state"', 'save("backend-state"', "FileAlreadyExistsException"),
+            ('save("ui-rename-state"', 'save("ui-state"', "FileAlreadyExistsException"),
+            ('save("ui-rename-media"', 'save("ui-media"', "FileAlreadyExistsException"),
+            ('read("backend-rename-state")', 'read("backend-state")', "restart_reads_renamed_checkpoint"),
+            ('read("ui-rename-state")', 'read("ui-state")', "restart_reads_renamed_checkpoint"),
+            ('read("ui-rename-media")', 'read("ui-media")', "restart_reads_renamed_checkpoint"),
+            ("StandardOpenOption.CREATE_NEW", "StandardOpenOption.CREATE,StandardOpenOption.TRUNCATE_EXISTING", "duplicate_snapshot_rejected"),
+        )
+        for old, new, label in mutations:
+            assert source.count(old) == 1, ("checkpoint mutation anchor", old)
+            result = execute(source.replace(old, new))
+            assert result.returncode != 0 and "SNAPSHOT_VALID_WITNESS" in result.stdout and label in result.stderr, (label,result.stdout,result.stderr)
+        print("CATALOG_SNAPSHOT_HOST positive=1 witnessed_mutants=7 PASS; actual save/read and AST-derived calls, not Android")
+
+
 def selftest():
+    snapshot_selftest()
     rename_host_selftest()
     catalog_ui_selftest()
     assert REQUIRED == EXPECTED

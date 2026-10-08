@@ -17,6 +17,83 @@ assert hashlib.sha256(Path(shared.__file__).read_bytes()).hexdigest() == SHARED_
 for marker in (" static Map<String,List<List<String>>> expected(", " void save(", " void seed(", " @Override public void onCreate"):
     assert shared.JAVA.count(marker) == 1, "ambiguous Java scaffold boundary"
 CASES = r'''
+ // Backup wire transports declared columns, not hidden paths/tags rowids.
+ // Keep full physical equality everywhere else, including in-place writes/rollback.
+ static Map<String,List<List<String>>> backupProjection(Map<String,List<List<String>>> input){
+  Map<String,List<List<String>>> out=new TreeMap<>();
+  for(Map.Entry<String,List<List<String>>> entry:input.entrySet()){
+   String table=entry.getKey();List<List<String>> rows=new ArrayList<>();
+   boolean relation=table.equals("paths")||table.equals("tags");
+   List<List<String>> original=entry.getValue();
+   if(relation)need(!original.isEmpty()&&original.get(0).equals(Arrays.asList("rowid","activity_id","position","text")),"backup relation columns");
+   long previous=Long.MIN_VALUE;
+   for(int i=0;i<original.size();i++){
+    List<String> row=original.get(i);
+    if(relation){
+     need(row.size()==4,"backup relation width");
+     if(i>0){
+      need(row.get(0).startsWith("1:"),"backup rowid type");
+      long current=Long.parseLong(row.get(0).substring(2));
+      need(current>previous,"backup rowid order");previous=current;
+     }
+     rows.add(new ArrayList<>(row.subList(1,row.size())));
+    }else rows.add(new ArrayList<>(row));
+   }
+   out.put(table,rows);
+  }
+  return out;
+ }
+ static boolean backupEqual(Map<String,List<List<String>>> before,Map<String,List<List<String>>> after){
+  return backupProjection(before).equals(backupProjection(after));
+ }
+ void backup(AppDatabase source,String suffix)throws Exception{
+  Map<String,List<List<String>>> before=state(source);
+  byte[] wire=source.exportState();
+  Path media=folder.resolve("media-"+suffix);MediaRepository repo=new MediaRepository(media,64L*1024*1024);
+  Path zip=folder.resolve(suffix+".zip");source.exportBackup(zip,repo);
+  try(AppDatabase target=AppDatabase.openSchema3(getTargetContext(),"restore-catalog-"+nonce+"-"+suffix+".db")){
+   target.restoreBackup(zip,folder.resolve("stage-"+suffix),64L*1024*1024,repo);
+   Map<String,List<List<String>>> after=state(target);
+   boolean logical=backupEqual(before,after);
+   if(logical){
+    for(String table:Arrays.asList("paths","tags")){
+     List<List<String>> left=before.get(table),right=after.get(table);
+     need(left!=null&&right!=null,"backup relation tables");
+     for(int i=1;i<left.size();i++)if(!left.get(i).get(0).equals(right.get(i).get(0)))
+      System.out.println("BACKUP_ROWID_ONLY "+suffix+" "+table+" row="+i+" "+left.get(i).get(0)+" -> "+right.get(i).get(0));
+    }
+   }else{
+    for(String table:before.keySet())if(!before.get(table).equals(after.get(table)))
+     System.out.println("BACKUP_NONMATCHING_TABLE "+suffix+" "+table);
+   }
+   need(state(source).equals(before),"backup source remains physically unchanged");
+   need(Arrays.equals(wire,target.exportState()),"backup exact wire readback");
+   pass(logical,suffix.equals("backend")?"backend_backup":"ui_backup");
+  }
+ }
+ void relationGeometry()throws Exception{
+  final ScrollView[] scroll={null};
+  ui(()->{
+   View v=one("activity-details-scroll",true);need(v instanceof ScrollView,"detail scroll identity");
+   scroll[0]=(ScrollView)v;scroll[0].fullScroll(View.FOCUS_DOWN);
+  });
+  waitForIdleSync();
+  ui(()->{
+   android.graphics.Rect viewport=new android.graphics.Rect();
+   need(scroll[0].getGlobalVisibleRect(viewport)&&viewport.height()>0,"detail viewport nonempty");
+   for(String label:Arrays.asList("标记完成","跳过今天")){
+    View control=one(label,false);android.graphics.Rect rect=new android.graphics.Rect();
+    need(control.isShown()&&control.isEnabled()&&control.getGlobalVisibleRect(rect)
+      &&rect.height()==control.getHeight()&&rect.width()==control.getWidth()
+      &&rect.height()>=Math.round(48*activity.getResources().getDisplayMetrics().density),"checkin fully visible "+label);
+    need(!(control.getParent() instanceof ScrollView),"checkin not scroll child");
+    need(rect.bottom<=viewport.top,"checkin pinned above scrolling details");
+   }
+   View stamp=one("activity-today-status",true);android.graphics.Rect rect=new android.graphics.Rect();
+   need(stamp.getGlobalVisibleRect(rect)&&rect.height()==stamp.getHeight()&&rect.bottom<=viewport.top,"status fully visible above scroll");
+   System.out.println("DETAIL_GEOMETRY viewport="+viewport+" status="+rect+" size="+root().getWidth()+"x"+root().getHeight());
+  });
+ }
  Object relationPlan(AppDatabase h,long id,boolean tags)throws Exception{
   return invoke(h,"prepareActivityStrings",new Class<?>[]{long.class,boolean.class},id,tags);
  }
@@ -86,7 +163,7 @@ CASES = r'''
    need(value.contentEquals(((EditText)out.get(0)).getText()),"exact relation input");});
  }
  void relationsUI(AppDatabase h)throws Exception{
-  click("activity-2",true);Map<String,List<List<String>>> before=state(h);
+  click("activity-2",true);relationGeometry();Map<String,List<List<String>>> before=state(h);
   click("activity-path-edit-2",true);
   boolean[] okay={false};ui(()->okay[0]=((TextView)one("relation-identity",true)).getText().toString().contains("#2"));
   pass(okay[0]&&state(h).equals(before),"relation_ui_prepare");
@@ -98,7 +175,7 @@ CASES = r'''
   pass(state(h).equals(relationExpected(before,"paths",2,Arrays.asList("A","B","A"))),"relation_ui_path");
   before=state(h);ui(()->old[0].performClick());ready();pass(state(h).equals(before),"relation_ui_duplicate");
   click("activity-tags-edit-2",true);relationText(" z\na\nz");click("relation-save",true);
-  pass(state(h).equals(relationExpected(before,"tags",2,Arrays.asList("z","a"))),"relation_ui_tags");
+  pass(state(h).equals(relationExpected(before,"tags",2,Arrays.asList("z","a"))),"relation_ui_tags");relationGeometry();
   before=state(h);click("activity-tags-edit-2",true);click("relation-save",true);pass(state(h).equals(before),"relation_ui_same");
   click("activity-path-edit-2",true);relationText("Cancel");ui(()->old[0]=one("relation-save",true));click("relation-cancel",true);
   ui(()->old[0].performClick());ready();pass(state(h).equals(before),"relation_ui_cancel");
@@ -339,7 +416,7 @@ CASES = r'''
  }
 '''
 JAVA = (shared.JAVA[:shared.JAVA.index(" static Map<String,List<List<String>>> expected(")] + CASES
-    + shared.JAVA[shared.JAVA.index(" void save("):shared.JAVA.index(" void seed(")].replace("category-", "catalog-").replace("&&target.categoryIds().equals(source.categoryIds())", "")
+    + shared.JAVA[shared.JAVA.index(" void save("):shared.JAVA.index(" void seed(")].replace("category-", "catalog-").replace("&&target.categoryIds().equals(source.categoryIds())", "").replace(" void backup(", " void historicalBackup(")
     + shared.JAVA[shared.JAVA.index(" @Override public void onCreate"):].replace('"category-"+nonce', '"catalog-"+nonce'))
 def bind_infrastructure():
     for name in ("parser", "validate", "fixture", "driver", "report", "report_selftest"):
@@ -650,6 +727,7 @@ class Checkpoint{
 
 
 def selftest():
+    repair_selftest()
     relation_host_selftest()
     snapshot_selftest()
     rename_host_selftest()
@@ -895,6 +973,121 @@ class Extract{
                 assert result.returncode!=0 and witness in result.stdout and "AssertionError: "+label in result.stderr,(kind,label,result.stdout,result.stderr)
                 print("RELATION_MUTANT_REJECTED "+kind+" "+label,flush=True)
         print("RELATION_HOST backend=23 ui=17 witnessed_mutants=11 PASS; extracted Java, SQL/widget doubles")
+
+
+def repair_selftest(source=None, ui_source=None, mutants=True):
+    """Actual generated comparator and Java AST layout checks, not Android geometry."""
+    import tempfile, subprocess
+    from pathlib import Path
+    if source is None: source=JAVA
+    if ui_source is None: ui_source=(ROOT/"src/main/java/com/supercubegame/pockettodo/ActivitiesScreen.java").read_text()
+    extract=r'''import javax.tools.*;import com.sun.source.util.*;import com.sun.source.tree.*;import java.nio.file.*;import java.util.*;
+class Extract{
+ public static void main(String[]a)throws Exception{
+  JavaCompiler compiler=ToolProvider.getSystemJavaCompiler();DiagnosticCollector<JavaFileObject>d=new DiagnosticCollector<>();
+  try(StandardJavaFileManager f=compiler.getStandardFileManager(d,null,null)){
+   JavacTask task=(JavacTask)compiler.getTask(null,f,d,Arrays.asList("-proc:none"),null,f.getJavaFileObjects(a[0]));
+   CompilationUnitTree unit=task.parse().iterator().next();
+   for(Diagnostic<?> e:d.getDiagnostics())if(e.getKind()==Diagnostic.Kind.ERROR)throw new AssertionError(e.toString());
+   String text=Files.readString(Path.of(a[0]));SourcePositions pos=Trees.instance(task).getSourcePositions();
+   Map<String,MethodTree> methods=new HashMap<>();
+   for(Tree type:unit.getTypeDecls())if(type instanceof ClassTree)for(Tree member:((ClassTree)type).getMembers())
+    if(member instanceof MethodTree)methods.put(((MethodTree)member).getName().toString(),(MethodTree)member);
+   if(a[2].equals("backup")){
+    StringBuilder out=new StringBuilder();
+    for(String name:Arrays.asList("backupProjection","backupEqual")){
+     MethodTree m=methods.get(name);if(m==null)throw new AssertionError("missing backup comparator");
+     out.append(text.substring((int)pos.getStartPosition(unit,m),(int)pos.getEndPosition(unit,m))).append("\n");
+    }Files.writeString(Path.of(a[1]),out);
+   }else{
+    MethodTree render=methods.get("renderDetail");if(render==null)throw new AssertionError("missing render");
+    List<String> calls=new ArrayList<>();
+    new TreeScanner<Void,Void>(){
+     @Override public Void visitMethodInvocation(MethodInvocationTree m,Void p){
+      calls.add(m.getMethodSelect().toString()+"("+m.getArguments().toString()+")");return super.visitMethodInvocation(m,p);
+     }
+    }.scan(render.getBody(),null);
+    if(Collections.frequency(calls,"body.addView(stamp)")!=1||Collections.frequency(calls,"body.addView(marks)")!=1
+      ||calls.contains("details.addView(stamp)")||calls.contains("details.addView(marks)"))
+      throw new AssertionError("checkin must stay outside scroll");
+    int status=calls.indexOf("body.addView(stamp)"),marks=calls.indexOf("body.addView(marks)"),scroll=-1;
+    for(int i=0;i<calls.size();i++)if(calls.get(i).startsWith("body.addView(scroll,"))scroll=i;
+    if(!(status<marks&&marks<scroll))throw new AssertionError("fixed controls before scroll");
+    if(calls.indexOf("details.addView(tagText)")>=calls.indexOf("details.addView(pathTitle)"))
+      throw new AssertionError("path remains last scroll section");
+    System.out.println("DETAIL_LAYOUT_AST_PASS_NOT_GEOMETRY");
+   }
+  }
+ }
+}'''
+    harness=r'''import java.util.*;
+class Check{
+ static void need(boolean b,String s){if(!b)throw new AssertionError(s);}
+ __METHODS__
+ static List<String> row(String...v){return new ArrayList<>(Arrays.asList(v));}
+ static Map<String,List<List<String>>> fixture(boolean restored){
+  Map<String,List<List<String>>> m=new TreeMap<>();
+  m.put("paths",new ArrayList<>(Arrays.asList(row("rowid","activity_id","position","text"),row("1:1","1:5","1:0","3:A"),row("1:2","1:5","1:1","3:B"),row("1:3","1:5","1:2","3:A"))));
+  m.put("tags",new ArrayList<>(Arrays.asList(row("rowid","activity_id","position","text"),row(restored?"1:1":"1:2","1:6","1:0","3:z"),row(restored?"1:2":"1:3","1:6","1:1","3:a"),row(restored?"1:3":"1:4","1:5","1:0","3:Final"))));
+  m.put("notes",new ArrayList<>(Arrays.asList(row("rowid","id","title"),row("1:9","3:note","3:Keep"))));
+  m.put("revision",new ArrayList<>(Arrays.asList(row("rowid","id","value"),row("1:1","1:1","1:12"))));return m;
+ }
+ static void bad(Map<String,List<List<String>>> a,Map<String,List<List<String>>> b,String label){
+  boolean rejected;try{rejected=!backupEqual(a,b);}catch(AssertionError|IllegalArgumentException e){rejected=true;}need(rejected,label);
+ }
+ public static void main(String[]args){
+  var a=fixture(false);var b=fixture(true);String frozen=a.toString();
+  need(backupEqual(a,a),"equal witness");System.out.println("BACKUP_EQUAL_WITNESS");
+  need(!a.equals(b)&&backupEqual(a,b),"rowid_only_allowed");System.out.println("BACKUP_NORMALIZATION_WITNESS");
+  need(a.toString().equals(frozen),"input_unchanged");
+  for(String table:Arrays.asList("paths","tags"))for(int col=1;col<4;col++){
+   b=fixture(true);b.get(table).get(1).set(col,"3:corrupt");bad(a,b,"declared_cell");
+  }
+  b=fixture(true);b.get("tags").get(1).set(1,"3:6");bad(a,b,"type_preserved");
+  b=fixture(true);Collections.swap(b.get("paths"),1,2);bad(a,b,"row_order");
+  b=fixture(true);b.get("paths").remove(3);bad(a,b,"duplicate_step");
+  b=fixture(true);b.remove("paths");bad(a,b,"table_set");
+  b=fixture(true);b.get("tags").get(0).set(3,"caption");bad(a,b,"columns");
+  b=fixture(true);b.get("notes").get(1).set(0,"1:1");bad(a,b,"other_rowid_exact");
+  b=fixture(true);b.get("notes").get(1).set(2,"3:Bad");bad(a,b,"other_content_exact");
+  b=fixture(true);b.get("revision").get(1).set(2,"1:13");bad(a,b,"revision_exact");
+  b=fixture(true);b.get("paths").add(row("1:4","1:5","1:3","3:Extra"));bad(a,b,"extra_row");
+  b=fixture(true);b.get("tags").get(1).set(0,"3:1");bad(a,b,"rowid_type");
+  b=fixture(true);b.get("tags").get(2).set(0,"1:1");bad(a,b,"rowid_order");
+  System.out.println("BACKUP_COMPARATOR_PASS 3 positive 17 negative");
+ }
+}'''
+    with tempfile.TemporaryDirectory() as tmp:
+        p=Path(tmp);(p/"Extract.java").write_text(extract)
+        (p/"Device.java").write_text(source);(p/"ActivitiesScreen.java").write_text(ui_source)
+        def run(args):
+            return subprocess.run(["java",*map(str,args)],capture_output=True,text=True,timeout=30)
+        r=run([p/"Extract.java",p/"Device.java",p/"methods","backup"])
+        assert r.returncode==0,(r.stdout,r.stderr)
+        methods=(p/"methods").read_text()
+        def check(code):
+            (p/"Check.java").write_text(harness.replace("__METHODS__",code))
+            return run([p/"Check.java"])
+        r=check(methods);assert r.returncode==0,(r.stdout,r.stderr);print(r.stdout.strip())
+        r=run([p/"Extract.java",p/"ActivitiesScreen.java",p/"unused","layout"])
+        assert r.returncode==0,(r.stdout,r.stderr);print(r.stdout.strip())
+        if mutants:
+            for old,new,label,witness in (
+                ('row.subList(1,row.size())','row','rowid_only_allowed','BACKUP_EQUAL_WITNESS'),
+                ('row.subList(1,row.size())','row.subList(2,row.size())','declared_cell','BACKUP_NORMALIZATION_WITNESS'),
+                ('}else rows.add(new ArrayList<>(row));','}else rows.add(new ArrayList<>(row.subList(1,row.size())));','other_rowid_exact','BACKUP_NORMALIZATION_WITNESS'),
+                ('return backupProjection(before).equals(backupProjection(after));','return true;','declared_cell','BACKUP_NORMALIZATION_WITNESS'),
+                ('need(current>previous,"backup rowid order");',';','rowid_order','BACKUP_NORMALIZATION_WITNESS'),
+            ):
+                assert methods.count(old)==1
+                r=check(methods.replace(old,new))
+                assert r.returncode!=0 and witness in r.stdout and ("AssertionError: "+label) in r.stderr,(label,r.stdout,r.stderr)
+            for old,new in (("body.addView(stamp)","details.addView(stamp)"),("body.addView(marks)","details.addView(marks)")):
+                assert ui_source.count(old)==1
+                (p/"ActivitiesScreen.java").write_text(ui_source.replace(old,new))
+                r=run([p/"Extract.java",p/"ActivitiesScreen.java",p/"unused","layout"])
+                assert r.returncode!=0 and "checkin must stay outside scroll" in r.stderr,r.stderr
+            print("REPAIR_MUTANTS 5 comparator and 2 layout rejected; host only")
 
 
 if __name__ == "__main__":

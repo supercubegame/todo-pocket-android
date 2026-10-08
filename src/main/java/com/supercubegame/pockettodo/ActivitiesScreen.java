@@ -202,14 +202,16 @@ public final class ActivitiesScreen {
         Button fieldEntry=host.button("字段",()->{});fieldEntry.setContentDescription("activity-fields-"+id);
         fieldEntry.setOnClickListener(v->{if(selected==id&&!backupPanel&&!historyPanel)fields.open(fieldEntry);});
         toolbar.addView(fieldEntry,new LinearLayout.LayoutParams(0,host.dp(48),1));
-        ScrollView scroll=new ScrollView(host.activity);LinearLayout details=host.column();scroll.addView(details);body.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        // Daily status/actions remain reachable while reading long paths or tags.
+        TextView stamp=host.text("今天："+d.status,18,TodayScreen.ACCENT);stamp.setContentDescription("activity-today-status");
+        stamp.setPadding(host.dp(8),host.dp(8),host.dp(8),host.dp(8));stamp.setBackground(host.shape(TodayScreen.TINT,16));body.addView(stamp);
+        LinearLayout marks=new LinearLayout(host.activity);
+        marks.addView(host.button("标记完成",()->mark(id,LocalDate.now(CN),CalendarRules.Status.DONE)),new LinearLayout.LayoutParams(0,host.dp(52),1));
+        marks.addView(host.button("跳过今天",()->mark(id,LocalDate.now(CN),CalendarRules.Status.SKIPPED)),new LinearLayout.LayoutParams(0,host.dp(52),1));body.addView(marks);
+        ScrollView scroll=new ScrollView(host.activity);scroll.setContentDescription("activity-details-scroll");LinearLayout details=host.column();scroll.addView(details);body.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         details.addView(host.text(d.title,26,TodayScreen.INK));
         TextView note=host.text("手动记录，不会替你操作其他应用",14,TodayScreen.MUTED);note.setPadding(0,host.dp(6),0,host.dp(18));details.addView(note);
         details.addView(host.text(d.day+" · 中国时间",16,TodayScreen.MUTED));
-        TextView stamp=host.text("今天："+d.status,24,TodayScreen.ACCENT);stamp.setPadding(host.dp(14),host.dp(16),host.dp(14),host.dp(16));stamp.setBackground(host.shape(TodayScreen.TINT,16));details.addView(stamp);
-        LinearLayout marks=new LinearLayout(host.activity);
-        marks.addView(host.button("标记完成",()->mark(id,LocalDate.now(CN),CalendarRules.Status.DONE)),new LinearLayout.LayoutParams(0,host.dp(52),1));
-        marks.addView(host.button("跳过今天",()->mark(id,LocalDate.now(CN),CalendarRules.Status.SKIPPED)),new LinearLayout.LayoutParams(0,host.dp(52),1));details.addView(marks);
         details.addView(host.button("打卡记录",()->{historyPanel=true;load();}));
         details.addView(host.button("笔记",()->new NoteEditorScreen(host,id,d.title,this::load).load()));
         TextView count=host.text("笔记 · "+d.notes.size()+" 篇",16,TodayScreen.INK);count.setContentDescription("note-count-"+id);details.addView(count);
@@ -228,18 +230,18 @@ public final class ActivitiesScreen {
             preview.setMaxLines(2);preview.setPadding(0,0,0,host.dp(8));details.addView(preview);
             details.addView(noteOrderActions(id,shown,summary,i,actions));
         }
-        TextView pathTitle=host.text("去哪里操作",20,TodayScreen.INK);pathTitle.setPadding(0,host.dp(18),0,host.dp(8));details.addView(pathTitle);
-        if(d.path.isEmpty())details.addView(host.text("把入口一行行记下来，下次不用找。",16,TodayScreen.MUTED));
-        for(int i=0;i<d.path.size();i++){TextView step=host.text((i+1)+". "+d.path.get(i),17,TodayScreen.INK);step.setPadding(host.dp(8),host.dp(8),host.dp(8),host.dp(8));details.addView(step);}
-        RelationEditor pathEditor=new RelationEditor(host,id,d.title,false,d.path,this::load);
-        Button pathEdit=host.button("编辑路径",()->{});pathEdit.setContentDescription("activity-path-edit-"+id);
-        pathEdit.setOnClickListener(v->pathEditor.open(pathEdit));details.addView(pathEdit,new LinearLayout.LayoutParams(-1,-2));
         details.addView(host.text("标签",20,TodayScreen.INK));
         TextView tagText=host.text(d.tags.isEmpty()?"还没有标签":String.join(" · ",d.tags),16,TodayScreen.MUTED);
         tagText.setContentDescription("activity-tags-"+id);details.addView(tagText);
         RelationEditor tagEditor=new RelationEditor(host,id,d.title,true,d.tags,this::load);
         Button tagEdit=host.button("编辑标签",()->{});tagEdit.setContentDescription("activity-tags-edit-"+id);
         tagEdit.setOnClickListener(v->tagEditor.open(tagEdit));details.addView(tagEdit,new LinearLayout.LayoutParams(-1,-2));
+        TextView pathTitle=host.text("去哪里操作",20,TodayScreen.INK);pathTitle.setPadding(0,host.dp(18),0,host.dp(8));details.addView(pathTitle);
+        if(d.path.isEmpty())details.addView(host.text("把入口一行行记下来，下次不用找。",16,TodayScreen.MUTED));
+        for(int i=0;i<d.path.size();i++){TextView step=host.text((i+1)+". "+d.path.get(i),17,TodayScreen.INK);step.setPadding(host.dp(8),host.dp(8),host.dp(8),host.dp(8));details.addView(step);}
+        RelationEditor pathEditor=new RelationEditor(host,id,d.title,false,d.path,this::load);
+        Button pathEdit=host.button("编辑路径",()->{});pathEdit.setContentDescription("activity-path-edit-"+id);
+        pathEdit.setOnClickListener(v->pathEditor.open(pathEdit));details.addView(pathEdit,new LinearLayout.LayoutParams(-1,-2));
     }
     /** Buttons retain the displayed stable-ID sequence, never a title lookup.
      * The backend rejects stale membership/order and owns the single transaction.

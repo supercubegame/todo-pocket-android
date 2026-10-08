@@ -68,12 +68,46 @@ def verify_phase(output, phase):
     assert not missing, 'restore coverage missing: ' + repr(sorted(missing))
     return int(found[0][0])
 
-def reveal_summary(read_nodes, swipe, package, description, expected, max_swipes=8):
-    """Scroll only while identity is absent; wrong visible content fails immediately."""
+def summary_viewport(frame, package):
+    matches = [n for n in frame if n.get('content-desc') == 'activity-details-scroll']
+    assert len(matches) == 1, 'missing or duplicate summary viewport'
+    node = matches[0]
+    assert node.get('package') == package, 'summary viewport belongs to another package'
+    assert node.get('class') == 'android.widget.ScrollView' and node.get('enabled') == 'true', 'invalid summary viewport'
+    match = re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', node.get('bounds', ''))
+    assert match, 'summary viewport has malformed bounds'
+    left, top, right, bottom = map(int, match.groups())
+    assert right-left >= 3 and bottom-top >= 3, 'summary viewport too small'
+    return left, top, right, bottom
+
+def summary_gesture(bounds):
+    left, top, right, bottom = bounds
+    x = (left+right)//2
+    # Half-viewport travel leaves overlap for short rows; never use screen coordinates.
+    start = top + (bottom-top)*3//4
+    end = top + (bottom-top)//4
+    assert left < x < right and top < end < start < bottom, 'summary gesture leaves viewport'
+    return x, start, x, end
+
+def reveal_summary(read_nodes, swipe, package, description, expected, max_swipes=8, records=None):
+    """Bounded navigation, not a retry of wrong content; record every observed frame."""
     assert type(max_swipes) is int and 0 <= max_swipes <= 8, 'invalid summary navigation bound'
+    records = [] if records is None else records
+    previous = None
     for attempt in range(max_swipes + 1):
-        frame = read_nodes()
+        frame = list(read_nodes())
+        record = dict(attempt=attempt, description=description, status='OBSERVED')
+        records.append(record)
+        viewport = summary_viewport(frame, package)
+        record['viewport'] = list(viewport)
+        fields = ('package','content-desc','text','bounds','class')
+        signature = hashlib.sha256(json.dumps([[n.get(k,'') for k in fields] for n in frame],
+                                              ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
+        record['frame_sha256'] = signature
+        record['changed_from_previous'] = None if previous is None else signature != previous
+        previous = signature
         matches = [n for n in frame if n.get('content-desc') == description]
+        record['matches'] = len(matches)
         assert len(matches) <= 1, 'duplicate summary identity'
         if matches:
             node = matches[0]
@@ -82,11 +116,167 @@ def reveal_summary(read_nodes, swipe, package, description, expected, max_swipes
             assert bounds, 'summary has malformed bounds'
             x1,y1,x2,y2 = map(int,bounds.groups())
             assert x2 > x1 and y2 > y1, 'summary has empty visible bounds'
+            left,top,right,bottom = viewport
+            assert left <= x1 < x2 <= right and top <= y1 < y2 <= bottom, 'summary outside observed viewport'
             assert node.get('text') == expected, 'summary text differs: '+repr(node.get('text'))
+            record['status'] = 'EXACT_SUMMARY_FOUND'
+            record['summary_bounds'] = [x1,y1,x2,y2]
             return node
         if attempt < max_swipes:
-            swipe()
+            coordinates = summary_gesture(viewport)
+            record['gesture'] = list(coordinates)
+            record['duration_ms'] = 350
+            record['status'] = 'SWIPE_REQUESTED'
+            swipe(*coordinates)
+        else:
+            record['status'] = 'ABSENT_AT_BOUND'
     raise AssertionError('summary identity absent after bounded scroll: '+description)
+
+def summary_geometry_selftest():
+    """Original API34 geometry replay MODEL, not reconstructed Android touch physics."""
+    import ast, copy, inspect
+    package='synthetic.app'; description='note-activity-1'; expected='Watered 20 min today'
+    viewport={'package':package,'content-desc':'activity-details-scroll','class':'android.widget.ScrollView',
+              'enabled':'true','scrollable':'true','bounds':'[18,293][302,578]'}
+    node={'package':package,'content-desc':description,'text':expected,'bounds':'[18,400][302,424]'}
+    def rejected(fn, needle):
+        try: fn()
+        except AssertionError as exc:
+            assert needle in str(exc), (needle,str(exc))
+            return
+        raise AssertionError('negative survived: '+needle)
+    def overlap_model(reveal, legacy=False):
+        # Measured viewport h=285, old requested travel=320. This 24px row lies
+        # in the 35px uncovered interval. Actual original intermediate frames
+        # were not retained, so this proves the gap mechanism, not its occurrence.
+        offset=0; gestures=[]; receipts=[]
+        def read():
+            top=293+290-offset; bottom=top+24
+            result=[dict(viewport)]
+            if max(top,293)<min(bottom,578):
+                result.append(dict(node,bounds=f'[18,{max(top,293)}][302,{min(bottom,578)}]'))
+            return result
+        def swipe(*args):
+            nonlocal offset
+            if legacy:
+                assert args == ()
+                args=(160,500,160,180)
+            gestures.append(args)
+            offset += args[1]-args[3]
+        if legacy:
+            rejected(lambda:reveal(read,swipe,package,description,expected),
+                     'summary identity absent after bounded scroll')
+            assert len(gestures)==8
+        else:
+            result=reveal(read,swipe,package,description,expected,records=receipts)
+            assert result['text']==expected and len(gestures)==1
+            assert gestures == [(160,506,160,364)]
+            assert len(receipts)==2 and receipts[-1]['status']=='EXACT_SUMMARY_FOUND'
+            assert receipts[-1]['changed_from_previous'] is True
+        return receipts
+    # A matching immediately-visible positive witness is used for every mutant.
+    def visible(reveal):
+        result=reveal(lambda:[viewport,node],lambda *a:(_ for _ in ()).throw(AssertionError('unexpected swipe')),
+                      package,description,expected)
+        assert result==node
+    def case(reveal, key):
+        if key=='gap': overlap_model(reveal); return
+        if key=='text':
+            rejected(lambda:reveal(lambda:[viewport,dict(node,text='wrong')],lambda *a:None,package,description,expected),'summary text differs')
+        elif key=='identity':
+            rejected(lambda:reveal(lambda:[viewport,dict(node,**{'content-desc':'note-activity-2'})],
+                                  lambda *a:None,package,description,expected,0),'summary identity absent')
+        elif key=='bound':
+            calls=[]; receipts=[]
+            rejected(lambda:reveal(lambda:[viewport],lambda *a:calls.append(a),package,description,expected,records=receipts),
+                     'summary identity absent')
+            assert len(calls)==8 and len(receipts)==9,'swipe or observation count differs'
+        elif key=='records':
+            receipts=overlap_model(reveal)
+            assert receipts[0]['gesture']==[160,506,160,364]
+    visible(reveal_summary)
+    for key in ('gap','text','identity','bound','records'): case(reveal_summary,key)
+    negative=0
+    for bad, needle in [
+        ([], 'missing or duplicate'),([viewport,viewport],'missing or duplicate'),
+        ([dict(viewport,package='foreign')],'another package'),
+        ([dict(viewport,enabled='false')],'invalid summary viewport'),
+        ([dict(viewport,bounds='broken')],'malformed bounds'),
+        ([dict(viewport,bounds='[0,0][0,0]')],'too small'),
+        ([dict(viewport,**{'class':'android.widget.TextView'})],'invalid summary viewport'),
+        ([viewport,dict(node,bounds='[18,20][302,44]')],'outside observed viewport'),
+    ]:
+        rejected(lambda bad=bad:reveal_summary(lambda:bad,lambda *a:None,package,description,expected),needle)
+        negative+=1
+    for bound in (-1,9,True,1.5):
+        rejected(lambda:reveal_summary(lambda:[viewport],lambda *a:None,package,description,expected,bound),'invalid summary navigation bound')
+        negative+=1
+    for rect in ((18,281,302,578),(18,293,302,578),(301,700,1001,1200),(10,20,13,24)):
+        coords=summary_gesture(rect); left,top,right,bottom=rect
+        assert left<coords[0]<right and top<coords[3]<coords[1]<bottom
+        assert coords[1]-coords[3] <= (bottom-top+1)//2
+    # No progress remains a failure at the ORIGINAL bound, with nine receipts.
+    receipts=[];calls=[]
+    rejected(lambda:reveal_summary(lambda:[viewport],lambda *a:calls.append(a),package,description,expected,records=receipts),
+             'summary identity absent')
+    assert len(calls)==8 and len(receipts)==9 and receipts[-1]['status']=='ABSENT_AT_BOUND'
+    assert all(r['changed_from_previous'] is False for r in receipts[1:])
+    source=inspect.getsource(reveal_summary)
+    mutants=[
+        ("coordinates = summary_gesture(viewport)","coordinates = (160,500,160,180)",'gap'),
+        ("assert node.get('text') == expected","assert True",'text'),
+        ("range(max_swipes + 1)","range(max_swipes)",'bound'),
+        ("record['gesture'] = list(coordinates)","record['gesture'] = []",'records'),
+    ]
+    killed=0
+    for old,new,key in mutants:
+        assert source.count(old)==1
+        scope=dict(globals());exec(compile(source.replace(old,new,1),'<navigation-mutant>','exec'),scope)
+        mutant=scope['reveal_summary']
+        visible(mutant)
+        try:case(mutant,key)
+        except AssertionError:killed+=1
+        else:raise AssertionError('navigation mutant survived '+key)
+    assert killed==4
+    print('SUMMARY_GEOMETRY_SELFTEST positive_viewports=4 negative_geometry_bounds='+str(negative)+
+          ' witnessed_mutants='+str(killed)+' PASS; geometry model, NOT_ANDROID',flush=True)
+
+def summary_wiring_selftest():
+    import ast, copy
+    tree=ast.parse(Path(__file__).read_text())
+    def check(tree):
+        native=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='_verify_native_ui')
+        calls=[n for n in ast.walk(native) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='reveal_summary']
+        assert len(calls)==1
+        assert ast.unparse(calls[0])=="reveal_summary(nodes, swipe_summary, PKG, 'note-activity-1', 'Watered 20 min today', records=summary_navigation_traces)"
+        swipe=next(n for n in native.body if isinstance(n,ast.FunctionDef) and n.name=='swipe_summary')
+        assert ast.unparse(swipe)=="def swipe_summary(x1, y1, x2, y2):\n    shell('input', 'swipe', str(x1), str(y1), str(x2), str(y2), '350')\n    time.sleep(0.4)"
+        shell=next(n for n in native.body if isinstance(n,ast.FunctionDef) and n.name=='shell')
+        assert any(isinstance(n,ast.keyword) and n.arg=='timeout' and ast.literal_eval(n.value)==40 for n in ast.walk(shell))
+        writes=[n for n in ast.walk(native) if isinstance(n,ast.Assign) and
+                any(ast.unparse(t)=="result['summary_navigation_traces']" for t in n.targets)]
+        assert len(writes)==2 and all(ast.unparse(n.value)=='summary_navigation_traces' for n in writes)
+        parser=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='parser_selftest')
+        names={n.func.id for n in ast.walk(parser) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name)}
+        assert {'summary_navigation_selftest','summary_geometry_selftest','summary_wiring_selftest'} <= names
+    check(tree)
+    for omission in ('records','caller','entry'):
+        changed=copy.deepcopy(tree)
+        if omission=='records':
+            native=next(n for n in changed.body if isinstance(n,ast.FunctionDef) and n.name=='_verify_native_ui')
+            for n in ast.walk(native):
+                if isinstance(n,ast.Assign):
+                    for t in n.targets:
+                        if ast.unparse(t)=="result['summary_navigation_traces']":t.slice=ast.Constant(value='omitted')
+        else:
+            for n in ast.walk(changed):
+                if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id==('reveal_summary' if omission=='caller' else 'summary_geometry_selftest'):
+                    n.func.id='omitted'
+        try:check(changed)
+        except AssertionError:pass
+        else:raise AssertionError('summary wiring omission survived '+omission)
+    print('SUMMARY_WIRING_SELFTEST positive=1 omissions=3 PASS',flush=True)
+
 
 def summary_navigation_selftest():
     package = 'synthetic.app'
@@ -97,8 +287,10 @@ def summary_navigation_selftest():
         state = {'frame':0,'reads':0}
         def read():
             state['reads'] += 1
-            return frames[min(state['frame'],len(frames)-1)]
-        def swipe():
+            view={'package':package,'content-desc':'activity-details-scroll','class':'android.widget.ScrollView',
+                  'enabled':'true','bounds':'[16,100][300,400]'}
+            return [view]+frames[min(state['frame'],len(frames)-1)]
+        def swipe(*coordinates):
             state['frame'] += 1
         accepted = False
         try:
@@ -566,6 +758,8 @@ def parser_selftest():
     restore_picker_wiring_selftest()
     full_native_observer_selftest()
     summary_navigation_selftest()
+    summary_geometry_selftest()
+    summary_wiring_selftest()
     database_directory_selftest()
     checks = 0
     def synthetic(labels, phase, code=-1, count=None):
@@ -825,6 +1019,7 @@ def _verify_native_ui(adb,nodes):
     infra_retries = []
     process_stops = []
     restore_picker_traces = []
+    summary_navigation_traces = []
     directory_traces = []
     directory_runner = isolated_directory_runner(adb, SERIAL, PKG, directory_traces)
     def shell(*args):
@@ -834,6 +1029,8 @@ def _verify_native_ui(adb,nodes):
         x1,y1,x2,y2=map(int,re.findall(r'\d+',n.get('bounds')))
         assert x2>x1 and y2>y1, 'empty touch bounds'
         shell('input','tap',str((x1+x2)//2),str((y1+y2)//2))
+    def swipe_summary(x1,y1,x2,y2):
+        shell('input','swipe',str(x1),str(y1),str(x2),str(y2),'350'); time.sleep(.4)
     def swipe_up():
         shell('input','swipe','160','500','160','180','350'); time.sleep(.4)
     def find(**attrs):
@@ -1056,7 +1253,7 @@ def _verify_native_ui(adb,nodes):
         restart(); tap('活动'); ready(); touch('activity-1'); ready()
         # The activity summary can be below the viewport after accessible title controls grow.
         # Navigate by stable identity, then assert exact content once; never retry wrong text.
-        ok(reveal_summary(nodes,swipe_up,PKG,'note-activity-1','Watered 20 min today') is not None,'note survives process restart')
+        ok(reveal_summary(nodes,swipe_summary,PKG,'note-activity-1','Watered 20 min today',records=summary_navigation_traces) is not None,'note survives process restart')
         # The bottom tab reloads the selected detail; it does not clear selected activity.
         # Verify that detail before entering notes, rather than seeking a category-list row.
         tap('活动'); ready()
@@ -1529,10 +1726,12 @@ public class ImageImportFixture {
         result.update(derivative_ui='NATIVE_CROP_MASK_UI_SAVE_CANCEL_RESTART_PASS')
         result.update(derivative_geometry=derive_geometry,pixel_oracle=pixel_oracle,process_stops=process_stops)
         result['restore_picker_traces']=restore_picker_traces
+        result['summary_navigation_traces']=summary_navigation_traces
         result['database_directory_traces']=directory_traces
     except Exception as exc:
         result={'status':'FAIL','api':API,'count':len(checks),'checks':checks,'error':repr(exc),'screenshots':shots,'infra_retries':infra_retries,'release_ready':False,'process_stops':process_stops}
         result['restore_picker_traces']=restore_picker_traces
+        result['summary_navigation_traces']=summary_navigation_traces
         result['database_directory_traces']=directory_traces
         if 'derive_geometry' in locals():result['derivative_geometry']=derive_geometry
         if 'pixel_oracle' in locals():result['pixel_oracle']=pixel_oracle

@@ -1,0 +1,298 @@
+name: Bounded server log delivery validation
+on:
+  push:
+    branches: [diagnostic/server-log-delivery-20261008]
+    paths: [.github/workflows/deliver-server-log.yml]
+permissions:
+  contents: read
+concurrency:
+  group: bounded-server-log-delivery-20261008
+  cancel-in-progress: false
+jobs:
+  deliver:
+    if: github.repository == 'supercubegame/todo-pocket-android' && github.ref == 'refs/heads/diagnostic/server-log-delivery-20261008'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Require actual tracer without retry
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v strace >/dev/null 2>&1; then
+            timeout 90s sudo apt-get -o Acquire::Retries=0 update
+            timeout 60s sudo apt-get -o Acquire::Retries=0 install --no-install-recommends -y strace
+          fi
+          strace --version
+      - name: Verify pinned candidate and isolated permission before product write
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          import gzip
+          import hashlib
+          import io
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import tempfile
+          import urllib.request
+          
+          REPO = "supercubegame/todo-pocket-android"
+          BASE = "0c4f5d8707a79d4b28ff4f8ed28b12ce659e04b8"
+          BRANCH = "diagnostic/server-log-delivery-20261008"
+          PRODUCT = "feature/v1.2-activity-notes-ledger"
+          WORKFLOW = ".github/workflows/deliver-server-log.yml"
+          FILES = {
+              "tools/verify_process_control.py": ("7198109c1058f7e278404cce4670c4ab6e31a879", "e900ed523d101d47052de49b94f997b8551442dc", 168785, "77fc58adb43c5f6f1f7e4b3965a0a40a7460dec17503630d9ce0c33dbcdc69a2"),
+              ".github/workflows/android.yml": ("a6ed32ff2405f36ea41b0afeef98c25feb66b0ee", "a4c8e9384f88270b8562c17a3000d0cf877cd019", 125133, "c25f747aa232c76f1a87c975e88ab680fa6824d2924b186efabebb75f161b32e"),
+          }
+          WORKFLOWS = ("android.yml", "note-drafts.yml", "todo-management.yml", "custom-fields.yml", "category-drag.yml", "app-catalog.yml")
+          PAYLOAD = "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"
+          
+          
+          def blob(data):
+              return hashlib.sha1(b"blob "+str(len(data)).encode()+b"\0"+data).hexdigest()
+          
+          
+          def exact(path, data):
+              _, identity, size, sha256 = FILES[path]
+              assert len(data) == size and blob(data) == identity
+              assert hashlib.sha256(data).hexdigest() == sha256
+          
+          
+          def context(env):
+              assert env["GITHUB_REPOSITORY"] == REPO
+              assert env["GITHUB_REF"] == "refs/heads/"+BRANCH
+              assert env["GITHUB_EVENT_NAME"] == "push"
+              assert env["GITHUB_RUN_ATTEMPT"] == "1", "One-shot delivery; no reruns"
+          
+          
+          def require_base(head):
+              assert head == BASE, "Product head changed; stop without writing it"
+          
+          
+          def sequence(check, probe, verify_probe, product, verify_product, dispatch):
+              check()
+              probe()  # Permission refusal raises here; no fallback API or credential.
+              verify_probe()
+              check()
+              product()
+              verify_product()
+              dispatch()
+          
+          
+          def controls():
+              good = {"GITHUB_REPOSITORY":REPO, "GITHUB_REF":"refs/heads/"+BRANCH,
+                      "GITHUB_EVENT_NAME":"push", "GITHUB_RUN_ATTEMPT":"1"}
+              context(good); require_base(BASE)
+              for key in good:
+                  changed=dict(good);changed[key]="wrong"
+                  try: context(changed)
+                  except AssertionError: pass
+                  else: raise AssertionError("Context rejection missing")
+              try: require_base("changed")
+              except AssertionError: pass
+              else: raise AssertionError("Head guard missing")
+              calls=[]
+              def step(name, fail=False):
+                  def invoke():
+                      calls.append(name)
+                      if fail: raise PermissionError("synthetic refusal")
+                  return invoke
+              sequence(*[step(name) for name in ("check","probe","verify_probe","product","verify_product","dispatch")])
+              assert calls == ["check","probe","verify_probe","check","product","verify_product","dispatch"]
+              for blocked in ("probe", "verify_probe", "product", "verify_product"):
+                  calls.clear()
+                  try: sequence(*[step(name,name==blocked) for name in ("check","probe","verify_probe","product","verify_product","dispatch")])
+                  except PermissionError: pass
+                  else: raise AssertionError("Refusal swallowed")
+                  assert calls[-1] == blocked and "dispatch" not in calls
+                  if blocked in ("probe","verify_probe"): assert "product" not in calls
+              print("DELIVERY_CONTROLS context=5 permission/order=5 PASS")
+          
+          
+          controls()
+          # LOCAL_CONTROLS_END
+          context(os.environ)
+          HEAD = os.environ["GITHUB_SHA"]
+          ROOT = Path.cwd()
+          OUT = Path(os.environ["RUNNER_TEMP"])/"server-log-delivery"
+          OUT.mkdir(exist_ok=True)
+          TOKEN = os.environ["GH_TOKEN"]
+          receipt = {"status":"NOT_SUBMITTED", "base":BASE, "bootstrap":HEAD,
+                     "diagnostic_branch":BRANCH, "product_branch":PRODUCT, "files":FILES,
+                     "run":os.environ["GITHUB_RUN_ID"], "release_ready":False, "durable_upgrade_ready":False}
+          
+          
+          def save():
+              (OUT/"receipt.json").write_text(json.dumps(receipt,indent=2)+"\n")
+              with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as stream:
+                  stream.write("Status: "+receipt["status"]+"\n\n")
+                  for key in ("probe_commit","product_commit"):
+                      if key in receipt:
+                          stream.write(key+": https://github.com/"+REPO+"/commit/"+receipt[key]+"\n\n")
+          
+          
+          def run(args, *, data=None, env=None, timeout=30):
+              value=subprocess.run(args,input=data,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+                                   timeout=timeout,env=env)
+              if value.returncode:
+                  # Never print token, auth config or all environment values.
+                  error=value.stderr.decode(errors="replace").replace(TOKEN,"[REDACTED]")
+                  raise RuntimeError("command failed ("+str(value.returncode)+"): "+error[-4000:])
+              return value.stdout
+          
+          
+          def git(*args, data=None, env=None):
+              return run(["git",*args],data=data,env=env).decode().strip()
+          
+          
+          def remote(branch):
+              rows=git("ls-remote","origin","refs/heads/"+branch).splitlines()
+              assert len(rows)==1 and rows[0].split()[1]=="refs/heads/"+branch, "Exact ref missing"
+              return rows[0].split()[0]
+          
+          
+          def api(route, data=None, limit=1048576, raw=False):
+              assert not route.startswith("/") and "://" not in route
+              request=urllib.request.Request("https://api.github.com/repos/"+REPO+"/"+route,
+                  data=None if data is None else json.dumps(data).encode(),
+                  headers={"Authorization":"Bearer "+TOKEN,
+                           "Accept":"application/vnd.github.raw+json" if raw else "application/vnd.github+json"})
+              with urllib.request.urlopen(request,timeout=30) as response:
+                  body=response.read(limit+1)
+              assert len(body)<=limit, "Response overflow"
+              return body if raw else (json.loads(body) if body else None)
+          
+          
+          def verify_remote(commit):
+              for path in FILES:
+                  raw=api("contents/"+path+"?ref="+commit,limit=FILES[path][2],raw=True)
+                  exact(path,raw)
+              return True
+          
+          
+          def push(commit, branch):
+              auth=base64.b64encode(("x-access-token:"+TOKEN).encode()).decode()
+              env=dict(os.environ, GIT_CONFIG_COUNT="1",
+                       GIT_CONFIG_KEY_0="http.https://github.com/.extraheader",
+                       GIT_CONFIG_VALUE_0="AUTHORIZATION: basic "+auth)
+              value=subprocess.run(["git","push","origin",commit+":refs/heads/"+branch],
+                                   stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env,timeout=60)
+              (OUT/("push-"+("probe" if branch==BRANCH else "product")+".log")).write_text(
+                  (value.stdout+value.stderr).decode(errors="replace").replace(TOKEN,"[REDACTED]").replace(auth,"[REDACTED]"))
+              assert value.returncode==0, "PUSH_REFUSED: stop; no alternate transport or credential"
+          
+          
+          def make_commit(parent, include_helper):
+              index=OUT/("probe.index" if include_helper else "product.index")
+              assert not index.exists()
+              env=dict(os.environ,GIT_INDEX_FILE=str(index),
+                       GIT_AUTHOR_NAME="github-actions[bot]",GIT_COMMITTER_NAME="github-actions[bot]",
+                       GIT_AUTHOR_EMAIL="41898282+github-actions[bot]@users.noreply.github.com",
+                       GIT_COMMITTER_EMAIL="41898282+github-actions[bot]@users.noreply.github.com")
+              git("read-tree",parent,env=env)
+              for path,(_,identity,_,_) in FILES.items():
+                  assert git("hash-object","-w","--stdin",data=(ROOT/path).read_bytes())==identity
+                  git("update-index","--add","--cacheinfo","100644",identity,path,env=env)
+              tree=git("write-tree",env=env)
+              commit=git("commit-tree",tree,"-p",parent,
+                         data=b"ci: capture bounded existing ADB server log with identity guards\n",env=env)
+              assert set(git("diff-tree","--no-commit-id","--name-only","-r",commit).splitlines())==set(FILES)
+              helper=run(["git","ls-tree",commit,"--",WORKFLOW]).strip()
+              assert bool(helper) is include_helper, "Helper must never enter product tree"
+              return commit
+          
+          
+          try:
+              assert git("rev-parse","HEAD")==HEAD
+              assert git("rev-parse",HEAD+"^")==BASE, "Unexpected bootstrap parent"
+              assert git("diff-tree","--no-commit-id","--name-only","-r",HEAD)==WORKFLOW
+              require_base(remote(PRODUCT))
+              assert remote(BRANCH)==HEAD
+              for path,(original,_,_,_) in FILES.items():
+                  assert blob((ROOT/path).read_bytes())==original
+              packed=base64.b64decode(PAYLOAD,validate=True)
+              with gzip.GzipFile(fileobj=io.BytesIO(packed)) as stream:
+                  patch=stream.read(65537)
+              assert len(patch)==26186, "Unexpected patch length"
+              expected_headers={"a/"+path+" b/"+path for path in FILES}
+              # git apply --numstat lists paths before any application.
+              listed=run(["git","apply","--numstat","-"],data=patch).decode().splitlines()
+              assert {line.split("\t")[-1] for line in listed}==set(FILES) and len(listed)==2
+              run(["git","apply","--check","-"],data=patch)
+              run(["git","apply","-"],data=patch)
+              for path in FILES: exact(path,(ROOT/path).read_bytes())
+              assert set(git("diff","--name-only").splitlines())==set(FILES)
+              for name in WORKFLOWS:
+                  header=(ROOT/".github/workflows"/name).read_text().split("permissions:",1)[0]
+                  assert "  workflow_dispatch:\n" in header, "Existing CI dispatch unavailable"
+              for entry in ("selftest","connection-selftest","directory-selftest","isolated-selftest",
+                            "absence-selftest","server-log-selftest","isolated-real-selftest"):
+                  value=subprocess.run(["python3","tools/verify_process_control.py",entry],
+                                       stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=120)
+                  (OUT/(entry+".log")).write_bytes(value.stdout)
+                  assert value.returncode==0, "Host gate failed: "+entry
+              for path in FILES: exact(path,(ROOT/path).read_bytes())
+              probe=make_commit(HEAD,True)
+              product=make_commit(BASE,False)
+              receipt.update(status="HOST_VERIFIED_PERMISSION_PROBE_PENDING",probe_commit=probe,product_commit=product)
+              save()
+              def check():
+                  require_base(remote(PRODUCT))
+              def probe_write():
+                  assert remote(BRANCH)==HEAD
+                  receipt["status"]="PROBE_PUSH_STARTED"; save()
+                  push(probe,BRANCH)
+              def probe_verify():
+                  assert remote(BRANCH)==probe
+                  verify_remote(probe)
+                  receipt["status"]="ISOLATED_PERMISSION_PROBE_VERIFIED"; save()
+              def product_write():
+                  receipt["status"]="PRODUCT_PUSH_STARTED"; save()
+                  push(product,PRODUCT)
+              def product_verify():
+                  assert remote(PRODUCT)==product
+                  verify_remote(product)
+                  receipt["status"]="PRODUCT_SUBMITTED_EXACT_REMOTE_VERIFIED"; save()
+              def dispatch():
+                  results=[]
+                  receipt["dispatch"]=results
+                  for name in WORKFLOWS:
+                      assert remote(PRODUCT)==product, "Head changed before dispatch"
+                      try:
+                          api("actions/workflows/"+name+"/dispatches",{"ref":PRODUCT})
+                          results.append({"workflow":name,"status":"ACCEPTED_NOT_COMPLETED","expected_commit":product})
+                      except Exception as exc:
+                          results.append({"workflow":name,"status":"FAILED","error_type":type(exc).__name__})
+                      save()
+                  assert all(row["status"]=="ACCEPTED_NOT_COMPLETED" for row in results), "Dispatch incomplete"
+                  receipt["status"]="SUBMITTED_REMOTE_VERIFIED_CI_DISPATCH_ACCEPTED_NOT_ACCEPTANCE"; save()
+              sequence(check,probe_write,probe_verify,product_write,product_verify,dispatch)
+          except BaseException as exc:
+              receipt["failed_stage"]=receipt["status"]
+              receipt["status"]="STOPPED_NO_FALLBACK"
+              receipt["error_type"]=type(exc).__name__
+              receipt["error"]=str(exc).replace(TOKEN,"[REDACTED]")[-4000:]
+              save()
+              raise
+          PY
+      - name: Preserve delivery or refusal evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: server-log-delivery-${{ github.run_id }}
+          path: ${{ runner.temp }}/server-log-delivery/
+          if-no-files-found: warn

@@ -636,7 +636,259 @@ public class BatchPageCheck {
 '''
 
 
+def scan_batch_summaries(read_nodes, swipe, expected, package, records,
+                         viewport_for, gesture_for):
+    """25 observations, at most 24 useful gestures; never retry wrong content.
+
+    Bounds describe observed UI geometry, not Android touch/scroll physics.
+    The caller owns records before entry so failures cannot discard them.
+    """
+    actual, order, frames = {}, [], []
+    previous = None
+    for attempt in range(25):
+        record = {"attempt": attempt, "status": "READING"}
+        records.append(record)
+        try:
+            current = list(read_nodes())
+            signature = hashlib.sha256(json.dumps(
+                [sorted(n.attrib.items()) for n in current],
+                ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+            record.update(frame_sha256=signature,
+                          changed_from_previous=None if previous is None else signature != previous)
+            previous = signature
+            viewport = viewport_for(current, package)
+            record["viewport"] = list(viewport)
+            frame, seen = [], set()
+            record["rows"] = frame
+            for node in current:
+                key = node.get("content-desc", "")
+                if not key.startswith(("note-count-", "note-title-", "note-activity-", "note-summary-")):
+                    continue
+                value = node.get("text", "")
+                frame.append({"id": key, "text": value, "bounds": node.get("bounds")})
+                assert key not in seen, "duplicate summary identity in frame"
+                seen.add(key)
+                assert node.get("package") == package, "summary belongs to another package"
+                match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
+                assert match, "summary has malformed bounds"
+                x1, y1, x2, y2 = map(int, match.groups())
+                left, top, right, bottom = viewport
+                assert left <= x1 < x2 <= right and top <= y1 < y2 <= bottom, "summary outside observed viewport"
+                assert key in expected, "unexpected summary identity"
+                assert value == expected[key], "summary text differs"
+                assert key not in actual or actual[key] == value, "summary changed while scrolling"
+                if key.startswith("note-title-") and key not in actual:
+                    order.append(key)
+                actual[key] = value
+            frames.append(frame)
+            record["missing"] = sorted(set(expected) - set(actual))
+            if set(expected) <= set(actual):
+                summary_ui_check(expected, actual, order)
+                record["status"] = "EXACT_SUMMARIES_FOUND"
+                return frames
+            if attempt < 24:
+                coordinates = gesture_for(viewport)
+                record.update(gesture=list(coordinates), duration_ms=350, status="SWIPE_REQUESTED")
+                swipe(*coordinates)
+            else:
+                record["status"] = "ABSENT_AT_BOUND"
+        except Exception as exc:
+            record.update(status="FAILED", error=repr(exc))
+            raise
+    raise AssertionError("summary rows unreachable: " + repr(set(expected) - set(actual)))
+
+
+def batch_scroll_selftest():
+    # Run the actual scanner and shared geometry, not an alternative implementation.
+    import inspect
+    import ast
+    # Importing emulator_gate changes cwd and requires Android runner variables.
+    # Compile only its two pure geometry functions for this host-only control.
+    geometry_source = Path(__file__).with_name("emulator_gate.py").read_text()
+    geometry_tree = ast.parse(geometry_source)
+    names = {"summary_viewport", "summary_gesture"}
+    functions = [node for node in geometry_tree.body
+                 if isinstance(node, ast.FunctionDef) and node.name in names]
+    assert len(functions) == 2 and {node.name for node in functions} == names
+    geometry = {"re": re}
+    exec(compile(ast.Module(body=functions, type_ignores=[]), "<actual-shared-geometry>", "exec"), geometry)
+    summary_viewport, summary_gesture = geometry["summary_viewport"], geometry["summary_gesture"]
+    package = "test.package"
+    viewport = (18, 293, 302, 578)
+    expected = {"note-count-1": "笔记 · 2 篇", "note-title-a": "1. Same",
+                "note-activity-1": "Public", "note-title-b": "2. Same",
+                "note-summary-b": "空笔记"}
+
+    def bounds(box):
+        return "[%d,%d][%d,%d]" % box
+
+    def frame(keys, box=viewport):
+        left, top, right, bottom = box
+        nodes = [ET.Element("node", {"content-desc": "activity-details-scroll",
+                 "package": package, "class": "android.widget.ScrollView",
+                 "enabled": "true", "bounds": bounds(box)})]
+        for key in keys:
+            nodes.append(ET.Element("node", {"content-desc": key, "text": expected[key],
+                         "package": package, "bounds": bounds((left, top+1, right, top+2))}))
+        return nodes
+
+    def exercise(fn, frames, want_failure=None, want_swipes=None):
+        receipts, gestures, observations = [], [], []
+        def read():
+            at = len(observations)
+            result = frames[min(at, len(frames)-1)]
+            observations.append(result)
+            return result
+        def swipe(x1, y1, x2, y2):
+            left, top, right, bottom = summary_viewport(observations[-1], package)
+            assert left < x1 == x2 < right and top < y2 < y1 < bottom, "gesture outside viewport"
+            assert (x1, y1, x2, y2) == summary_gesture((left, top, right, bottom)), "gesture is not half viewport"
+            gestures.append((x1, y1, x2, y2))
+        try:
+            result = fn(read, swipe, expected, package, receipts, summary_viewport, summary_gesture)
+        except AssertionError as exc:
+            assert want_failure is not None and want_failure in str(exc), (want_failure, str(exc))
+            result = None
+        else:
+            assert want_failure is None, "negative accepted: "+str(want_failure)
+        assert len(receipts) == len(observations), "missing frame receipt"
+        for i, record in enumerate(receipts):
+            assert record["attempt"] == i
+            assert re.fullmatch("[0-9a-f]{64}", record["frame_sha256"])
+            assert record["changed_from_previous"] is (None if i == 0 else
+                record["frame_sha256"] != receipts[i-1]["frame_sha256"])
+        if want_swipes is not None:
+            assert len(gestures) == want_swipes, "gesture budget changed"
+        if want_failure is None:
+            assert receipts[-1]["status"] == "EXACT_SUMMARIES_FOUND"
+            assert receipts[-1]["missing"] == []
+            assert result and all(isinstance(f, list) for f in result)
+        elif want_failure == "summary rows unreachable":
+            assert len(receipts) == 25 and receipts[-1]["status"] == "ABSENT_AT_BOUND"
+            assert receipts[-1]["missing"] == sorted(expected)
+        else:
+            assert receipts[-1]["status"] == "FAILED" and receipts[-1]["error"]
+        for record, gesture in zip(receipts, gestures):
+            assert record["gesture"] == list(gesture), "missing gesture receipt"
+            assert record["duration_ms"] == 350
+        return receipts
+
+    all_keys = list(expected)
+    exercise(scan_batch_summaries, [frame(all_keys)], want_swipes=0)
+    # Changed viewport on the second observation: never reuse stale geometry.
+    shifted = (31, 117, 391, 617)
+    exercise(scan_batch_summaries, [frame(all_keys[:2]), frame(all_keys[2:4], shifted),
+                                   frame(all_keys[4:], shifted)], want_swipes=2)
+    for box in ((18, 293, 302, 578), (18, 281, 302, 578), (0, 0, 1080, 1920), (1, 1, 5, 5)):
+        exercise(scan_batch_summaries, [frame([], box), frame(all_keys, box)], want_swipes=1)
+    exercise(scan_batch_summaries, [frame([])]*24+[frame(all_keys)], want_swipes=24)
+    exercise(scan_batch_summaries, [frame([])], "summary rows unreachable", 24)
+    negatives = []
+    for key, value, message in (
+        ("package", "other", "another package"), ("class", "wrong", "invalid summary viewport"),
+        ("enabled", "false", "invalid summary viewport"), ("bounds", "bad", "malformed bounds"),
+        ("bounds", "[18,293][18,578]", "too small"),
+        ("bounds", "[-1,293][302,578]", "malformed bounds")):
+        bad = frame(all_keys); bad[0].set(key, value); negatives.append((bad, message))
+    negatives.extend([(frame(all_keys)[1:], "missing or duplicate"),
+                      (frame(all_keys)+[frame([])[0]], "missing or duplicate")])
+    for key, value, message in (
+        ("package", "other", "another package"), ("text", "PRIVATE", "summary text differs"),
+        ("content-desc", "note-summary-other-owner", "unexpected summary identity"),
+        ("bounds", "bad", "malformed bounds"),
+        ("bounds", "[18,292][302,300]", "outside observed viewport"),
+        ("bounds", "[18,300][18,310]", "outside observed viewport")):
+        bad = frame(all_keys); bad[1].set(key, value); negatives.append((bad, message))
+    negatives.append((frame(all_keys)+[frame(all_keys)[1]], "duplicate summary identity"))
+    negatives.append((frame([all_keys[0], all_keys[3], all_keys[4], all_keys[1], all_keys[2]]),
+                      "summary display order differs"))
+    for bad, message in negatives:
+        exercise(scan_batch_summaries, [bad], message, 0)
+    # Wrong content must fail now, not wait until all other expected rows are found.
+    partial = frame([all_keys[0]]); partial[1].set("text", "wrong")
+    exercise(scan_batch_summaries, [partial], "summary text differs", 0)
+    # Exceptions from transport are preserved, not retried; incomplete receipt remains reachable.
+    sentinel = OSError("transport sentinel")
+    receipts = []
+    def broken(): raise sentinel
+    try:
+        scan_batch_summaries(broken, None, expected, package, receipts, summary_viewport, summary_gesture)
+    except OSError as exc:
+        assert exc is sentinel and len(receipts) == 1 and receipts[0]["status"] == "FAILED"
+    else:
+        raise AssertionError("transport failure swallowed")
+    # Demonstrate each mutant preserves an ordinary fully-visible case, then is killed
+    # by the same checker used above. This is not a replay of original touch physics.
+    original = inspect.getsource(scan_batch_summaries)
+    mutants = [
+        ("coordinates = gesture_for(viewport)", "coordinates = (160, 440, 160, 190)",
+         [frame([]), frame(all_keys)], None, 1),
+        ("range(25)", "range(24)", [frame([])]*24+[frame(all_keys)], None, 24),
+        ("gesture=list(coordinates)", "gesture=[]", [frame([]), frame(all_keys)], None, 1),
+        ("assert value == expected[key]", "assert True", [partial], "summary text differs", 0),
+        ('assert key not in seen, "duplicate summary identity in frame"',
+         'assert True, "duplicate summary identity in frame"',
+         [frame(all_keys)+[frame(all_keys)[1]]], "duplicate summary identity", 0),
+        ("summary_ui_check(expected, actual, order)", "pass",
+         [negatives[-1][0]], "summary display order differs", 0),
+    ]
+    for old, new, frames, failure, swipes in mutants:
+        assert original.count(old) == 1, "mutation anchor drift"
+        namespace = dict(globals()); exec(original.replace(old, new), namespace)
+        mutated = namespace["scan_batch_summaries"]
+        exercise(mutated, [frame(all_keys)], want_swipes=0)
+        try:
+            exercise(mutated, frames, failure, swipes)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("batch scroll mutant survived: "+old)
+    print("BATCH_SCROLL_HOST positive=7 negative="+str(len(negatives)+3)+
+          " witnessed_mutants="+str(len(mutants))+" HOST_ONLY_NOT_ANDROID_PHYSICS", flush=True)
+
+
+def batch_scroll_wiring_selftest():
+    import ast
+    import inspect
+    def check(source):
+        tree = ast.parse(source)
+        native_node = tree.body[0]
+        summary = next(n for n in native_node.body if isinstance(n, ast.FunctionDef) and n.name == "summary_ui")
+        observe = next(n for n in summary.body if isinstance(n, ast.FunctionDef) and n.name == "observe")
+        required = ast.parse(
+            'navigation = {"label": label, "owner": owner, "frames": []}\n'
+            'proof.setdefault("navigation", []).append(navigation)\n'
+            'def bounded_swipe(x1, y1, x2, y2):\n'
+            '    shell("input", "swipe", str(x1), str(y1), str(x2), str(y2), "350")\n'
+            'frames = scan_batch_summaries(nodes, bounded_swipe, expected, gate.PKG, '
+            'navigation["frames"], gate.summary_viewport, gate.summary_gesture)\n').body
+        wanted = [ast.dump(n) for n in required]
+        actual = [ast.dump(n) for n in observe.body]
+        assert sum(actual[i:i+len(wanted)] == wanted for i in range(len(actual))) == 1, "batch navigation wiring missing"
+        # The caller may no longer contain its old fixed-coordinate scan loop.
+        assert not any(isinstance(n, ast.For) for n in observe.body
+                       if any(isinstance(a, ast.Constant) and a.value == 25 for a in ast.walk(n))), "old scanner retained"
+    source = inspect.getsource(native)
+    check(source)
+    mutants = [
+        ('proof.setdefault("navigation", []).append(navigation)', 'pass'),
+        ('navigation["frames"],', '[],'),
+        ('gate.summary_gesture)', 'gate.wrong_gesture)'),
+    ]
+    for old, new in mutants:
+        assert source.count(old) == 1, "wiring mutation anchor drift"
+        try:
+            check(source.replace(old, new))
+        except AssertionError as exc:
+            assert str(exc) == "batch navigation wiring missing"
+        else:
+            raise AssertionError("batch navigation wiring mutation survived")
+    print("BATCH_SCROLL_WIRING positive=1 negative=3 ACTUAL_NATIVE_AST_NOT_DEVICE", flush=True)
+
+
 def selftest():
+    batch_scroll_selftest()
+    batch_scroll_wiring_selftest()
     note_management.selftest()
     editor_order_selftest()
     order_ui_selftest()
@@ -953,25 +1205,13 @@ def native(adb, gate):
                 swipe()
             else: raise AssertionError("summary fixture activity unreachable")
             expected = summary_expected(snapshot[0], owner)
-            actual, order, frames = {}, [], []
-            for attempt in range(25):
-                current = nodes()
-                frame = []
-                for n in current:
-                    key = n.get("content-desc", "")
-                    if key.startswith(("note-count-", "note-title-", "note-activity-", "note-summary-")):
-                        assert n.get("package") == gate.PKG
-                        value = n.get("text", "")
-                        assert key not in actual or actual[key] == value, "summary changed while scrolling"
-                        if key.startswith("note-title-") and key not in actual: order.append(key)
-                        actual[key] = value
-                        frame.append({"id": key, "text": value, "bounds": n.get("bounds")})
-                frames.append(frame)
-                # Check once coverage is complete, never retry a mismatched assertion.
-                if set(expected) <= set(actual):
-                    summary_ui_check(expected, actual, order); break
-                swipe()
-            else: raise AssertionError("summary rows unreachable: "+repr(set(expected)-set(actual)))
+            navigation = {"label": label, "owner": owner, "frames": []}
+            proof.setdefault("navigation", []).append(navigation)
+            def bounded_swipe(x1, y1, x2, y2):
+                shell("input", "swipe", str(x1), str(y1), str(x2), str(y2), "350")
+            frames = scan_batch_summaries(
+                nodes, bounded_swipe, expected, gate.PKG, navigation["frames"],
+                gate.summary_viewport, gate.summary_gesture)
             file = out/("summary-"+label+".png")
             file.write_bytes(command("exec-out", "screencap", "-p", binary=True))
             proof["screens"].append({"label": label, "owner": owner, "frames": frames,

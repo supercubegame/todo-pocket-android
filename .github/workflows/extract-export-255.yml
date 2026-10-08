@@ -1,0 +1,140 @@
+name: Isolated immutable export 255 extraction
+on:
+  push:
+    branches: [diagnostic/extract-export-255-20261008]
+    paths: [.github/workflows/extract-export-255.yml]
+permissions:
+  contents: write
+concurrency:
+  group: isolated-export-255-20261008
+  cancel-in-progress: false
+jobs:
+  extract:
+    if: github.repository == 'supercubegame/todo-pocket-android' && github.ref == 'refs/heads/diagnostic/extract-export-255-20261008'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Verify immutable source and publish bounded failure evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, copy, hashlib, json, os, re, urllib.request
+          REPO = "supercubegame/todo-pocket-android"
+          BRANCH = "diagnostic/extract-export-255-20261008"
+          SOURCE = "06e608e5d4bfc75a2f7044d67a5bff3508597f30"
+          PRODUCT = "0c4f5d8707a79d4b28ff4f8ed28b12ce659e04b8"
+          RUN = "37647320116"
+          PATH = "reports/export-probe-early-" + PRODUCT + "-" + RUN + ".json"
+          OUTPUT = "reports/isolated-export-255-0c4f5d8-37647320116.json"
+          COMMAND = ["/usr/local/lib/android/sdk/platform-tools/adb", "-s", "emulator-5554", "shell", "-n", "-T", "pidof", "com.supercubegame.pockettodo.v12.preview"]
+          def blob(data):
+              return hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+          def exact(data, meta):
+              assert meta["type"] == "file" and meta["path"] == PATH
+              assert len(data) == meta["size"] and blob(data) == meta["sha"]
+          def extract(doc):
+              assert doc["commit"] == PRODUCT and doc["run_id"] == RUN
+              assert doc["scope"] == "EARLY_DIAGNOSTIC_NOT_ACCEPTANCE"
+              device = doc["devices"]["26"]
+              assert device["commit"] == PRODUCT and device["run_id"] == RUN and device["api"] == 26
+              assert device["status"] == "FAIL"
+              failure = device["original_failure"]
+              assert failure["returncode"] == 255 and failure["command"] == COMMAND
+              native = device["native_image_pages"]
+              assert native["commit"] == PRODUCT and native["run_id"] == RUN and native["api"] == 26
+              matches = [t for t in native["process_query_traces"] if t.get("command_returncode") == 255 and t.get("command") == COMMAND]
+              assert len(matches) == 1, "Missing or ambiguous failed trace"
+              trace = matches[0]
+              assert trace["attempts"] == 1 and not trace["timed_out"]
+              assert trace["tracer_returncode"] == 255 and trace["tracer_exit_matches"] is True
+              raw = base64.b64decode(trace["trace"]["tail_b64"], validate=True)
+              assert not trace["trace"]["truncated"] and len(raw) == trace["trace"]["bytes"]
+              assert 0 < len(raw) <= 65536, "Incomplete trace is not full evidence"
+              text = raw.decode("utf-8", errors="strict")
+              readable = re.sub(r"\\x([0-9a-fA-F]{2})", lambda m: chr(int(m[1],16)), text)
+              lines = [line for line in readable.splitlines() if any(word in line for word in ("connect(", "write(", "read(", "exit_group(", "SIGCHLD", "ECONN", "EPIPE"))]
+              return {"status":"EXTRACTED_NOT_ROOT_CAUSE_OR_ACCEPTANCE", "original_failure":failure,
+                      "traceback":device["traceback"], "process_loss":native["process_loss"],
+                      "failed_trace":trace, "decoded_trace_sha256":hashlib.sha256(raw).hexdigest(),
+                      "readable_tail": "\n".join(lines)[-12000:],
+                      "readable_tail_is_excerpt":len("\n".join(lines)) > 12000,
+                      "release_ready":False, "durable_upgrade_ready":False}
+          def selftest():
+              raw = b'1 read(3, "", 5) = 0\n1 exit_group(255) = ?\n'
+              trace = {"command":COMMAND, "command_returncode":255, "tracer_returncode":255,
+                       "tracer_exit_matches":True, "attempts":1, "timed_out":False,
+                       "trace":{"tail_b64":base64.b64encode(raw).decode(), "bytes":len(raw), "truncated":False}}
+              native = {"commit":PRODUCT,"run_id":RUN,"api":26,"process_query_traces":[trace],"process_loss":{}}
+              device = {"commit":PRODUCT,"run_id":RUN,"api":26,"status":"FAIL","native_image_pages":native,
+                        "original_failure":{"returncode":255,"command":COMMAND},"traceback":"fixture"}
+              doc = {"commit":PRODUCT,"run_id":RUN,"scope":"EARLY_DIAGNOSTIC_NOT_ACCEPTANCE","devices":{"26":device}}
+              assert extract(doc)["failed_trace"] == trace
+              negatives = [
+                  lambda d:d.update(commit="wrong"),
+                  lambda d:d.update(run_id="wrong"),
+                  lambda d:d["devices"]["26"].update(api=34),
+                  lambda d:d["devices"]["26"]["original_failure"].update(returncode=1),
+                  lambda d:d["devices"]["26"]["native_image_pages"]["process_query_traces"].clear(),
+                  lambda d:d["devices"]["26"]["native_image_pages"]["process_query_traces"].append(copy.deepcopy(trace)),
+                  lambda d:d["devices"]["26"]["native_image_pages"]["process_query_traces"][0].update(attempts=2),
+                  lambda d:d["devices"]["26"]["native_image_pages"]["process_query_traces"][0]["trace"].update(truncated=True),
+                  lambda d:d["devices"]["26"]["native_image_pages"]["process_query_traces"][0]["trace"].update(bytes=999)]
+              for mutate in negatives:
+                  changed = copy.deepcopy(doc); mutate(changed)
+                  try: extract(changed)
+                  except AssertionError: pass
+                  else: raise AssertionError("Negative extraction control survived")
+              meta = {"type":"file","path":PATH,"size":len(raw),"sha":blob(raw)}
+              exact(raw,meta)
+              for changed in (raw[:-1], raw+b"x", b"x"+raw[1:]):
+                  try: exact(changed,meta)
+                  except AssertionError: pass
+                  else: raise AssertionError("Byte corruption survived")
+              print("PASS extraction: 2 positive, 12 negative controls")
+          selftest()
+          # LOCAL_GATE_END: network is deliberately outside the local host gate.
+          assert os.environ["GITHUB_REPOSITORY"] == REPO
+          assert os.environ["GITHUB_REF"] == "refs/heads/" + BRANCH
+          assert os.environ["GITHUB_EVENT_NAME"] == "push"
+          assert os.environ["GITHUB_RUN_ATTEMPT"] == "1", "One-shot diagnostic, no reruns"
+          HEAD = os.environ["GITHUB_SHA"]
+          def api(route, payload=None, raw_limit=None):
+              assert not route.startswith("/") and "://" not in route
+              headers = {"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github.raw+json" if raw_limit is not None else "application/vnd.github+json"}
+              data = None if payload is None else json.dumps(payload).encode()
+              request = urllib.request.Request("https://api.github.com/repos/"+REPO+"/"+route, data=data, headers=headers)
+              limit = raw_limit if raw_limit is not None else 1048576
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  body = response.read(limit+1)
+              assert len(body) <= limit, "Response overflow"
+              return body if raw_limit is not None else json.loads(body)
+          meta = api("contents/"+PATH+"?ref="+SOURCE)
+          assert 0 < meta["size"] <= 8000000
+          data = api("contents/"+PATH+"?ref="+SOURCE, raw_limit=meta["size"])
+          exact(data, meta)
+          result = extract(json.loads(data))
+          result.update(source_commit=SOURCE, product_commit=PRODUCT, source_run=RUN,
+                        source_path=PATH, source_bytes=len(data), source_blob=blob(data),
+                        source_sha256=hashlib.sha256(data).hexdigest(), diagnostic_commit=HEAD,
+                        diagnostic_run=os.environ["GITHUB_RUN_ID"], diagnostic_attempt=1)
+          encoded = (json.dumps(result,ensure_ascii=True,indent=2)+"\n").encode()
+          assert len(encoded) <= 160000, "Small report overflow; never truncate original trace"
+          assert api("git/ref/heads/"+BRANCH)["object"]["sha"] == HEAD, "Concurrent branch change"
+          commit = api("git/commits/"+HEAD)
+          tree = api("git/trees", {"base_tree":commit["tree"]["sha"],"tree":[{"path":OUTPUT,"mode":"100644","type":"blob","content":encoded.decode()}]})
+          written = api("git/commits", {"message":"Record immutable API26 255 extraction","tree":tree["sha"],"parents":[HEAD]})
+          # Non-force ref update refuses divergent concurrent writes.
+          request = urllib.request.Request("https://api.github.com/repos/"+REPO+"/git/refs/heads/"+BRANCH,
+              data=json.dumps({"sha":written["sha"],"force":False}).encode(),
+              headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json"},method="PATCH")
+          with urllib.request.urlopen(request,timeout=30) as response:
+              assert response.status == 200
+          actual = api("contents/"+OUTPUT+"?ref="+written["sha"],raw_limit=len(encoded))
+          assert actual == encoded and blob(actual) == blob(encoded)
+          print("SOURCE_VERIFIED",len(data),blob(data),result["source_sha256"])
+          print("REPORT_VERIFIED",written["sha"],len(encoded),blob(encoded))
+          print("https://github.com/"+REPO+"/blob/"+written["sha"]+"/"+OUTPUT)
+          PY

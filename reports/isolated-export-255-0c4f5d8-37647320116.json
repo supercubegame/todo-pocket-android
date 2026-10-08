@@ -112,6 +112,377 @@
       ]
     }
   },
+  "existing_diagnostics": {
+    "device": {
+      "crash_logs": {
+        "present": false,
+        "value": null
+      },
+      "crash_diagnostic_error": {
+        "present": false,
+        "value": null
+      },
+      "failure_diagnostics": {
+        "present": false,
+        "value": null
+      },
+      "diagnostic_error": {
+        "present": false,
+        "value": null
+      }
+    },
+    "native_image_pages": {
+      "crash_logs": {
+        "present": true,
+        "value": {
+          "status": "OBSERVED_NOT_ACCEPTANCE",
+          "logs": [
+            {
+              "command": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "logcat",
+                "-b",
+                "crash",
+                "-d",
+                "-t",
+                "160",
+                "-v",
+                "threadtime"
+              ],
+              "timeout_seconds": 8,
+              "returncode": 0,
+              "status": "OBSERVED_NOT_ACCEPTANCE",
+              "stdout": {
+                "bytes": 0,
+                "truncated": false,
+                "tail": ""
+              },
+              "stderr": {
+                "bytes": 0,
+                "truncated": false,
+                "tail": ""
+              }
+            },
+            {
+              "command": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "logcat",
+                "-b",
+                "main",
+                "-b",
+                "system",
+                "-d",
+                "-t",
+                "240",
+                "-v",
+                "threadtime",
+                "AndroidRuntime:E",
+                "libc:F",
+                "DEBUG:F",
+                "ActivityManager:E",
+                "*:S"
+              ],
+              "timeout_seconds": 8,
+              "returncode": 0,
+              "status": "OBSERVED_NOT_ACCEPTANCE",
+              "stdout": {
+                "bytes": 58,
+                "truncated": false,
+                "tail": "--------- beginning of main\n--------- beginning of system\n"
+              },
+              "stderr": {
+                "bytes": 0,
+                "truncated": false,
+                "tail": ""
+              }
+            }
+          ],
+          "release_ready": false,
+          "scope": "CI_SYNTHETIC_LOG_TAILS_NOT_ACCEPTANCE_OR_NO_CRASH_PROOF",
+          "collection_budget_seconds": 19,
+          "identity": {
+            "command": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "getprop",
+              "ro.kernel.qemu"
+            ],
+            "timeout_seconds": 3,
+            "returncode": 0,
+            "status": "OBSERVED_NOT_ACCEPTANCE",
+            "stdout": {
+              "bytes": 2,
+              "truncated": false,
+              "tail": "1\n"
+            },
+            "stderr": {
+              "bytes": 0,
+              "truncated": false,
+              "tail": ""
+            }
+          },
+          "combined_collection_budget_seconds": 51,
+          "process_snapshot": {
+            "status": "DIAGNOSTIC_ONLY_NOT_IDENTITY_ACCEPTANCE",
+            "scope": "CURRENT_PROCESS_AFTER_FAILURE_NOT_FAILED_PID_OR_RETRY",
+            "release_ready": false,
+            "collection_budget_seconds": 32,
+            "selected_pid": null,
+            "failed_pid_reconstructed": false,
+            "reads": [
+              {
+                "command": [
+                  "/usr/local/lib/android/sdk/platform-tools/adb",
+                  "-s",
+                  "emulator-5554",
+                  "shell",
+                  "-n",
+                  "-T",
+                  "getprop",
+                  "ro.kernel.qemu"
+                ],
+                "timeout_seconds": 3,
+                "returncode": 0,
+                "status": "OBSERVED_NOT_ACCEPTANCE",
+                "stdout": {
+                  "bytes": 2,
+                  "truncated": false,
+                  "tail": "1\n"
+                },
+                "stderr": {
+                  "bytes": 0,
+                  "truncated": false,
+                  "tail": ""
+                }
+              },
+              {
+                "command": [
+                  "/usr/local/lib/android/sdk/platform-tools/adb",
+                  "-s",
+                  "emulator-5554",
+                  "shell",
+                  "-n",
+                  "-T",
+                  "run-as",
+                  "com.supercubegame.pockettodo.v12.preview",
+                  "id",
+                  "-u"
+                ],
+                "timeout_seconds": 3,
+                "returncode": 0,
+                "status": "OBSERVED_NOT_ACCEPTANCE",
+                "stdout": {
+                  "bytes": 6,
+                  "truncated": false,
+                  "tail": "10077\n"
+                },
+                "stderr": {
+                  "bytes": 0,
+                  "truncated": false,
+                  "tail": ""
+                }
+              },
+              {
+                "command": [
+                  "/usr/local/lib/android/sdk/platform-tools/adb",
+                  "-s",
+                  "emulator-5554",
+                  "shell",
+                  "-n",
+                  "-T",
+                  "pidof",
+                  "com.supercubegame.pockettodo.v12.preview"
+                ],
+                "timeout_seconds": 3,
+                "returncode": 1,
+                "status": "COMMAND_FAILED",
+                "stdout": {
+                  "bytes": 0,
+                  "truncated": false,
+                  "tail": ""
+                },
+                "stderr": {
+                  "bytes": 0,
+                  "truncated": false,
+                  "tail": ""
+                }
+              },
+              {
+                "command": [
+                  "/usr/local/lib/android/sdk/platform-tools/adb",
+                  "-s",
+                  "emulator-5554",
+                  "logcat",
+                  "-b",
+                  "events",
+                  "-d",
+                  "-t",
+                  "80",
+                  "-v",
+                  "threadtime",
+                  "am_proc_start:I",
+                  "am_proc_died:I",
+                  "am_kill:I",
+                  "am_crash:I",
+                  "*:S"
+                ],
+                "timeout_seconds": 8,
+                "returncode": 0,
+                "status": "OBSERVED_NOT_ACCEPTANCE",
+                "stdout": {
+                  "bytes": 583,
+                  "truncated": false,
+                  "tail": "10-07 15:59:56.925  1621  1809 I am_proc_start: [0,7893,10010,com.android.externalstorage,content provider,com.android.externalstorage/.ExternalStorageProvider]\n10-07 15:59:56.989  1621  2901 I am_proc_start: [0,7913,10008,com.android.mtp,content provider,com.android.mtp/.MtpDocumentsProvider]\n10-07 15:59:57.134  1621  4352 I am_proc_start: [0,7934,10049,com.google.android.apps.docs,content provider,com.google.android.apps.docs/.storagebackend.StorageBackendContentProvider]\n10-07 16:00:01.579  1621  4308 I am_proc_died: [0,7724,com.supercubegame.pockettodo.v12.preview,700,14]\n"
+                },
+                "stderr": {
+                  "bytes": 0,
+                  "truncated": false,
+                  "tail": ""
+                }
+              }
+            ]
+          }
+        }
+      },
+      "crash_diagnostic_error": {
+        "present": false,
+        "value": null
+      },
+      "failure_diagnostics": {
+        "present": true,
+        "value": {
+          "status": "DIAGNOSTIC_ONLY_NOT_RETRY_OR_ACCEPTANCE",
+          "original": {
+            "type": "CalledProcessError",
+            "message": "Command '['/usr/local/lib/android/sdk/platform-tools/adb', '-s', 'emulator-5554', 'shell', '-n', '-T', 'pidof', 'com.supercubegame.pockettodo.v12.preview']' returned non-zero exit status 255.",
+            "command": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "returncode": 255,
+            "stdout": {
+              "captured": true,
+              "tail": "",
+              "truncated": false
+            },
+            "stderr": {
+              "captured": true,
+              "tail": "",
+              "truncated": false
+            }
+          },
+          "probes": [
+            {
+              "name": "transport",
+              "command": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "get-state"
+              ],
+              "returncode": 0,
+              "stdout": {
+                "captured": true,
+                "tail": "device\n",
+                "truncated": false
+              },
+              "stderr": {
+                "captured": true,
+                "tail": "",
+                "truncated": false
+              }
+            },
+            {
+              "name": "shell_identity",
+              "command": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "id"
+              ],
+              "returncode": 0,
+              "stdout": {
+                "captured": true,
+                "tail": "uid=2000(shell) gid=2000(shell) groups=2000(shell),1004(input),1007(log),1011(adb),1015(sdcard_rw),1028(sdcard_r),3001(net_bt_admin),3002(net_bt),3003(inet),3006(net_bw_stats),3009(readproc) context=u:r:shell:s0\n",
+                "truncated": false
+              },
+              "stderr": {
+                "captured": true,
+                "tail": "",
+                "truncated": false
+              }
+            },
+            {
+              "name": "app_identity",
+              "command": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "run-as",
+                "com.supercubegame.pockettodo.v12.preview",
+                "id"
+              ],
+              "returncode": 0,
+              "stdout": {
+                "captured": true,
+                "tail": "uid=10077(u0_a77) gid=10077(u0_a77) groups=10077(u0_a77) context=u:r:untrusted_app:s0:c512,c768\n",
+                "truncated": false
+              },
+              "stderr": {
+                "captured": true,
+                "tail": "",
+                "truncated": false
+              }
+            },
+            {
+              "name": "database_directory",
+              "command": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "run-as",
+                "com.supercubegame.pockettodo.v12.preview",
+                "ls",
+                "databases"
+              ],
+              "returncode": 0,
+              "stdout": {
+                "captured": true,
+                "tail": "pocket-v12.db\npocket-v12.db-shm\npocket-v12.db-wal\n",
+                "truncated": false
+              },
+              "stderr": {
+                "captured": true,
+                "tail": "",
+                "truncated": false
+              }
+            }
+          ]
+        }
+      },
+      "diagnostic_error": {
+        "present": false,
+        "value": null
+      }
+    }
+  },
   "failed_trace": {
     "observation_number": 13,
     "retention": "LATEST_8_QUERY_TRACES",
@@ -162,7 +533,7 @@
   "source_bytes": 1388120,
   "source_blob": "9180475aadd58a0612b1a759ef96f326f186eabf",
   "source_sha256": "bb98ab09f236c7b7a303a5c0864d4f7bb45bd9e83272ec4c6f26e85218569ab7",
-  "diagnostic_commit": "a4ddb9b1e9033524493242a0294382b5338cca96",
-  "diagnostic_run": "37706878037",
+  "diagnostic_commit": "7032e045767fd49b1a27f8d44dbed275825e6b69",
+  "diagnostic_run": "37708407244",
   "diagnostic_attempt": 1
 }

@@ -1,4 +1,4 @@
-name: Detail navigation guarded delivery
+name: Archive legacy media guarded delivery
 on:
   push:
     branches: [diagnostic/server-log-delivery-20261008]
@@ -23,84 +23,40 @@ jobs:
         run: |
           echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
           echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
-      - name: Validate and submit bounded batch summary scanner
+      - name: Validate and submit legacy archive media acceptance
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import ast,hashlib,subprocess,textwrap
+          import ast,hashlib,subprocess,textwrap,base64,lzma,json
           from pathlib import Path
-          parent="e57376564337a3f621b30aaf4e9c071d56371b40"
+          parent="a2486b7b367057e2a20f5677a70ded8bf8717fdd"
           raw=subprocess.check_output(["git","show",parent+":.github/workflows/deliver-server-log.yml"],timeout=30)
-          assert len(raw)==13518 and hashlib.sha256(raw).hexdigest()=="3e433c7c217159d3e8e93c31051f2b9aab694236258061f5cfe37f7d4fe17322"
-          start="          python3 - <<'PY'\n"
-          assert raw.decode().count(start)==1
-          code=textwrap.dedent(raw.decode().split(start,1)[1].split("          PY\n",1)[0])
+          assert len(raw)==5456 and hashlib.sha256(raw).hexdigest()=="69bb752d0de4e7c38d3848803604761a7a633d795c475e15c8d857e007f5ffb4"
+          marker="          python3 - <<'PY'\n"
+          assert raw.decode().count(marker)==1
+          code=textwrap.dedent(raw.decode().split(marker,1)[1].split("          PY\n",1)[0])
           tree=ast.parse(code)
-          assert ast.unparse(tree.body[-1])=="ns['main'](payload_bytes)"
+          assert ast.unparse(tree.body[-1])=="ns['main'](inherited['payload_bytes'])"
           tree.body.pop()
-          inherited={"__name__":"approved_detail_delivery"}
-          exec(compile(tree,"<pinned-detail-delivery>","exec"),inherited)
-          builder=inherited["builder"]
-          assemble_before=builder["assemble"]
-          
-          def scoped_wiring(source):
-              """Keep all existing checks and mutations; narrow their subject to summary_ui."""
-              tree=ast.parse(source)
-              fn=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=="batch_scroll_wiring_selftest")
-              lines=source.splitlines(keepends=True)
-              old="".join(lines[fn.lineno-1:fn.end_lineno])
-              anchor="    source = inspect.getsource(native)\n    check(source)\n"
-              assert old.count(anchor)==1,"original batch wiring source anchor"
-              replacement='''    source = inspect.getsource(native)
-              check(source)
-              # Mutation anchors belong to summary_ui, not unrelated detail navigators.
-              native_node = ast.parse(source).body[0]
-              summary_node = next(n for n in native_node.body
-                                  if isinstance(n, ast.FunctionDef) and n.name == "summary_ui")
-              lines = source.splitlines(keepends=True)
-              source = lines[0] + "".join(lines[summary_node.lineno-1:summary_node.end_lineno])
-              check(source)
-          '''
-              new=old.replace(anchor,replacement,1)
-              assert source.count(old)==1
-              candidate=source.replace(old,new,1)
-              assert candidate.count(new)==1 and candidate.replace(new,old,1)==source
-              ast.parse(candidate)
-              return candidate
-          
-          def assemble(original,additions):
-              return scoped_wiring(assemble_before(original,additions).decode()).encode()
-          
-          def scope_selftest():
-              # Reproduce the old unique-anchor assumption with valid repeated navigation
-              # outside summary_ui, then prove the scoped source still has exactly one.
-              source='''def native(adb, gate):
-              def summary_ui():
-                  proof.setdefault("navigation", []).append(navigation)
-              def order_ui():
-                  proof.setdefault("navigation", []).append(navigation)
-          '''
-              anchor='proof.setdefault("navigation", []).append(navigation)'
-              assert source.count(anchor)==2
-              try:assert source.count(anchor)==1
-              except AssertionError:pass
-              else:raise AssertionError("old unique-anchor RED missing")
-              root=ast.parse(source).body[0]
-              summary=next(n for n in root.body if n.name=="summary_ui")
-              lines=source.splitlines(keepends=True)
-              scoped=lines[0]+"".join(lines[summary.lineno-1:summary.end_lineno])
-              assert scoped.count(anchor)==1
-              assert scoped.replace(anchor,"pass").count(anchor)==0
-              print("WIRING_SCOPE_CONTROL original_RED=1 scoped_positive=1 omission_negative=1",flush=True)
-          
-          scope_selftest()
-          builder["assemble"]=assemble
+          inherited={"__name__":"pinned_previous_delivery"}
+          exec(compile(tree,"<pinned-previous-delivery>","exec"),inherited)
           ns=inherited["ns"]
-          ns["PARENT"]=parent
-          ns["main"](inherited["payload_bytes"])
+          overrides='def unpack(encoded):\n    require(type(encoded) is bytes and len(encoded)==26944 and\n            hashlib.sha256(encoded).hexdigest()==\'e72b4d32f3d958f65c0a52321f2b6f14930cc2189809355b88e20bc5d1acca0e\',"Payload exact bytes")\n    payload=json.loads(encoded)\n    require(set(payload)=={\'build_patch.py\', \'media_oracle.py\', \'wiring.py\', \'acceptance.java\'},"Payload members")\n    return payload\n\ndef integrate(repo,payload,git):\n    path="tools/verify_app_catalog.py"\n    original=git("show",CURRENT+":"+path)\n    legacy=git("show",CURRENT+":src/androidTest/java/com/supercubegame/pockettodo/V12DeviceTest.java")\n    ns={"__name__":"archive_patch_assembly"}\n    exec(compile(payload["build_patch.py"],"<archive-builder>","exec"),ns)\n    candidate=ns["assemble"](original,legacy,payload["acceptance.java"],payload["media_oracle.py"],payload["wiring.py"])\n    (repo/path).write_bytes(candidate)\n    require(git("diff","--name-only").decode().splitlines()==[path],"Product diff escapes one verifier")\n    return {path:candidate}\n\ndef test_original_and_integration(work,repo,payload,candidates,env,receipt,save):\n    original=subprocess.check_output(["git","show",CURRENT+":tools/verify_app_catalog.py"],cwd=repo,timeout=30)\n    legacy=subprocess.check_output(["git","show",CURRENT+":src/androidTest/java/com/supercubegame/pockettodo/V12DeviceTest.java"],cwd=repo,timeout=30)\n    ns={"__name__":"assembly_control"};exec(payload["build_patch.py"],ns)\n    args=(legacy,payload["acceptance.java"],payload["media_oracle.py"],payload["wiring.py"])\n    require(ns["assemble"](original,*args)==candidates["tools/verify_app_catalog.py"],"Assembly nondeterministic")\n    for bad in (original[:-1],original+b"\\n",bytes([original[0]^1])+original[1:]):\n        try:ns["assemble"](bad,*args)\n        except AssertionError:pass\n        else:raise AssertionError("Corrupt catalog baseline accepted")\n    for bad in (legacy[:-1],legacy+b"\\n"):\n        try:ns["assemble"](original,bad,*args[1:])\n        except AssertionError:pass\n        else:raise AssertionError("Corrupt historical fixture accepted")\n    control=work/"archive-original-red.py"\n    control_source="import sys\\nfrom pathlib import Path\\nsys.path.insert(0,"+repr(str(repo/"tools"))+")\\nimport verify_app_catalog as candidate\\n"+(\n       "baseline={\'__name__\':\'original_catalog\',\'__file__\':"+repr(str(repo/"tools/verify_app_catalog.py"))+"}\\n"+\n       "exec(compile("+repr(original.decode())+",baseline[\'__file__\'],\'exec\'),baseline)\\n"+\n       "try: candidate.archive_acceptance_wiring_selftest(baseline[\'JAVA\'])\\n"+\n       "except AssertionError as failure:\\n"+\n       " assert \'seed/archiveAcceptanceSeed\' in str(failure),str(failure)\\n"+\n       " print(\'ORIGINAL_ARCHIVE_COVERAGE_RED missing_legacy_media_acceptance=1 NOT_DEVICE_FAILURE\')\\n"+\n       "else: raise AssertionError(\'original missing coverage accepted\')\\n"+\n       "candidate.archive_media_oracle_selftest()\\n"+\n       "candidate.archive_acceptance_wiring_selftest()\\n")\n    compile(control_source,str(control),"exec")\n    control.write_text(control_source)\n    with (work/"host-original-red.log").open("wb") as log:\n        result=subprocess.run(["python3",str(control)],cwd=repo,env=env,stdout=log,stderr=subprocess.STDOUT,timeout=300)\n    require(result.returncode==0,"Archive original RED/control failed: "+(work/"host-original-red.log").read_text()[-5000:])\n    receipt["integration_controls"]={"positive":1,"negative":5,"original_red":"MISSING_COVERAGE_NOT_DEVICE_FAILURE"}\n    save()'
+          exec(compile(overrides,'<archive-overrides>','exec'),ns)
+          ns.update(BASE="d7e79e00438992d5b2da40c7e459da7fc0164a60",CURRENT="d7e79e00438992d5b2da40c7e459da7fc0164a60",
+                    PARENT=parent,PINS={"tools/verify_app_catalog.py":"c5ae577b014aadaa7bac4249afc8ad212265c233"})
+          publisher=ns["publish"]
+          old="test: bound order and deletion detail navigation to measured viewport"
+          assert publisher.__code__.co_consts.count(old)==1
+          publisher.__code__=publisher.__code__.replace(co_consts=tuple(
+           "test: verify archived legacy PNG references across migration and backup" if c==old else c for c in publisher.__code__.co_consts))
+          decoder=lzma.LZMADecompressor(memlimit=134217728)
+          payload=decoder.decompress(base64.b64decode('/Td6WFoAAATm1rRGAgAhARYAAAB0L+Wj4Gk/Hm1dAD2IiEeTu6NDoUBEy2bjZSRrnrAKIpiQDT7uo8aEvo6eLpxOVh1Yj8BRbBA3EXmzQCrX3W865y6aWZu2KwTSQTWLFor/K+Wvr0Tx+uNoQdTBEALNmfBUDpEkeIhEzYIOWf/15ekiHCCpOLWGVpDnxGEWh7vlg086NNHVdUEV5A1F9TR97O5mjB3G5xnq9bbZ/hzQY0v6f4WIjKZkS347xnUOsNoaQDAkXTIhIq4okVW3R8yElokM9ZmBUf2LQT4ECmoFVL7b+Cthe486pii57xNurD6mAu/Rz6FhX6MnY7NrC+9AU58hhcRDMUJa5QBIYBMpQfpJWqoPyXMvJCREcLVu2AY1mCCmXkn30doQgLr2BBv4yQ1eH+GE+NV8o7R4zWk5kLGyelYam4uSKoHokIJWPE1QkHXznQZOt9Cs/PMT8eY9f2D8/Oq6+10QuubVE0HMHsejVlP3t1RDrH+9Ucba8ts2Z/REq1kdn34A2X3Rb9xDMoizwuWaj+OwB2Cc2OGMP/Alm5qxiC1UGZK5PfBJNLu2e4LA08bo1PzL/GX3hSsuSHYdwnwNmdPG4QaNef7/E3L8BqAZWYaz5A0No36wRDHtuj5VeXChCddeFlrXcZGI8iQtayoewTuiA9L8tJzoNAvhpZRMtzg9BVrbDmKqOXiyc6qGvOVMXyjErJ/tQoCaMj86BMKmmiV4HEEQM+MXXoipOoFtt6RWZ6GhFBLGcEgiyD7PFzBGoUfIZkfyI2t7M0AhWVkZmEd80rBhOOi5gEA5LuIubL0nd1MbIMnusfi2HyW+tJiRDIwX1osR8KkTWP2LvqhHfRKIMaRDkx7lzt4wHjQc6ZKbpvdLrIhAXpPWLQ49XGCOEv/iwuuYK+zH/lcxQna0kJVHbn4zTwC15CEXXRGm81KDxICSWsXBdYjr1JfFsE91NTYRRAo03kixYgZneVnOw0G8scHAe0yD+++mpQesQ9ezpGflPIA3Dvos+FOKnHAT6QpShZ7Gt2X8TG53wi+0V9hmeVHYKs+NShrJIVXBw44flzIV+EM+l58hCp5p6rOpdil5mxTMKFExj7KfGrbz/tzw5j+ctUNnZqf512hH8DgQKbhkTtj5e31oJVnXyWyiGMIpUoZhdcQNq2GGnQFfmP3wa+Yn/SkRQAnfrc44d91uHaHu6NrHJ84GaLSvo550fwJjA71DKmOiNdt9Qb2NZ47tMpvi1TV6/buAtzYaryZU5cHkufp2s/SuTj8OrGmbhcausVDdKXgIeBi5s1pXb1xN9smaeL6TOgu13yXixRxqcl2mo5vh+nasgwjDf2zoua3Evwnm+S8AEmDLR5FqK3wXzUMmjOECeE4TdW5TxFxLFYmka4R4u19edZHUVMYk5NSt0rT1PYh6mdx8tX3isoZ8JiY6F7iQFuTqeXbJsoM/9JpYceKJx2edIsGRQ3mrtpnXleyBvTUvIQl95EOigpZ5OoOSQLxGZegvbWlw753mxyqXZM7eLghXQlvwocG0y/1nlrFRUU7HLZEzo0adH5S15ZecNoZ+kNGbhMzXN2eMbSLt07ByBDHeh7hx9amIa0smXXDh7yxNdcbCvJved6ZsIcuLVxj/aqrMjZpvsEGGvLFo1BVw3siiI2Pp9SnRHdR6p3nclVrYwKK5Gh/7c/S3gPm7hNHIO0cuA1Oc9Us+7eH2NwvQG/kmdk8lfEQxqn6HviSZMkFuCccLEL93XXoMVK7A9xGIPfFE2v5aASCkLRsJeg6afbvmDoNWIlnYz/olYQBPzNTT/Jzzkjc26mZkRbcJVeh9oXU9yi3H+395tmhSb4S57xArUk/vItomcFAz4KidpshJG2YRzweyCFY6D2rK3E3Amgy64ktt44LH8+tV3/pOLN3KJdpvqYL2Uz7YJx6n3CfPImBXVGpk6YAAGlnMpe5fTOI6HNubp2SKDdFgNOjuN0aWzwz3qY8ULpSI3kozn9VgfzM9giIUV8PE5S9q5gZWsSUXvuTl8ixxV0Q9W8bX0x7GPCADyj78AOtjMZaAYSh54peSWjdZrp3y+xR9rGXEYEm8w7DIWXnsziF1aO1n68WgesGzQ5T0r0uE5nuNeruWhymF5J6p1uG9upPNmol/YpP8Suh4MxXJlPudG8XFHV7s5QjmuvKuvdEwiDiOAMKVWN0Yl5bhe4lxzrySh5nJydsqXq5iQJH71eGvtLvTpxp39cZQfXRwtO/da9GsNIfmIk1mzF+6T1fuUoIq85pmN4b0xGRrGIMiySt0jF+PfCWPNTjCkk1KyDJ7Mh+vAH67MdMhftnYQ6eS74luhNqknuf8MB4LzPAhel576Fdx8sSgx1XoUNY+zw+lG7alEy78um545Hi+3du0lqS5khwKP/LzW312ye2/5x9ooXBAfN5Dquzt9uLwfchGjPJPulfBSzX8bNuoDfw1uR1wsKkwVYsNDOE4O23dchHp7TytGpjTjDEWrr+KiQiOOniwRBhH2AG3OHrn+C2GOcOclgA5t2uN6wzGeBSWq+U/MQ4Rs/xtQM6u1/0Weh5YLzKGG/R8/nkiZhnnRsVveJ3cNTbcgVsSYvzmPNNHBGvm/xOFT/gily8wLm8+HZS/IYOimKMwufXmq9wNhqCAuK8tunPR8jpN4ibiUlachKgdfGnK4r7aAHrxwMuW4WhGmWBrQozBeksHU8z9hOhekN4OE7rVt6ueNzjssTgr8hs2m92IptqrzG7NlMT7LqtyIBOyEEtS/orRQ9kwC7WI00bFrsdXdhrKYsi0jE17R/COOQQ2MxwajOuRAC5ZY4X4D5bzODWevlABUD9l8aPUTJHXABuoCr77k3C8h7Fg8dokR687MUlH81zws15o2SZu+mEmjQ0Fn5vr8ApRm+BdX61vBXlWCnyiEhDqseQbyI5KpqUKbnaRUJ7yZLmEvBpMTbqUHukLDBxInvx/s9ifqIhQnuXMYKnUUIjiF+LmoorleUhVXUrOt/bkCCQJ/ZSKsWsKBrcQBBIcQ7elSm5X3/m6943l/HogT6Ro4ahnhObuDIYdqhl3EY/xtjqak3VwqEPpoUxXAIr6TC/jxEH15xAbHLq3LDkmZguVGx5euLmgYyVJzqtl6016hfm+mnafvCrdPXyI7FrnrZZKPw/ZWckdCqhDFmeHl+OUp3nDAVBjV0ILOgi10C1AfrrNezpB0eT6Vaw8XnRAyTiKKjFM3cRI6CgwacmIKaN7GMEF/m03ZZKdo4ArS+ZtLYdrtAvkpi6Bjo+Zqxhfou/BS4uxpem/cnjUFJcnBZoGMTM0WbEy+p4ixTxXQUO8J4mim+NifexWRabmmB+zkm+etdCfI0tVL0cJuqB9IhnWQyYwN7ffI3ZL2Hl8soAKzIXCekRPJkiiyDWinI6AIcAiPvFgg65kZ3teHBJE55OCN6uAtzjh5md0lbvedXAs9h2zNVhDjbDD7kCNG8ICrz+NqpSIpg0uSE1vJfXXRot1ihxbJhMv7lmrvgnXvsfkY3fCC5PoX7vxElPI9oUnq71pYZpBu9iPqZ09gKcG0gXFawdo8A1QXriEJZ/ccN547OB9RIq3Jm+FB3mQTgt1+Zx6620fpbUBMXN/5DSYzn8tu8UCIzz/YQbnV9TJzk/DJzEv6WEcwWu9THWOQKNClyancZnUJc90vKOrxv7/r5w1ELfuTiuacVwLmTqA0Ku9seTCwAIk2onk+1IrTHd07+C2di5fFuDvMIMTyYCqvbISgAlXu5CqMhxaO1xb9v7NXfuIa2qDZ/wO4OTaekujJPNUAxWfUMzoXIBsalJqUklVcCOd7VI7yBjiRQsum4TqHSS6q+oSdkrkEhn5OXWY6TWuO0hz7shB759qtIEaGjIXglOEyFYBsx5dcDUY7HQnIXmnnO7WUa4bRnVd0FYWraMDDLY+uOmz+adUu8AxhmcJpUrQ2QRumoEoeN7EM10IqZkh0qieVzr7P0Eadkd1iMQW+Eruomt8jp6oQfh1AS7pBxVSYzN45dZpRqggNGl8WTS9RuvDg8R8kUt7m8KQROLeJrGvHyYFTMU/kw5sp4tfoR2pkxfsoN6YacBBgDGCek82AmJvgNe+LTWsgZZk1T9Nuj8RxWbnk5xWCOlRYLWyY6bvk4sjUOaBNUIJHeKLd0Sj8XNIRtKVbFgYYHoqcXYxA3P92lc439dZXSsAcXAd93yLS+x7VvNbPMEBSH4K0gT9klMguSW6CPtKEai1r7YxG+gyjVFsm0qLkCH+B/EE5jzk58KesRo7TRdSmcJes9ehoDVBXrYIno2dBFF4Cs/ewuC0wxKaDj8KyoxdXW/niuiKZ6iEiM0HVt4cNMDP15zjeX8xHMH6ng1Ny2DmG1XbrYs/KG4rIcAneZCb3Np72aIyVFqK6AicUmjdaStc1dkmOoIme4wOOCwqcwfIRdFUvACgjVJFqL7nvxSTiCpdspJngYk/Kb/FkEiNLj6ZPz+ilGHt+bcldUOqSGclncTYz/DGp2cwz6JfpT/gaLdFZiVCkv/qIIlSa5kQXq1KUzLz2cYa9I5gkPLvebAlsUNrTQ5Sw9JzgMQ4gDq65B3BBfBEUjW4ikrTFbAKi+SJf98oap4RR3hN+eu5YVpSXTPln8pJmtbFbQiYdi/+bEqSdWlW9GdTUsCPhwT3YnCNNtJ0UdhEWcEo5ReqhfEe1K3h4g4jJg0eYoMyoK0pdVjKpimJqOZNos1oobFDf0SKRbBLGVnuozJPRGaa/By3CSFIinA4s8tc2ur5ncr0eo6DbA718lYz+2NOUCEUMqH/DZmLossBxXRQpTII1RAirKO2Wvn0t8ogOagfJoYTtzjoXvZwu2oHCeNwt9UAomvM0vw4eJZ9rBRcGZbj9TGL9SYTnEtVxezWve3s1foVl2WZiuufOZCaOarmiBls52rYGymI+csnO1mkROJBJ58/g3WsogxVz2Bq5z3DOlMlBVfhsGhMztczcTwf+HA7WxJSMF3FRY0nbijHv8itwsgVkuPriNTpawLqDf1gy5OfU6QsF/TLP1t6yn4zIhMogJ1PDqKK5OLn+8TR41uPRE5Seqr94mYpH+a3mdc5xeZaNN213aSLBXWB/cfKYKWmuYOs+EpZKWBCO9BkKxk6KupD+Pkw/n2bNdgRxSb+9yz+SiHQMQjTUwji6sERV2devQ8Z35vx7cKUifyu5M2ibM0UMHA5mvTT1qL3f156ERBWzZpi1txyV5w3w3QDVVxbTW6mrR9O2YUkbaggjVmJFy1qrmk6DKHtwMQ6HVZaQd8aD/vLx3MJ7nJQe4KEb/wSNANjgFMVzJn4wTO1RFzNvKGZPHj4aGtvOjorwXDi4wPHYwjzQ74BvzpIBrg4lwB6uio2esoRleXt1xVgjcgEJBL3qXwI9Y8q50tluB8+O7E9v9eyGDDfhOZYEmGj0djLfpN61FnLkM3NHrTUBryM+96HHC+my8FDkYMnIn/pwzaQrx3oLfEJlgbBnhiEKu/BXotlbgGx/wXmycpEdeTVKy9uhxfhSjKHpVsrZwqQhACt34EidJvJhcmDB42hiJ7BXJBrRpOk10LuSw9F6xaQRPY9TqD5W92aK08Kt0elUiirYXru0oFqj9/4hIMT+Mz/KpTeCUQESfXRpJZlzYmhmKStQCLDeEVhmf5vCq98AZ44Fa8mc3GO3AMDGkx0QgnV5GH16UZbnd5QxxzmfT4MS/Wb26cIKT7QUTiRLKq+gZqwgASzFNZ/jveDVXZzqoBSN371QESj3ChGWxck5GzAPnlx4UELtMnVTv+ypjL5U2j5N2JgQGt6hE/IkaoNoxoUnV54EvtmZbqp4upJilLAwTIDxbryW1+7Hvud4M21+Qls5FdaIWvPYL/+rH8IfJe4DEoO0MNAUZfHSwFSISvEdhN8ODRtL5OpvCckfsbWm4RMHgNUu44mlsQ+R0QWD7KTSL+TqpNwnSD04G5ojGu2hw2+QpWmjRE5Fu5jGnCJ9REx3RO1a0bPe0PiXS26QXEHSAdnY1wwFlXe31xbk2OoIFGLyc8a0aNHTOpF9n+4Vgy/9OqdlcEt07ZlUUFf2r+zfHuwFeC/ZfaT26k73zLo0MaP3Dc5OM5iKMqGjNNtylxC1RSS6y80/J0UlY+BO/WkIkekMU/mokTmpC6GHBLxH5x+BrxMOFLSrUgJ3OOhzyinQ6YFCcZLoLbOkILrNhrnERck1xhITYhBW+x62c5+cSb7VfdXDMDjk1q1pHV5tQjvEoBW/nQvqK834+H3p2kAMYkJnxn4/JF0dbVG9WGn3ofA/mZdKnm8pWVWNXeRb5Iqyd57xUZA82wSEmFOfxraR2XqHqXWoyAJe0h6/6u8527bjmAEafcYW5QsoCKtXf/D2wqU/H3vMnhLOy/lBZNns+JUeq6QFuzJnrCJsGchOQUPh6/oweBi3C1JCSCY+XjCEIe++j0hTRy2JFzd2ixA9bNyjaiuz1JT2nXuzxESZjV4IDBYlnij/pEKtdqYZXPren3VRt9CSIh6BksZ6B+Wxl+kRGXI9Gf3nxrU4E3R8RegnB27h+A83+NPvgOZsfp9SErv6FTiA+4dyRRuDJBR9AsjAcZWH3+vtrD9zQu8d5uE7nsnHcPw3l60M8kwUlO71vtH9JX6slPYYaaiai7u8QRWvB2LweZihAnEAAsYhWHDlTPut9nXux3CCT3Yb+n0caj6761tA1XHglavfK+vjrXIBz7Eoj7zWWbW9YQNRhMkntfMKGgXon/SvClD4d6sX1nvq/8+ljxRrfQVAPxPMGHdzvl9l6FKR29fGutLCiDM2xkqykrcJM9caqtaUHJy+NWcjlyL9v1Ykr0wnytCEZ0sSHmAlsz0UBYc8dn5QKOUSw9SmY+JFOS+7u+1p091p9c1vN3KnajDkFb7kxLxeXuAb41ouvEBFeVnoLjWdCWdaISER6Yqjq4Go5fhOH3t2beXB7DYBDD5hrolFUkbqn7MsAMD5F2M57SVe/6LdN8MBXAtcZTZcZLXkfhI9DDOYLD/QIfeb5gyNGiHBXz5t6bl9WccObswl1dmmWd6k5noDmmytz7RpeAgDHRf3NSLGlfKS+pPIBV9szNnNgDEyHnne/cJs088TgQPwD+nr7bRAuF0qO58FDQqGUy7mqqfT9BtX2wHyz6UCWhizZdKPLkhy0nE9++c6P5ZSo9NVPlTNzZ0VgU2ME5UEQ6eAridRvfYFXRPsjOfEjSAhWaTqsGCFZXn39vHiBjuQBMr4xbMww+L3skga3bLdFRG5iiBa2t7xFQNhJJk9EO6be0BN4fIILItzsUpFfJ+iVSDxeZgB0Bkwh03qKb1Khpz0QzuTnWuCTEoa+GxEF92duc0g+pPNYKN+yRft+sMt4v0rBAkK9ZfuyrbNL9sovTqgkt2DjQddR05b7+zFU5p6DsIFd383V7Ll58P2dma6MjHn0OTZ+G+7XcwC9q/59YxPRNkKfz7jJ4Yy411/3n+PORVon8lwFxLHJAjScNWX/WohC51fmz0oqAaAEGhUtnYRBhWTfsQsToPGb6z8CRcY2lfx9hHJeYvuH9AaZJ6dB51L0pZGJcKcrHWZ+wGzXI+ZRF3aSMN6VP9tDNWY4ly3OLQ4wPuDfEenGd3ldjhckGUgiKWCv5UmE60WgKVlnAX9rdI79RI3wyxpQ7PRIwBpOZCaUNpnbwelrJJpzjKntuYqGe3UtxHJ/8UhAfQ+EiLQ+L7uvDIFwq/uP6i0H1lytlE8XVfiUxVrbLHl363AbeKblsCroKpxGW7pegE+fXuZjzdgAj+RjA9oRhMTe5GSs6SGLDbA1m6CY1oGWUqvc31mcWSE31kHKBXedSqwdHU8e70pBexa8KNhqKgJJKQHB3J7h/yfBGhHOHdGg9tQk7CvQr+aEYYJNusrMWCN94aAUFwDjn2MBjASYGop2M4SZuxh5WZk/dvV74XAdocL0wx4WyUcWo1gKyKW1OObvMLa0U/lSrrzlRkwk9gEomKeB8zunziXvCEnpzhXNnRGMn0e3pTgHTAPVrtBOSowyXuIK+rIZlLED/d1h6cimxPhmUiaQKqM7Qsf99Lq4t3iwfI2jHcl+J+s/WMCB2hcyzyMmBRExRn0kxIJtUd3V/1mjECnPPazXmspW/dTCOl3a8vvomb6lsenWWb1tVBHEEOQdIUiQ2AzT28sLwJUtGKJbuCggbm0aeWNanshkeHs/N/NLDABR7077SQVYbjhHSfYgQdqyvGQWnVSzkCoL1dlm05R/DYT/mTIWxfF6RkgjgOTtK1hO9CuuF4iy5Ly2AGxrhqoyoZlo6PxvpI77wCnazpu8/voMTuyyEHlJOXKfH1uUHYnP2QqBcA/g2fQmStKptfoChcPqaJuM2rA/Pr+19ZzO4QVZhlQJ8JMYYOg6OvA7GUYIpLfHFXus/ToFvctbpCaYaLiJdSUG3g3z2PLGsaMxGAJ6caxvIvpnbD1BYiY5nBRIoOqrIIbe74DI6qWEhxRaMT+5F6CDx9Gg4vB7NCuYlqHwhOs1gyWDbfcDoWtEEiGKlHlGpmQS8oiKybEO0ih/Yb4S2fTUrLudvuxLKcF8hV1zOGCY4KNayb79DFTUS9K/e2Ik0qmYUoiswc2vedsgssZQ/HnKpyDIdAG2WKGHLURPzMUq25BA9ROi1FlxuJlyIFZ2jELKrWQFiyQsUCR4kkhhTpQ5U0IDLWkh5AToWAMRISZzJ1eplIUx5KNcYer4xS3Go5rAf/sHTlZHUPGzjcutAIi0kbnyRL2c4HeT8SI0pCiEz3R205OwF9lXHSM8l7512Z1S2KrlgXCzfE8MjIBBhEby3iLzsUYR878NbkYjadrTY6/QXlck5hZ4ZcOHxwIKVnL6D3x35RmehqHr4Jqc/q2wIWFZ9Yl1S43Ovzs41PRsgsJ3MjyDxZzkIJESOHSJ4a+IfCLfeLYpY4nuyLoHqW/o8LNTWh3dQNb645IHE2oG9XVs7UnbE826HCKkfM0EpgsCIAE0ya9EQRPGn9pLCj1+SLFNMZF/qeCJtoj/fMJAM33t63PFhycxLcqzpkD+2pnLzeJIAP9BsTuv2bY/ZOONEEet00LrXX+m7TMBxoBolnwFhjF6s3Qbse/ctCCEPKDDIxHYpEmMZ9yTUX0u5/jjCrPXINcoB8CNczPLCjeQYciIoWUIyIdwrnfVwaCS4mwZ7nFisEoegnh6HafUMnG/Rgvng18ZFtufh7N6nhvAgjebZQX73jSn2M4A8c+cXh7+rbYwdtqyDOqq1JJi5nLd/gygmovU5Hrw18tFZLBYmNZFi/+wNLkI3Jpe9H6ZO9eHEOluhNrU65y/GAx3WqrHPS611gYVYm/Wyl/QqVv6tsGtwnmIR4rympwQhixaFFYq9WaFXTA/pbZRIuKmu8Ukx8RfJEUkB2sOM+P+dBvAAOFgRG1lR7/k++EBImTnImKjZsJm7hmHumuWL3+CzEBBTs2NHfGcxQbAVT3mpAJ0x8wp+v3C++wMKoLJX44N2js4sz08U81d35EmcJ0cIzN/mSFcS+IGM+69bjWkDT96l9R9CVWYvYk2euzT5bBWVKLYEiIn7P/83DsmV+TeL0lO9+RDSQeUoS2yTS12CnzuH84cwgH91DSrtfSjnSmiFW6dSx8tVFc4FPlUFJjSgA4LelRXT9N546OVUYfMCCvI1C8HLA1HUwiyIHSe6q7Z7fOjUqootwBdFXs39Zn+dxZ0GDmIOq3BplvgHUlgJmOH+K8/dGyIEpwT3LmhN80LaSS8Tmz4LP0Wsxg6UroIncNtag8IU9ZRPGTj9/OkNFoH4ZEFs5IABQLmW8lVgD2U89oADtO48AzeT4Xs2xZdteCTsOv7Cqr+kOmhDIWVmFN78cVUUpZ/vK+TLmxriRzlNaJqcTfO3PhfwQYSsdLWYYRznOXIXPSYZeaOxtPRJ9rBfOw1F9nHU17Dvwa/awekZpM+WF5BK709SGTHq1fgrJAH75YY+moHB/Mdql5ZWbE/Fx7nKxpvid1JEH+2OzqVkagZErlbmjiYmE4Z9oQswP9XvlRBVKO3RqCCTIQEswC9q1Ac4tDu3UnuA6xbb6WMxZIFwjqPwHwgCo+pzWBOu8aiSZTuqt+hXaK1OxtKgQeBykzGp4vEnBC+OF/AE3SarzyBHu/U/LAOIB55El1HbT1BAVgY6Cw6JOlG+nis+VNl9QIu4UTN09PQmSoWpnHVuuL5Duy2bVfj1v772pkkuls24/Sq9zbpJezF7aosAWwBKfL74pKfas6jFAX49JXxRE6mBu/oSSvDPeMjtY57h39KeUF/hIjDeQkDqc2Uih0+NHTpBhaInUwMFhDezf4TKoWcgCE1znULGnkth+jmM5gmjb7xY5MDJZa7idhGsusKOAWF7+D/3BGcO16XupdZqqrol10QZbIAUpg9g/Pz05MLQAAAAAobre4hzyWucAAYk9wNIBAOPTAEKxxGf7AgAAAAAEWVo=',validate=True),max_length=26945)
+          assert decoder.eof and not decoder.unused_data and len(payload)==26944 and hashlib.sha256(payload).hexdigest()=='e72b4d32f3d958f65c0a52321f2b6f14930cc2189809355b88e20bc5d1acca0e'
+          ns["main"](payload)
           PY
       - name: Preserve delivery and original host evidence
         if: always()

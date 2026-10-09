@@ -17,6 +17,11 @@ jobs:
         run: |
           echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
           echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+      - name: Stable upgrade host and independent wiring controls
+        run: |
+          set -euo pipefail
+          python3 tools/verify_upgrade.py selftest
+          python3 tools/verify_upgrade.py workflow-selftest
       - name: Legacy, domain and real JVM file boundary contracts
         run: |
           set -euo pipefail
@@ -1112,12 +1117,14 @@ jobs:
     timeout-minutes: 75
     env:
       TEST_API: ${{ matrix.api }}
+      POCKET_STABLE_SIGNING: '1'
+      POCKET_SIGNING_DIR: ${{ runner.temp }}/pocket-signing-${{ matrix.api }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Require isolated tracing before full regression device work
         run: *isolated_trace_setup
       - name: Fixed Android build setup
-        run: |
+        run: &upgrade_build_setup |
           set -euo pipefail
           exec > >(tee setup.log) 2>&1
           echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
@@ -1128,6 +1135,14 @@ jobs:
           unzip -q /tmp/gradle.zip -d /tmp
           echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+      - name: Require fixed preview signing without fallback
+        env:
+          POCKET_PREVIEW_KEYSTORE_B64: ${{ secrets.POCKET_PREVIEW_KEYSTORE_B64 }}
+          POCKET_PREVIEW_STORE_PASSWORD: ${{ secrets.POCKET_PREVIEW_STORE_PASSWORD }}
+          POCKET_PREVIEW_KEY_ALIAS: ${{ secrets.POCKET_PREVIEW_KEY_ALIAS }}
+          POCKET_PREVIEW_KEY_PASSWORD: ${{ secrets.POCKET_PREVIEW_KEY_PASSWORD }}
+          POCKET_PREVIEW_CERT_SHA256: ${{ secrets.POCKET_PREVIEW_CERT_SHA256 }}
+        run: python3 tools/verify_upgrade.py prepare-signing
       - name: Compile internal test APKs and lint (not deliverable)
         env:
           BUILD_429_EXECUTE: 'true'
@@ -1168,6 +1183,8 @@ jobs:
           assert 'uses-permission:' not in permissions
           certs=re.findall(r'^Signer #1 certificate SHA-256 digest: ([0-9a-f]+)$',signature,re.M)
           assert len(certs)==1 and len(certs[0])==64
+          signing=json.loads((Path(os.environ['POCKET_SIGNING_DIR'])/'credentials.json').read_text())
+          assert certs[0]==signing['certificate'],'fixed preview certificate mismatch'
           folder=Path('preview-candidate');folder.mkdir()
           name='PocketTodo-v1.2-preview-'+os.environ['GITHUB_SHA'][:12]+'.apk'
           target=folder/name;shutil.copyfile(source,target)
@@ -1178,7 +1195,7 @@ jobs:
           (folder/'package.txt').write_text(package+'\n'+permissions)
           meta={'commit':os.environ['GITHUB_SHA'],'run_id':os.environ['GITHUB_RUN_ID'],'apk':name,'sha256':digest,'bytes':target.stat().st_size,'certificate_sha256':certs[0],'package':'com.supercubegame.pockettodo.v12.preview','version_name':'1.2','version_code':3,'exact_binary_device_api':34,'release_ready':False,'durable_upgrade_ready':False}
           (folder/'preview.json').write_text(json.dumps(meta,indent=2)+'\n')
-          (folder/'README.txt').write_text('口袋待办 v1.2 阶段开发预览，不是完整正式版。\n与旧版隔离安装；仅用于试用，请先备份。\n临时debug签名，不保证下一次CI生成的包可以覆盖安装。请勿为安装直接卸载有数据的旧预览；先导出完整备份。\n完整备份包含私有内容、原图与元数据，未加密。私有图片标记不是加密，分享过滤尚未实现。\n已接通待办、活动、打卡历史、日期账目、多笔记、PNG/JPEG导入、图片说明和私有标记、备份确认恢复。\n裁剪遮挡、PDF/图片/Markdown分享、应用目录与字段完整UI、恢复撤销、搜索模板日程、稳定签名和真机验收尚未完成。\n不含账号、网络权限或遥测。不要输入无法承担丢失风险的重要数据。\n此APK是API34实际测试过的同一字节；API26测试同源码的独立构建。源码和摘要见preview.json、SHA256SUMS.txt。\n下载Actions产物需要GitHub登录；压缩包解压后安装.apk，不要安装测试instrumentation包。\n',encoding='utf-8')
+          (folder/'README.txt').write_text('口袋待办 v1.2 阶段开发预览，不是完整正式版。\n与旧版隔离安装；仅用于试用，请先备份。\n固定预览签名；覆盖安装仅验证过同一固定密钥重建的旧源码，不代表兼容此前临时签名包。请勿为安装直接卸载有数据的旧预览；先导出完整备份。\n完整备份包含私有内容、原图与元数据，未加密。私有图片标记不是加密，分享过滤尚未实现。\n已接通待办、活动、打卡历史、日期账目、多笔记、PNG/JPEG导入、图片说明和私有标记、备份确认恢复。\n裁剪遮挡、PDF/图片/Markdown分享、应用目录与字段完整UI、恢复撤销、搜索模板日程、稳定签名和真机验收尚未完成。\n不含账号、网络权限或遥测。不要输入无法承担丢失风险的重要数据。\n此APK是API34实际测试过的同一字节；API26测试同源码的独立构建。源码和摘要见preview.json、SHA256SUMS.txt。\n下载Actions产物需要GitHub登录；压缩包解压后安装.apk，不要安装测试instrumentation包。\n',encoding='utf-8')
           print('PREVIEW_CANDIDATE '+json.dumps(meta))
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -1212,8 +1229,61 @@ jobs:
             native-ui/full-observer/observer-*/dex/classes.dex
             build/reports/lint-results-debug.html
           if-no-files-found: error
+      - name: Remove temporary signing material
+        if: always()
+        run: python3 tools/verify_upgrade.py cleanup-signing
+  upgrade:
+    needs: [core, database]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [26, 34]
+    env:
+      TEST_API: ${{ matrix.api }}
+      POCKET_STABLE_SIGNING: '1'
+      POCKET_SIGNING_DIR: ${{ runner.temp }}/pocket-signing-${{ matrix.api }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: f42e88e10052a4c71e21b83aa0d4475849b807a0
+          path: upgrade-old
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: internal-preview-candidate
+          path: upgrade-candidate
+      - name: Fixed Android build setup for upgrade probe
+        run: *upgrade_build_setup
+      - name: Initialize bounded upgrade evidence
+        run: mkdir upgrade-evidence
+      - name: Require fixed preview signing without fallback
+        env:
+          POCKET_PREVIEW_KEYSTORE_B64: ${{ secrets.POCKET_PREVIEW_KEYSTORE_B64 }}
+          POCKET_PREVIEW_STORE_PASSWORD: ${{ secrets.POCKET_PREVIEW_STORE_PASSWORD }}
+          POCKET_PREVIEW_KEY_ALIAS: ${{ secrets.POCKET_PREVIEW_KEY_ALIAS }}
+          POCKET_PREVIEW_KEY_PASSWORD: ${{ secrets.POCKET_PREVIEW_KEY_PASSWORD }}
+          POCKET_PREVIEW_CERT_SHA256: ${{ secrets.POCKET_PREVIEW_CERT_SHA256 }}
+        run: python3 tools/verify_upgrade.py prepare-signing
+      - name: Build pinned historical source with same fixed key
+        run: python3 tools/verify_upgrade.py build-old
+      - name: Actual retained-data overwrite on the exact candidate APK
+        run: python3 tools/verify_upgrade.py android
+      - name: Remove temporary signing material
+        if: always()
+        run: python3 tools/verify_upgrade.py cleanup-signing
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: upgrade-api-${{ matrix.api }}
+          path: upgrade-evidence/
+          if-no-files-found: error
+          retention-days: 14
   report:
-    needs: [core, database, export_probe, export_feedback]
+    needs: [core, database, export_probe, export_feedback, upgrade]
     if: always() && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -1765,6 +1835,12 @@ jobs:
           assert json.loads(Path('collected/scope/codec-result.json').read_text()).get('status')=='PASS','Android codec coverage missing or failed'
           assert json.loads(Path('collected/scope/legacy-schema2-result.json').read_text()).get('status')=='PASS','Frozen schema2 compatibility missing or failed; read legacy evidence'
           PY
+      - name: Require independent retained-data upgrade before preview delivery
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 tools/verify_upgrade.py report
       - name: Require both current-source devices before preview delivery
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}

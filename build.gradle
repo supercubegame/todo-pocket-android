@@ -1,6 +1,37 @@
 plugins {
     id 'com.android.application' version '8.7.3'
 }
+
+// Stable preview mode is mandatory for deliverable builds and upgrade probes.
+// Independent suites without this mode remain disposable, not deliverable.
+def stableMode = System.getenv('POCKET_STABLE_SIGNING')
+if (stableMode != null && stableMode != '1') {
+    throw new GradleException('Invalid stable signing mode; no fallback')
+}
+def stableCredentials = null
+def stableKeystore = null
+if (stableMode == '1') {
+    try {
+        def root = new File(System.getenv('RUNNER_TEMP')).canonicalFile
+        def dir = new File(System.getenv('POCKET_SIGNING_DIR')).canonicalFile
+        if (dir.parentFile != root || !(dir.name ==~ /pocket-signing-(26|34)/)) {
+            throw new IllegalStateException()
+        }
+        stableKeystore = new File(dir, 'preview.jks')
+        def config = new File(dir, 'credentials.json')
+        if (!stableKeystore.isFile() || !config.isFile()) {
+            throw new IllegalStateException()
+        }
+        stableCredentials = new groovy.json.JsonSlurper().parse(config)
+        if (stableCredentials.keySet() != ['alias','storePassword','keyPassword','certificate'].toSet() ||
+            stableCredentials.values().any { !(it instanceof String) || it.isEmpty() }) {
+            throw new IllegalStateException()
+        }
+    } catch (Exception ignored) {
+        throw new GradleException('Stable preview signing is not configured; no temporary-key fallback')
+    }
+}
+
 android {
     namespace 'com.supercubegame.pockettodo'
     compileSdk 35
@@ -18,8 +49,21 @@ android {
                 ? 'com.supercubegame.pockettodo.Schema3DeviceTest'
                 : 'com.supercubegame.pockettodo.V12DeviceTest')
     }
+    signingConfigs {
+        if (stableMode == '1') {
+            stablePreview {
+                storeFile stableKeystore
+                storePassword stableCredentials.storePassword
+                keyAlias stableCredentials.alias
+                keyPassword stableCredentials.keyPassword
+            }
+        }
+    }
     buildTypes {
-        debug { applicationIdSuffix '.preview' }
+        debug {
+            applicationIdSuffix '.preview'
+            if (stableMode == '1') { signingConfig signingConfigs.stablePreview }
+        }
         release { minifyEnabled false }
     }
     compileOptions {

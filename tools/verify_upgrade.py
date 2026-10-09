@@ -454,6 +454,103 @@ def report():
     need(failure is None and value["status"] == "PASS", "UPGRADE_NOT_ACCEPTED: see published evidence")
 
 
+SIGNING_PATH_SCRIPT = """set -euo pipefail
+case "$TEST_API" in 26|34) ;; *) exit 1 ;; esac
+python3 - <<'PY'
+import os
+from pathlib import Path
+root = Path(os.environ["RUNNER_TEMP"])
+assert root.is_absolute() and root.is_dir(), "valid runner temp required"
+assert not any(c in str(root) for c in ("\\n", "\\r", "\\0")), "unsafe runner temp"
+folder = root / ("pocket-signing-" + os.environ["TEST_API"])
+with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as stream:
+    stream.write("POCKET_SIGNING_DIR=" + str(folder) + "\\n")
+PY
+"""
+
+
+def signing_path_wiring(lines):
+    """Validate this canonical job's env scope and executable first step."""
+    step_start = lines.index("    steps:")
+    job_env = lines[:step_start]
+    need(not any("runner." in v or "POCKET_SIGNING_DIR:" in v for v in job_env),
+         "RUNNER_CONTEXT_FORBIDDEN_IN_JOB_ENV")
+    steps = []
+    for line in lines[step_start + 1:]:
+        if line.startswith("      - "):
+            steps.append([])
+        need(bool(steps), "UNEXPECTED_STEP_LAYOUT")
+        steps[-1].append(line)
+    expected = ["      - name: Initialize fixed signing directory",
+                "        run: |"] + ["          " + v for v in SIGNING_PATH_SCRIPT.splitlines()]
+    need(steps[0] == expected, "SIGNING_PATH_MUST_INITIALIZE_FIRST_EXACTLY")
+    need(sum("Initialize fixed signing directory" in v for v in lines) == 1,
+         "SIGNING_PATH_INITIALIZER_DUPLICATED")
+    need(not any(line.startswith("          POCKET_SIGNING_DIR:")
+                 for step in steps[1:] for line in step),
+         "SIGNING_PATH_LATER_OVERRIDE")
+
+
+def signing_path_selftest():
+    """Execute the real initialization shell; never import or invoke Android."""
+    import tempfile
+    lines = ["    env:", "      TEST_API: ${{ matrix.api }}",
+             "      POCKET_STABLE_SIGNING: '1'", "    steps:",
+             "      - name: Initialize fixed signing directory", "        run: |"]
+    lines += ["          " + v for v in SIGNING_PATH_SCRIPT.splitlines()]
+    lines += ["      - name: Later step", "        run: echo no-secrets"]
+    signing_path_wiring(lines)
+    signing_path_wiring(lines + ["      - name: Read configured path", "        run: |",
+                                 "          print(os.environ['POCKET_SIGNING_DIR'])"])
+    invalid = []
+    # Reproduce the actual rejected job-level expression, with a valid initializer witness.
+    bad = lines[:]; bad.insert(3, "      POCKET_SIGNING_DIR: ${{ runner.temp }}/pocket-signing-${{ matrix.api }}")
+    invalid.append(bad)
+    invalid.append([v for v in lines if v != "      - name: Initialize fixed signing directory"])
+    invalid.append([v.replace('stream.write(', '#stream.write(') for v in lines])
+    invalid.append(lines + ["      - name: Wrong override", "        env:",
+                            "          POCKET_SIGNING_DIR: /tmp/wrong", "        run: echo wrong"])
+    for bad in invalid:
+        try:
+            signing_path_wiring(bad)
+        except (AssertionError, ValueError):
+            pass
+        else:
+            raise AssertionError("SIGNING_PATH_NEGATIVE_SURVIVED")
+    with tempfile.TemporaryDirectory(prefix="signing-path-host-") as tmp:
+        root = Path(tmp) / "runner with spaces"; root.mkdir()
+        target = Path(tmp) / "github-env"
+        def execute(script, api, temp=str(root)):
+            target.write_text("EXISTING=retained\n")
+            env = dict(os.environ, TEST_API=api, RUNNER_TEMP=temp, GITHUB_ENV=str(target))
+            result = subprocess.run(["bash", "-euo", "pipefail", "-c", script],
+                                    env=env, capture_output=True, timeout=10)
+            return result, target.read_text()
+        for api in ("26", "34"):
+            result, output = execute(SIGNING_PATH_SCRIPT, api)
+            need(result.returncode == 0 and output ==
+                 "EXISTING=retained\nPOCKET_SIGNING_DIR=" + str(root / ("pocket-signing-" + api)) + "\n",
+                 "SIGNING_PATH_RUNTIME_BINDING")
+            need(not (root / ("pocket-signing-" + api)).exists(),
+                 "INITIALIZER_MUST_NOT_CREATE_SECRET_DIRECTORY")
+        for api, temp in (("25", str(root)), ("", str(root)), ("34\nINJECTED=1", str(root)),
+                          ("26", "relative"), ("26", str(root / "missing"))):
+            result, output = execute(SIGNING_PATH_SCRIPT, api, temp)
+            need(result.returncode != 0 and output == "EXISTING=retained\n",
+                 "INVALID_PATH_INPUT_NOT_REJECTED")
+        # Compiled shell/Python mutation, valid API witness retained; the path observer rejects it.
+        old = '("pocket-signing-" + os.environ["TEST_API"])'
+        need(SIGNING_PATH_SCRIPT.count(old) == 1, "PATH_MUTATION_ANCHOR")
+        changed = SIGNING_PATH_SCRIPT.replace(old, '"pocket-signing-26"')
+        result, output = execute(changed, "26")
+        need(result.returncode == 0 and output.endswith("/pocket-signing-26\n"), "PATH_MUTANT_WITNESS")
+        result, output = execute(changed, "34")
+        need(result.returncode == 0 and not output.endswith("/pocket-signing-34\n"),
+             "PATH_MUTANT_SURVIVED")
+    print("SIGNING_PATH_HOST runtime_positive=2 invalid_inputs=5 wiring_negative=4 witnessed_mutant=1 PASS; NOT_ANDROID")
+
+
+
 def workflow_contract(text):
     """Canonical job/step layout only; separate from the stages it guards."""
     jobs = {}
@@ -482,9 +579,8 @@ def workflow_contract(text):
          "REPORT_DOES_NOT_WAIT_FOR_UPGRADE")
     for job in ("database", "upgrade"):
         lines = jobs[job]
-        need("      POCKET_STABLE_SIGNING: '1'" in lines and
-             "      POCKET_SIGNING_DIR: ${{ runner.temp }}/pocket-signing-${{ matrix.api }}" in lines,
-             "STABLE_MODE_NOT_MANDATORY")
+        signing_path_wiring(lines)
+        need("      POCKET_STABLE_SIGNING: '1'" in lines, "STABLE_MODE_NOT_MANDATORY")
         prepare = [i for i, line in enumerate(lines)
                    if line.strip() == "run: python3 tools/verify_upgrade.py prepare-signing"]
         build = [i for i, line in enumerate(lines)
@@ -514,6 +610,7 @@ def workflow_contract(text):
 
 
 def workflow_selftest():
+    signing_path_selftest()
     text = Path(".github/workflows/android.yml").read_text()
     workflow_contract(text)
     variants = [

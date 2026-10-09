@@ -1118,8 +1118,21 @@ jobs:
     env:
       TEST_API: ${{ matrix.api }}
       POCKET_STABLE_SIGNING: '1'
-      POCKET_SIGNING_DIR: ${{ runner.temp }}/pocket-signing-${{ matrix.api }}
     steps:
+      - name: Initialize fixed signing directory
+        run: |
+          set -euo pipefail
+          case "$TEST_API" in 26|34) ;; *) exit 1 ;; esac
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"])
+          assert root.is_absolute() and root.is_dir(), "valid runner temp required"
+          assert not any(c in str(root) for c in ("\n", "\r", "\0")), "unsafe runner temp"
+          folder = root / ("pocket-signing-" + os.environ["TEST_API"])
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as stream:
+              stream.write("POCKET_SIGNING_DIR=" + str(folder) + "\n")
+          PY
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Require isolated tracing before full regression device work
         run: *isolated_trace_setup
@@ -1244,8 +1257,21 @@ jobs:
     env:
       TEST_API: ${{ matrix.api }}
       POCKET_STABLE_SIGNING: '1'
-      POCKET_SIGNING_DIR: ${{ runner.temp }}/pocket-signing-${{ matrix.api }}
     steps:
+      - name: Initialize fixed signing directory
+        run: |
+          set -euo pipefail
+          case "$TEST_API" in 26|34) ;; *) exit 1 ;; esac
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"])
+          assert root.is_absolute() and root.is_dir(), "valid runner temp required"
+          assert not any(c in str(root) for c in ("\n", "\r", "\0")), "unsafe runner temp"
+          folder = root / ("pocket-signing-" + os.environ["TEST_API"])
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as stream:
+              stream.write("POCKET_SIGNING_DIR=" + str(folder) + "\n")
+          PY
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:

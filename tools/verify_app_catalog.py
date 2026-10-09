@@ -8,8 +8,8 @@ import verify_todo_management as runner
 import verify_category_drag as shared
 PACKAGE = runner.PACKAGE
 SCOPE = "MANUAL_APPLICATION_CATALOG_AND_LINKED_ACTIVITY_NOT_EXTERNAL_LAUNCH_OR_FULL_PRODUCT"
-REQUIRED = {'seed': ['backend_fixture', 'application_insert', 'duplicate_package_readonly', 'invalid_package_readonly', 'prepare_readonly', 'create_linked_once', 'duplicate_plan_readonly', 'canceled_plan_readonly', 'second_category_reuse', 'unassigned_activity', 'stale_app_readonly', 'stale_category_readonly', 'late_rollback', 'consumed_failure_readonly', 'outer_transaction_readonly', 'backend_checkpoint', 'rename_fixture', 'rename_prepare_readonly', 'rename_exact_state', 'rename_duplicate', 'rename_same_readonly', 'rename_cancel', 'rename_blank', 'rename_blank_consumed', 'rename_stale', 'rename_unrelated_change', 'rename_late_rollback', 'rename_failure_consumed', 'rename_readback_rollback', 'rename_prepare_outer', 'rename_confirm_outer', 'rename_missing', 'rename_foreign', 'rename_owner_retained', 'rename_closed_helper', 'rename_reopened_state', 'relation_prepare', 'relation_path_order', 'relation_duplicate', 'relation_tag_order', 'relation_same', 'relation_clear', 'relation_blank', 'relation_blank_consumed', 'relation_cancel', 'relation_stale', 'relation_late_rollback', 'relation_failure_consumed', 'relation_readback_rollback', 'relation_foreign', 'relation_owner_retained', 'relation_prepare_outer', 'relation_confirm_outer', 'relation_missing', 'relation_closed', 'relation_final', 'archive_prepare', 'archive_exact', 'archive_duplicate', 'archive_same', 'archive_relation_refused', 'archive_restore_exact', 'archive_cancel', 'archive_stale_same', 'archive_late_rollback', 'archive_failure_consumed', 'archive_readback_rollback', 'archive_foreign', 'archive_owner_retained', 'archive_prepare_outer', 'archive_confirm_outer', 'archive_missing', 'archive_closed', 'archive_reopened_restore', 'archive_final', 'archive_schema2_compatible'], 'deleted': ['backend_restart', 'backend_backup', 'ui_fixture', 'catalog_open_readonly', 'invalid_name_readonly', 'invalid_package_ui_readonly', 'create_application_ui', 'duplicate_package_ui_readonly', 'same_title_distinct_ids', 'cancel_picker_readonly', 'first_category_link', 'duplicate_click_readonly', 'second_category_link', 'old_picker_readonly', 'unassigned_retained', 'ui_checkpoint', 'rename_ui_prepare', 'rename_ui_blank', 'rename_ui_exact', 'rename_ui_duplicate', 'rename_ui_cancel', 'rename_ui_same', 'rename_ui_stale', 'rename_ui_detached', 'rename_ui_final', 'relation_ui_prepare', 'relation_ui_blank', 'relation_ui_path', 'relation_ui_duplicate', 'relation_ui_tags', 'relation_ui_same', 'relation_ui_cancel', 'relation_ui_clear', 'relation_ui_other_owner', 'relation_ui_other_tags', 'relation_ui_stale', 'relation_ui_detached', 'relation_ui_final', 'archive_ui_preview', 'archive_ui_cancel', 'archive_ui_exact', 'archive_ui_duplicate', 'archive_ui_readonly_history', 'archive_ui_list', 'archive_ui_active_filter', 'archive_ui_restore_cancel', 'archive_ui_restore', 'archive_ui_stale', 'archive_ui_detached', 'archive_ui_final'], 'undone': ['ui_restart', 'ui_backup', 'archive_ui_restart_history']}
-EXPECTED = {'seed': ['backend_fixture', 'application_insert', 'duplicate_package_readonly', 'invalid_package_readonly', 'prepare_readonly', 'create_linked_once', 'duplicate_plan_readonly', 'canceled_plan_readonly', 'second_category_reuse', 'unassigned_activity', 'stale_app_readonly', 'stale_category_readonly', 'late_rollback', 'consumed_failure_readonly', 'outer_transaction_readonly', 'backend_checkpoint', 'rename_fixture', 'rename_prepare_readonly', 'rename_exact_state', 'rename_duplicate', 'rename_same_readonly', 'rename_cancel', 'rename_blank', 'rename_blank_consumed', 'rename_stale', 'rename_unrelated_change', 'rename_late_rollback', 'rename_failure_consumed', 'rename_readback_rollback', 'rename_prepare_outer', 'rename_confirm_outer', 'rename_missing', 'rename_foreign', 'rename_owner_retained', 'rename_closed_helper', 'rename_reopened_state', 'relation_prepare', 'relation_path_order', 'relation_duplicate', 'relation_tag_order', 'relation_same', 'relation_clear', 'relation_blank', 'relation_blank_consumed', 'relation_cancel', 'relation_stale', 'relation_late_rollback', 'relation_failure_consumed', 'relation_readback_rollback', 'relation_foreign', 'relation_owner_retained', 'relation_prepare_outer', 'relation_confirm_outer', 'relation_missing', 'relation_closed', 'relation_final', 'archive_prepare', 'archive_exact', 'archive_duplicate', 'archive_same', 'archive_relation_refused', 'archive_restore_exact', 'archive_cancel', 'archive_stale_same', 'archive_late_rollback', 'archive_failure_consumed', 'archive_readback_rollback', 'archive_foreign', 'archive_owner_retained', 'archive_prepare_outer', 'archive_confirm_outer', 'archive_missing', 'archive_closed', 'archive_reopened_restore', 'archive_final', 'archive_schema2_compatible'], 'deleted': ['backend_restart', 'backend_backup', 'ui_fixture', 'catalog_open_readonly', 'invalid_name_readonly', 'invalid_package_ui_readonly', 'create_application_ui', 'duplicate_package_ui_readonly', 'same_title_distinct_ids', 'cancel_picker_readonly', 'first_category_link', 'duplicate_click_readonly', 'second_category_link', 'old_picker_readonly', 'unassigned_retained', 'ui_checkpoint', 'rename_ui_prepare', 'rename_ui_blank', 'rename_ui_exact', 'rename_ui_duplicate', 'rename_ui_cancel', 'rename_ui_same', 'rename_ui_stale', 'rename_ui_detached', 'rename_ui_final', 'relation_ui_prepare', 'relation_ui_blank', 'relation_ui_path', 'relation_ui_duplicate', 'relation_ui_tags', 'relation_ui_same', 'relation_ui_cancel', 'relation_ui_clear', 'relation_ui_other_owner', 'relation_ui_other_tags', 'relation_ui_stale', 'relation_ui_detached', 'relation_ui_final', 'archive_ui_preview', 'archive_ui_cancel', 'archive_ui_exact', 'archive_ui_duplicate', 'archive_ui_readonly_history', 'archive_ui_list', 'archive_ui_active_filter', 'archive_ui_restore_cancel', 'archive_ui_restore', 'archive_ui_stale', 'archive_ui_detached', 'archive_ui_final'], 'undone': ['ui_restart', 'ui_backup', 'archive_ui_restart_history']}
+REQUIRED = {'seed': ['backend_fixture', 'application_insert', 'duplicate_package_readonly', 'invalid_package_readonly', 'prepare_readonly', 'create_linked_once', 'duplicate_plan_readonly', 'canceled_plan_readonly', 'second_category_reuse', 'unassigned_activity', 'stale_app_readonly', 'stale_category_readonly', 'late_rollback', 'consumed_failure_readonly', 'outer_transaction_readonly', 'backend_checkpoint', 'rename_fixture', 'rename_prepare_readonly', 'rename_exact_state', 'rename_duplicate', 'rename_same_readonly', 'rename_cancel', 'rename_blank', 'rename_blank_consumed', 'rename_stale', 'rename_unrelated_change', 'rename_late_rollback', 'rename_failure_consumed', 'rename_readback_rollback', 'rename_prepare_outer', 'rename_confirm_outer', 'rename_missing', 'rename_foreign', 'rename_owner_retained', 'rename_closed_helper', 'rename_reopened_state', 'relation_prepare', 'relation_path_order', 'relation_duplicate', 'relation_tag_order', 'relation_same', 'relation_clear', 'relation_blank', 'relation_blank_consumed', 'relation_cancel', 'relation_stale', 'relation_late_rollback', 'relation_failure_consumed', 'relation_readback_rollback', 'relation_foreign', 'relation_owner_retained', 'relation_prepare_outer', 'relation_confirm_outer', 'relation_missing', 'relation_closed', 'relation_final', 'archive_prepare', 'archive_exact', 'archive_duplicate', 'archive_same', 'archive_relation_refused', 'archive_restore_exact', 'archive_cancel', 'archive_stale_same', 'archive_late_rollback', 'archive_failure_consumed', 'archive_readback_rollback', 'archive_foreign', 'archive_owner_retained', 'archive_prepare_outer', 'archive_confirm_outer', 'archive_missing', 'archive_closed', 'archive_reopened_restore', 'archive_final', 'archive_schema2_compatible', 'archive_acceptance_v1_frozen_input', 'archive_acceptance_v1_migration_preserved', 'archive_acceptance_v1_restore_exact', 'archive_acceptance_v1_archive_exact', 'archive_acceptance_v1_backup_exact', 'archive_acceptance_v1_checkpoint', 'archive_acceptance_v2_frozen_input', 'archive_acceptance_v2_migration_preserved', 'archive_acceptance_v2_restore_exact', 'archive_acceptance_v2_archive_exact', 'archive_acceptance_v2_backup_exact', 'archive_acceptance_v2_checkpoint'], 'deleted': ['backend_restart', 'backend_backup', 'ui_fixture', 'catalog_open_readonly', 'invalid_name_readonly', 'invalid_package_ui_readonly', 'create_application_ui', 'duplicate_package_ui_readonly', 'same_title_distinct_ids', 'cancel_picker_readonly', 'first_category_link', 'duplicate_click_readonly', 'second_category_link', 'old_picker_readonly', 'unassigned_retained', 'ui_checkpoint', 'rename_ui_prepare', 'rename_ui_blank', 'rename_ui_exact', 'rename_ui_duplicate', 'rename_ui_cancel', 'rename_ui_same', 'rename_ui_stale', 'rename_ui_detached', 'rename_ui_final', 'relation_ui_prepare', 'relation_ui_blank', 'relation_ui_path', 'relation_ui_duplicate', 'relation_ui_tags', 'relation_ui_same', 'relation_ui_cancel', 'relation_ui_clear', 'relation_ui_other_owner', 'relation_ui_other_tags', 'relation_ui_stale', 'relation_ui_detached', 'relation_ui_final', 'archive_ui_preview', 'archive_ui_cancel', 'archive_ui_exact', 'archive_ui_duplicate', 'archive_ui_readonly_history', 'archive_ui_list', 'archive_ui_active_filter', 'archive_ui_restore_cancel', 'archive_ui_restore', 'archive_ui_stale', 'archive_ui_detached', 'archive_ui_final'], 'undone': ['ui_restart', 'ui_backup', 'archive_ui_restart_history', 'archive_acceptance_v1_separate_process', 'archive_acceptance_v2_separate_process']}
+EXPECTED = {'seed': ['backend_fixture', 'application_insert', 'duplicate_package_readonly', 'invalid_package_readonly', 'prepare_readonly', 'create_linked_once', 'duplicate_plan_readonly', 'canceled_plan_readonly', 'second_category_reuse', 'unassigned_activity', 'stale_app_readonly', 'stale_category_readonly', 'late_rollback', 'consumed_failure_readonly', 'outer_transaction_readonly', 'backend_checkpoint', 'rename_fixture', 'rename_prepare_readonly', 'rename_exact_state', 'rename_duplicate', 'rename_same_readonly', 'rename_cancel', 'rename_blank', 'rename_blank_consumed', 'rename_stale', 'rename_unrelated_change', 'rename_late_rollback', 'rename_failure_consumed', 'rename_readback_rollback', 'rename_prepare_outer', 'rename_confirm_outer', 'rename_missing', 'rename_foreign', 'rename_owner_retained', 'rename_closed_helper', 'rename_reopened_state', 'relation_prepare', 'relation_path_order', 'relation_duplicate', 'relation_tag_order', 'relation_same', 'relation_clear', 'relation_blank', 'relation_blank_consumed', 'relation_cancel', 'relation_stale', 'relation_late_rollback', 'relation_failure_consumed', 'relation_readback_rollback', 'relation_foreign', 'relation_owner_retained', 'relation_prepare_outer', 'relation_confirm_outer', 'relation_missing', 'relation_closed', 'relation_final', 'archive_prepare', 'archive_exact', 'archive_duplicate', 'archive_same', 'archive_relation_refused', 'archive_restore_exact', 'archive_cancel', 'archive_stale_same', 'archive_late_rollback', 'archive_failure_consumed', 'archive_readback_rollback', 'archive_foreign', 'archive_owner_retained', 'archive_prepare_outer', 'archive_confirm_outer', 'archive_missing', 'archive_closed', 'archive_reopened_restore', 'archive_final', 'archive_schema2_compatible', 'archive_acceptance_v1_frozen_input', 'archive_acceptance_v1_migration_preserved', 'archive_acceptance_v1_restore_exact', 'archive_acceptance_v1_archive_exact', 'archive_acceptance_v1_backup_exact', 'archive_acceptance_v1_checkpoint', 'archive_acceptance_v2_frozen_input', 'archive_acceptance_v2_migration_preserved', 'archive_acceptance_v2_restore_exact', 'archive_acceptance_v2_archive_exact', 'archive_acceptance_v2_backup_exact', 'archive_acceptance_v2_checkpoint'], 'deleted': ['backend_restart', 'backend_backup', 'ui_fixture', 'catalog_open_readonly', 'invalid_name_readonly', 'invalid_package_ui_readonly', 'create_application_ui', 'duplicate_package_ui_readonly', 'same_title_distinct_ids', 'cancel_picker_readonly', 'first_category_link', 'duplicate_click_readonly', 'second_category_link', 'old_picker_readonly', 'unassigned_retained', 'ui_checkpoint', 'rename_ui_prepare', 'rename_ui_blank', 'rename_ui_exact', 'rename_ui_duplicate', 'rename_ui_cancel', 'rename_ui_same', 'rename_ui_stale', 'rename_ui_detached', 'rename_ui_final', 'relation_ui_prepare', 'relation_ui_blank', 'relation_ui_path', 'relation_ui_duplicate', 'relation_ui_tags', 'relation_ui_same', 'relation_ui_cancel', 'relation_ui_clear', 'relation_ui_other_owner', 'relation_ui_other_tags', 'relation_ui_stale', 'relation_ui_detached', 'relation_ui_final', 'archive_ui_preview', 'archive_ui_cancel', 'archive_ui_exact', 'archive_ui_duplicate', 'archive_ui_readonly_history', 'archive_ui_list', 'archive_ui_active_filter', 'archive_ui_restore_cancel', 'archive_ui_restore', 'archive_ui_stale', 'archive_ui_detached', 'archive_ui_final'], 'undone': ['ui_restart', 'ui_backup', 'archive_ui_restart_history', 'archive_acceptance_v1_separate_process', 'archive_acceptance_v2_separate_process']}
 SHARED_SHA256 = "9b1b435b21b630e1230f1e112a794962825665982ceabdbb41cc68583ce3d70d"
 # Reuse unchanged transport/receipt infrastructure, never the category cases.
 # Pin the whole dependency: a future edit must explicitly review this adapter.
@@ -496,7 +496,7 @@ CASES = r'''
    try{readonly(h,IllegalStateException.class,()->prepare(h,3,10),"outer_transaction_readonly");}
    finally{h.getWritableDatabase().endTransaction();}
    save("backend-state",state(h).toString());pass(h.count("applications")==1&&h.count("activities")==4&&h.count("ledger")==1&&h.count("checkins")==1,"backend_checkpoint");
-   renameBackend(h);
+   renameBackend(h);archiveAcceptanceSeed();
   }
  }
  void text(String key,String value)throws Exception{ui(()->{View v=one(key,true);need(v instanceof EditText,"editable "+key);((EditText)v).setText(value);need(value.contentEquals(((EditText)v).getText()),"exact input");});}
@@ -544,9 +544,232 @@ CASES = r'''
  }
  void undone()throws Exception{
   launch();click("活动",false);
-  pass(state(db()).toString().equals(read("ui-rename-state"))&&media().toString().equals(read("ui-rename-media")),"ui_restart");backup(db(),"ui");archiveRestartUI();
+  pass(state(db()).toString().equals(read("ui-rename-state"))&&media().toString().equals(read("ui-rename-media")),"ui_restart");backup(db(),"ui");archiveRestartUI();archiveAcceptanceReopen();
  }
 '''
+"""Candidate additions for verify_app_catalog.py; not yet integrated or submitted."""
+import json
+import subprocess
+import tempfile
+from pathlib import Path
+
+JAVA_MEDIA_ORACLE = r'''
+ static void archiveMediaExact(java.nio.file.Path root,
+     java.util.Map<String,byte[]> expected,java.util.Map<String,Long> registry)throws Exception{
+  need(!expected.isEmpty(),"archive media fixture must be nonempty");
+  need(registry.keySet().equals(expected.keySet()),"archive media registry identities");
+  java.util.Set<String> names=new java.util.TreeSet<>();
+  need(!java.nio.file.Files.isSymbolicLink(root)&&java.nio.file.Files.isDirectory(root,java.nio.file.LinkOption.NOFOLLOW_LINKS),"archive media directory");
+  try(java.util.stream.Stream<java.nio.file.Path> files=java.nio.file.Files.list(root)){
+   for(java.nio.file.Path file:(Iterable<java.nio.file.Path>)files::iterator)names.add(file.getFileName().toString());
+  }
+  need(names.equals(expected.keySet()),"archive media physical identities");
+  for(java.util.Map.Entry<String,byte[]> entry:expected.entrySet()){
+   String id=entry.getKey();byte[] wanted=entry.getValue();
+   need(id.matches("[0-9a-f]{64}")&&wanted!=null&&wanted.length>0,"archive media independent fixture");
+   java.nio.file.Path file=root.resolve(id);
+   need(!java.nio.file.Files.isSymbolicLink(file)&&java.nio.file.Files.isRegularFile(file,java.nio.file.LinkOption.NOFOLLOW_LINKS),"archive media ordinary file");
+   need(registry.get(id)!=null&&registry.get(id).longValue()==wanted.length,"archive media registry byte count");
+   need(java.nio.file.Files.size(file)==wanted.length,"archive media physical byte count");
+   byte[] actual=java.nio.file.Files.readAllBytes(file);
+   java.security.MessageDigest digest=java.security.MessageDigest.getInstance("SHA-256");
+   StringBuilder hex=new StringBuilder();
+   for(byte b:digest.digest(wanted))hex.append(String.format(java.util.Locale.ROOT,"%02x",b&255));
+   need(id.equals(hex.toString())&&java.util.Arrays.equals(wanted,actual),"archive media exact independently expected bytes");
+  }
+ }
+'''
+
+ARCHIVE_MEDIA_HOST_HARNESS = r'''
+import java.nio.file.*;import java.util.*;
+class ArchiveMediaTest {
+ __ORACLE__
+ static void need(boolean b,String label){if(!b)throw new AssertionError(label);}
+ interface Check{void run()throws Exception;}
+ static int positive,negative;
+ static void rejected(Check check,String label)throws Exception{
+  try{check.run();}catch(AssertionError expected){
+   need(expected.getMessage().equals(label),"wrong rejection: "+expected.getMessage());
+   negative++;return;
+  }
+  throw new AssertionError("MISSED "+label);
+ }
+ static void originalPositive(Path root,Map<String,byte[]> expected,Map<String,Long> registry)throws Exception{
+  archiveMediaExact(root,expected,registry);positive++;
+  System.out.println("VALID_MEDIA_WITNESS");
+ }
+ public static void main(String[] args)throws Exception{
+  Path root=Files.createTempDirectory("archive-media-oracle-");
+  // Published SHA-256 abc vector, independent of MediaRepository.digest.
+  String id="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+  byte[] bytes={97,98,99};
+  Map<String,byte[]> expected=new TreeMap<>();expected.put(id,bytes);
+  Map<String,Long> registry=new TreeMap<>();registry.put(id,3L);
+  Path asset=root.resolve(id);
+  try{
+   Files.write(asset,bytes,StandardOpenOption.CREATE_NEW);
+   originalPositive(root,expected,registry);
+   // These are byte-store controls, not PNG decoding or Android archive tests.
+   Files.write(asset,new byte[]{97,98,100});
+   rejected(()->archiveMediaExact(root,expected,registry),"archive media exact independently expected bytes");
+   Files.write(asset,bytes);
+   Files.write(asset,new byte[]{97,98});
+   rejected(()->archiveMediaExact(root,expected,registry),"archive media physical byte count");
+   Files.write(asset,bytes);
+   registry.put(id,2L);
+   rejected(()->archiveMediaExact(root,expected,registry),"archive media registry byte count");
+   registry.put(id,3L);
+   registry.put("f".repeat(64),3L);
+   rejected(()->archiveMediaExact(root,expected,registry),"archive media registry identities");
+   registry.remove("f".repeat(64));
+   Path extra=root.resolve("unexpected");Files.write(extra,bytes);
+   rejected(()->archiveMediaExact(root,expected,registry),"archive media physical identities");
+   Files.delete(extra);
+   Path held=root.getParent().resolve(root.getFileName()+"-held");Files.move(asset,held);
+   try{
+    rejected(()->archiveMediaExact(root,expected,registry),"archive media physical identities");
+    Files.createSymbolicLink(asset,held);
+    rejected(()->archiveMediaExact(root,expected,registry),"archive media ordinary file");
+    Files.delete(asset);
+   }finally{Files.move(held,asset);}
+   // Empty actual files/registry/expectation previously made equality vacuous.
+   Files.delete(asset);
+   rejected(()->archiveMediaExact(root,Collections.emptyMap(),Collections.emptyMap()),"archive media fixture must be nonempty");
+   Files.write(asset,bytes);
+   archiveMediaExact(root,expected,registry);positive++;
+   need(positive==2&&negative==8,"exact oracle control population");
+   System.out.println("ARCHIVE_MEDIA_ORACLE positive="+positive+" negative="+negative+" HOST_FILES_NOT_ANDROID");
+  }finally{
+   try(var files=Files.walk(root)){
+    for(Path p:(Iterable<Path>)files.sorted(Comparator.reverseOrder())::iterator)Files.delete(p);
+   }
+  }
+ }
+}
+'''
+
+
+def archive_media_oracle_selftest():
+    """Execute the same Java checker for genuine and mutated behavior."""
+    mutations = [
+        ('need(id.equals(hex.toString())&&java.util.Arrays.equals(wanted,actual),"archive media exact independently expected bytes");',
+         ';', "archive media exact independently expected bytes"),
+        ('need(registry.keySet().equals(expected.keySet()),"archive media registry identities");',
+         ';', "archive media registry identities"),
+        ('need(names.equals(expected.keySet()),"archive media physical identities");',
+         ';', "archive media physical identities"),
+        ('need(!expected.isEmpty(),"archive media fixture must be nonempty");',
+         ';', "archive media fixture must be nonempty"),
+    ]
+    with tempfile.TemporaryDirectory(prefix="archive-media-host-") as temporary:
+        java = Path(temporary) / "ArchiveMediaTest.java"
+
+        def execute(source):
+            java.write_text(ARCHIVE_MEDIA_HOST_HARNESS.replace("__ORACLE__", source), encoding="utf-8")
+            return subprocess.run(["java", str(java)], text=True, capture_output=True, timeout=30)
+
+        good = execute(JAVA_MEDIA_ORACLE)
+        assert good.returncode == 0 and not good.stderr, (good.stdout, good.stderr)
+        assert good.stdout.splitlines() == [
+            "VALID_MEDIA_WITNESS",
+            "ARCHIVE_MEDIA_ORACLE positive=2 negative=8 HOST_FILES_NOT_ANDROID",
+        ], good.stdout
+        witnessed = []
+        for old, new, label in mutations:
+            assert JAVA_MEDIA_ORACLE.count(old) == 1, "mutation anchor drift"
+            altered = JAVA_MEDIA_ORACLE.replace(old, new, 1)
+            assert altered != JAVA_MEDIA_ORACLE
+            result = execute(altered)
+            assert result.stdout.splitlines().count("VALID_MEDIA_WITNESS") == 1, result.stdout
+            assert result.returncode == 1 and "AssertionError: MISSED " + label in result.stderr, (
+                label, result.stdout, result.stderr)
+            witnessed.append(label)
+        receipt = dict(status="PASS", positive=2, negative=8,
+                       witnessed_mutants=len(witnessed), mutations=witnessed,
+                       scope="JAVA_FILESYSTEM_ORACLE_ONLY_NOT_PRODUCT_ARCHIVE_OR_DEVICE",
+                       integrated=False, submitted=False, release_ready=False)
+        print(json.dumps(receipt, sort_keys=True))
+        return receipt
+
+
+
+def archive_acceptance_wiring_selftest(source=None):
+    """Parse real generated Java calls, including omissions; not Android execution."""
+    extractor = r'''
+import java.nio.file.*;import java.util.*;import javax.tools.*;
+import com.sun.source.tree.*;import com.sun.source.util.*;
+class ArchiveWiring {
+ public static void main(String[] args)throws Exception{
+  JavaCompiler c=ToolProvider.getSystemJavaCompiler();
+  DiagnosticCollector<JavaFileObject> d=new DiagnosticCollector<>();
+  Map<String,Map<String,Integer>> calls=new TreeMap<>();
+  try(StandardJavaFileManager f=c.getStandardFileManager(d,null,null)){
+   JavacTask task=(JavacTask)c.getTask(null,f,d,List.of("-proc:none"),null,f.getJavaFileObjects(args[0]));
+   CompilationUnitTree unit=task.parse().iterator().next();
+   for(Diagnostic<?> x:d.getDiagnostics())if(x.getKind()==Diagnostic.Kind.ERROR)throw new AssertionError("java syntax "+x);
+   for(Tree type:unit.getTypeDecls())if(type instanceof ClassTree)for(Tree child:((ClassTree)type).getMembers())if(child instanceof MethodTree){
+    MethodTree method=(MethodTree)child;Map<String,Integer> counts=new TreeMap<>();
+    calls.put(method.getName().toString(),counts);
+    new TreeScanner<Void,Void>(){
+     public Void visitMethodInvocation(MethodInvocationTree call,Void unused){
+      counts.merge(call.getMethodSelect().toString(),1,Integer::sum);
+      return super.visitMethodInvocation(call,unused);
+     }
+    }.scan(method.getBody(),null);
+   }
+  }
+  need(calls.getOrDefault("seed",Map.of()).getOrDefault("renameBackend",0)==1,"existing_seed_witness");
+  System.out.println("ARCHIVE_WIRING_VALID_WITNESS");
+  require(calls,"seed","archiveAcceptanceSeed",1);
+  require(calls,"undone","archiveAcceptanceReopen",1);
+  require(calls,"archiveAcceptanceSeed","archiveConfirm",2);
+  require(calls,"archiveAcceptanceSeed","archiveMediaExact",5);
+  require(calls,"archiveAcceptanceSeed","archiveReferenceWitness",4);
+  require(calls,"archiveAcceptanceSeed","target.restoreBackup",1);
+  require(calls,"archiveAcceptanceSeed","archiveOldProjection",3);
+  require(calls,"archiveAcceptanceReopen","archiveMediaExact",2);
+  require(calls,"archiveAcceptanceReopen","archiveReferenceWitness",2);
+  require(calls,"archiveAcceptanceReopen","read",1);
+  System.out.println("ARCHIVE_WIRING_PASS");
+ }
+ static void need(boolean value,String label){if(!value)throw new AssertionError(label);}
+ static void require(Map<String,Map<String,Integer>> calls,String method,String call,int count){
+  need(calls.getOrDefault(method,Map.of()).getOrDefault(call,0)==count,method+"/"+call);
+ }
+}
+'''
+    if source is None:
+        source = JAVA
+    with tempfile.TemporaryDirectory(prefix="archive-wiring-") as temporary:
+        root = Path(temporary)
+        (root/"ArchiveWiring.java").write_text(extractor)
+
+        def run(source):
+            (root/"TodoInstrumentation.java").write_text(source)
+            return subprocess.run(["java", str(root/"ArchiveWiring.java"), str(root/"TodoInstrumentation.java")],
+                                  capture_output=True, text=True, timeout=30)
+
+        good = run(source)
+        assert good.returncode == 0 and good.stdout.splitlines() == [
+            "ARCHIVE_WIRING_VALID_WITNESS", "ARCHIVE_WIRING_PASS"], (good.stdout, good.stderr)
+        cases = [
+            ("archiveAcceptanceSeed();", ";", "seed/archiveAcceptanceSeed"),
+            ("archiveAcceptanceReopen();", ";", "undone/archiveAcceptanceReopen"),
+            ("archiveMediaExact(restored,wanted,archiveRegistry(target));", ";",
+             "archiveAcceptanceSeed/archiveMediaExact"),
+            ("archiveMediaExact(folder.resolve(prefix+\"restored-media\"),archiveWanted(),archiveRegistry(target));", ";",
+             "archiveAcceptanceReopen/archiveMediaExact"),
+        ]
+        for old, new, label in cases:
+            assert source.count(old) == 1, ("archive wiring anchor", old)
+            bad = run(source.replace(old, new, 1))
+            assert bad.stdout.splitlines() == ["ARCHIVE_WIRING_VALID_WITNESS"], bad.stdout
+            assert bad.returncode == 1 and "AssertionError: "+label in bad.stderr, (label,bad.stderr)
+        print("ARCHIVE_ACCEPTANCE_WIRING positive=1 negative=4 JAVA_AST_NOT_DEVICE")
+
+ARCHIVE_ACCEPTANCE_JAVA = ' static final String[] ARCHIVE_V1_DDL={\n        "CREATE TABLE revision(id INTEGER PRIMARY KEY CHECK(id=1), value INTEGER NOT NULL CHECK(value>=0))",\n        "CREATE TABLE categories(id INTEGER PRIMARY KEY CHECK(id>0),name TEXT NOT NULL CHECK(length(trim(name))>0),position INTEGER NOT NULL CHECK(position>=0))",\n        "CREATE TABLE applications(id INTEGER PRIMARY KEY CHECK(id>0),name TEXT NOT NULL,package_name TEXT NOT NULL)",\n        "CREATE UNIQUE INDEX application_package ON applications(package_name) WHERE package_name<>\'\'",\n        "CREATE TABLE activities(id INTEGER PRIMARY KEY CHECK(id>0),category_id INTEGER NOT NULL REFERENCES categories(id),application_id INTEGER REFERENCES applications(id),title TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN(0,1)))",\n        "CREATE TABLE paths(activity_id INTEGER NOT NULL REFERENCES activities(id),position INTEGER NOT NULL CHECK(position>=0),text TEXT NOT NULL,PRIMARY KEY(activity_id,position))",\n        "CREATE TABLE tags(activity_id INTEGER NOT NULL REFERENCES activities(id),position INTEGER NOT NULL CHECK(position>=0),text TEXT NOT NULL,PRIMARY KEY(activity_id,text),UNIQUE(activity_id,position))",\n        "CREATE TABLE batches(id TEXT PRIMARY KEY NOT NULL,payload BLOB NOT NULL,revision INTEGER NOT NULL,undone INTEGER NOT NULL CHECK(undone IN(0,1)))",\n        "CREATE TABLE ledger(id TEXT PRIMARY KEY NOT NULL,activity_id INTEGER NOT NULL REFERENCES activities(id),day TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN(\'EXPENSE\',\'REFUND\',\'INCOME\',\'PLANNED\')),cents INTEGER NOT NULL CHECK(cents>=0),memo TEXT NOT NULL,batch_id TEXT NOT NULL REFERENCES batches(id),position INTEGER NOT NULL CHECK(position>=0),UNIQUE(batch_id,position))",\n        "CREATE INDEX ledger_activity_day ON ledger(activity_id,day)",\n        "CREATE TABLE checkins(activity_id INTEGER NOT NULL REFERENCES activities(id),day TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN(\'DONE\',\'SKIPPED\')),memo TEXT NOT NULL,recorded_at TEXT NOT NULL,PRIMARY KEY(activity_id,day))",\n        "CREATE TABLE media(id TEXT PRIMARY KEY NOT NULL,mime TEXT NOT NULL,bytes INTEGER NOT NULL CHECK(bytes>0))",\n        "CREATE TABLE notes(id TEXT PRIMARY KEY NOT NULL,activity_id INTEGER NOT NULL REFERENCES activities(id),title TEXT NOT NULL)",\n        "CREATE TABLE blocks(note_id TEXT NOT NULL REFERENCES notes(id),id TEXT NOT NULL,position INTEGER NOT NULL CHECK(position>=0),kind TEXT NOT NULL CHECK(kind IN(\'TEXT\',\'IMAGE\')),text TEXT NOT NULL,asset_id TEXT REFERENCES media(id),caption TEXT NOT NULL,private INTEGER NOT NULL CHECK(private IN(0,1)),PRIMARY KEY(note_id,id),UNIQUE(note_id,position),CHECK((kind=\'TEXT\' AND asset_id IS NULL) OR (kind=\'IMAGE\' AND asset_id IS NOT NULL)))"\n };\n static final String[] ARCHIVE_V2_DDL={\n        "CREATE TABLE fields(id TEXT PRIMARY KEY NOT NULL,name TEXT NOT NULL,type TEXT NOT NULL CHECK(type IN(\'TEXT\',\'LONG_TEXT\',\'NUMBER\',\'DATE\',\'SELECT\',\'MULTI_SELECT\',\'LINK\',\'BOOLEAN\')),archived INTEGER NOT NULL CHECK(archived IN(0,1)))",\n        "CREATE TABLE field_options(field_id TEXT NOT NULL REFERENCES fields(id),id TEXT NOT NULL,position INTEGER NOT NULL CHECK(position>=0),PRIMARY KEY(field_id,id),UNIQUE(field_id,position))",\n        "CREATE TABLE field_values(activity_id INTEGER NOT NULL REFERENCES activities(id),field_id TEXT NOT NULL REFERENCES fields(id),position INTEGER NOT NULL CHECK(position>=0),value TEXT NOT NULL,PRIMARY KEY(activity_id,field_id,position))",\n        "CREATE TABLE field_notes(note_id TEXT PRIMARY KEY NOT NULL REFERENCES notes(id),field_id TEXT NOT NULL REFERENCES fields(id))",\n        "CREATE TABLE todos(id TEXT PRIMARY KEY NOT NULL,title TEXT NOT NULL CHECK(length(trim(title))>0),done INTEGER NOT NULL CHECK(done IN(0,1)),position INTEGER NOT NULL CHECK(position>=0) UNIQUE)",\n        "CREATE TABLE legacy_imports(source_id TEXT PRIMARY KEY NOT NULL,item_count INTEGER NOT NULL CHECK(item_count>=0))"\n };\n // Synthetic PNG storage/reference acceptance, not real-photo rendering or phone gestures.\n static final String[] ARCHIVE_IDS={\n  "5331b957ef1f272fa51d16e8d6d844a4db5767975fb2ce987544594b2d96744f",\n  "44df8a96d3682c596fa3c5a16e708b0b15bf8eef9540413c75e6243e340ebde8"};\n static final String[] ARCHIVE_PNG={\n  "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP8z8Dwn4GBgYGJAQoAHxcCAk+Uzr4AAAAASUVORK5CYII=",\n  "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGNkYPj/n4GBgYGJAQoAHRkCAjRcHicAAAAASUVORK5CYII="};\n static final String[] ARCHIVE_TABLES={"revision","categories","applications","activities","paths","tags","batches","ledger","checkins","media","notes","blocks","fields","field_options","field_values","field_notes","todos","legacy_imports"};\n static Map<String,byte[]> archiveWanted(){\n  Map<String,byte[]> out=new TreeMap<>();\n  for(int i=0;i<ARCHIVE_IDS.length;i++)out.put(ARCHIVE_IDS[i],android.util.Base64.decode(ARCHIVE_PNG[i],2));\n  return out;\n }\n static Map<String,Long> archiveRegistry(AppDatabase h){\n  Map<String,Long> out=new TreeMap<>();\n  try(Cursor c=h.getReadableDatabase().rawQuery("SELECT id,mime,bytes FROM media ORDER BY id",null)){\n   while(c.moveToNext()){\n    need(c.getType(0)==Cursor.FIELD_TYPE_STRING&&c.getType(1)==Cursor.FIELD_TYPE_STRING&&\n      c.getType(2)==Cursor.FIELD_TYPE_INTEGER&&c.getString(1).equals("image/png"),"archive media registry types");\n    need(out.put(c.getString(0),c.getLong(2))==null,"archive duplicate registry");\n   }\n  }return out;\n }\n String archiveDatabaseName(int version){return "archive-acceptance-v"+version+"-"+nonce+".db";}\n Path archiveMediaRoot(int version){return folder.resolve("archive-acceptance-media-v"+version);}\n static Map<String,List<List<String>>> archiveOldProjection(SQLiteDatabase db,int tables){\n  Map<String,List<List<String>>> out=new TreeMap<>();\n  for(int t=0;t<tables;t++){\n   String table=ARCHIVE_TABLES[t];\n   String columns=table.equals("blocks")?"note_id,id,position,kind,text,asset_id,caption,private":"*";\n   List<List<String>> rows=new ArrayList<>();\n   try(Cursor c=db.rawQuery("SELECT rowid AS rowid,"+columns+" FROM "+table+" ORDER BY rowid",null)){\n    rows.add(Arrays.asList(c.getColumnNames()));\n    while(c.moveToNext()){\n     List<String> row=new ArrayList<>();\n     for(int i=0;i<c.getColumnCount();i++){\n      int type=c.getType(i);need(type==0||type==1||type==3||type==4,"archive legacy supported cell");\n      row.add(type+":"+(type==0?"":type==4?android.util.Base64.encodeToString(c.getBlob(i),2):c.getString(i)));\n     }rows.add(row);\n    }\n   }out.put(table,rows);\n  }return out;\n }\n void archiveReferenceWitness(AppDatabase h){\n  try(Cursor c=h.getReadableDatabase().rawQuery(\n   "SELECT n.id,n.activity_id,b.id,b.asset_id,b.caption,b.private,b.original_asset_id FROM notes n JOIN blocks b ON b.note_id=n.id WHERE b.kind=\'IMAGE\' ORDER BY n.id,b.position",null)){\n   String[][] wanted={\n    {"archive-legacy-other","10","other-photo",ARCHIVE_IDS[1],"Other owner image","0"},\n    {"archive-legacy-shared","10","shared-photo",ARCHIVE_IDS[0],"Shared public caption","0"},\n    {"archive-legacy-target","9","target-photo",ARCHIVE_IDS[0],"Private archive caption","1"}};\n   for(String[] row:wanted){\n    need(c.moveToNext(),"archive reference missing");\n    for(int i=0;i<row.length;i++)need(row[i].equals(c.getString(i)),"archive reference identity caption privacy");\n    need(c.isNull(6),"archive migration must not invent original asset");\n   }need(!c.moveToNext(),"archive unexpected reference");\n  }\n }\n void archiveAcceptanceSeed()throws Exception{\n  for(int version:new int[]{1,2}){\n   String prefix="archive_acceptance_v"+version+"_";\n   String name=archiveDatabaseName(version);\n   need(!getTargetContext().getDatabasePath(name).exists(),"archive fresh legacy fixture");\n   Path media=archiveMediaRoot(version);\n   need(!Files.exists(media),"archive fresh media fixture");\n   MediaRepository repository=new MediaRepository(media,64L*1024*1024);\n   Map<String,byte[]> wanted=archiveWanted();\n   for(Map.Entry<String,byte[]> e:wanted.entrySet()){\n    try(InputStream in=new ByteArrayInputStream(e.getValue())){\n     need(repository.copy(in).equals(e.getKey()),"archive fixture independently pinned PNG");\n    }\n   }\n   Map<String,List<List<String>>> old;\n   int oldCount=version==1?12:18;\n   try(SQLiteDatabase raw=getTargetContext().openOrCreateDatabase(name,0,null)){\n    raw.setForeignKeyConstraintsEnabled(true);\n    for(String sql:ARCHIVE_V1_DDL)raw.execSQL(sql);\n    if(version==2)for(String sql:ARCHIVE_V2_DDL)raw.execSQL(sql);\n    raw.execSQL("INSERT INTO revision VALUES(1,42)");\n    raw.execSQL("INSERT INTO categories VALUES(7,\'Archive legacy category\',0)");\n    raw.execSQL("INSERT INTO activities VALUES(9,7,NULL,\'Archived legacy activity\',1)");\n    raw.execSQL("INSERT INTO activities VALUES(10,7,NULL,\'Active other owner\',0)");\n    raw.execSQL("INSERT INTO paths VALUES(9,0,\'Legacy path\')");\n    raw.execSQL("INSERT INTO tags VALUES(9,0,\'Legacy tag\')");\n    raw.execSQL("INSERT INTO checkins VALUES(9,\'2026-09-01\',\'DONE\',\'Legacy mark\',\'2026-09-21T12:00:00Z\')");\n    for(String id:ARCHIVE_IDS)raw.execSQL("INSERT INTO media VALUES(?,\'image/png\',?)",new Object[]{id,wanted.get(id).length});\n    raw.execSQL("INSERT INTO notes VALUES(\'archive-legacy-target\',9,\'Same title\')");\n    raw.execSQL("INSERT INTO notes VALUES(\'archive-legacy-shared\',10,\'Same title\')");\n    raw.execSQL("INSERT INTO notes VALUES(\'archive-legacy-other\',10,\'Other note\')");\n    raw.execSQL("INSERT INTO blocks VALUES(\'archive-legacy-target\',\'target-photo\',0,\'IMAGE\',\'\',?,\'Private archive caption\',1)",new Object[]{ARCHIVE_IDS[0]});\n    raw.execSQL("INSERT INTO blocks VALUES(\'archive-legacy-target\',\'target-text\',1,\'TEXT\',\'Private legacy history\',NULL,\'\',1)");\n    raw.execSQL("INSERT INTO blocks VALUES(\'archive-legacy-shared\',\'shared-photo\',0,\'IMAGE\',\'\',?,\'Shared public caption\',0)",new Object[]{ARCHIVE_IDS[0]});\n    raw.execSQL("INSERT INTO blocks VALUES(\'archive-legacy-other\',\'other-photo\',0,\'IMAGE\',\'\',?,\'Other owner image\',0)",new Object[]{ARCHIVE_IDS[1]});\n    raw.setVersion(version);old=archiveOldProjection(raw,oldCount);\n    try(Cursor cols=raw.rawQuery("PRAGMA table_info(blocks)",null);\n        Cursor tables=raw.rawQuery("SELECT count(*) FROM sqlite_master WHERE type=\'table\' AND name=\'fields\'",null)){\n     need(tables.moveToFirst(),"archive legacy table witness");\n     pass(raw.getVersion()==version&&cols.getCount()==8&&tables.getInt(0)==(version==1?0:1)&&old.get("blocks").size()==5,prefix+"frozen_input");\n    }\n   }\n   // Exercise the existing 1->2 helper before the existing opt-in 2->3 helper.\n   try(AppDatabase v2=new AppDatabase(getTargetContext(),name)){\n    need(v2.getReadableDatabase().getVersion()==2&&archiveOldProjection(v2.getReadableDatabase(),oldCount).equals(old),"archive v1-to-v2 exact historical cells");\n   }\n   try(AppDatabase h=AppDatabase.openSchema3(getTargetContext(),name)){\n    archiveReferenceWitness(h);\n    archiveMediaExact(media,wanted,archiveRegistry(h));\n    pass(h.getReadableDatabase().getVersion()==3&&archiveOldProjection(h.getReadableDatabase(),oldCount).equals(old),prefix+"migration_preserved");\n    Map<String,List<List<String>>> before=state(h);\n    need(archiveConfirm(h,archivePlan(h,9,false)),"archive legacy restore changed");\n    archiveReferenceWitness(h);archiveMediaExact(media,wanted,archiveRegistry(h));\n    pass(state(h).equals(archiveExpected(before,9,false)),prefix+"restore_exact");\n    before=state(h);\n    need(archiveConfirm(h,archivePlan(h,9,true)),"archive legacy archive changed");\n    archiveReferenceWitness(h);archiveMediaExact(media,wanted,archiveRegistry(h));\n    pass(state(h).equals(archiveExpected(before,9,true)),prefix+"archive_exact");\n    before=state(h);byte[] wire=h.exportState();\n    Path zip=folder.resolve(prefix+"backup.zip");h.exportBackup(zip,repository);\n    Path restored=folder.resolve(prefix+"restored-media");\n    need(!Files.exists(restored),"archive backup target media initially absent");\n    MediaRepository targetRepo=new MediaRepository(restored,64L*1024*1024);\n    try(AppDatabase target=AppDatabase.openSchema3(getTargetContext(),"restored-"+name)){\n     target.restoreBackup(zip,folder.resolve(prefix+"stage"),64L*1024*1024,targetRepo);\n     archiveReferenceWitness(target);\n     archiveMediaExact(restored,wanted,archiveRegistry(target));\n     archiveMediaExact(media,wanted,archiveRegistry(h));\n     pass(state(h).equals(before)&&backupEqual(before,state(target))&&Arrays.equals(wire,target.exportState()),prefix+"backup_exact");\n    }\n    save(prefix+"state",state(h).toString());\n    pass(state(h).equals(before),prefix+"checkpoint");\n   }\n  }\n }\n void archiveAcceptanceReopen()throws Exception{\n  for(int version:new int[]{1,2}){\n   String prefix="archive_acceptance_v"+version+"_";String name=archiveDatabaseName(version);\n   try(AppDatabase h=AppDatabase.openSchema3(getTargetContext(),name);\n       AppDatabase target=AppDatabase.openSchema3(getTargetContext(),"restored-"+name)){\n    archiveReferenceWitness(h);archiveReferenceWitness(target);\n    archiveMediaExact(archiveMediaRoot(version),archiveWanted(),archiveRegistry(h));\n    archiveMediaExact(folder.resolve(prefix+"restored-media"),archiveWanted(),archiveRegistry(target));\n    pass(h.getReadableDatabase().getVersion()==3&&state(h).toString().equals(read(prefix+"state"))&&\n       backupEqual(state(h),state(target))&&Arrays.equals(h.exportState(),target.exportState()),prefix+"separate_process");\n   }\n  }\n }\n'
+CASES += JAVA_MEDIA_ORACLE + ARCHIVE_ACCEPTANCE_JAVA
+
 JAVA = (shared.JAVA[:shared.JAVA.index(" static Map<String,List<List<String>>> expected(")] + CASES
     + shared.JAVA[shared.JAVA.index(" void save("):shared.JAVA.index(" void seed(")].replace("category-", "catalog-").replace("&&target.categoryIds().equals(source.categoryIds())", "").replace(" void backup(", " void historicalBackup(")
     + shared.JAVA[shared.JAVA.index(" @Override public void onCreate"):].replace('"category-"+nonce', '"catalog-"+nonce'))
@@ -557,7 +780,7 @@ def bind_infrastructure():
         s=s.replace("category","catalog").replace("Category","Catalog").replace("CATEGORY","CATALOG")
         if name=="fixture":
             assert s.count("checks=40")==1
-            s=s.replace("checks=40","checks=129")
+            s=s.replace("checks=40","checks=143")
         if name=="report":
             old='["physical_phone_gestures", "all_lifecycle_stale_duplicate_UI_cases", "referenced_media_fixture", "ordinary_todo_sorting"]'
             assert s.count(old)==1
@@ -859,6 +1082,8 @@ class Checkpoint{
 
 
 def selftest():
+    archive_media_oracle_selftest()
+    archive_acceptance_wiring_selftest()
     archive_host_selftest()
     repair_selftest()
     relation_host_selftest()
@@ -866,7 +1091,7 @@ def selftest():
     rename_host_selftest()
     catalog_ui_selftest()
     assert REQUIRED == EXPECTED
-    assert [len(EXPECTED[p]) for p in ("seed", "deleted", "undone")] == [76,50,3]
+    assert [len(EXPECTED[p]) for p in ("seed", "deleted", "undone")] == [88,50,5]
     rejected = 0
     for api in (26,34):
         value, manifest, logs = fixture(api)

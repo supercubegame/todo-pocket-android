@@ -870,6 +870,13 @@ def batch_scroll_wiring_selftest():
                        if any(isinstance(a, ast.Constant) and a.value == 25 for a in ast.walk(n))), "old scanner retained"
     source = inspect.getsource(native)
     check(source)
+    # Mutation anchors belong to summary_ui, not unrelated detail navigators.
+    native_node = ast.parse(source).body[0]
+    summary_node = next(n for n in native_node.body
+                        if isinstance(n, ast.FunctionDef) and n.name == "summary_ui")
+    lines = source.splitlines(keepends=True)
+    source = lines[0] + "".join(lines[summary_node.lineno-1:summary_node.end_lineno])
+    check(source)
     mutants = [
         ('proof.setdefault("navigation", []).append(navigation)', 'pass'),
         ('navigation["frames"],', '[],'),
@@ -886,7 +893,292 @@ def batch_scroll_wiring_selftest():
     print("BATCH_SCROLL_WIRING positive=1 negative=3 ACTUAL_NATIVE_AST_NOT_DEVICE", flush=True)
 
 
+def scan_detail_navigation(read_nodes, swipe, package, records, viewport_for,
+                           gesture_for, expected, buttons, forbidden, target=None):
+    """Read at most 25 frames; gestures use each frame's measured detail viewport.
+
+    target mode locates one actionable detail control. Scan mode verifies every
+    summary and boundary button; disabled boundary buttons are valid evidence.
+    Neither mode navigates activity lists or confirmation dialogs.
+    """
+    actual, order, controls = {}, [], {}
+    previous = None
+    for attempt in range(25):
+        record = {"attempt": attempt, "status": "READING"}
+        records.append(record)
+        try:
+            frame = list(read_nodes())
+            signature = hashlib.sha256(json.dumps(
+                [sorted(n.attrib.items()) for n in frame],
+                ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+            record.update(frame_sha256=signature,
+                          changed_from_previous=None if previous is None else signature != previous)
+            previous = signature
+            viewport = viewport_for(frame, package)
+            record["viewport"] = list(viewport)
+            record["rows"] = []
+            seen = set()
+            found = None
+            for node in frame:
+                key = node.get("content-desc", "")
+                assert key not in forbidden, "deleted identity still visible"
+                summary = key.startswith(("note-count-", "note-title-", "note-activity-", "note-summary-"))
+                button = key.startswith(("note-up-", "note-down-"))
+                relevant = key == target if target is not None else summary or (button and buttons is not None)
+                if not relevant:
+                    continue
+                record["rows"].append(dict(id=key, text=node.get("text", ""),
+                                           bounds=node.get("bounds"), enabled=node.get("enabled")))
+                assert key not in seen, "duplicate detail identity"
+                seen.add(key)
+                assert node.get("package") == package, "detail belongs to another package"
+                match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
+                assert match, "detail has malformed bounds"
+                x1, y1, x2, y2 = map(int, match.groups())
+                left, top, right, bottom = viewport
+                assert left <= x1 < x2 <= right and top <= y1 < y2 <= bottom, "detail outside viewport"
+                if target is not None:
+                    assert node.get("class") == "android.widget.Button", "detail control class differs"
+                    assert node.get("enabled") == "true", "detail target disabled"
+                    found = node
+                elif summary:
+                    assert key in expected, "unexpected detail summary identity"
+                    text = node.get("text", "")
+                    assert text == expected[key], "detail summary text differs"
+                    assert key not in actual or actual[key] == text, "detail summary changed"
+                    if key.startswith("note-title-") and key not in actual:
+                        order.append(key)
+                    actual[key] = text
+                elif buttons is not None:
+                    assert key in buttons, "unexpected order control identity"
+                    assert node.get("class") == "android.widget.Button", "order control class differs"
+                    assert node.get("enabled") == buttons[key], "wrong order boundary " + key
+                    controls[key] = node.get("enabled")
+            record["missing_summaries"] = sorted(set(expected) - set(actual))
+            record["missing_controls"] = sorted(set(buttons or {}) - set(controls))
+            if target is not None and found is not None:
+                record["status"] = "EXACT_CONTROL_FOUND"
+                return found
+            if target is None and set(expected) <= set(actual) and set(buttons or {}) <= set(controls):
+                summary_ui_check(expected, actual, order)
+                record["status"] = "EXACT_DETAIL_FOUND"
+                return None
+            if attempt < 24:
+                coordinates = gesture_for(viewport)
+                record.update(gesture=list(coordinates), duration_ms=350, status="SWIPE_REQUESTED")
+                swipe(*coordinates)
+            else:
+                record["status"] = "ABSENT_AT_BOUND"
+        except Exception as exc:
+            record.update(status="FAILED", error=repr(exc))
+            raise
+    if target is not None:
+        raise AssertionError("detail control unreachable " + target)
+    raise AssertionError("detail summary/control coverage incomplete")
+
+
+def detail_navigation_selftest():
+    import ast
+    import inspect
+    source = Path(__file__).with_name("emulator_gate.py").read_text()
+    functions = [n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef)
+                 and n.name in {"summary_viewport", "summary_gesture"}]
+    assert len(functions) == 2
+    scope = {"re": re}
+    exec(compile(ast.Module(body=functions, type_ignores=[]), "<actual-detail-geometry>", "exec"), scope)
+    viewport_for, gesture_for = scope["summary_viewport"], scope["summary_gesture"]
+    package = "test.package"
+    expected = {"note-count-1": "2", "note-title-a": "1. Same", "note-activity-1": "Public",
+                "note-title-b": "2. Same", "note-summary-b": "Empty"}
+    buttons = {"note-up-a": "false", "note-down-a": "true",
+               "note-up-b": "true", "note-down-b": "false"}
+    forbidden = ("note-title-deleted", "note-delete-deleted", "note-summary-deleted")
+    keys = list(expected) + list(buttons)
+    def frame(keys, box=(18,293,302,578)):
+        l,t,r,b = box
+        bounds = lambda rect: "[%d,%d][%d,%d]" % rect
+        out = [ET.Element("node", {"content-desc":"activity-details-scroll", "package":package,
+                "class":"android.widget.ScrollView", "enabled":"true", "bounds":bounds(box)})]
+        for key in keys:
+            out.append(ET.Element("node", {"content-desc":key, "package":package,
+                "class":"android.widget.Button" if key.startswith(("note-up-","note-down-","note-delete-")) else "android.widget.TextView",
+                "text":expected.get(key,""), "enabled":buttons.get(key,"true"),
+                "bounds":bounds((l,t+1,r,t+2))}))
+        return out
+    def exercise(fn, frames, target=None, failure=None, swipes=0, boundary=True):
+        records, calls, observed = [], [], []
+        def read():
+            f = frames[min(len(observed), len(frames)-1)]
+            observed.append(f)
+            return f
+        def swipe(*coords):
+            rect = viewport_for(observed[-1], package)
+            assert coords == gesture_for(rect), "wrong measured gesture"
+            calls.append(coords)
+        try:
+            result = fn(read, swipe, package, records, viewport_for, gesture_for,
+                        expected if target is None else {}, buttons if boundary and target is None else None,
+                        forbidden, target)
+        except AssertionError as exc:
+            assert failure and failure in str(exc), (failure, str(exc))
+            result = None
+        else:
+            assert failure is None, "negative input accepted"
+        assert len(records) == len(observed), "frame receipt missing"
+        assert len(calls) == swipes, "observation/gesture budget changed"
+        for i, rec in enumerate(records):
+            assert rec["attempt"] == i
+            assert re.fullmatch("[0-9a-f]{64}", rec["frame_sha256"])
+            assert rec["changed_from_previous"] is (None if i==0 else rec["frame_sha256"] != records[i-1]["frame_sha256"])
+        for rec, coords in zip(records, calls):
+            assert rec["gesture"] == list(coords) and rec["duration_ms"] == 350, "gesture receipt missing"
+        if failure:
+            assert records[-1]["status"] == ("ABSENT_AT_BOUND" if "coverage incomplete" in failure or "unreachable" in failure else "FAILED")
+        else:
+            assert records[-1]["status"] == ("EXACT_CONTROL_FOUND" if target else "EXACT_DETAIL_FOUND")
+            if target: assert result.get("content-desc") == target
+            else: assert records[-1]["missing_summaries"] == records[-1]["missing_controls"] == []
+        return records
+    positives = [
+        ([frame(keys)], None, 0, True),
+        ([frame(keys[:2]),frame(keys[2:],(31,117,391,617))],None,1,True),
+        ([frame([])]*24+[frame(keys)],None,24,True),
+        ([frame(list(expected))],None,0,False),
+        ([frame(["note-up-b"])],"note-up-b",0,True),
+        ([frame([]),frame(["note-delete-b"])],"note-delete-b",1,False),
+        ([frame([])]*24+[frame(["note-down-a"])],"note-down-a",24,True),
+    ]
+    for frames,target,swipes,boundary in positives:
+        exercise(scan_detail_navigation,frames,target,swipes=swipes,boundary=boundary)
+    negatives=[]
+    for index,field,value,message in [
+        (1,"text","PRIVATE","summary text differs"),
+        (1,"package","other","another package"),
+        (1,"bounds","bad","malformed bounds"),
+        (1,"bounds","[18,292][302,300]","outside viewport"),
+        (1,"content-desc","note-title-other","unexpected detail summary"),
+        (6,"enabled","true","wrong order boundary"),
+        (6,"class","android.widget.TextView","control class differs"),
+        (6,"content-desc","note-up-other","unexpected order control"),
+        (0,"enabled","false","invalid summary viewport"),
+        (0,"bounds","bad","malformed bounds"),
+        (0,"package","other","another package"),
+    ]:
+        bad=frame(keys);bad[index].set(field,value)
+        negatives.append((bad,None,message,True))
+    negatives += [
+        (frame(keys)+[frame(["note-title-a"])[1]],None,"duplicate detail identity",True),
+        (frame(keys)+[frame(["note-delete-deleted"])[1]],None,"deleted identity still visible",True),
+        (frame([keys[0],keys[3],keys[4],keys[1],keys[2]]+list(buttons)),None,"summary display order differs",True),
+        (frame(keys)[1:],None,"missing or duplicate",True),
+        (frame(keys)+[frame([])[0]],None,"missing or duplicate",True),
+    ]
+    for field,value,message in [
+        ("enabled","false","target disabled"),
+        ("class","android.widget.TextView","control class differs"),
+        ("package","other","another package"),
+        ("bounds","[0,0][1,1]","outside viewport"),
+    ]:
+        bad=frame(["note-up-b"]);bad[1].set(field,value)
+        negatives.append((bad,"note-up-b",message,True))
+    for frames,target,message,boundary in negatives:
+        exercise(scan_detail_navigation,[frames],target,message,boundary=boundary)
+    exercise(scan_detail_navigation,[frame([])],failure="coverage incomplete",swipes=24)
+    exercise(scan_detail_navigation,[frame([])],"note-up-b","unreachable",24)
+    # Original transport exception must survive, with a retained FAILED record.
+    records=[];sentinel=OSError("original transport")
+    def broken(): raise sentinel
+    try:scan_detail_navigation(broken,None,package,records,viewport_for,gesture_for,{},None,())
+    except OSError as exc:assert exc is sentinel and records[0]["status"]=="FAILED"
+    else:raise AssertionError("transport swallowed")
+    mutants=[
+        ("coordinates = gesture_for(viewport)","coordinates = (160,440,160,190)",
+         lambda f:exercise(f,[frame([]),frame(keys)],swipes=1)),
+        ("range(25)","range(24)",
+         lambda f:exercise(f,[frame([])]*24+[frame(keys)],swipes=24)),
+        ("gesture=list(coordinates)","gesture=[]",
+         lambda f:exercise(f,[frame([]),frame(keys)],swipes=1)),
+        ('assert key not in forbidden,','assert True,',
+         lambda f:exercise(f,[frame(keys)+[frame(["note-delete-deleted"])[1]]],failure="deleted identity still visible")),
+        ('assert node.get("enabled") == buttons[key],','assert True,',
+         lambda f:exercise(f,[negatives[5][0]],failure="wrong order boundary")),
+        ("summary_ui_check(expected, actual, order)","pass",
+         lambda f:exercise(f,[negatives[13][0]],failure="summary display order differs")),
+        ("assert text == expected[key],","assert True,",
+         lambda f:exercise(f,[negatives[0][0]],failure="summary text differs")),
+        ('assert key not in seen,','assert True,',
+         lambda f:exercise(f,[negatives[11][0]],failure="duplicate detail identity")),
+    ]
+    original=inspect.getsource(scan_detail_navigation)
+    for old,new,check in mutants:
+        assert original.count(old)==1
+        ns=dict(globals());exec(original.replace(old,new,1),ns)
+        mutant=ns["scan_detail_navigation"]
+        exercise(mutant,[frame(keys)])
+        try:check(mutant)
+        except AssertionError:pass
+        else:raise AssertionError("detail mutant survived "+old)
+    print("DETAIL_NAV_HOST positive="+str(len(positives))+" negative="+str(len(negatives)+3)+
+          " witnessed_mutants="+str(len(mutants))+" HOST_ONLY_NOT_TOUCH_REPLAY",flush=True)
+
+
+def detail_navigation_wiring_selftest():
+    import ast
+    import inspect
+    def check(source):
+        native_node=ast.parse(source).body[0]
+        sections={n.name:n for n in native_node.body if isinstance(n,ast.FunctionDef)}
+        total=0
+        for name in ("order_ui","deletion_ui"):
+            section=sections[name]
+            calls=[n for n in ast.walk(section) if isinstance(n,ast.Call) and
+                   isinstance(n.func,ast.Name) and n.func.id=="scan_detail_navigation"]
+            assert len(calls)==2,"detail caller missing"
+            total+=len(calls)
+            for call in calls:
+                assert [ast.unparse(a) for a in call.args[:6]]==[
+                    "nodes","bounded_swipe","gate.PKG","navigation['frames']",
+                    "gate.summary_viewport","gate.summary_gesture"],"detail binding missing"
+            appends=[n for n in ast.walk(section) if isinstance(n,ast.Expr) and
+                     ast.unparse(n)=="proof.setdefault('navigation', []).append(navigation)"]
+            assert len(appends)==2,"detail retention missing"
+            bounded=[n for n in ast.walk(section) if isinstance(n,ast.FunctionDef) and n.name=="bounded_swipe"]
+            assert len(bounded)==2 and all(ast.unparse(n.body[0])==
+                "shell('input', 'swipe', str(x1), str(y1), str(x2), str(y2), '350')" for n in bounded),"gesture wiring differs"
+            locate=next(n for n in section.body if isinstance(n,ast.FunctionDef) and n.name=="locate")
+            assert isinstance(locate.body[0],ast.If)
+            wanted="desc.startswith(('note-up-', 'note-down-'))" if name=="order_ui" else "desc == 'note-delete-' + note"
+            assert ast.unparse(locate.body[0].test)==wanted,"detail-only scope changed"
+            # Original fallback remains for activity list and consent dialog.
+            assert any(isinstance(n,ast.For) and ast.unparse(n.iter)=="range(25)" for n in locate.body)
+            scan=calls[0] if len(calls[0].args)==9 else calls[1]
+            assert len(scan.args)==9
+            if name=="order_ui":
+                assert [ast.unparse(a) for a in scan.args[6:]]==["expected","buttons","()"]
+            else:
+                assert [ast.unparse(a) for a in scan.args[6:]]==[
+                    "expected","None","('note-title-' + note, 'note-delete-' + note, 'note-summary-' + note)"],"deleted guard missing"
+        assert total==4
+    source=inspect.getsource(native)
+    check(source)
+    mutations=[
+        ('gate.summary_gesture,\n', 'gate.wrong_gesture,\n'),
+        ('proof.setdefault("navigation", []).append(navigation)', 'pass'),
+        ('desc == "note-delete-"+note','desc.startswith("note-delete-")'),
+        ('("note-title-"+note, "note-delete-"+note, "note-summary-"+note)', '()'),
+    ]
+    for old,new in mutations:
+        assert old in source
+        try:check(source.replace(old,new))
+        except AssertionError:pass
+        else:raise AssertionError("detail wiring omission survived")
+    print("DETAIL_NAV_WIRING positive=1 negative="+str(len(mutations))+" ACTUAL_CALLERS_NOT_DEVICE",flush=True)
+
+
+
 def selftest():
+    detail_navigation_selftest()
+    detail_navigation_wiring_selftest()
     batch_scroll_selftest()
     batch_scroll_wiring_selftest()
     note_management.selftest()
@@ -1315,6 +1607,14 @@ def native(adb, gate):
             assert ORDER_UI_LABELS[len(proof["labels"])] == label
             proof["labels"].append(label); proof["checks"] = len(proof["labels"])
         def locate(desc):
+            if desc.startswith(("note-up-", "note-down-")):
+                navigation = {"kind": "detail-control", "target": desc, "frames": []}
+                proof.setdefault("navigation", []).append(navigation)
+                def bounded_swipe(x1, y1, x2, y2):
+                    shell("input", "swipe", str(x1), str(y1), str(x2), str(y2), "350")
+                return scan_detail_navigation(nodes, bounded_swipe, gate.PKG, navigation["frames"],
+                                              gate.summary_viewport, gate.summary_gesture,
+                                              {}, None, (), desc)
             for _ in range(25):
                 found = [n for n in nodes() if n.get("content-desc") == desc]
                 assert len(found) <= 1, "duplicate order control " + desc
@@ -1334,23 +1634,13 @@ def native(adb, gate):
                        for i, r in enumerate(rows) for prefix, enabled in
                        (("note-up-", i > 0), ("note-down-", i < len(rows)-1))}
             actual, order, controls = {}, [], {}
-            for _ in range(25):
-                for n in nodes():
-                    key = n.get("content-desc", "")
-                    if key in expected:
-                        assert n.get("package") == gate.PKG
-                        text = n.get("text", "")
-                        assert key not in actual or actual[key] == text
-                        if key.startswith("note-title-") and key not in actual: order.append(key)
-                        actual[key] = text
-                    if key in buttons:
-                        assert n.get("package") == gate.PKG and n.get("class") == "android.widget.Button"
-                        assert n.get("enabled") == buttons[key], "wrong order boundary " + key
-                        controls[key] = n.get("enabled")
-                if set(expected) <= set(actual) and set(buttons) <= set(controls):
-                    summary_ui_check(expected, actual, order); break
-                shell("input", "swipe", "160", "440", "160", "190", "350")
-            else: raise AssertionError("order summary/control coverage incomplete")
+            navigation = {"kind": "order-scan", "owner": activity, "frames": []}
+            proof.setdefault("navigation", []).append(navigation)
+            def bounded_swipe(x1, y1, x2, y2):
+                shell("input", "swipe", str(x1), str(y1), str(x2), str(y2), "350")
+            scan_detail_navigation(nodes, bounded_swipe, gate.PKG, navigation["frames"],
+                                   gate.summary_viewport, gate.summary_gesture,
+                                   expected, buttons, ())
             stop(); assert state() == snapshot, "order browsing wrote database or media"
         editor_proof = {"status": "FAIL", "scope": EDITOR_ORDER_SCOPE, "api": gate.API,
                         "commit": source, "run_id": run_id, "apk_sha256": result["apk_sha256"],
@@ -1435,6 +1725,14 @@ def native(adb, gate):
             assert DELETE_UI_LABELS[len(proof["labels"])] == label
             proof["labels"].append(label); proof["checks"] = len(proof["labels"])
         def locate(desc):
+            if desc == "note-delete-"+note:
+                navigation = {"kind": "detail-control", "target": desc, "frames": []}
+                proof.setdefault("navigation", []).append(navigation)
+                def bounded_swipe(x1, y1, x2, y2):
+                    shell("input", "swipe", str(x1), str(y1), str(x2), str(y2), "350")
+                return scan_detail_navigation(nodes, bounded_swipe, gate.PKG, navigation["frames"],
+                                              gate.summary_viewport, gate.summary_gesture,
+                                              {}, None, (), desc)
             for _ in range(25):
                 found = [n for n in nodes() if n.get("content-desc") == desc]
                 assert len(found) <= 1, "duplicate delete control "+desc
@@ -1482,20 +1780,14 @@ def native(adb, gate):
         detail()
         expected = summary_expected(deleted[0], owner)
         actual, order = {}, []
-        for _ in range(25):
-            for node in nodes():
-                key = node.get("content-desc", "")
-                assert key not in ("note-title-"+note, "note-delete-"+note, "note-summary-"+note)
-                if key.startswith(("note-count-", "note-title-", "note-activity-", "note-summary-")):
-                    assert node.get("package") == gate.PKG
-                    value = node.get("text", "")
-                    assert key not in actual or actual[key] == value
-                    if key.startswith("note-title-") and key not in actual: order.append(key)
-                    actual[key] = value
-            if set(expected) <= set(actual):
-                summary_ui_check(expected, actual, order); break
-            shell("input", "swipe", "160", "440", "160", "190", "350")
-        else: raise AssertionError("surviving delete summary rows unreachable")
+        navigation = {"kind": "deletion-scan", "owner": owner, "frames": []}
+        proof.setdefault("navigation", []).append(navigation)
+        def bounded_swipe(x1, y1, x2, y2):
+            shell("input", "swipe", str(x1), str(y1), str(x2), str(y2), "350")
+        scan_detail_navigation(nodes, bounded_swipe, gate.PKG, navigation["frames"],
+                               gate.summary_viewport, gate.summary_gesture,
+                               expected, None,
+                               ("note-title-"+note, "note-delete-"+note, "note-summary-"+note))
         stop(); assert state() == deleted; passed("restart_deletion_and_sibling_persisted")
         assert proof["labels"] == DELETE_UI_LABELS
         proof.update(status="PASS", state="EXACT_TARGET_ROWS_ONE_REVISION_ALL_MEDIA_PRESERVED")

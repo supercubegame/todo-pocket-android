@@ -105,6 +105,7 @@ def sample(api=26, source="source", run="run", apk="a"*64):
 
 
 def selftest():
+    note_signing_selftest()
     good = sample()
     def parents(value):
         batch = {"status": "PASS", "note_management": value, "deletion_ui": report_ui_sample(),
@@ -310,7 +311,7 @@ public final class NoteManagementInstrumentation extends Instrumentation {
 
 
 def native(adb, gate, snapshot):
-    from verify_paged_exports import debug_key
+    from verify_paged_exports import paged_signing, paged_signing_dsl, paged_signing_build
     from verify_schema3 import certificate, require_registration, exception_evidence
     from verify_process_control import stop_verified
     root = Path(__file__).resolve().parents[1]
@@ -340,7 +341,7 @@ def native(adb, gate, snapshot):
         assert installed() == product
         digest = hashlib.sha256(product).hexdigest()
         cert = certificate(app, gate); assert certificate(test, gate) == cert
-        key = debug_key(cert)
+        signing = paged_signing(cert)
         require_registration(adb, gate, "notes-before", "V12DeviceTest")
         with tempfile.TemporaryDirectory(prefix="notes-runner-", dir=root/"build") as directory:
             folder = Path(directory); src = folder/"src"; src.mkdir()
@@ -350,11 +351,11 @@ def native(adb, gate, snapshot):
                 " p.androidComponents.finalizeDsl { dsl ->\n"
                 " dsl.defaultConfig.testInstrumentationRunner = 'ci.notes.NoteManagementInstrumentation'\n"
                 " dsl.sourceSets.getByName('androidTest').java.srcDir "+json.dumps(str(src))+"\n"
-                " dsl.signingConfigs.getByName('debug').storeFile = new File("+json.dumps(str(key))+")\n"
+                +paged_signing_dsl(signing)+
                 " }\n }\n}\n")
             backup = folder/"default-test.apk"; backup.write_bytes(saved)
             try:
-                log = command(["gradle", "--no-daemon", "--console=plain", "-I", init, "assembleDebugAndroidTest"], 300)
+                log = paged_signing_build(["gradle", "--no-daemon", "--console=plain", "-I", init, "assembleDebugAndroidTest"], signing, 300)
                 (out/"note-management-build.log").write_text(log)
                 assert app.read_bytes() == product and certificate(test, gate) == cert
                 command(prefix+["install", "-r", "-t", test], 120)
@@ -1392,6 +1393,384 @@ def report_editor_selftest():
     result = {"positive": 2, "receipt_negative": len(invalid), "aggregate_negative": len(pairs),
               "permanent_report_mutants": 4, "scope": "HOST_INDEPENDENT_EDITOR_REPORT_NOT_ANDROID_EXECUTION"}
     print("NOTE_EDITOR_REPORT_HOST "+json.dumps(result), flush=True)
+    return result
+
+
+def note_signing_case(checker, mode="fixed", api=26, fault=None, keytool=None):
+    """Host-only: execute the actual Python native caller with controlled APK/adb
+    doubles. Gradle and Android are NOT executed. Existing receipt/Java tests run
+    separately, unchanged. Optional keytool callback permits a real ephemeral key.
+    """
+    import contextlib
+    import io
+    import secrets
+    import sys
+    import types
+    from unittest.mock import patch
+    import verify_paged_exports as paged
+    calls, registrations, stops = [], [], []
+    caught = None
+    with tempfile.TemporaryDirectory(prefix="note-signing-host-") as temporary:
+        root = Path(temporary)
+        tools = root/"tools"; tools.mkdir()
+        product_path = root/"build/outputs/apk/debug/app.apk"
+        test_path = root/"build/outputs/apk/androidTest/debug/test.apk"
+        for path in (product_path, test_path):
+            path.parent.mkdir(parents=True, exist_ok=True)
+        product, saved, rebuilt = b"HOST_PRODUCT", b"HOST_DEFAULT_TEST", b"HOST_NOTE_TEST"
+        product_path.write_bytes(product); test_path.write_bytes(saved)
+        folder = root/"pocket-signing-26"; folder.mkdir(mode=0o700)
+        key, config = folder/"preview.jks", folder/"credentials.json"
+        key.write_bytes(b"HOST_KEYTOOL_DOUBLE"); key.chmod(0o600)
+        der = b"HOST_CERTIFICATE_DOUBLE"
+        cert = hashlib.sha256(der).hexdigest()
+        password = secrets.token_hex(18) + "'\"\\"
+        values = dict(alias="non-default-alias", storePassword=password,
+                      keyPassword=password, certificate=cert)
+        if keytool is not None:
+            der, values = keytool("prepare", key, values)
+            cert = hashlib.sha256(der).hexdigest()
+            assert values["certificate"] == cert
+            password = values["storePassword"]
+        if fault == "wrong_certificate":
+            values["certificate"] = "0"*64
+        config.write_text(json.dumps(values)); config.chmod(0o600)
+        if fault == "permissions":
+            config.chmod(0o644)
+        home = root/"home"; home.mkdir()
+        debug = home/".android/debug.keystore"
+        if mode == "disposable":
+            debug.parent.mkdir(); debug.write_bytes(b"HOST_DEBUG_KEY")
+        env = dict(HOME=str(home), RUNNER_TEMP=str(root), POCKET_SIGNING_DIR=str(folder),
+                   GITHUB_ACTIONS="true", GITHUB_SHA="host-source", GITHUB_RUN_ID="123",
+                   GITHUB_RUN_ATTEMPT="1")
+        for name in ("PATH", "JAVA_HOME"):
+            if name in os.environ:
+                env[name] = os.environ[name]
+        if mode == "fixed":
+            env["POCKET_STABLE_SIGNING"] = "1"
+        if fault == "invalid_mode":
+            env["POCKET_STABLE_SIGNING"] = "0"
+        gate = types.SimpleNamespace(SERIAL="host-serial", API=api, PKG="host.package")
+        installed_calls = 0
+        snapshot_calls = 0
+        built = False
+        diagnostic = ("java.lang.AssertionError: note_management_diagnostic_sentinel\n"
+                      "NOTE_MANAGEMENT_FAILED\nINSTRUMENTATION_CODE: 0")
+        def certificate(path, gate):
+            if fault == "test_certificate" and built and Path(path) == test_path:
+                return "f"*64
+            return cert
+        def registration(adb, gate, stage, runner):
+            assert runner == "V12DeviceTest"
+            registrations.append(stage)
+        def snapshot():
+            nonlocal snapshot_calls
+            snapshot_calls += 1
+            return {"table": [snapshot_calls if fault == "state" else 1], "media": b"same"}
+        def dispatch(args, **kwargs):
+            nonlocal installed_calls, built
+            args = list(map(str, args)); calls.append((args, kwargs.get("timeout")))
+            if args[0] == "keytool":
+                if keytool is not None:
+                    return keytool("export", args, kwargs)
+                assert kwargs["timeout"] == 20
+                if mode == "fixed":
+                    assert args[-2:] == ["-storepass:env", "PAGED_STORE_PASSWORD"]
+                    assert kwargs["env"]["PAGED_STORE_PASSWORD"] == password
+                else:
+                    assert args[-4:] == ["-alias", "androiddebugkey", "-storepass", "android"]
+                return subprocess.CompletedProcess(args, 0, der, b"")
+            if args[0] == "gradle":
+                assert args[:4] == ["gradle", "--no-daemon", "--console=plain", "-I"]
+                assert args[5:] == ["assembleDebugAndroidTest"] and kwargs["timeout"] == 300
+                script = Path(args[4]).read_text()
+                assert "ci.notes.NoteManagementInstrumentation" in script
+                assert password not in script
+                if mode == "fixed":
+                    for line in ("s.storePassword = c.storePassword", "s.keyAlias = c.alias",
+                                 "s.keyPassword = c.keyPassword",
+                                 "dsl.buildTypes.getByName('debug').signingConfig = s"):
+                        assert line in script, "NOTE_HOST_DSL_MISSING "+line
+                else:
+                    assert str(debug) in script and "storePassword" not in script
+                built = True; test_path.write_bytes(rebuilt)
+                if fault == "product":
+                    product_path.write_bytes(b"CHANGED")
+                output = ("host-build " + password + " " + json.dumps(password)[1:-1] +
+                          " " + repr(password)[1:-1]) if mode == "fixed" else "host-build"
+                if fault == "timeout":
+                    raise subprocess.TimeoutExpired(args, 300, output=output)
+                return subprocess.CompletedProcess(args, 7 if fault == "build" else 0, output, "")
+            assert args[:3] == ["host-adb", "-s", gate.SERIAL], args
+            tail = args[3:]; timeout = kwargs["timeout"]
+            out = ""
+            if tail == ["shell", "-n", "-T", "pm", "path", gate.PKG]:
+                assert timeout == 40; out = "package:/host/app.apk\n"
+            elif tail == ["exec-out", "cat", "/host/app.apk"]:
+                assert timeout == 40 and kwargs["text"] is False
+                installed_calls += 1
+                out = b"BAD_INSTALLED" if fault == "installed" and installed_calls == 2 else product
+                return subprocess.CompletedProcess(args, 0, out, b"")
+            elif tail[:3] == ["install", "-r", "-t"]:
+                assert timeout == 120
+                payload = Path(tail[3]).read_bytes()
+                assert payload == (saved if Path(tail[3]).name == "default-test.apk" else rebuilt)
+                if fault == "restore" and payload == saved:
+                    return subprocess.CompletedProcess(args, 9, "", "HOST_RESTORE_FAILURE")
+            elif tail == ["shell", "-n", "-T", "pm", "list", "instrumentation"]:
+                out = "instrumentation:host.package.test/ci.notes.NoteManagementInstrumentation (target=host.package)"
+            elif tail[:6] == ["shell", "-n", "-T", "am", "instrument", "-w"]:
+                if "diagnostic" in tail:
+                    assert timeout == 60
+                    out = "BAD_DIAGNOSTIC" if fault == "diagnostic" else diagnostic
+                else:
+                    assert timeout == 180
+                    if fault == "device":
+                        raise RuntimeError("HOST_DEVICE_FAILURE")
+                    out = "HOST_DEVICE_SUCCESS"
+            else:
+                raise AssertionError("unexpected host command "+repr(args))
+            return subprocess.CompletedProcess(args, 0, out, "")
+        schema = types.ModuleType("verify_schema3")
+        schema.certificate = certificate
+        schema.require_registration = registration
+        schema.exception_evidence = lambda exc: {"type": type(exc).__name__, "message": str(exc)}
+        control = types.ModuleType("verify_process_control")
+        control.stop_verified = lambda *args: stops.append(args)
+        observed = []
+        def observe(text, api, package):
+            assert text.strip() == "HOST_DEVICE_SUCCESS"
+            observed.append((api, package))
+            return ["HOST_CALLER_WITNESS"]
+        namespace = dict(checker.__globals__, __file__=str(tools/"verify_note_management.py"),
+                         JAVA="// HOST_ONLY_NOT_COMPILED", SCOPE="HOST_ONLY",
+                         observe=observe, log_accepted=lambda text, api: False,
+                         accepted=lambda *args: True)
+        actual = types.FunctionType(checker.__code__, namespace, checker.__name__,
+                                    checker.__defaults__, checker.__closure__)
+        cwd = Path.cwd()
+        capture = io.StringIO()
+        try:
+            os.chdir(root)
+            with patch.dict(os.environ, env, clear=True), patch.dict(sys.modules,
+                    verify_schema3=schema, verify_process_control=control), \
+                    patch.object(Path, "home", return_value=home), \
+                    patch.object(subprocess, "run", dispatch), \
+                    contextlib.redirect_stdout(capture), contextlib.redirect_stderr(capture):
+                try:
+                    actual("host-adb", gate, snapshot)
+                except Exception as exc:
+                    caught = exc
+        finally:
+            os.chdir(cwd)
+        receipt = json.loads((root/"native-ui/note-management-result.json").read_text())
+        visible = capture.getvalue()+str(caught)+json.dumps(receipt)
+        for path in (root/"native-ui").iterdir():
+            if path.is_file():
+                visible += path.read_text()
+        for secret in (password, values["keyPassword"]):
+            assert secret not in visible and json.dumps(secret)[1:-1] not in visible
+            assert repr(secret)[1:-1] not in visible
+        if fault in ("invalid_mode", "wrong_certificate", "permissions"):
+            assert type(caught) is AssertionError and "PAGED_" in str(caught), repr(caught)
+            assert not built and not any("install" in a for a, _ in calls)
+        elif fault:
+            assert caught is not None and built, "negative did not reach build: "+repr(caught)
+            if fault == "build":
+                assert type(caught) is RuntimeError and "exit=7" in str(caught)
+            if fault == "timeout":
+                assert type(caught) is RuntimeError and "timed out" in str(caught)
+            if fault == "device":
+                assert str(caught) == "HOST_DEVICE_FAILURE"
+            if fault == "restore":
+                assert isinstance(caught, subprocess.CalledProcessError) and caught.returncode == 9
+            if fault == "state":
+                assert str(caught) == "note management instrumentation changed live tables/media"
+            assert any("default-test.apk" in " ".join(a) for a, _ in calls)
+            if fault not in ("restore", "product"):
+                assert test_path.read_bytes() == saved and registrations[-1] == "notes-restored"
+        else:
+            if caught is not None:
+                raise caught
+            assert receipt["status"] == "PASS" and observed == [(api, gate.PKG)]
+            assert product_path.read_bytes() == product and test_path.read_bytes() == saved
+            assert registrations == ["notes-before", "notes-restored"]
+            assert installed_calls == 3 and snapshot_calls == 2 and len(stops) == 2
+            installs = [a[3:] for a, _ in calls if a[:3] == ["host-adb", "-s", gate.SERIAL]
+                        and len(a) > 3 and a[3] == "install"]
+            assert len(installs) == 2 and installs[0] == ["install", "-r", "-t", str(test_path)]
+            assert installs[1][:3] == ["install", "-r", "-t"]
+            assert Path(installs[1][3]).name == "default-test.apk", "original test install omitted"
+            assert sum(a[0] == "gradle" for a, _ in calls) == 1
+            assert sum(a[0] == "keytool" for a, _ in calls) == (2 if mode == "fixed" else 1)
+        if caught is not None:
+            assert receipt["status"] == "FAIL" and receipt["error"]["type"] == type(caught).__name__
+        return {"mode": mode, "api": api, "fault": fault, "built": built,
+                "scope": "HOST_CALLER_WITH_BUILD_AND_ADB_DOUBLES_NOT_ANDROID"}
+
+
+def note_signing_wiring(sources):
+    """Guard the three known fixed-signing build consumers, not every separate
+    disposable workflow. Inspect executable AST, never comments or Java strings.
+    """
+    import ast
+    contracts = {"native": (300, "assembleDebugAndroidTest"),
+                 "instrumentation": (300, "assembleDebugAndroidTest"),
+                 "apk_size_comparison": (360, "assembleDebug")}
+    assert set(sources) == set(contracts)
+    for name, (budget, task) in contracts.items():
+        module = ast.parse(sources[name])
+        functions = [n for n in module.body if isinstance(n, ast.FunctionDef) and n.name == name]
+        assert len(functions) == 1, "missing fixed signing consumer "+name
+        node = functions[0]
+        calls = [n for n in ast.walk(node) if isinstance(n, ast.Call)]
+        def named(target):
+            return [n for n in calls if isinstance(n.func, ast.Name) and n.func.id == target]
+        assert not named("debug_key"), "old debug lookup in "+name
+        for target in ("paged_signing", "paged_signing_dsl", "paged_signing_build"):
+            assert len(named(target)) == 1, (name, target, "missing or repeated")
+        build = named("paged_signing_build")[0]
+        assert ast.literal_eval(build.keywords[0].value) == budget if build.keywords else (
+            len(build.args) == 3 and ast.literal_eval(build.args[2]) == budget)
+        command = build.args[0]
+        assert isinstance(command, ast.List)
+        assert ast.literal_eval(command.elts[0]) == "gradle"
+        assert ast.literal_eval(command.elts[-1]) == task
+        for call in calls:
+            if call is build or not call.args or not isinstance(call.args[0], ast.List):
+                continue
+            elements = call.args[0].elts
+            assert not (elements and isinstance(elements[0], ast.Constant) and
+                        elements[0].value == "gradle"), "unwrapped Gradle in "+name
+    return len(contracts)
+
+
+def note_main_chain_wiring(source):
+    """Validate the batch entry edges in real Python AST, not Java/text matches."""
+    import ast
+    tree = ast.parse(source)
+    def edge(parent, wanted):
+        functions = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == parent]
+        assert functions, "missing main-chain function "+parent
+        expected = ast.dump(ast.parse(wanted, mode="eval").body, include_attributes=False)
+        found = [node for fn in functions for node in ast.walk(fn)
+                 if isinstance(node, ast.Call) and ast.dump(node, include_attributes=False) == expected]
+        assert len(found) == 1, "missing or repeated main-chain edge "+wanted
+    edge("native", "note_management.native(adb, gate, state)")
+    edge("selftest", "note_management.selftest()")
+    installs = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "install"]
+    assert len(installs) == 1
+    expected = ast.parse(
+        "def install(gate):\n"
+        "    previous = gate.verify_native_ui\n"
+        "    def previous_then_batch(adb):\n"
+        "        previous(adb)\n"
+        "        native(adb, gate)\n"
+        "    gate.verify_native_ui = previous_then_batch\n").body[0]
+    assert ast.dump(installs[0], include_attributes=False) == ast.dump(expected, include_attributes=False)
+    return 3
+
+
+def note_signing_selftest():
+    import ast
+    import inspect
+    import verify_paged_exports as paged
+    source = inspect.getsource(native)
+    cases = [("fixed", 26, None), ("fixed", 34, None), ("disposable", 26, None)]
+    cases += [("fixed", 26, fault) for fault in (
+        "invalid_mode", "wrong_certificate", "permissions", "build", "timeout",
+        "product", "test_certificate", "installed", "diagnostic", "device", "restore", "state")]
+    for mode, api, fault in cases:
+        note_signing_case(native, mode, api, fault)
+    def changed(old, new):
+        assert source.count(old) == 1, old
+        modified = source.replace(old, new, 1)
+        assert modified != source
+        namespace = dict(globals())
+        exec(compile(modified, "<note-signing-mutant>", "exec"), namespace)
+        return namespace["native"]
+    mutants = [
+        ("signing = paged_signing(cert)",
+         "signing = dict(mode='disposable', key=str(__import__('verify_paged_exports').debug_key(cert)))",
+         ("disposable", 26, None)),
+        ("+paged_signing_dsl(signing)+",
+         '''+(" dsl.signingConfigs.getByName('debug').storeFile = new File("+json.dumps(signing["key"])+")\\n")+''',
+         ("disposable", 26, None)),
+        ('log = paged_signing_build(["gradle", "--no-daemon", "--console=plain", "-I", init, "assembleDebugAndroidTest"], signing, 300)',
+         'log = command(["gradle", "--no-daemon", "--console=plain", "-I", init, "assembleDebugAndroidTest"], 300)',
+         ("disposable", 26, None)),
+        ('command(prefix+["install", "-r", "-t", backup], 120)',
+         'pass # deliberately omit restore install',
+         ("fixed", 26, "invalid_mode")),
+    ]
+    killed = []
+    for old, new, witness in mutants:
+        checker = changed(old, new)
+        # Plausible mutant must first pass a case in which its defect is dormant.
+        note_signing_case(checker, *witness)
+        try:
+            note_signing_case(checker)
+        except (AssertionError, RuntimeError):
+            killed.append(old)
+        else:
+            raise AssertionError("note signing mutant escaped "+old)
+    sources = dict(native=source, instrumentation=inspect.getsource(paged.instrumentation),
+                   apk_size_comparison=inspect.getsource(paged.apk_size_comparison))
+    assert note_signing_wiring(sources) == 3
+    wiring_killed = []
+    for name in sources:
+        for target in ("paged_signing", "paged_signing_dsl", "paged_signing_build"):
+            tree = ast.parse(sources[name])
+            nodes = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and
+                     isinstance(n.func, ast.Name) and n.func.id == target]
+            assert len(nodes) == 1
+            nodes[0].func.id = "omitted_"+target
+            modified = dict(sources, **{name: ast.unparse(tree)})
+            # Unchanged parsing/shape still succeeds; the shared checker must reject.
+            assert len([n for n in ast.parse(modified[name]).body if isinstance(n, ast.FunctionDef)]) == 1
+            try:
+                note_signing_wiring(modified)
+            except AssertionError:
+                wiring_killed.append(name+"."+target)
+            else:
+                raise AssertionError("caller omission escaped")
+    root = Path(__file__).resolve().parents[1]
+    batch = (root/"tools/verify_batch_exports.py").read_text()
+    assert note_main_chain_wiring(batch) == 3
+    chain_killed = []
+    for parent, method in (("native", "native"), ("selftest", "selftest"), ("install", "native")):
+        tree = ast.parse(batch)
+        matched = []
+        for fn in tree.body:
+            if not isinstance(fn, ast.FunctionDef) or fn.name != parent:
+                continue
+            for node in ast.walk(fn):
+                if not isinstance(node, ast.Call):
+                    continue
+                target = node.func
+                if parent != "install" and isinstance(target, ast.Attribute) and (
+                        isinstance(target.value, ast.Name) and target.value.id == "note_management" and
+                        target.attr == method):
+                    target.attr = "omitted_"+method; matched.append(node)
+                elif parent == "install" and isinstance(target, ast.Name) and target.id == method:
+                    target.id = "omitted_"+method; matched.append(node)
+        assert len(matched) == 1
+        mutant = ast.unparse(tree)
+        assert len(ast.parse(mutant).body) == len(ast.parse(batch).body)
+        try:
+            note_main_chain_wiring(mutant)
+        except AssertionError:
+            chain_killed.append(parent)
+        else:
+            raise AssertionError("main-chain omission escaped "+parent)
+    result = dict(cases=len(cases), caller_mutants=len(killed), known_consumers=len(sources),
+                  wiring_mutants=len(wiring_killed),
+                  main_chain_edges=3, main_chain_mutants=len(chain_killed),
+                  scope="HOST_PYTHON_CALLER_NOT_FULL_PROJECT_GRADLE_OR_ANDROID")
+    assert (result["cases"], result["caller_mutants"], result["known_consumers"],
+            result["wiring_mutants"], result["main_chain_mutants"]) == (15, 4, 3, 9, 3)
+    print("NOTE_SIGNING_HOST "+json.dumps(result), flush=True)
     return result
 
 

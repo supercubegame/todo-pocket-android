@@ -1,4 +1,4 @@
-name: Batch summary viewport guarded delivery
+name: Detail navigation guarded delivery
 on:
   push:
     branches: [diagnostic/server-log-delivery-20261008]
@@ -30,80 +30,66 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import ast,base64,hashlib,lzma,re,subprocess
+          import ast,base64,hashlib,lzma,subprocess,textwrap
           from pathlib import Path
-          prior="5c708e768e37aa70e3dafdc3afbd9f42d8af08fa"
-          raw=subprocess.check_output(["git","show",prior+":.github/workflows/deliver-server-log.yml"],timeout=30)
-          assert len(raw)==16830 and hashlib.sha256(raw).hexdigest()=="3be6e67aa8b88fe0f97ec7980b55c87ff7b279a0ca085b22b273ee05fff942c7"
-          match=re.findall(rb"base64.b64decode\('([^']+)',validate=True\)",raw)
-          assert len(match)==1
-          d=lzma.LZMADecompressor(memlimit=134217728)
-          s=d.decompress(base64.b64decode(match[0],validate=True),max_length=39493)
-          assert d.eof and not d.unused_data and len(s)==39492 and hashlib.sha256(s).hexdigest()=="5bad1924b58b2c22d2eebc3b19bc397031efa0e4c1a920a0cc92dad2d41cfab3"
-          tree=ast.parse(s)
-          assert ast.unparse(tree.body[-1])=="main(PAYLOAD)"
+          parent="c5b0f128f489b6022067ef7c0f8594e0bf8dfbc1"
+          raw=subprocess.check_output(["git","show",parent+":.github/workflows/deliver-server-log.yml"],timeout=30)
+          assert len(raw)==6444 and hashlib.sha256(raw).hexdigest()=="2c4e946e56cbfa1cab34a1c0d49123cdda4f135dc098394b32147866923632a4"
+          start="          python3 - <<'PY'\n"
+          assert raw.decode().count(start)==1
+          code=raw.decode().split(start,1)[1].split("          PY\n",1)[0]
+          tree=ast.parse(textwrap.dedent(code))
+          assert ast.unparse(tree.body[-1])=="ns['main'](ns['PAYLOAD'])"
           tree.body.pop()
-          ns={"__name__":"approved_batch_delivery"}
-          exec(compile(tree,"<pinned-batch-delivery>","exec"),ns)
-          """Read the actual pinned inherited host-command list, without executing delivery."""
-          def preserved_commands(work):
-              import ast,base64,hashlib,lzma,subprocess
-              def require(condition,message):
-                  if not condition: raise AssertionError(message)
-              def get(ref):
-                  return subprocess.check_output(
-                      ["git","show",ref+":.github/workflows/deliver-server-log.yml"],cwd=work,timeout=30)
-              raw=get("9e98eb5e2c28943da97c0ca5b456867d8b64019d")
-              require(len(raw)==11729 and hashlib.sha256(raw).hexdigest()=="9febad8597612e5bedf83e856f1ef01bd2363c4c810b390cec383466cfc8fdf2",
-                      "Previous workflow exact bytes")
-              import re
-              match=re.findall(rb"base64.b64decode\('([^']+)',validate=True\)",raw)
-              require(len(match)==1,"Previous payload anchor")
-              decoder=lzma.LZMADecompressor(memlimit=134217728)
-              data=decoder.decompress(base64.b64decode(match[0],validate=True),max_length=23641)
-              require(decoder.eof and not decoder.unused_data and len(data)==23640 and
-                      hashlib.sha256(data).hexdigest()=="224bf65eda7211710b495e6da6b7726d4ca42a9f6b728f547d5a6c751d815e8d",
-                      "Previous script exact bytes")
-              tree=ast.parse(data)
-              # The wrapper contains no commands assignment. Its immutable helper expands
-              # the original 11-command list plus the approved parser selftest.
-              names={"need","historical_source"}
-              functions=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name in names]
-              require(len(functions)==2 and {n.name for n in functions}==names,"Historical decoder functions")
-              scope=dict(ast=ast,base64=base64,hashlib=hashlib,lzma=lzma)
-              exec(compile(ast.Module(body=functions,type_ignores=[]),"<pinned-historical-decoder>","exec"),scope)
-              source=scope["historical_source"](get("1d030f02c5f54e65ea346cc5fcea89c971d61aa6"))
-              return command_list(source)
+          inherited={"__name__":"verified_previous_delivery"}
+          exec(compile(tree,"<pinned-successful-delivery>","exec"),inherited)
+          ns=inherited["ns"]
           
-          def command_list(source):
-              import ast
-              tree=ast.parse(source)
-              mains=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=="main"]
-              assert len(mains)==1,"Host main missing or duplicate"
-              candidates=[n.value for n in ast.walk(mains[0]) if isinstance(n,ast.Assign)
-                          and any(isinstance(t,ast.Name) and t.id=="commands" for t in n.targets)]
-              assert len(candidates)==1,"Host commands missing or duplicate in main"
-              commands=ast.literal_eval(candidates[0])
-              expected=[
-                  ["python3","tools/verify_app_catalog.py","selftest"],
-                  ["python3","tools/verify.py","v12"],
-                  ["python3","tools/verify_process_control.py","selftest"],
-                  ["python3","tools/verify_ui_observer.py","selftest"],
-                  ["python3","tools/verify_adb_transfer.py"],
-                  ["python3","tools/verify_evidence.py"],
-                  ["python3","tools/verify_schema3.py","selftest"],
-                  ["python3","tools/verify_note_drafts.py","selftest"],
-                  ["python3","tools/verify_todo_management.py","selftest"],
-                  ["python3","tools/verify_custom_fields.py","selftest"],
-                  ["python3","tools/verify_category_drag.py","selftest"],
-                  ["python3","-c",'import sys;sys.path.insert(0,"tools");import emulator_gate;emulator_gate.parser_selftest()'],
-              ]
-              assert commands==expected,"Original twelve commands changed"
-              return commands
+          decoder=lzma.LZMADecompressor(memlimit=134217728)
+          payload_bytes=decoder.decompress(base64.b64decode('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',validate=True),max_length=23711)
+          assert decoder.eof and not decoder.unused_data and len(payload_bytes)==23710
+          assert hashlib.sha256(payload_bytes).hexdigest()=='50354048e9f9b01dc9feec4e855b7230cca941dc294067fd5eda20e160036dc5'
           
-          ns["PARENT"]=prior
-          ns["baseline_commands"]=preserved_commands
-          ns["main"](ns["PAYLOAD"])
+          import json
+          payload=json.loads(payload_bytes)
+          assert set(payload)=={"additions.py","build_patch.py"}
+          builder={"__name__":"exact_detail_patch"}
+          exec(compile(payload["build_patch.py"],"<detail-builder>","exec"),builder)
+          current="bafb9e3e0edb28eccb916d382b33946d86faa32b"
+          path="tools/verify_batch_exports.py"
+          def unpack(value):
+              assert value is payload_bytes
+              return payload
+          def integrate(repo,value,git):
+              assert value==payload
+              original=git("show",current+":"+path)
+              assert (repo/path).read_bytes()==original
+              builder["original_red"](original)
+              candidate=builder["assemble"](original,payload["additions.py"])
+              ast.parse(candidate)
+              (repo/path).write_bytes(candidate)
+              assert git("diff","--name-only").decode().splitlines()==[path]
+              return {path:candidate}
+          def integration_controls(work,repo,value,candidates,env,receipt,save):
+              original=subprocess.check_output(["git","show",current+":"+path],cwd=repo,timeout=30)
+              assert builder["assemble"](original,value["additions.py"])==candidates[path]
+              for bad in (original[:-1],original+b"\n",bytes([original[0]^1])+original[1:]):
+                  try:builder["assemble"](bad,value["additions.py"])
+                  except AssertionError:pass
+                  else:raise AssertionError("wrong baseline accepted")
+              receipt["integration_controls"]={"positive":1,"negative":3,"original_geometry_red":"WITNESSED_NOT_DEVICE_REPLAY"}
+              save()
+          ns.update(BASE=current,CURRENT=current,PARENT=parent,
+                    PINS={path:"c707b21467cc14bce0744643179d48224949a02e"},
+                    unpack=unpack,integrate=integrate,test_original_and_integration=integration_controls)
+          # Preserve the complete tested publisher, changing only its commit message.
+          publisher=next(n for n in ast.parse(inherited["s"]).body if isinstance(n,ast.FunctionDef) and n.name=="publish")
+          old="test: bound batch summary scrolling to observed viewport"
+          matches=[n for n in ast.walk(publisher) if isinstance(n,ast.Constant) and n.value==old]
+          assert len(matches)==1
+          matches[0].value="test: bound order and deletion detail navigation to measured viewport"
+          exec(compile(ast.Module(body=[publisher],type_ignores=[]),"<same-guarded-publisher>","exec"),ns)
+          ns["main"](payload_bytes)
           PY
       - name: Preserve delivery and original host evidence
         if: always()

@@ -119,7 +119,8 @@ def database_snapshot(path):
         version = db.execute("PRAGMA user_version").fetchone()[0]
         need(version == 3, "UPGRADE_EXPECTS_SCHEMA3")
         names = [r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
-        need(names == sorted(TABLES), "EXACT_DATABASE_TABLE_SET")
+        need(names == sorted(TABLES + ["android_metadata"]), "EXACT_DATABASE_TABLE_SET")
+        metadata_contract(db)
         schema = db.execute("SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name").fetchall()
         tables = {}
         for name in names:
@@ -428,15 +429,21 @@ def report():
                  current_phone_certificate_compatible=False)
     failure = None
     try:
+        errors = collect_upgrade_devices(root, value, source, run, attempt)
         meta, _ = read_candidate(root / "internal-preview-candidate", source, run)
         needs = json.loads(os.environ["NEEDS_JSON"])
-        need(needs["upgrade"]["result"] == "success", "UPGRADE_MATRIX_JOB_NOT_SUCCESS")
+        validation = {}
         for api in (26, 34):
-            raw = (root / ("upgrade-api-" + str(api)) / "result.json").read_bytes()
-            need(len(raw) <= 2 * 1024 * 1024, "UPGRADE_REPORT_BUDGET")
-            row = json.loads(raw)
-            value["devices"][str(api)] = row
-            check_receipt(row, source, run, attempt, api, meta)
+            if str(api) in errors:
+                continue
+            try:
+                check_receipt(value["devices"][str(api)], source, run, attempt, api, meta)
+            except (AssertionError, OSError, ValueError, KeyError, TypeError) as exc:
+                validation[str(api)] = repr(exc)
+        value["device_validation_errors"] = validation
+        need(needs["upgrade"]["result"] == "success", "UPGRADE_MATRIX_JOB_NOT_SUCCESS")
+        need(not errors and not validation and set(value["devices"]) == {"26", "34"},
+             "UPGRADE_DEVICE_RECEIPTS_NOT_ACCEPTED")
         value["status"] = "PASS"
     except (AssertionError, OSError, ValueError, KeyError, TypeError) as exc:
         value["error"] = repr(exc); failure = exc
@@ -689,6 +696,8 @@ def build_old():
 
 
 def selftest():
+    metadata_selftest()
+    upgrade_report_selftest()
     import contextlib
     import io
     import secrets
@@ -843,6 +852,8 @@ def selftest():
             db.execute("PRAGMA user_version=3")
             for name in TABLES:
                 db.execute('CREATE TABLE "' + name + '" (value)')
+            db.execute("CREATE TABLE android_metadata (locale TEXT)")
+            db.execute("INSERT INTO android_metadata VALUES('en_US')")
             db.executemany("INSERT INTO todos(rowid,value) VALUES(?,?)",
                            [(2, None), (4, b"abc"), (7, 1), (9, "1"), (12, 1.5)])
         original = database_snapshot(dbfile)
@@ -856,6 +867,279 @@ def selftest():
     result = dict(status="PASS", positive=positives, negative=negatives,
                   witnessed_mutants=mutants, scope="HOST_ONLY_NOT_ANDROID_OR_SIGNING_ACCEPTANCE")
     print("UPGRADE_HOST " + json.dumps(result, sort_keys=True))
+    return result
+
+
+def metadata_contract(db):
+    """Android owns this one known table; retain it rather than filtering it out.
+    Locale values are environment-dependent, so compare exact typed rows between
+    phases instead of hardcoding the CI locale. Unknown tables remain forbidden.
+    """
+    need(db.execute("PRAGMA table_info(android_metadata)").fetchall() ==
+         [(0, "locale", "TEXT", 0, None, 0)], "ANDROID_METADATA_SCHEMA")
+    rows = db.execute("SELECT rowid,locale FROM android_metadata ORDER BY rowid").fetchall()
+    need(len(rows) == 1 and type(rows[0][0]) is int and rows[0][0] > 0 and
+         type(rows[0][1]) is str and bool(rows[0][1].strip()) and
+         not any(c in rows[0][1] for c in "\0\r\n"), "ANDROID_METADATA_ROWS")
+
+
+def collect_upgrade_devices(root, value, source, run, attempt):
+    """Collect both originals independently, even if one is failed/malformed.
+    Read errors and identity errors never become acceptance. Keep the raw hash
+    and byte size alongside each parsed original, never manufacture a device row.
+    """
+    errors = {}
+    value["device_readback"] = {}
+    for api in (26, 34):
+        key = str(api)
+        try:
+            path = root / ("upgrade-api-" + key) / "result.json"
+            with path.open("rb") as stream:
+                raw = stream.read(2 * 1024 * 1024 + 1)
+            need(0 < len(raw) <= 2 * 1024 * 1024, "UPGRADE_REPORT_BUDGET")
+            value["device_readback"][key] = dict(bytes=len(raw), sha256=digest(raw))
+            row = json.loads(raw)
+            need(isinstance(row, dict), "UPGRADE_REPORT_OBJECT")
+            value["devices"][key] = row
+            need((row.get("commit"), row.get("run_id"), row.get("run_attempt"), row.get("api")) ==
+                 (source, run, attempt, api) and type(row.get("api")) is int,
+                 "UPGRADE_BINDING_MISMATCH")
+        except (AssertionError, OSError, ValueError, KeyError, TypeError) as exc:
+            errors[key] = repr(exc)
+    value["device_read_errors"] = errors
+    return errors
+
+
+def metadata_selftest():
+    """Real host SQLite, not Android. Check exact table population, typed cells,
+    metadata structure and phase equality; keep mutants in the permanent gate.
+    """
+    positives = negatives = mutants = 0
+    def fixture(path):
+        with sqlite3.connect(path) as db:
+            db.execute("PRAGMA user_version=3")
+            for name in TABLES:
+                db.execute('CREATE TABLE "' + name + '" (value)')
+            db.execute("CREATE TABLE android_metadata (locale TEXT)")
+            db.execute("INSERT INTO android_metadata VALUES('en_US')")
+            db.executemany("INSERT INTO todos(rowid,value) VALUES(?,?)",
+                           [(2, None), (4, b"abc"), (7, 1), (9, "1"), (12, 1.5)])
+    def rejected(checker, path, reason):
+        try:
+            checker(path)
+        except AssertionError as exc:
+            need(str(exc) == reason, "WRONG_METADATA_NEGATIVE: " + str(exc))
+        else:
+            raise AssertionError("METADATA_NEGATIVE_SURVIVED: " + reason)
+    with tempfile.TemporaryDirectory(prefix="upgrade-metadata-host-") as td:
+        root = Path(td); good = root / "good.db"; fixture(good)
+        before = database_snapshot(good)
+        need(set(before["tables"]) == set(TABLES) | {"android_metadata"}, "METADATA_NOT_CAPTURED")
+        need(before["tables"]["android_metadata"] ==
+             dict(columns=["rowid", "locale"], rows=[[["integer", "1"], ["text", "en_US"]]]),
+             "METADATA_TYPED_ROWS_NOT_EXACT")
+        need(before["tables"]["todos"]["rows"] ==
+             [[["integer", "2"], ["null", None]], [["integer", "4"], ["blob", "YWJj"]],
+              [["integer", "7"], ["integer", "1"]], [["integer", "9"], ["text", "1"]],
+              [["integer", "12"], ["real", (1.5).hex()]]], "BUSINESS_TYPED_ROWS_CHANGED")
+        positives += 1
+        bad = []
+        edits = [
+            ("CREATE TABLE unexpected(value)", "EXACT_DATABASE_TABLE_SET"),
+            ("DROP TABLE android_metadata", "EXACT_DATABASE_TABLE_SET"),
+            ("ALTER TABLE android_metadata ADD COLUMN extra TEXT", "ANDROID_METADATA_SCHEMA"),
+            ("DELETE FROM android_metadata", "ANDROID_METADATA_ROWS"),
+            ("INSERT INTO android_metadata VALUES('fr_FR')", "ANDROID_METADATA_ROWS"),
+            ("UPDATE android_metadata SET locale=NULL", "ANDROID_METADATA_ROWS"),
+            ("UPDATE android_metadata SET locale=x'656e'", "ANDROID_METADATA_ROWS"),
+            ("UPDATE android_metadata SET locale=' '", "ANDROID_METADATA_ROWS"),
+            ("UPDATE android_metadata SET rowid=0", "ANDROID_METADATA_ROWS"),
+        ]
+        edits += [('DROP TABLE "' + name + '"', "EXACT_DATABASE_TABLE_SET") for name in TABLES]
+        for i, (sql, reason) in enumerate(edits):
+            path = root / (str(i) + ".db"); path.write_bytes(good.read_bytes())
+            with sqlite3.connect(path) as db:
+                db.execute(sql)
+            rejected(database_snapshot, path, reason); bad.append((path, reason)); negatives += 1
+        # Valid, different metadata must remain a valid snapshot but fail equality.
+        for sql in ("UPDATE android_metadata SET locale='fr_FR'",
+                    "UPDATE android_metadata SET rowid=3",
+                    "UPDATE todos SET value='1' WHERE rowid=7"):
+            path = root / "changed.db"; path.write_bytes(good.read_bytes())
+            with sqlite3.connect(path) as db:
+                db.execute(sql)
+            after = database_snapshot(path)
+            need(after != before, "METADATA_OR_TYPED_CHANGE_LOST")
+            try:
+                state_equal(dict(database=before, media={}, uid="10001"),
+                            dict(database=after, media={}, uid="10001"))
+            except AssertionError as exc:
+                need(str(exc) == "DATABASE_TYPED_ROWS_OR_SCHEMA_CHANGED", "WRONG_STATE_REASON")
+            else:
+                raise AssertionError("METADATA_OR_TYPED_CHANGE_ACCEPTED")
+            positives += 1; negatives += 1
+        snapshot_source = inspect.getsource(database_snapshot)
+        for old, new in (
+            ('need(names == sorted(TABLES + ["android_metadata"]), "EXACT_DATABASE_TABLE_SET")', "pass"),
+            ("metadata_contract(db)", "pass"),
+        ):
+            need(snapshot_source.count(old) == 1, "METADATA_MUTATION_ANCHOR")
+            ns = dict(globals())
+            exec(compile(snapshot_source.replace(old, new, 1), "<metadata-mutant>", "exec"), ns)
+            checker = ns["database_snapshot"]
+            need(checker(good) == before, "METADATA_MUTANT_POSITIVE")
+            escaped = 0
+            for path, reason in bad:
+                try:
+                    checker(path)
+                except (AssertionError, sqlite3.Error):
+                    continue
+                escaped += 1
+            need(escaped > 0, "METADATA_MUTANT_NOT_WITNESSED")
+            mutants += 1
+        # Dropping only the metadata row from the equality oracle must be caught.
+        old = 'for name in names:'
+        need(snapshot_source.count(old) == 1, "METADATA_CAPTURE_ANCHOR")
+        ns = dict(globals())
+        exec(compile(snapshot_source.replace(old, 'for name in [n for n in names if n != "android_metadata"]:', 1),
+                     "<metadata-capture-mutant>", "exec"), ns)
+        checker = ns["database_snapshot"]
+        need(checker(good)["tables"]["todos"] == before["tables"]["todos"], "CAPTURE_MUTANT_WITNESS")
+        path = root / "locale.db"; path.write_bytes(good.read_bytes())
+        with sqlite3.connect(path) as db:
+            db.execute("UPDATE android_metadata SET locale='fr_FR'")
+        need(checker(good) == checker(path) and database_snapshot(good) != database_snapshot(path),
+             "METADATA_CAPTURE_MUTANT_NOT_WITNESSED")
+        mutants += 1
+    result = dict(positive=positives, negative=negatives, witnessed_mutants=mutants,
+                  scope="HOST_REAL_SQLITE_NOT_ANDROID_UPGRADE")
+    print("UPGRADE_METADATA_HOST " + json.dumps(result), flush=True)
+    return result
+
+
+def upgrade_report_selftest():
+    """Execute the actual report entry with synthetic receipts and a publication
+    double. A failed matrix must preserve both original rows and still fail.
+    """
+    import contextlib
+    import io
+    import sys
+    import types
+    from unittest.mock import patch
+    source, run, attempt = "e" * 40, "12", "1"
+    meta = dict(sha256="c" * 64, bytes=14, certificate_sha256="a" * 64)
+    identity = dict(package=PACKAGE, version_code=3, version_name="1.2", min_sdk=26,
+                    certificate="a" * 64, bytes=13, sha256="b" * 64)
+    state = dict(database=dict(tables=dict(todos=dict(rows=[["fixture"]]),
+                                          blocks=dict(rows=[["fixture"]]))),
+                 media={"d" * 64: dict(bytes=3, base64="YWJj")}, uid="10077")
+    def sample(api):
+        return dict(status="PASS", scope=SCOPE, commit=source, run_id=run, run_attempt=attempt,
+                    api=api, old_source=OLD_SOURCE, labels=LABELS[:],
+                    install_command=["install", "-r", "-t", "candidate.apk"],
+                    commands=[dict(args=["install", "-t", "old.apk"], returncode=0, attempts=1),
+                              dict(args=["install", "-r", "-t", "upgrade-evidence/candidate.apk"],
+                                   returncode=0, attempts=1)],
+                    old_apk=identity, new_apk=dict(identity, bytes=14, sha256="c" * 64),
+                    installed=dict(old_apk="b" * 64, new_apk="c" * 64),
+                    snapshots={p: copy.deepcopy(state) for p in ("before", "immediate", "restart")},
+                    release_ready=False, durable_upgrade_ready=False,
+                    current_phone_certificate_compatible=False)
+    def execute(rows, matrix="success", candidate_ok=True, checker=report):
+        with tempfile.TemporaryDirectory(prefix="upgrade-report-host-") as td:
+            root = Path(td)
+            raw_rows = {}
+            for api, row in rows.items():
+                if row is None:
+                    continue
+                path = root / "collected" / ("upgrade-api-" + str(api)) / "result.json"
+                path.parent.mkdir(parents=True)
+                raw = row if isinstance(row, bytes) else json.dumps(row).encode()
+                path.write_bytes(raw); raw_rows[str(api)] = raw
+            published = []
+            evidence = types.ModuleType("verify_evidence")
+            evidence.publish = lambda api, path, raw: (published.append((path, raw)) or {"host": True})
+            def candidate(*args):
+                need(candidate_ok, "HOST_CANDIDATE_FAILURE")
+                return meta, None
+            env = dict(GITHUB_SHA=source, GITHUB_RUN_ID=run, GITHUB_RUN_ATTEMPT=attempt,
+                       NEEDS_JSON=json.dumps({"upgrade": {"result": matrix}}))
+            cwd = Path.cwd(); caught = None
+            try:
+                os.chdir(root)
+                with patch.dict(os.environ, env), patch.dict(sys.modules, verify_evidence=evidence), \
+                        patch.dict(checker.__globals__, read_candidate=candidate), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    try:
+                        checker()
+                    except AssertionError as exc:
+                        caught = exc
+            finally:
+                os.chdir(cwd)
+            need(len(published) == 1, "REPORT_NOT_PUBLISHED_ON_FAILURE")
+            raw = (root / "upgrade-report.json").read_bytes()
+            need(raw == published[0][1], "REPORT_LOCAL_PUBLICATION_BYTES_DIFFER")
+            value = json.loads(raw)
+            if caught is not None:
+                need(str(caught) == "UPGRADE_NOT_ACCEPTED: see published evidence", "REPORT_WRONG_FAILURE")
+                need(value["status"] == "FAIL", "FAILED_REPORT_CLAIMS_PASS")
+            return value, caught, raw_rows
+    def verify(rows, matrix="success", candidate_ok=True, checker=report, passed=False):
+        value, failure, raw_rows = execute(rows, matrix, candidate_ok, checker)
+        need((failure is None) == passed, "REPORT_ACCEPTANCE_WRONG")
+        need(all(value[k] is False for k in ("release_ready", "durable_upgrade_ready",
+                                             "current_phone_certificate_compatible")), "REPORT_SCOPE_CHANGED")
+        for api, row in rows.items():
+            if isinstance(row, dict):
+                need(value["devices"].get(str(api)) == row, "ORIGINAL_DEVICE_FAILURE_OMITTED")
+                need(value["device_readback"][str(api)] ==
+                     dict(bytes=len(raw_rows[str(api)]), sha256=digest(raw_rows[str(api)])),
+                     "ORIGINAL_DEVICE_BYTES_UNBOUND")
+            else:
+                need(str(api) in value.get("device_read_errors", {}), "MALFORMED_DEVICE_NOT_REPORTED")
+        return value
+    good = {26: sample(26), 34: sample(34)}
+    verify(good, passed=True)
+    failures = {}
+    for api in (26, 34):
+        failures[api] = dict(sample(api), status="FAIL", labels=["old_installed_exact"],
+                             error="HOST_ORIGINAL_" + str(api), snapshots={})
+    cases = [(failures, "failure", True), (failures, "success", True),
+             (failures, "failure", False), (good, "failure", True)]
+    for api in (26, 34):
+        for replacement in (None, b"{", b"x" * (2 * 1024 * 1024 + 1), []):
+            rows = dict(failures); rows[api] = replacement
+            cases.append((rows, "failure", True))
+        for key, wrong in (("commit", "old"), ("run_id", "old"), ("run_attempt", "2"), ("api", True)):
+            rows = copy.deepcopy(good); rows[api][key] = wrong
+            cases.append((rows, "success", True))
+    for rows, matrix, candidate_ok in cases:
+        verify(rows, matrix, candidate_ok)
+    # Actual entry mutations preserve the success witness but lose originals on
+    # failure; run the same observer rather than a special mutant checker.
+    text = inspect.getsource(report)
+    mutants = 0
+    old = "        errors = collect_upgrade_devices(root, value, source, run, attempt)"
+    for replacement in (
+        '        need(json.loads(os.environ["NEEDS_JSON"])["upgrade"]["result"] == "success", "UPGRADE_MATRIX_JOB_NOT_SUCCESS")\n' + old,
+        "        meta, _ = read_candidate(root / \"internal-preview-candidate\", source, run)\n" + old,
+    ):
+        need(text.count(old) == 1, "REPORT_MUTATION_ANCHOR")
+        ns = dict(globals())
+        exec(compile(text.replace(old, replacement, 1), "<report-mutant>", "exec"), ns)
+        checker = ns["report"]
+        verify(good, checker=checker, passed=True)
+        detected = False
+        for rows, matrix, candidate_ok in cases:
+            try:
+                verify(rows, matrix, candidate_ok, checker)
+            except AssertionError:
+                detected = True
+        need(detected, "REPORT_OMISSION_MUTANT_SURVIVED")
+        mutants += 1
+    result = dict(positive=1, negative=len(cases), witnessed_mutants=mutants,
+                  scope="HOST_REPORT_ENTRY_PUBLICATION_DOUBLE_NOT_ANDROID")
+    print("UPGRADE_REPORT_HOST " + json.dumps(result), flush=True)
     return result
 
 

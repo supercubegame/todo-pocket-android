@@ -355,6 +355,327 @@ def debug_key(certificate):
     print("PAGED_DEBUG_KEY existing certificate match verified; no key generated",flush=True)
     return key
 
+def paged_signing(certificate):
+    """Select one signing mode. Stable mode never searches for debug credentials."""
+    mode = os.environ.get("POCKET_STABLE_SIGNING")
+    if mode is None:
+        return {"mode": "disposable", "key": str(debug_key(certificate))}
+    assert mode == "1", "PAGED_SIGNING_INVALID_MODE"
+    import stat
+    try:
+        root = Path(os.environ["RUNNER_TEMP"]).resolve()
+        folder = Path(os.environ["POCKET_SIGNING_DIR"])
+        assert (folder.is_absolute() and folder.parent.resolve() == root and
+                re.fullmatch(r"pocket-signing-(26|34)", folder.name) and
+                not folder.is_symlink() and folder.is_dir())
+        assert stat.S_IMODE(folder.stat().st_mode) == 0o700
+        key, config = folder / "preview.jks", folder / "credentials.json"
+        for path in (key, config):
+            assert not path.is_symlink() and path.is_file()
+            assert stat.S_IMODE(path.stat().st_mode) == 0o600
+            assert 0 < path.stat().st_size <= 1024 * 1024
+        def unique(pairs):
+            out = {}
+            for name, value in pairs:
+                assert name not in out
+                out[name] = value
+            return out
+        values = json.loads(config.read_text(), object_pairs_hook=unique)
+        assert set(values) == {"alias", "storePassword", "keyPassword", "certificate"}
+        assert all(isinstance(v, str) and v and not any(c in v for c in "\r\n\0")
+                   for v in values.values())
+        assert re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", values["alias"])
+        assert re.fullmatch(r"[0-9a-f]{64}", values["certificate"])
+        assert values["certificate"] == certificate
+        env = dict(os.environ, PAGED_STORE_PASSWORD=values["storePassword"])
+        result = subprocess.run(
+            ["keytool", "-exportcert", "-keystore", str(key), "-alias", values["alias"],
+             "-storepass:env", "PAGED_STORE_PASSWORD"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=20, env=env)
+        assert result.returncode == 0 and result.stdout
+        assert hashlib.sha256(result.stdout).hexdigest() == certificate
+    except Exception:
+        # Decoder, filesystem, keytool and timeout details may contain credentials.
+        raise AssertionError("PAGED_FIXED_SIGNING_INVALID_OR_MISMATCH; no fallback") from None
+    print("PAGED_FIXED_KEY existing certificate match verified; no key generated", flush=True)
+    return {"mode": "fixed", "key": str(key), "config": str(config),
+            "certificate": certificate}
+
+
+def paged_signing_dsl(signing):
+    """The script contains paths and a public certificate digest, never passwords.
+    Configure the *active* debug build type, including historical source which has
+    no stablePreview config. No product source or dependency overlay is necessary.
+    """
+    if signing["mode"] == "disposable":
+        return ("   dsl.signingConfigs.getByName('debug').storeFile = new File(" +
+                json.dumps(signing["key"]) + ")\n")
+    assert signing["mode"] == "fixed", "PAGED_SIGNING_INVALID_DSL_MODE"
+    return (
+        "   try {\n"
+        "    def cfgFile = new File(" + json.dumps(signing["config"]) + ")\n"
+        "    def keyFile = new File(" + json.dumps(signing["key"]) + ")\n"
+        "    if (!cfgFile.isFile() || !keyFile.isFile()) { throw new IllegalStateException() }\n"
+        "    def c = new groovy.json.JsonSlurper().parse(cfgFile)\n"
+        "    if (c.keySet() != ['alias','storePassword','keyPassword','certificate'].toSet() ||\n"
+        "        c.values().any { !(it instanceof String) || it.isEmpty() } ||\n"
+        "        c.certificate != " + json.dumps(signing["certificate"]) + ") {\n"
+        "      throw new IllegalStateException()\n"
+        "    }\n"
+        "    def s = dsl.signingConfigs.getByName('debug')\n"
+        "    s.storeFile = keyFile\n"
+        "    s.storePassword = c.storePassword\n"
+        "    s.keyAlias = c.alias\n"
+        "    s.keyPassword = c.keyPassword\n"
+        "    dsl.buildTypes.getByName('debug').signingConfig = s\n"
+        "   } catch (Exception ignored) {\n"
+        "    throw new GradleException('Paged fixed signing unavailable; no fallback')\n"
+        "   }\n")
+
+
+def paged_signing_build(args, signing, timeout):
+    """Retain build output, redacting credential values before printing/raising."""
+    if signing["mode"] == "disposable":
+        return run(args, timeout=timeout)
+    assert signing["mode"] == "fixed", "PAGED_SIGNING_INVALID_BUILD_MODE"
+    # Revalidate immediately before either build; never expose parser exceptions.
+    checked = paged_signing(signing["certificate"])
+    assert checked == signing, "PAGED_SIGNING_CHANGED_BEFORE_BUILD"
+    try:
+        values = json.loads(Path(signing["config"]).read_text())
+        secrets = [values["storePassword"], values["keyPassword"]]
+    except Exception:
+        raise AssertionError("PAGED_SIGNING_CREDENTIAL_READ_FAILED") from None
+    def redacted(output):
+        if isinstance(output, bytes):
+            output = output.decode("utf-8", errors="replace")
+        output = output or ""
+        variants = set()
+        for value in secrets:
+            variants.update((value, json.dumps(value)[1:-1], repr(value)[1:-1]))
+        for value in sorted(variants, key=len, reverse=True):
+            output = output.replace(value, "<redacted-signing-credential>")
+        return output
+    try:
+        p = subprocess.run(list(map(str, args)), text=True, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        output = redacted(exc.output)
+        print(output, flush=True)
+        raise RuntimeError("Paged signing build timed out\n" + output[-6000:]) from None
+    except Exception:
+        raise RuntimeError("Paged signing build could not start") from None
+    output = redacted(p.stdout)
+    print(output, flush=True)
+    if p.returncode:
+        raise RuntimeError("Paged signing build failed; exit=" + str(p.returncode) +
+                           "\n" + output[-6000:])
+    return output
+
+
+def paged_signing_contract(select, dsl, build):
+    """Host subprocess doubles exercise real Python paths, not Android or Gradle."""
+    import contextlib
+    import io
+    import secrets
+    from unittest.mock import patch
+    labels = []
+    def need(value, label):
+        assert value, label
+        labels.append(label)
+    with tempfile.TemporaryDirectory(prefix="paged-signing-controls-") as temporary:
+        root = Path(temporary)
+        folder = root / "pocket-signing-26"
+        folder.mkdir(mode=0o700)
+        key, config = folder / "preview.jks", folder / "credentials.json"
+        key.write_bytes(b"host-only-keytool-double")
+        key.chmod(0o600)
+        cert_bytes = b"host-only-certificate-double"
+        cert = hashlib.sha256(cert_bytes).hexdigest()
+        password = secrets.token_hex(18) + "'\"\\"
+        keypass = secrets.token_hex(18)
+        values = dict(alias="non-default-alias", storePassword=password,
+                      keyPassword=keypass, certificate=cert)
+        def reset():
+            config.write_text(json.dumps(values))
+            config.chmod(0o600)
+        reset()
+        env = dict(RUNNER_TEMP=str(root), POCKET_SIGNING_DIR=str(folder),
+                   POCKET_STABLE_SIGNING="1")
+        calls = []
+        def tool(args, **kwargs):
+            calls.append((args, kwargs))
+            assert args[0] == "keytool"
+            assert password not in str(args) and keypass not in str(args)
+            assert args[-2:] == ["-storepass:env", "PAGED_STORE_PASSWORD"]
+            assert kwargs["env"]["PAGED_STORE_PASSWORD"] == password
+            assert kwargs["timeout"] == 20
+            return subprocess.CompletedProcess(args, 0, cert_bytes, b"")
+        def forbidden(*args, **kwargs):
+            raise AssertionError("debug fallback must not execute")
+        with patch.dict(os.environ, env, clear=True):
+            with patch.dict(select.__globals__, debug_key=forbidden):
+                with patch.object(subprocess, "run", tool), contextlib.redirect_stdout(io.StringIO()) as log:
+                    signing = select(cert)
+                need(signing == dict(mode="fixed", key=str(key), config=str(config),
+                                     certificate=cert) and len(calls) == 1, "fixed_exact_key_certificate")
+                script = dsl(signing)
+                need(password not in script + log.getvalue() and keypass not in script + log.getvalue()
+                     and password not in repr(signing), "no_credentials_in_script_or_selection")
+                for line in ("s.storeFile = keyFile", "s.storePassword = c.storePassword",
+                             "s.keyAlias = c.alias", "s.keyPassword = c.keyPassword",
+                             "dsl.buildTypes.getByName('debug').signingConfig = s"):
+                    need(line in script, "dsl_" + line.split(" = ")[0])
+                need("c.certificate != " + json.dumps(cert) in script and
+                     "catch (Exception ignored)" in script, "dsl_certificate_guard_generic_failure")
+                def refuse(label, action):
+                    caught = None
+                    with patch.object(subprocess, "run", tool), contextlib.redirect_stdout(io.StringIO()) as capture:
+                        try:
+                            action()
+                        except Exception as exc:
+                            caught = exc
+                    need(type(caught) is AssertionError and
+                         "PAGED_" in str(caught) and "debug fallback" not in str(caught) and
+                         password not in str(caught) + capture.getvalue() and
+                         keypass not in str(caught) + capture.getvalue(), label)
+                for mode in ("", "0", "true", " 1"):
+                    with patch.dict(os.environ, POCKET_STABLE_SIGNING=mode):
+                        refuse("invalid_mode_" + repr(mode), lambda: select(cert))
+                with patch.dict(os.environ, POCKET_SIGNING_DIR=str(root / "elsewhere")):
+                    refuse("invalid_directory", lambda: select(cert))
+                folder.chmod(0o755)
+                refuse("public_directory", lambda: select(cert))
+                folder.chmod(0o700)
+                for path in (key, config):
+                    path.chmod(0o644)
+                    refuse("public_" + path.name, lambda: select(cert))
+                    path.chmod(0o600)
+                    saved = path.read_bytes()
+                    path.unlink()
+                    refuse("missing_" + path.name, lambda: select(cert))
+                    target = root / ("other-" + path.name)
+                    target.write_bytes(saved); target.chmod(0o600)
+                    path.symlink_to(target)
+                    refuse("symlink_" + path.name, lambda: select(cert))
+                    path.unlink(); path.write_bytes(saved); path.chmod(0o600)
+                variants = [
+                    "{", json.dumps(dict(values, extra="x")),
+                    json.dumps(dict(values, storePassword="")),
+                    json.dumps(dict(values, keyPassword="bad\nvalue")),
+                    json.dumps(dict(values, alias="bad/alias")),
+                    json.dumps(dict(values, certificate="b" * 64)),
+                    '{"alias":"a","alias":"b"}',
+                ]
+                for index, text in enumerate(variants):
+                    config.write_text(text)
+                    refuse("invalid_credentials_" + str(index), lambda: select(cert))
+                reset()
+                refuse("product_certificate_mismatch", lambda: select("c" * 64))
+                for response in (subprocess.CompletedProcess([], 1, password.encode(), keypass.encode()),
+                                 subprocess.CompletedProcess([], 0, b"wrong-cert", b"")):
+                    def bad_tool(*args, **kwargs):
+                        return response
+                    with patch.object(subprocess, "run", bad_tool):
+                        try:
+                            select(cert)
+                        except AssertionError as exc:
+                            need(str(exc) == "PAGED_FIXED_SIGNING_INVALID_OR_MISMATCH; no fallback",
+                                 "keytool_rejected_" + str(response.returncode))
+                        else:
+                            raise AssertionError("invalid keytool result accepted")
+                def leaking_tool(*args, **kwargs):
+                    raise subprocess.TimeoutExpired(["keytool"], 20, output=password.encode())
+                with patch.object(subprocess, "run", leaking_tool):
+                    try:
+                        select(cert)
+                    except AssertionError as exc:
+                        need(password not in str(exc) and exc.__suppress_context__, "keytool_timeout_no_leak")
+                    else:
+                        raise AssertionError("keytool timeout accepted")
+                for outcome in ("success", "failure", "timeout", "startup"):
+                    commands = []
+                    def compiler(args, **kwargs):
+                        if args[0] == "keytool":
+                            return tool(args, **kwargs)
+                        commands.append((args, kwargs))
+                        raw = "OUTPUT_SENTINEL\n" + password + "\n" + keypass + "\n" + json.dumps(password)
+                        if outcome == "timeout":
+                            raise subprocess.TimeoutExpired(args, kwargs["timeout"], output=raw.encode())
+                        if outcome == "startup":
+                            raise OSError(raw)
+                        return subprocess.CompletedProcess(args, int(outcome == "failure"), raw)
+                    caught = None
+                    with patch.object(subprocess, "run", compiler), contextlib.redirect_stdout(io.StringIO()) as capture:
+                        try:
+                            result = build(["gradle", "--no-daemon", "assembleDebug"], signing, 360)
+                        except Exception as exc:
+                            caught = exc
+                    text = capture.getvalue() + (str(caught) if caught else result)
+                    need(password not in text and keypass not in text and json.dumps(password)[1:-1] not in text
+                         and len(commands) == 1 and commands[0][1]["timeout"] == 360
+                         and (caught is None) == (outcome == "success"),
+                         "build_" + outcome + "_one_attempt_redacted")
+                    if outcome != "startup":
+                        need("OUTPUT_SENTINEL" in text, "build_original_output_" + outcome)
+            with patch.dict(os.environ, {}, clear=True):
+                with patch.dict(select.__globals__, debug_key=lambda certificate: key):
+                    selected = select(cert)
+                need(selected == dict(mode="disposable", key=str(key)), "disposable_existing_selector")
+                need(dsl(selected) == "   dsl.signingConfigs.getByName('debug').storeFile = new File(" +
+                     json.dumps(str(key)) + ")\n", "disposable_original_dsl")
+                observed = []
+                with patch.dict(build.__globals__, run=lambda args, timeout: observed.append((args, timeout)) or "ok"):
+                    need(build(["gradle"], selected, 300) == "ok" and observed == [(["gradle"], 300)],
+                         "disposable_original_runner_budget")
+    return labels
+
+
+def paged_signing_selftest():
+    import ast
+    import inspect
+    labels = paged_signing_contract(paged_signing, paged_signing_dsl, paged_signing_build)
+    assert len(labels) == 41, "paged signing host control population changed"
+    mutations = (
+        (paged_signing, 'assert mode == "1"', 'assert True'),
+        (paged_signing, 'values["certificate"] == certificate', 'True'),
+        (paged_signing, 'hashlib.sha256(result.stdout).hexdigest() == certificate', 'True'),
+        (paged_signing, 'not path.is_symlink() and path.is_file()', 'path.is_file()'),
+        (paged_signing_dsl, "    s.keyPassword = c.keyPassword", "    // key password omitted"),
+        (paged_signing_dsl, "    dsl.buildTypes.getByName('debug').signingConfig = s", "    // active signing omitted"),
+        (paged_signing_build, 'output.replace(value, "<redacted-signing-credential>")', 'output'),
+    )
+    killed = 0
+    for function, old, new in mutations:
+        source = inspect.getsource(function)
+        assert source.count(old) == 1, "paged signing mutation anchor drift"
+        namespace = dict(globals())
+        exec(compile(source.replace(old, new), "<paged-signing-mutant>", "exec"), namespace)
+        implementations = [namespace[f.__name__] for f in (paged_signing, paged_signing_dsl, paged_signing_build)]
+        try:
+            paged_signing_contract(*implementations)
+        except AssertionError:
+            killed += 1
+        else:
+            raise AssertionError("paged signing mutant survived: " + function.__name__)
+    # Inspect actual callers, not a duplicate list of anticipated invocations.
+    assert killed == 7, "paged signing mutation population incomplete"
+    for function, task, budget in ((instrumentation, "assembleDebugAndroidTest", 300),
+                                   (apk_size_comparison, "assembleDebug", 360)):
+        tree = ast.parse(inspect.getsource(function))
+        calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)]
+        assert sum(n.func.id == "paged_signing" for n in calls) == 1
+        assert sum(n.func.id == "paged_signing_dsl" for n in calls) == 1
+        assert not any(n.func.id == "debug_key" for n in calls)
+        builds = [n for n in calls if n.func.id == "paged_signing_build"]
+        assert len(builds) == 1 and len(builds[0].args) == 2
+        assert isinstance(builds[0].args[1], ast.Name) and builds[0].args[1].id == "signing"
+        assert builds[0].args[0].elts[-1].value == task
+        assert [(k.arg, k.value.value) for k in builds[0].keywords] == [("timeout", budget)]
+    print("PAGED_SIGNING_HOST " + str(len(labels)) + " controls " + str(killed) +
+          " implementation mutants; 2 caller wiring checks PASS NOT_GRADLE_OR_ANDROID", flush=True)
+
 def instrumentation(folder,prefix,gate):
     """Normal target-app startup initializes fonts; never patch hidden framework APIs."""
     from verify_schema3 import certificate, require_registration
@@ -367,7 +688,7 @@ def instrumentation(folder,prefix,gate):
     cert=certificate(app,gate)
     assert cert==certificate(test,gate)
     require_registration(prefix[0],gate,"paged-before","V12DeviceTest")
-    key=debug_key(cert)
+    signing=paged_signing(cert)
     nonce="paged-contract-"+os.environ["GITHUB_RUN_ID"]
     cache="cache/"+nonce
     run([*prefix,"shell","run-as",gate.PKG,"mkdir",cache])
@@ -394,11 +715,11 @@ def instrumentation(folder,prefix,gate):
             "  p.androidComponents.finalizeDsl { dsl ->\n"
             "   dsl.defaultConfig.testInstrumentationRunner = 'ci.paged.PagedInstrumentation'\n"
             "   dsl.sourceSets.getByName('androidTest').java.srcDir "+json.dumps(str(src))+"\n"
-            "   dsl.signingConfigs.getByName('debug').storeFile = new File("+json.dumps(str(key))+")\n"
+            +paged_signing_dsl(signing)+
             "  }\n }\n}\n")
         backup=work/"default-test.apk";backup.write_bytes(saved)
         try:
-            run(["gradle","--no-daemon","--console=plain","-I",init,"assembleDebugAndroidTest"],timeout=300)
+            paged_signing_build(["gradle","--no-daemon","--console=plain","-I",init,"assembleDebugAndroidTest"],signing,timeout=300)
             assert app.read_bytes()==before,"test build changed product APK"
             assert certificate(test,gate)==cert,"paged test signing certificate differs"
             run([*prefix,"install","-r","-t",test],timeout=120)
@@ -493,6 +814,7 @@ def pdf_text_diagnostic(text):
             "form_feeds":text.count("\f")}
 
 def selftest():
+    paged_signing_selftest()
     dependency_setup_selftest()
     format_button_selftest()
     native_receipt_selftest()
@@ -602,7 +924,7 @@ def apk_size_comparison(gate):
     from verify_schema3 import certificate
     root=Path(__file__).resolve().parents[1]
     apps=list((root/"build/outputs/apk/debug").glob("*.apk"));assert len(apps)==1
-    app=apps[0];current=app.read_bytes();cert=certificate(app,gate);key=debug_key(cert)
+    app=apps[0];current=app.read_bytes();cert=certificate(app,gate);signing=paged_signing(cert)
     baseline="452969cf2f053bb8c527d3fb2dc3bf1fbf4afe21"
     run(["git","-C",root,"fetch","--no-tags","--depth=1","origin",baseline],timeout=120)
     with tempfile.TemporaryDirectory(prefix="paged-size-",dir=root/"build") as temp:
@@ -612,9 +934,9 @@ def apk_size_comparison(gate):
         with tarfile.open(archive) as files:files.extractall(project,filter="data")
         init=work/"signing.gradle"
         init.write_text("gradle.beforeProject { p -> p.plugins.withId('com.android.application') { "
-            "p.androidComponents.finalizeDsl { dsl -> dsl.signingConfigs.getByName('debug').storeFile = new File("
-            +json.dumps(str(key))+") } } }\n")
-        run(["gradle","--no-daemon","--console=plain","-p",project,"-I",init,"assembleDebug"],timeout=360)
+            "p.androidComponents.finalizeDsl { dsl ->\n"
+            +paged_signing_dsl(signing)+" } } }\n")
+        paged_signing_build(["gradle","--no-daemon","--console=plain","-p",project,"-I",init,"assembleDebug"],signing,timeout=360)
         old=list((project/"build/outputs/apk/debug").glob("*.apk"));assert len(old)==1
         assert certificate(old[0],gate)==cert,"size baseline certificate mismatch"
         previous=old[0].read_bytes()

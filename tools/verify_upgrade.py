@@ -469,7 +469,7 @@ PY
 """
 
 
-def signing_path_wiring(lines):
+def signing_path_wiring(lines, prefix=()):
     """Validate this canonical job's env scope and executable first step."""
     step_start = lines.index("    steps:")
     job_env = lines[:step_start]
@@ -483,11 +483,12 @@ def signing_path_wiring(lines):
         steps[-1].append(line)
     expected = ["      - name: Initialize fixed signing directory",
                 "        run: |"] + ["          " + v for v in SIGNING_PATH_SCRIPT.splitlines()]
-    need(steps[0] == expected, "SIGNING_PATH_MUST_INITIALIZE_FIRST_EXACTLY")
+    need(steps[:len(prefix)] == list(prefix), "SIGNING_PATH_REQUIRED_PREFIX")
+    need(steps[len(prefix)] == expected, "SIGNING_PATH_INITIALIZATION_ORDER")
     need(sum("Initialize fixed signing directory" in v for v in lines) == 1,
          "SIGNING_PATH_INITIALIZER_DUPLICATED")
     need(not any(line.startswith("          POCKET_SIGNING_DIR:")
-                 for step in steps[1:] for line in step),
+                 for step in steps[len(prefix)+1:] for line in step),
          "SIGNING_PATH_LATER_OVERRIDE")
 
 
@@ -579,7 +580,12 @@ def workflow_contract(text):
          "REPORT_DOES_NOT_WAIT_FOR_UPGRADE")
     for job in ("database", "upgrade"):
         lines = jobs[job]
-        signing_path_wiring(lines)
+        prefix = (
+            ["      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683"],
+            ["      - name: Require isolated tracing before full regression device work",
+             "        run: *isolated_trace_setup"],
+        ) if job == "database" else ()
+        signing_path_wiring(lines, prefix)
         need("      POCKET_STABLE_SIGNING: '1'" in lines, "STABLE_MODE_NOT_MANDATORY")
         prepare = [i for i, line in enumerate(lines)
                    if line.strip() == "run: python3 tools/verify_upgrade.py prepare-signing"]
@@ -613,6 +619,26 @@ def workflow_selftest():
     signing_path_selftest()
     text = Path(".github/workflows/android.yml").read_text()
     workflow_contract(text)
+    start = text.index("  database:\n")
+    end = text.index("  upgrade:\n", start)
+    database = text[start:end]
+    initializer = ("      - name: Initialize fixed signing directory\n        run: |\n" +
+                   "".join("          " + line + "\n" for line in SIGNING_PATH_SCRIPT.splitlines()))
+    trace = ("      - name: Require isolated tracing before full regression device work\n"
+             "        run: *isolated_trace_setup\n")
+    need(database.count(initializer) == database.count(trace) == 1, "ORDER_TEST_ANCHORS")
+    wrong = database.replace(initializer, "").replace("    steps:\n", "    steps:\n" + initializer, 1)
+    original_failure = text[:start] + wrong + text[end:]
+    for changed in (original_failure, text.replace(trace, "", 1),
+                    text.replace(trace, trace.replace("        run:", "        if: false\n        run:"), 1)):
+        need(changed != text, "ORDER_MUTATION_NOT_APPLIED")
+        try:
+            workflow_contract(changed)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("ORIGINAL_ORDER_OR_TRACE_OMISSION_SURVIVED")
+    print("SIGNING_ORDER original_first_step_REJECTED missing_trace_REJECTED conditional_trace_REJECTED")
     variants = [
         ("  upgrade:", "  missing:"),
         ("    needs: [core, database, export_probe, export_feedback, upgrade]",

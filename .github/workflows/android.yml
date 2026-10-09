@@ -1119,6 +1119,9 @@ jobs:
       TEST_API: ${{ matrix.api }}
       POCKET_STABLE_SIGNING: '1'
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Require isolated tracing before full regression device work
+        run: *isolated_trace_setup
       - name: Initialize fixed signing directory
         run: |
           set -euo pipefail
@@ -1133,9 +1136,6 @@ jobs:
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as stream:
               stream.write("POCKET_SIGNING_DIR=" + str(folder) + "\n")
           PY
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - name: Require isolated tracing before full regression device work
-        run: *isolated_trace_setup
       - name: Fixed Android build setup
         run: &upgrade_build_setup |
           set -euo pipefail

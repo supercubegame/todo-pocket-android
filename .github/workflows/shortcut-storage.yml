@@ -1,238 +1,42 @@
-name: Guarded shortcut six-file delivery
+name: Read-only original API26 failure extraction
 on:
   push:
     branches: [ci/shortcut-storage-preflight-4d8742]
 permissions:
-  contents: write
+  contents: read
   actions: read
   checks: write
 jobs:
-  deliver:
+  extract:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
-      - name: Verify original preflight bytes and publish six non-workflow files once
-        id: delivery
+      - name: Extract one pinned original archive without running device tests
+        id: extraction
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
-          """Proposed two-commit transport. NOT EXECUTED remotely; needs changed-scope consent.
-          One isolated workflow would publish six exact non-workflow files. The existing
-          Personal connection would then submit the seventh file and trigger final CI.
-          No product write occurs when generating or locally testing this program.
-          """
-          import base64
-          import hashlib
-          import io
-          import json
-          import os
-          from pathlib import Path
-          import urllib.request
-          import zipfile
-
-          REPO = "supercubegame/todo-pocket-android"
-          BRANCH = "feature/v1.2-activity-notes-ledger"
-          BASE = "4d8742d5671f915c6887d11212ad973abb2a0d63"
-          PREFLIGHT_SHA = "0c84da7056a1e910675c8cc35822c3426167c64c"
-          RUN = 38023020342
-          ARTIFACT = 11659560223
-          ARCHIVE_SHA = "4328e92d9852981696630260b368d3fd88aa4c5d039ed15bccf5715099cad321"
-          WORKFLOW = ".github/workflows/shortcut-storage.yml"
-
-
-          def identity(raw):
-              return {"bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest(),
-                      "blob": hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()}
-
-
-          def checked_candidates(archive, expected, commands, verify_archive=True):
-              if verify_archive:
-                  assert len(archive) == 120510
-                  assert hashlib.sha256(archive).hexdigest() == ARCHIVE_SHA, "archive identity differs"
-              with zipfile.ZipFile(io.BytesIO(archive)) as source:
-                  names = source.namelist()
-                  assert len(names) == len(set(names)), "duplicate archive paths"
-                  assert len(names) < 100 and sum(p.file_size for p in source.infolist()) < 4 * 1024 * 1024
-                  for name in names:
-                      assert not name.startswith("/") and ".." not in name.split("/") and "\\" not in name
-                  receipt = json.loads(source.read("receipt.json"))
-                  assert receipt["status"] == "PASS" and receipt["baseline"] == BASE
-                  assert receipt["workflow_commit"] == PREFLIGHT_SHA
-                  assert receipt["run_id"] == str(RUN) and receipt["attempt"] == "1"
-                  assert receipt["completed_commands"] == receipt["passed_commands"] == 21
-                  assert len(commands) == 21 and receipt["expected_commands"] == commands
-                  assert [r["command"] for r in receipt["host_commands"]] == commands
-                  assert receipt["candidate_files"] == expected and len(expected) == 7
-                  assert receipt["product_pushes"] == 0 and receipt["device_execution"] is False
-                  for index, record in enumerate(receipt["host_commands"], 1):
-                      assert record["index"] == index
-                      assert record["returncode"] == 0 and record["timed_out"] is False
-                      assert record["attempts"] == 1 and record["budget_seconds"] == 300
-                      for stream in ("stdout", "stderr"):
-                          entry = record[stream]
-                          assert entry["path"] == "%02d.%s" % (index, stream)
-                          assert identity(source.read(entry["path"])) == {k: entry[k] for k in ("bytes", "sha256", "blob")}
-                  candidates = {p: source.read("candidate/" + p) for p in expected}
-                  for path, raw in candidates.items():
-                      assert identity(raw) == expected[path], "candidate identity differs: " + path
-                  assert {n for n in names if n.startswith("candidate/") and not n.endswith("/")} == {"candidate/" + p for p in expected}
-                  return candidates, receipt
-
-
-          def publish_six(api, candidates, expected):
-              """The caller owns authentication. No fallback, force update, merge or retry."""
-              assert set(candidates) == set(expected) and len(expected) == 7
-              for path, raw in candidates.items():
-                  assert identity(raw) == expected[path]
-              ref = "git/refs/heads/" + BRANCH
-              assert api(ref)["object"]["sha"] == BASE, "product baseline drift"
-              baseline = api("git/commits/" + BASE)
-              assert baseline["sha"] == BASE
-              selected = {p: raw for p, raw in candidates.items() if p != WORKFLOW}
-              assert len(selected) == 6 and not any(p.startswith(".github/") for p in selected)
-              entries = []
-              for path, raw in selected.items():
-                  created = api("git/blobs", {"encoding": "base64", "content": base64.b64encode(raw).decode()})
-                  assert created["sha"] == expected[path]["blob"]
-                  observed = api("git/blobs/" + created["sha"])
-                  assert observed["encoding"] == "base64"
-                  assert base64.b64decode(observed["content"]) == raw, "remote blob differs"
-                  entries.append({"path": path, "mode": "100644", "type": "blob", "sha": created["sha"]})
-              tree = api("git/trees", {"base_tree": baseline["tree"]["sha"], "tree": entries})
-              commit = api("git/commits", {"message": "feat: stage verified opt-in shortcut storage sources (device gate pending)",
-                                         "tree": tree["sha"], "parents": [BASE]})
-              remote = api("git/commits/" + commit["sha"])
-              assert [p["sha"] for p in remote["parents"]] == [BASE]
-              assert remote["tree"]["sha"] == tree["sha"]
-              comparison = api("compare/" + BASE + "..." + commit["sha"])
-              assert comparison["total_commits"] == 1
-              assert len(comparison["files"]) == 6
-              assert {f["filename"] for f in comparison["files"]} == set(selected)
-              for f in comparison["files"]:
-                  assert f["sha"] == expected[f["filename"]]["blob"]
-              assert api(ref)["object"]["sha"] == BASE, "product drift before publication"
-              # One non-force update. A racing descendant of BASE cannot be fast-forwarded
-              # to this sibling commit, so GitHub rejects it instead of overwriting it.
-              api(ref, {"sha": commit["sha"], "force": False}, method="PATCH")
-              assert api(ref)["object"]["sha"] == commit["sha"], "published ref readback differs"
-              return {"status": "SIX_FILES_PUBLISHED_SEVENTH_WORKFLOW_PENDING_NOT_ACCEPTED",
-                      "base": BASE, "commit": commit["sha"], "paths": sorted(selected),
-                      "product_ref_updates": 1, "android_executed": False, "release_ready": False}
-
-
-          import subprocess
-          import traceback
-          EXPECTED = {'src/main/java/com/supercubegame/pockettodo/Schema3Store.java': {'bytes': 34994, 'blob': '99d748cbc08fe2f122ec6cd16d2a36dac3f1edf3', 'sha256': '366e8a9495d47d262007eafb436664e077cf99e5f5457514d16c8b7e40dd7bba'}, 'AGENTS.md': {'bytes': 9656, 'blob': 'a0f3a081e6e90d2ef95b506991b69c810b5eaa81', 'sha256': '14bb2b000405ad71f12283129a410cec0058ce122d892412815ce61dcc8e3847'}, 'CLAUDE.md': {'bytes': 9656, 'blob': 'a0f3a081e6e90d2ef95b506991b69c810b5eaa81', 'sha256': '14bb2b000405ad71f12283129a410cec0058ce122d892412815ce61dcc8e3847'}, 'src/main/java/com/supercubegame/pockettodo/Schema4Store.java': {'bytes': 26697, 'blob': '939ae6b1a0ad9ca6fa4883f65119df144e40bdff', 'sha256': 'a62d9fe0e012642814addf209fc5ac55d83e26bc5bf4e3646c2c851a72aab863'}, 'src/androidTest/java/com/supercubegame/pockettodo/Schema4DeviceTest.java': {'bytes': 21033, 'blob': '939baf2c6ffcc2a87dfd58a3eb655bd39af27d40', 'sha256': '2d0bc7772e020e07027589d1b7a925f408f5b17e02e59d2d95bc9df06430465a'}, 'tools/verify_shortcuts.py': {'bytes': 48594, 'blob': '4c2e0a4a8146fe75fca93e65b0c7f1447b2ce702', 'sha256': 'd62b9bd77500a5a25d982d1e62b429d46fb6503fc1dab8b5de3b9dbc98357e3c'}, '.github/workflows/shortcut-storage.yml': {'bytes': 4219, 'blob': 'feb297e1398fd211a9d3380854eba494cc4add0e', 'sha256': 'f3353035ad996e72c90fff5220440dc82ce9af07756d627907f53ad8e66c7f94'}}
-          COMMANDS = [['python3', 'tools/verify_app_catalog.py', 'selftest'], ['python3', 'tools/verify.py', 'v12'], ['python3', 'tools/verify_process_control.py', 'selftest'], ['python3', 'tools/verify_ui_observer.py', 'selftest'], ['python3', 'tools/verify_adb_transfer.py'], ['python3', 'tools/verify_evidence.py'], ['python3', 'tools/verify_schema3.py', 'selftest'], ['python3', 'tools/verify_note_drafts.py', 'selftest'], ['python3', 'tools/verify_todo_management.py', 'selftest'], ['python3', 'tools/verify_custom_fields.py', 'selftest'], ['python3', 'tools/verify_category_drag.py', 'selftest'], ['python3', '-c', 'import sys;sys.path.insert(0,"tools");import emulator_gate;emulator_gate.parser_selftest()'], ['python3', 'tools/verify_batch_exports.py', 'selftest'], ['python3', 'tools/verify_upgrade.py', 'selftest'], ['python3', 'tools/verify_upgrade.py', 'workflow-selftest'], ['python3', 'tools/verify_process_control.py', 'server-log-selftest'], ['python3', 'tools/verify_process_control.py', 'isolated-selftest'], ['python3', 'tools/verify_process_control.py', 'absence-selftest'], ['python3', 'tools/verify_paged_exports.py', 'selftest'], ['python3', 'tools/verify_note_management.py', 'selftest'], ['python3', 'tools/verify_shortcuts.py', 'selftest']]
-          output = Path("delivery-evidence")
-          output.mkdir()
-          audit = []
-          receipt = {"status":"STARTED_NO_PRODUCT_WRITE", "baseline":BASE, "source_run":RUN,
-           "source_artifact":ARTIFACT, "workflow_commit":os.environ["GITHUB_SHA"],
-           "run_id":os.environ["GITHUB_RUN_ID"], "attempt":os.environ["GITHUB_RUN_ATTEMPT"],
-           "candidate_files":EXPECTED, "api_calls":audit, "android_executed":False, "release_ready":False}
-          def save():
-              (output / "receipt.json").write_text(json.dumps(receipt, indent=2))
-          def api(path, data=None, method=None):
-              method = method or ("POST" if data is not None else "GET")
-              command = ["gh","api","--method",method,"repos/" + REPO + "/" + path]
-              if data is not None:
-                  command += ["--input","-"]
-              entry = {"method":method,"path":path,"attempts":1,"status":"STARTED"}
-              audit.append(entry)
-              if method == "PATCH":
-                  receipt["ref_update_attempted"] = True
-              save()
-              result = subprocess.run(command, input=json.dumps(data).encode() if data is not None else None,
-                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
-              entry.update(returncode=result.returncode, stdout_sha256=hashlib.sha256(result.stdout).hexdigest())
-              (output / ("%02d.stderr" % len(audit))).write_bytes(result.stderr)
-              entry["status"] = "PASS" if result.returncode == 0 else "FAIL"
-              save()
-              if result.returncode:
-                  raise RuntimeError("Original API refusal: " + result.stderr.decode("utf-8","replace")[-4000:])
-              return json.loads(result.stdout)
-          save()
-          try:
-              assert os.environ["GITHUB_REF"] == "refs/heads/ci/shortcut-storage-preflight-4d8742"
-              assert os.environ["GITHUB_EVENT_NAME"] == "push"
-              run = api("actions/runs/" + str(RUN))
-              assert run["head_sha"] == PREFLIGHT_SHA and run["run_attempt"] == 1 and run["conclusion"] == "success"
-              meta = api("actions/artifacts/" + str(ARTIFACT))
-              assert meta["workflow_run"]["id"] == RUN and meta["workflow_run"]["head_sha"] == PREFLIGHT_SHA
-              assert meta["name"] == "shortcut-preflight-38023020342-1"
-              assert meta["size_in_bytes"] == 120510 and meta["digest"] == "sha256:" + ARCHIVE_SHA and not meta["expired"]
-              downloaded = subprocess.run(["gh","api","repos/" + REPO + "/actions/artifacts/" + str(ARTIFACT) + "/zip"],
-                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=90)
-              (output / "artifact-download.stderr").write_bytes(downloaded.stderr)
-              assert downloaded.returncode == 0, "artifact download failed: " + downloaded.stderr.decode("utf-8","replace")[-3000:]
-              candidates, original = checked_candidates(downloaded.stdout, EXPECTED, COMMANDS)
-              (output / "verified-original-artifact.zip").write_bytes(downloaded.stdout)
-              receipt["verified_archive_sha256"] = ARCHIVE_SHA
-              receipt["original_commands_verified"] = 21
-              receipt["status"] = "EXACT_PREFLIGHT_VALIDATED"
-              save()
-              delivered = publish_six(api, candidates, EXPECTED)
-              receipt.update(delivered)
-          except Exception:
-              receipt["status"] = "FAILED_OR_UNCERTAIN_STOPPED_NO_RETRY"
-              receipt["original_error"] = traceback.format_exc()
-          finally:
-              save()
-              print(json.dumps(receipt, indent=2), flush=True)
-          if receipt["status"] != "SIX_FILES_PUBLISHED_SEVENTH_WORKFLOW_PENDING_NOT_ACCEPTED":
-              raise SystemExit(1)
+          import base64, hashlib, lzma, pathlib
+          raw = lzma.decompress(base64.b64decode("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"))
+          assert hashlib.sha256(raw).hexdigest() == "5a6028d173dcd4902680dd6edd6ba39bb3abb9848c78d6a6d9278a31ef6d929f"
+          pathlib.Path("extract_original.py").write_bytes(raw)
           PY
+          python3 extract_original.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: evidence
         if: always()
         with:
-          name: shortcut-six-file-delivery-${{ github.run_id }}-${{ github.run_attempt }}
-          path: delivery-evidence/
+          name: original-2b94-api26-${{ github.run_id }}-${{ github.run_attempt }}
+          path: failure-evidence/
           if-no-files-found: error
           retention-days: 14
-      - name: Publish exact delivery receipt including original failure
+      - name: Publish bounded exact-readback evidence checks
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-          DELIVERY_OUTCOME: ${{ steps.delivery.outcome }}
+          EXTRACT_OUTCOME: ${{ steps.extraction.outcome }}
           ARTIFACT_OUTCOME: ${{ steps.evidence.outcome }}
           ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
           ARTIFACT_DIGEST: ${{ steps.evidence.outputs.artifact-digest }}
-        run: |
-          python3 - <<'PY'
-
-          import json, os, pathlib, subprocess
-          path = pathlib.Path("delivery-evidence/receipt.json")
-          receipt = json.loads(path.read_text()) if path.exists() else {"status":"NO_RECEIPT", "ref_update_attempted":"unknown"}
-          receipt["artifact_url"] = os.environ.get("ARTIFACT_URL","")
-          receipt["artifact_digest"] = os.environ.get("ARTIFACT_DIGEST","")
-          receipt["delivery_outcome"] = os.environ["DELIVERY_OUTCOME"]
-          receipt["artifact_outcome"] = os.environ["ARTIFACT_OUTCOME"]
-          ok = receipt["status"] == "SIX_FILES_PUBLISHED_SEVENTH_WORKFLOW_PENDING_NOT_ACCEPTED" and receipt["delivery_outcome"] == receipt["artifact_outcome"] == "success"
-          body = json.dumps(receipt, indent=2)
-          assert len(body.encode()) < 62000
-          payload = {"name":"Shortcut six-file delivery evidence", "head_sha":os.environ["GITHUB_SHA"],
-           "status":"completed","conclusion":"success" if ok else "failure",
-           "external_id":os.environ["GITHUB_RUN_ID"] + "-" + os.environ["GITHUB_RUN_ATTEMPT"],
-           "output":{"title":"Six-file delivery, seventh workflow and Android acceptance pending",
-           "summary":receipt["status"], "text":"```json\n" + body + "\n```"}}
-          endpoint = "repos/" + os.environ["GITHUB_REPOSITORY"] + "/check-runs"
-          def api(args, data=None):
-              p = subprocess.run(["gh","api"] + args, input=data, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
-              if p.returncode:
-                  raise RuntimeError(p.stderr[-3000:])
-              return json.loads(p.stdout)
-          posted = api(["--method","POST",endpoint,"--input","-"], json.dumps(payload))
-          readback = api([endpoint + "/" + str(posted["id"])])
-          for key in ("head_sha","external_id","conclusion","output"):
-              if key == "output":
-                  for field in ("title","summary","text"):
-                      assert readback[key][field] == payload[key][field]
-              else:
-                  assert readback[key] == payload[key]
-          print("DELIVERY_RECEIPT_EXACT_READBACK", readback["url"])
-          if not ok:
-              raise SystemExit(1)
-          PY
+        run: python3 extract_original.py publish

@@ -1,0 +1,147 @@
+name: Independent application catalog verification
+on:
+  push:
+    branches: [feature/v1.2-activity-notes-ledger]
+  pull_request:
+    branches: [main, feature/v1.1-edit-backup]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  catalog_host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Use Java 17
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+      - name: Validate evidence refusal and generated Java syntax
+        run: |
+          set -euo pipefail
+          python3 tools/verify_app_catalog.py selftest 2>&1 | tee catalog-host.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: catalog-host
+          path: |
+            catalog-host.log
+          if-no-files-found: error
+  catalog_device:
+    needs: catalog_host
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [26, 34]
+    env:
+      TEST_API: ${{ matrix.api }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Fixed Android build setup
+        run: |
+          set -euo pipefail
+          exec > >(tee catalog-setup.log) 2>&1
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip.sha256 -o /tmp/gradle.sha256
+          echo "$(cat /tmp/gradle.sha256)  /tmp/gradle.zip" | sha256sum -c -
+          unzip -q /tmp/gradle.zip -d /tmp
+          echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+      - name: Reuse unchanged configuration-only build guard
+        env:
+          BUILD_429_EXECUTE: "true"
+          BUILD_LOG: "catalog-build.log"
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          lines=Path('.github/workflows/android.yml').read_text().splitlines()
+          anchor='        run: &verified_build |'
+          assert lines.count(anchor)==1
+          body=[]
+          for line in lines[lines.index(anchor)+1:]:
+              if line and not line.startswith('          '):break
+              body.append(line[10:] if line else '')
+          script='\n'.join(body)+'\n'
+          assert script.startswith("set -euo pipefail\npython3 - <<'PY'\n") and script.endswith('PY\n')
+          assert 'selftest()' in script and 'rate_limited_configuration' in script
+          subprocess.run(['bash','-n'],input=script,text=True,check=True)
+          subprocess.run(['bash','-euo','pipefail','-c',script],check=True,timeout=900)
+          PY
+      - name: Freeze independent APK identity
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os,re,subprocess
+          from pathlib import Path
+          apks=list(Path('build/outputs/apk/debug').glob('*.apk'))
+          assert len(apks)==1
+          apk=apks[0];tools=Path(os.environ['ANDROID_HOME'])/'build-tools/35.0.0'
+          def run(args):return subprocess.check_output(list(map(str,args)),text=True,timeout=30)
+          badging=run([tools/'aapt','dump','badging',apk])
+          assert "name='com.supercubegame.pockettodo.v12.preview'" in badging
+          assert "versionCode='3'" in badging and "sdkVersion:'26'" in badging and "targetSdkVersion:'34'" in badging
+          assert 'uses-permission:' not in run([tools/'aapt','dump','permissions',apk])
+          certs=re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([0-9a-f]{64})$',run([tools/'apksigner','verify','--verbose','--print-certs',apk]),re.M)
+          assert len(certs)==1
+          data=apk.read_bytes()
+          receipt=dict(commit=os.environ['GITHUB_SHA'],run_id=os.environ['GITHUB_RUN_ID'],
+                       run_attempt=os.environ['GITHUB_RUN_ATTEMPT'],api=int(os.environ['TEST_API']),
+                       apk_sha256=hashlib.sha256(data).hexdigest(),apk_bytes=len(data),certificate=certs[0])
+          Path('catalog-apk.json').write_text(json.dumps(receipt,indent=2)+'\n')
+          PY
+      - name: Actual manual catalog, guarded reuse, restart and backup
+        run: |
+          set -euo pipefail
+          python3 tools/verify_app_catalog.py android 2>&1 | tee catalog-android.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: catalog-device-api-${{ matrix.api }}
+          path: |
+            catalog-apk.json
+            catalog-device/
+            catalog-android.log
+            catalog-setup.log
+            catalog-build.log
+            emulator.log
+          if-no-files-found: error
+          retention-days: 14
+  catalog_report:
+    needs: [catalog_host, catalog_device]
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: catalog-*
+          path: collected-catalog
+      - name: Publish current source device evidence and original failure
+        if: always()
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 tools/verify_app_catalog.py report 2>&1 | tee catalog-report.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: independent-catalog-report
+          path: |
+            catalog-report.json
+            catalog-report.log
+          if-no-files-found: error
+          retention-days: 14

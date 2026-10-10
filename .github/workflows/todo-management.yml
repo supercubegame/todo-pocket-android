@@ -1,0 +1,1268 @@
+name: Independent todo management verification
+on:
+  push:
+    branches: [feature/v1.2-activity-notes-ledger]
+  pull_request:
+    branches: [main, feature/v1.1-edit-backup]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  todo_host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Use Java 17
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+      - name: Fail-closed receipt and Java syntax controls
+        run: |
+          set -euo pipefail
+          python3 tools/verify_todo_management.py selftest 2>&1 | tee todo-host.log
+      - name: Actual source todo order models and mutation controls
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/todo-order-models.py" <<'PY'
+          import hashlib,json,os,subprocess,sys,tempfile
+          from pathlib import Path
+          sys.path.insert(0,str(Path("tools").resolve()))
+          import verify_todo_management as backend
+          
+          UI_MUTANTS=[
+           ("filter!=0||","", "readonly guard 0"),
+           ("todoView=new Object();","", "submit identity draft undo"),
+           ("!source.isAttachedToWindow()||","", "readonly guard 8"),
+           ("new ArrayList<>(order)","order","forward owned exact"),
+           ("index-1","index+1","actual up callback"),
+          ]
+          DB_MUTANTS=[
+           ('if(!ids.equals(seen))','if(false)',"stale"),
+           ('if(connection.inTransaction())','if(false)',"outer"),
+           ('||slots.get(index)!=c.getLong(1)','',"readback"),
+           ('bump(db);return true;','return true;',"forward_exact"),
+          ]
+          
+          def extracted_model(path,owner,members,prefix,suffix,model,mutants,summary,witness):
+              original=path.read_bytes()
+              extractor=backend.UI_EXTRACTOR
+              start=extractor.index('   Set<String> required=')
+              end=extractor.index('\n',start)
+              extractor=extractor[:start]+'   Set<String> required=new LinkedHashSet<>(List.of('+','.join(json.dumps(s) for s in members)+'));'+extractor[end:]
+              assert extractor.count('contentEquals("TodayScreen")')==1
+              extractor=extractor.replace('contentEquals("TodayScreen")','contentEquals('+json.dumps(owner)+')')
+              with tempfile.TemporaryDirectory(prefix="todo-order-product-") as tmp:
+                  p=Path(tmp);source=p/(owner+".java");output=p/"members.txt"
+                  source.write_bytes(original);(p/"ExtractUi.java").write_text(extractor)
+                  def extract(data):
+                      source.write_bytes(data)
+                      # Never reuse a successful extraction after a later failed parse.
+                      if output.exists():output.unlink()
+                      return subprocess.run(["java",str(p/"ExtractUi.java"),str(source),str(output)],capture_output=True,text=True,timeout=30)
+                  result=extract(original)
+                  assert result.returncode==0,(owner,result.stdout,result.stderr)
+                  actual=output.read_text()
+                  negatives=0
+                  for data,marker in (
+                      (("class "+owner+" {}").encode(),"Missing product members"),
+                      (("class WrongOwner {\n"+actual+"\n}").encode(),"Missing product members"),
+                      (("class "+owner+" {\n"+actual+"\n"+actual+"\n}").encode(),"Duplicate product member"),
+                  ):
+                      result=extract(data)
+                      assert result.returncode!=0 and marker in result.stderr and not output.exists(),(owner,marker,result.stderr)
+                      negatives+=1
+                  result=extract(original)
+                  assert result.returncode==0 and output.read_text()==actual,"exact fresh extraction after refusal"
+                  def execute(code,witness_only=False):
+                      file=p/(model+".java");file.write_text(prefix+code+suffix)
+                      return subprocess.run(["java",str(file)]+(["witness"] if witness_only else []),capture_output=True,text=True,timeout=30)
+                  result=execute(actual)
+                  assert result.returncode==0 and result.stdout.splitlines()[-1]==summary,(owner,result.stdout,result.stderr)
+                  print(result.stdout,end="")
+                  rejected=[]
+                  for old,new,label in mutants:
+                      assert actual.count(old)==1,(owner,"mutant anchor",old)
+                      changed=actual.replace(old,new,1)
+                      if owner=="TodayScreen":
+                          valid=execute(changed,True)
+                          assert valid.returncode==0 and valid.stdout.splitlines()==[witness],(label,valid.stdout,valid.stderr)
+                      result=execute(changed)
+                      assert result.returncode!=0 and witness in result.stdout.splitlines() and "AssertionError: "+label+"\n" in result.stderr,(owner,label,result.stdout,result.stderr)
+                      rejected.append(label);print("ORDER_PRODUCT_MUTANT_REJECTED",owner,label)
+                  assert path.read_bytes()==original,"product source modified by model"
+              return dict(source=str(path),source_sha256=hashlib.sha256(original).hexdigest(),members=members,
+                          extraction_negative=negatives,mutants_rejected=rejected,summary=summary)
+          
+          def main():
+              # Fixed checkout-relative paths; no fragment fallback or caller-supplied substitute.
+              root=Path("src/main/java/com/supercubegame/pockettodo")
+              results=[]
+              results.append(extracted_model(root/"TodayScreen.java","TodayScreen",
+                  ["todoViewCurrent","requestTodoMove","renderTodoOrder"],UI_PREFIX,UI_SUFFIX,"Model",UI_MUTANTS,
+                  "UI_ORDER_MODEL guards=13 functional_groups=10 PASS; actual extracted Java with explicit View/executor doubles, NOT Android",
+                  "UI_ORDER_VALID_WITNESS_PASS"))
+              results.append(extracted_model(root/"AppDatabase.java","AppDatabase",
+                  ["moveTodo","moveTodoSlot"],DB_PREFIX,DB_SUFFIX,"TodoOrderModel",DB_MUTANTS,
+                  "TODO_ORDER_MODEL positive=4 negative=11 PASS; actual extracted Java and explicit SQL doubles, NOT Android",
+                  "TODO_ORDER_VALID_WITNESS_PASS"))
+              print("ORDER_PRODUCT_MODELS "+json.dumps(dict(status="PASS",scope="ACTUAL_SOURCE_JAVA_WITH_EXPLICIT_DOUBLES_NOT_ANDROID",
+                  commit=os.environ.get("GITHUB_SHA","LOCAL"),run_id=os.environ.get("GITHUB_RUN_ID","LOCAL"),
+                  run_attempt=os.environ.get("GITHUB_RUN_ATTEMPT","LOCAL"),models=results,release_ready=False)),flush=True)
+          
+          UI_PREFIX = r'''
+          import java.util.*;import java.util.concurrent.Callable;import java.util.function.Consumer;
+          class Model {
+           static class Activity {boolean destroyed,finishing;boolean isDestroyed(){return destroyed;}boolean isFinishing(){return finishing;}}
+           static class View {boolean attached=true,enabled=true;String description;Consumer<View> click;
+            boolean isAttachedToWindow(){return attached;}boolean isEnabled(){return enabled;}void setEnabled(boolean b){enabled=b;}
+            void setContentDescription(String s){description=s;}void setOnClickListener(Consumer<View> c){click=c;}void tap(){click.accept(this);}}
+           static class Button extends View {}
+           static class LinearLayout extends View {List<View> children=new ArrayList<>();LinearLayout(Activity a){}
+            void addView(View v,LayoutParams p){children.add(v);}static class LayoutParams {LayoutParams(int a,int b,int c){}LayoutParams(int a,int b){}}}
+           static class TodoRow {String id="b";}
+           final Activity activity=new Activity();boolean busy,closed;int page,filter,loads,remembers,undos,previews,messages;
+           Object todoView=new Object();String composer="unsaved",draft="",lastMessage="";boolean lastError;
+           Callable<Boolean> pending;Consumer<Boolean> success;Runnable failure;int queued;
+           final DB db=new DB();
+           static class DB {int calls,to;String id;List<String> order;boolean fail;
+            boolean moveTodo(String i,List<String> o,int t){calls++;id=i;order=new ArrayList<>(o);to=t;if(fail)throw new IllegalStateException("stale");return true;}}
+           void rememberDraft(){remembers++;draft=composer;}void clearTodoUndo(){undos++;}void clearTodoPreview(){previews++;}
+           void loadTodos(){loads++;todoView=new Object();}void message(String s,boolean e){messages++;lastMessage=s;lastError=e;}
+           int dp(int x){return x;}Button button(String s,Runnable r){Button b=new Button();b.setOnClickListener(v->{if(!busy)r.run();});return b;}
+           void work(Callable<Boolean> a,Consumer<Boolean> b,Runnable c){queued++;busy=true;pending=a;success=b;failure=c;}
+           void finish(){try{boolean b=pending.call();busy=false;success.accept(b);}catch(Exception e){busy=false;failure.run();}}
+          '''
+          
+          UI_SUFFIX = r'''
+           static void ck(boolean b,String s){if(!b)throw new AssertionError(s);}
+           static List<String> ids(){return new ArrayList<>(List.of("a","b","c"));}
+           static void send(Model m,Object token,List<String> order,View v,int to){m.requestTodoMove("b",token,order,to,v);}
+           static void validWitness(){Model m=new Model();send(m,m.todoView,ids(),new View(),1);ck(m.queued==0&&m.undos==0,"noop witness");System.out.println("UI_ORDER_VALID_WITNESS_PASS");}
+           public static void main(String[] a){
+            validWitness();if(a.length>0)return;
+            Model m=new Model();Object old=m.todoView;List<String> input=ids();View v=new View();
+            send(m,old,input,v,2);ck(m.queued==1&&m.todoView!=old&&m.draft.equals("unsaved")&&m.undos==1&&m.previews==1,"submit identity draft undo");
+            input.clear();send(m,old,ids(),v,2);ck(m.queued==1,"busy duplicate");m.finish();
+            ck(m.db.calls==1&&m.db.id.equals("b")&&m.db.order.equals(ids())&&m.db.to==2&&m.loads==1&&!m.lastError,"forward owned exact");
+            send(m,old,ids(),v,0);ck(m.queued==1,"old replay");
+            m=new Model();send(m,m.todoView,ids(),v,0);m.finish();ck(m.db.to==0&&m.loads==1,"backward");
+            m=new Model();m.db.fail=true;old=m.todoView;send(m,old,ids(),v,2);m.finish();ck(m.loads==1&&m.lastError&&m.lastMessage.contains("未能调整待办顺序"),"failure refresh");send(m,old,ids(),v,2);ck(m.queued==1,"failure terminal");
+            m=new Model();send(m,m.todoView,ids(),v,2);m.page=1;m.finish();ck(m.loads==0&&m.messages==0,"abandoned success");
+            m=new Model();m.db.fail=true;send(m,m.todoView,ids(),v,2);m.closed=true;m.finish();ck(m.loads==0&&m.messages==0,"abandoned failure");
+            int negatives=0;
+            for(int n=0;n<13;n++){
+             m=new Model();old=m.todoView;v=new View();int to=2;List<String> order=ids();
+             switch(n){case 0:m.filter=1;break;case 1:m.filter=2;break;case 2:m.busy=true;break;case 3:m.closed=true;break;case 4:m.page=1;break;case 5:m.activity.destroyed=true;break;case 6:m.activity.finishing=true;break;case 7:old=new Object();break;case 8:v.attached=false;break;case 9:v.enabled=false;break;case 10:to=-1;break;case 11:to=3;break;case 12:order=List.of("a","c");}
+             send(m,old,order,v,to);ck(m.queued==0&&m.db.calls==0&&m.undos==0&&m.previews==0&&m.remembers==0,"readonly guard "+n);negatives++;
+            }
+            m=new Model();TodoRow row=new TodoRow();LinearLayout card=new LinearLayout(m.activity);old=m.todoView;
+            m.renderTodoOrder(card,row,ids(),old);ck(card.children.size()==1,"all renders");LinearLayout bar=(LinearLayout)card.children.get(0);ck(bar.children.size()==2,"both buttons");
+            View up=bar.children.get(0),down=bar.children.get(1);ck(up.description.equals("todo-up-b")&&down.description.equals("todo-down-b")&&up.enabled&&down.enabled,"stable button identities");
+            up.tap();m.finish();ck(m.db.to==0&&m.db.id.equals("b"),"actual up callback");down.tap();ck(m.queued==1,"sibling stale callback");
+            m=new Model();card=new LinearLayout(m.activity);m.renderTodoOrder(card,row,ids(),m.todoView);((LinearLayout)card.children.get(0)).children.get(1).tap();m.finish();ck(m.db.to==2,"actual down callback");
+            for(int f:new int[]{1,2}){m=new Model();m.filter=f;card=new LinearLayout(m.activity);m.renderTodoOrder(card,row,ids(),m.todoView);ck(card.children.isEmpty(),"filtered controls absent");}
+            m=new Model();row.id="a";card=new LinearLayout(m.activity);m.renderTodoOrder(card,row,ids(),m.todoView);bar=(LinearLayout)card.children.get(0);ck(!bar.children.get(0).enabled&&bar.children.get(1).enabled,"first boundary");
+            row.id="c";card=new LinearLayout(m.activity);m.renderTodoOrder(card,row,ids(),m.todoView);bar=(LinearLayout)card.children.get(0);ck(bar.children.get(0).enabled&&!bar.children.get(1).enabled,"last boundary");
+            System.out.println("UI_ORDER_MODEL guards="+negatives+" functional_groups=10 PASS; actual extracted Java with explicit View/executor doubles, NOT Android");
+           }
+          }
+          '''
+          
+          DB_PREFIX = r'''import java.util.*;
+          class TodoOrderModel{
+          static void need(boolean b,String s){if(!b)throw new AssertionError(s);}
+          static class Ledger{static String identifier(String id){if(id==null||id.isEmpty())throw new IllegalArgumentException();return id;}}
+          static class Row{
+          String id,title;boolean done;long position,rowid;
+          Row(String i,String t,boolean d,long p,long r){id=i;title=t;done=d;position=p;rowid=r;}
+          Row copy(){return new Row(id,title,done,position,rowid);}
+          public String toString(){return id+"|"+title+"|"+done+"|"+position+"|"+rowid;}
+          }
+          static class Cursor implements AutoCloseable{
+          List<Object[]>rows;int at=-1;Cursor(List<Object[]>r){rows=r;}
+          boolean moveToFirst(){at=0;return !rows.isEmpty();}boolean moveToNext(){return ++at<rows.size();}
+          String getString(int col){return (String)rows.get(at)[col];}long getLong(int col){return ((Number)rows.get(at)[col]).longValue();}
+          public void close(){}
+          }
+          static class SQLiteDatabase{
+          List<Row>rows=new ArrayList<>();boolean outer,late,zero,corrupt;long revision=8,changes;int writes,reads;
+          SQLiteDatabase(){rows.add(new Row("first","Same",false,0,11));rows.add(new Row("middle","Same",true,7,22));rows.add(new Row("last","Last",false,Long.MAX_VALUE,33));}
+          boolean inTransaction(){return outer;}
+          List<Row>ordered(){List<Row>out=new ArrayList<>(rows);out.sort(Comparator.comparingLong(r->r.position));return out;}
+          Cursor rawQuery(String q,String[] args){
+          if(q.equals("SELECT changes()"))return new Cursor(Collections.singletonList(new Object[]{changes}));
+          need(q.equals("SELECT id,position FROM todos ORDER BY position"),"actual_query");reads++;
+          List<Object[]>out=new ArrayList<>();for(Row r:ordered())out.add(new Object[]{r.id,r.position});
+          if(corrupt&&reads%2==0)out.get(0)[1]=99L;
+          return new Cursor(out);}
+          void execSQL(String q,Object[] args){
+          need(q.equals("UPDATE todos SET position=? WHERE id=?"),"actual_update");long next=((Number)args[0]).longValue();String id=(String)args[1];
+          need(next>=0,"nonnegative_SQL_constraint");
+          for(Row r:rows)if(!r.id.equals(id)&&r.position==next)throw new IllegalArgumentException("UNIQUE position");
+          writes++;changes=0;for(Row r:rows)if(r.id.equals(id)&&!zero){r.position=next;changes++;}
+          }
+          String snapshot(){return revision+":"+rows.toString();}
+          }
+          SQLiteDatabase sql=new SQLiteDatabase();SQLiteDatabase getWritableDatabase(){return sql;}
+          interface Work<T>{T run(SQLiteDatabase d);}
+          <T>T tx(Work<T>w){List<Row>old=new ArrayList<>();for(Row r:sql.rows)old.add(r.copy());long rev=sql.revision;
+          try{return w.run(sql);}catch(RuntimeException|Error e){sql.rows=old;sql.revision=rev;throw e;}}
+          static long bump(SQLiteDatabase d){if(d.late)throw new IllegalStateException("late sentinel");return d.revision=Math.incrementExact(d.revision);}
+          static List<String> ids(SQLiteDatabase d){List<String>out=new ArrayList<>();for(Row r:d.ordered())out.add(r.id);return out;}
+          '''
+          
+          DB_SUFFIX = r'''
+          static void reject(TodoOrderModel h,String id,List<String>seen,int to,Class<?>type,String label){
+          String before=h.sql.snapshot();Throwable error=null;try{h.moveTodo(id,seen,to);}catch(Throwable e){error=e;}
+          need(error!=null&&type.isInstance(error),label);need(h.sql.snapshot().equals(before),"readonly_"+label);
+          }
+          public static void main(String[]args){
+          List<String>a=Arrays.asList("first","middle","last"),b=Arrays.asList("middle","last","first");
+          TodoOrderModel h=new TodoOrderModel();String before=h.sql.snapshot();int writes=h.sql.writes;
+          need(!h.moveTodo("middle",a,1)&&h.sql.snapshot().equals(before)&&h.sql.writes==writes,"no_op");
+          System.out.println("TODO_ORDER_VALID_WITNESS_PASS");
+          need(h.moveTodo("first",a,2)&&ids(h.sql).equals(b)&&h.sql.snapshot().equals("9:[first|Same|false|9223372036854775807|11, middle|Same|true|0|22, last|Last|false|7|33]"),"forward_exact");
+          need(h.moveTodo("first",b,0)&&h.sql.snapshot().equals("10:[first|Same|false|0|11, middle|Same|true|7|22, last|Last|false|9223372036854775807|33]"),"backward_exact");
+          reject(h,"first",b,1,IllegalStateException.class,"stale");
+          reject(h,"first",Arrays.asList("first","first","last"),1,IllegalArgumentException.class,"duplicate");
+          reject(h,"first",null,1,IllegalArgumentException.class,"null");
+          reject(h,"first",Arrays.asList("first",null,"last"),1,IllegalArgumentException.class,"null_id");
+          reject(h,"missing",a,1,IllegalArgumentException.class,"missing");
+          reject(h,"first",a,-1,IllegalArgumentException.class,"negative_bound");
+          reject(h,"first",a,3,IllegalArgumentException.class,"upper_bound");
+          h.sql.outer=true;reject(h,"first",a,1,IllegalStateException.class,"outer");h.sql.outer=false;
+          h.sql.late=true;reject(h,"first",a,1,IllegalStateException.class,"late_rollback");h.sql.late=false;
+          h.sql.zero=true;reject(h,"first",a,1,IllegalStateException.class,"affected_rows");h.sql.zero=false;
+          h.sql.reads=0;h.sql.corrupt=true;reject(h,"first",a,1,IllegalStateException.class,"readback");h.sql.corrupt=false;
+          need(h.moveTodo("last",a,0)&&ids(h.sql).equals(Arrays.asList("last","first","middle"))&&h.sql.revision==11,"fresh_after_failures");
+          System.out.println("TODO_ORDER_MODEL positive=4 negative=11 PASS; actual extracted Java and explicit SQL doubles, NOT Android");
+          }}
+          '''
+          
+          if __name__=="__main__":
+              assert not sys.flags.optimize
+              main()
+          PY
+          python3 "$RUNNER_TEMP/todo-order-models.py" 2>&1 | tee todo-order-models.log
+      - name: Native receipt controls and independent state oracle
+        run: &todo_native_gate |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/todo-native-gate.py" <<'PY'
+          import copy,hashlib,inspect,json,os,re,subprocess,sys,tempfile
+          from pathlib import Path
+          sys.path.insert(0,str(Path("tools").resolve()))
+          import verify_todo_management as backend
+          LABELS={
+           "seed":"fresh_ui_database ui_created_same_title_completed exact_confirmation_identity explicit_undo_limit preview_all_state_readonly cancel_all_state_readonly cancel_preserves_composer delete_exact_all_tables_media delete_preserves_composer undo_exact_identity_done_position_rowid undo_single_use_and_composer second_delete_exact navigation_invalidates_undo_readonly deleted_restart_checkpoint".split(),
+           "deleted":"deleted_restart_state restart_has_no_undo second_identity_delete_undo edit_cancel_fixture_created edit_open_invalidates_undo_controls edit_cancel_readonly edit_cancel_preserves_composer edit_cancel_stale_undo_readonly order_fixture order_forward order_backward order_noop_readonly order_stale_readonly order_duplicate_readonly order_null_readonly order_missing_readonly order_bounds_readonly order_outer_readonly order_late_rollback order_delete_undo order_checkpoint ui_order_fixture ui_order_boundaries_readonly ui_order_down_once ui_order_stale_callbacks_readonly ui_order_up ui_order_composer ui_order_pending_readonly ui_order_completed_readonly ui_order_navigation_readonly ui_order_failure_rollback_readonly ui_order_failed_callbacks_readonly ui_order_recovery ui_order_checkpoint undone_restart_checkpoint".split(),
+           "undone":"undone_restart_state undone_restart_no_replay order_restart order_backup ui_order_restart ui_order_backup".split(),
+          }
+          SCOPE="ACTUAL_NATIVE_WIDGET_CALLBACKS_WITH_TODO_ORDER_BUTTONS_AND_BACKEND_NOT_PHYSICAL_TOUCH_OR_LMK"
+          # The emission list and acceptance list are deliberately independent.
+          ACCEPTED="fresh_ui_database ui_created_same_title_completed exact_confirmation_identity explicit_undo_limit preview_all_state_readonly cancel_all_state_readonly cancel_preserves_composer delete_exact_all_tables_media delete_preserves_composer undo_exact_identity_done_position_rowid undo_single_use_and_composer second_delete_exact navigation_invalidates_undo_readonly deleted_restart_checkpoint deleted_restart_state restart_has_no_undo second_identity_delete_undo edit_cancel_fixture_created edit_open_invalidates_undo_controls edit_cancel_readonly edit_cancel_preserves_composer edit_cancel_stale_undo_readonly order_fixture order_forward order_backward order_noop_readonly order_stale_readonly order_duplicate_readonly order_null_readonly order_missing_readonly order_bounds_readonly order_outer_readonly order_late_rollback order_delete_undo order_checkpoint ui_order_fixture ui_order_boundaries_readonly ui_order_down_once ui_order_stale_callbacks_readonly ui_order_up ui_order_composer ui_order_pending_readonly ui_order_completed_readonly ui_order_navigation_readonly ui_order_failure_rollback_readonly ui_order_failed_callbacks_readonly ui_order_recovery ui_order_checkpoint undone_restart_checkpoint undone_restart_state undone_restart_no_replay order_restart order_backup ui_order_restart ui_order_backup".split()
+          JAVA = r'''
+          package ci.todos;
+          import android.app.*;
+          import android.os.*;
+          import android.content.*;
+          import android.database.*;
+          import android.database.sqlite.*;
+          import android.graphics.Rect;
+          import android.view.*;
+          import android.view.accessibility.AccessibilityNodeInfo;
+          import android.widget.*;
+          import com.supercubegame.pockettodo.AppDatabase;
+          import java.lang.reflect.*;
+          import java.nio.file.*;
+          import java.util.*;
+          
+          public final class TodoInstrumentation extends Instrumentation {
+           Bundle args;Activity activity;Object screen;int count;String nonce,phase;Path folder;
+           interface Action{void run()throws Exception;}
+           static void need(boolean b,String s){if(!b)throw new AssertionError(s);}
+           void pass(boolean b,String s){need(b,s);count++;System.out.println("TODO_PASS "+s);}
+           static Object field(Object o,String name)throws Exception{Field f=o.getClass().getDeclaredField(name);f.setAccessible(true);return f.get(o);}
+           void ui(Action a)throws Exception{
+            final Throwable[] error={null};runOnMainSync(()->{try{a.run();}catch(Throwable e){error[0]=e;}});
+            if(error[0]!=null)throw new AssertionError("UI action",error[0]);
+           }
+           void ready()throws Exception{
+            long deadline=SystemClock.elapsedRealtime()+10000;
+            while(true){
+             final boolean[] done={false};ui(()->done[0]=!((Boolean)field(screen,"busy")));
+             if(done[0]){waitForIdleSync();return;}
+             need(SystemClock.elapsedRealtime()<deadline,"UI async deadline");SystemClock.sleep(20);
+            }
+           }
+           void launch()throws Exception{
+            Intent intent=new Intent().setClassName(getTargetContext(),"com.supercubegame.pockettodo.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            activity=startActivitySync(intent);screen=field(activity,"screen");ready();
+           }
+           View root(){return activity.getWindow().getDecorView();}
+           View unique(View root,String value,boolean description){
+            List<View> out=new ArrayList<>();find(root,value,description,out);
+            need(out.size()==1,"unique view "+value+" count="+out.size());return out.get(0);
+           }
+           void find(View v,String value,boolean description,List<View> out){
+            if(description?value.contentEquals(v.getContentDescription()==null?"":v.getContentDescription()):
+               v instanceof TextView&&value.contentEquals(((TextView)v).getText()))out.add(v);
+            if(v instanceof ViewGroup){ViewGroup g=(ViewGroup)v;for(int i=0;i<g.getChildCount();i++)find(g.getChildAt(i),value,description,out);}
+           }
+           void click(View root,String value,boolean description)throws Exception{
+            ui(()->{View v=unique(root,value,description);Rect r=new Rect();
+             need(v.isEnabled()&&v.isShown()&&v.getGlobalVisibleRect(r)&&r.width()>0&&r.height()>0,"clickable "+value);
+             clickOnce(v,value);
+            });ready();
+           }
+           static void clickOnce(View v,String value){
+            if(v instanceof CheckBox){
+             CheckBox box=(CheckBox)v;boolean before=box.isChecked();
+             box.performClick();
+             need(box.isChecked()!=before,"checkbox toggled "+value);
+            }else{
+             need(v.performClick(),"click handled "+value);
+            }
+           }
+           String text(View root,String value)throws Exception{
+            final String[] s={null};ui(()->s[0]=((TextView)unique(root,value,true)).getText().toString());return s[0];
+           }
+           void input(String value)throws Exception{ui(()->((EditText)unique(root(),"新待办输入",true)).setText(value));}
+           void add(String title)throws Exception{input(title);click(root(),"添加",false);}
+           AlertDialog dialog()throws Exception{
+            final AlertDialog[] d={null};ui(()->d[0]=(AlertDialog)field(screen,"todoDialog"));
+            need(d[0]!=null&&d[0].isShowing(),"delete dialog visible");return d[0];
+           }
+           void remove(String id)throws Exception{click(root(),"delete-"+id,true);}
+           void confirm()throws Exception{click(dialog().getWindow().getDecorView(),"todo-delete-confirm",true);}
+           void noUndo()throws Exception{
+            ui(()->{need(field(screen,"todoUndo")==null,"no in-memory undo");List<View> nodes=new ArrayList<>();find(root(),"撤销删除",false,nodes);need(nodes.isEmpty(),"no undo control");});
+           }
+           AppDatabase db()throws Exception{return (AppDatabase)field(screen,"db");}
+           Map<String,List<List<String>>> state()throws Exception{
+            return snapshot(db());
+           }
+           static Map<String,List<List<String>>> snapshot(AppDatabase h){
+            synchronized(h){
+             SQLiteDatabase sql=h.getReadableDatabase();sql.beginTransaction();
+             try{
+              Map<String,List<List<String>>> out=new TreeMap<>();
+              try(Cursor tables=sql.rawQuery("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",null)){
+               while(tables.moveToNext()){
+                String name=tables.getString(0);need(name.matches("[A-Za-z0-9_]+"),"table name");List<List<String>> rows=new ArrayList<>();
+                try(Cursor c=sql.rawQuery("SELECT rowid AS rowid,* FROM \""+name+"\" ORDER BY rowid",null)){
+                 rows.add(Arrays.asList(c.getColumnNames()));
+                 while(c.moveToNext()){List<String> row=new ArrayList<>();for(int i=0;i<c.getColumnCount();i++){int t=c.getType(i);row.add(t+":"+(t==0?"":t==4?android.util.Base64.encodeToString(c.getBlob(i),2):c.getString(i)));}rows.add(row);}
+                }out.put(name,rows);
+               }
+              }sql.setTransactionSuccessful();return out;
+             }finally{sql.endTransaction();}
+            }
+           }
+           static Map<String,List<List<String>>> expected(Map<String,List<List<String>>> before,String omit,int delta){
+            Map<String,List<List<String>>> out=new TreeMap<>();
+            for(Map.Entry<String,List<List<String>>> e:before.entrySet()){
+             List<List<String>> rows=new ArrayList<>();for(List<String> r:e.getValue())rows.add(new ArrayList<>(r));out.put(e.getKey(),rows);
+            }
+            if(omit!=null){
+             List<List<String>> rows=out.get("todos");int col=rows.get(0).indexOf("id"),n=0;
+             for(int i=rows.size()-1;i>0;i--)if(rows.get(i).get(col).equals("3:"+omit)){rows.remove(i);n++;}
+             need(n==1,"exact omitted row");
+            }
+            List<List<String>> rev=out.get("revision");need(rev.size()==2,"one revision");int col=rev.get(0).indexOf("value");
+            rev.get(1).set(col,"1:"+Math.addExact(Long.parseLong(rev.get(1).get(col).substring(2)),delta));return out;
+           }
+           Map<String,String> media()throws Exception{
+            Map<String,String> out=new TreeMap<>();Path base=getTargetContext().getFilesDir().toPath().resolve("media");
+            if(Files.exists(base))try(java.util.stream.Stream<Path> paths=Files.walk(base)){
+             for(Path p:(Iterable<Path>)paths::iterator){if(Files.isDirectory(p))continue;need(Files.isRegularFile(p,LinkOption.NOFOLLOW_LINKS),"media regular");
+              out.put(base.relativize(p).toString(),android.util.Base64.encodeToString(Files.readAllBytes(p),2));}
+            }return out;
+           }
+           String idAt(Map<String,List<List<String>>> s,int index){List<List<String>> r=s.get("todos");return r.get(index+1).get(r.get(0).indexOf("id")).substring(2);}
+           void save(String name,String value)throws Exception{Files.write(folder.resolve(name),value.getBytes("UTF-8"),StandardOpenOption.CREATE_NEW);}
+           String read(String name)throws Exception{return new String(Files.readAllBytes(folder.resolve(name)),"UTF-8");}
+           static void hiddenUndo(View hint,View button,Object token){
+            need(hint.getVisibility()==View.GONE,"undo hint hidden");
+            need(button.getVisibility()==View.GONE,"undo button hidden");
+            need(token==null,"undo token invalidated");
+           }
+           // Independent expected state: retain the original nonnegative unique slots,
+           // every rowid, typed cell and unrelated table. Not the product algorithm.
+           static Map<String,List<List<String>>> orderExpected(Map<String,List<List<String>>> before,String id,int to){
+            List<List<String>> rows=before.get("todos");List<String> header=rows.get(0);
+            int key=header.indexOf("id"),pos=header.indexOf("position");
+            List<List<String>> sorted=new ArrayList<>(rows.subList(1,rows.size()));
+            sorted.sort(Comparator.comparingLong(r->Long.parseLong(r.get(pos).substring(2))));
+            List<String> ids=new ArrayList<>();List<Long> slots=new ArrayList<>();
+            for(List<String> r:sorted){ids.add(r.get(key).substring(2));slots.add(Long.parseLong(r.get(pos).substring(2)));}
+            int from=ids.indexOf(id);need(from>=0&&to>=0&&to<ids.size(),"order oracle target");
+            need(new HashSet<>(ids).size()==ids.size()&&new HashSet<>(slots).size()==slots.size(),"order oracle unique");
+            Map<String,List<List<String>>> out=expected(before,null,from==to?0:1);
+            ids.add(to,ids.remove(from));
+            for(List<String> r:out.get("todos").subList(1,rows.size())){
+             int index=ids.indexOf(r.get(key).substring(2));r.set(pos,"1:"+slots.get(index));
+            }
+            return out;
+           }
+           static boolean move(AppDatabase h,String id,List<String> shown,int to)throws Exception{
+            try{
+             Object value=AppDatabase.class.getMethod("moveTodo",String.class,List.class,int.class).invoke(h,id,shown,to);
+             need(value instanceof Boolean,"moveTodo boolean contract");return (Boolean)value;
+            }catch(InvocationTargetException e){
+             Throwable cause=e.getCause();if(cause instanceof Exception)throw (Exception)cause;
+             if(cause instanceof Error)throw (Error)cause;throw new AssertionError(cause);
+            }
+           }
+           void orderReject(AppDatabase h,Class<? extends Throwable> type,Action action,String label)throws Exception{
+            Map<String,List<List<String>>> before=snapshot(h);Throwable error=null;
+            try{action.run();}catch(Throwable e){error=e;}
+            pass(error!=null&&type.isInstance(error)&&before.equals(snapshot(h)),label);
+           }
+           String orderName(){return "todo-order-"+nonce+".db";}
+           void orderBackend()throws Exception{
+            need(!getTargetContext().getDatabasePath(orderName()).exists(),"fresh order database");
+            Map<String,String> assets=media();
+            try(AppDatabase h=AppDatabase.openSchema3(getTargetContext(),orderName())){
+             h.addCategory(71,"Unchanged category");h.addActivity(72,71,0,"Unchanged activity");
+             h.createNote("order-note",72,"Unchanged note");
+             h.addTodo("order-first","Same order title");h.addTodo("order-middle","Same order title");h.addTodo("order-last","Last");
+             h.editTodo("order-middle","Same order title",true);
+             h.getWritableDatabase().execSQL("UPDATE todos SET position=7 WHERE id='order-middle'");
+             h.getWritableDatabase().execSQL("UPDATE todos SET position=? WHERE id='order-last'",new Object[]{Long.MAX_VALUE});
+             List<String> original=Arrays.asList("order-first","order-middle","order-last");
+             pass(h.todoIds().equals(original)&&h.todo("order-middle").done,"order_fixture");
+             Map<String,List<List<String>>> before=snapshot(h);
+             pass(move(h,"order-first",original,2)&&snapshot(h).equals(orderExpected(before,"order-first",2))&&assets.equals(media()),"order_forward");
+             before=snapshot(h);
+             pass(move(h,"order-first",h.todoIds(),0)&&snapshot(h).equals(orderExpected(before,"order-first",0))&&h.todoIds().equals(original),"order_backward");
+             before=snapshot(h);
+             pass(!move(h,"order-middle",h.todoIds(),1)&&before.equals(snapshot(h)),"order_noop_readonly");
+             orderReject(h,IllegalStateException.class,()->move(h,"order-first",Arrays.asList("order-middle","order-first","order-last"),1),"order_stale_readonly");
+             orderReject(h,IllegalArgumentException.class,()->move(h,"order-first",Arrays.asList("order-first","order-first","order-last"),1),"order_duplicate_readonly");
+             orderReject(h,IllegalArgumentException.class,()->move(h,"order-first",null,1),"order_null_readonly");
+             orderReject(h,IllegalArgumentException.class,()->move(h,"missing",original,1),"order_missing_readonly");
+             orderReject(h,IllegalArgumentException.class,()->move(h,"order-first",original,3),"order_bounds_readonly");
+             SQLiteDatabase sql=h.getWritableDatabase();sql.beginTransaction();
+             try{orderReject(h,IllegalStateException.class,()->move(h,"order-first",original,1),"order_outer_readonly");}finally{sql.endTransaction();}
+             before=snapshot(h);sql.execSQL("CREATE TRIGGER ci_order_fault BEFORE UPDATE OF value ON revision BEGIN SELECT RAISE(ABORT,'order_late_fault'); END");
+             Throwable fault=null;try{move(h,"order-first",original,2);}catch(Throwable e){fault=e;}
+             boolean marker=false;for(Throwable e=fault;e!=null;e=e.getCause())if(e.toString().contains("order_late_fault"))marker=true;
+             pass(marker&&before.equals(snapshot(h))&&assets.equals(media()),"order_late_rollback");sql.execSQL("DROP TRIGGER ci_order_fault");
+             before=snapshot(h);
+             AppDatabase.TodoDeletionUndo token=h.confirmTodoDeletion(h.prepareTodoDeletion("order-middle"));h.undoTodoDeletion(token);
+             pass(expected(before,null,2).equals(snapshot(h)),"order_delete_undo");
+             before=snapshot(h);need(move(h,"order-last",original,0),"final order changed");
+             need(snapshot(h).equals(orderExpected(before,"order-last",0)),"checkpoint exact order");
+             save("order-state",snapshot(h).toString());save("order-ids",h.todoIds().toString());
+             Files.write(folder.resolve("order.canonical"),h.exportState(),StandardOpenOption.CREATE_NEW);
+             h.exportBackup(folder.resolve("order.zip"),new com.supercubegame.pockettodo.MediaRepository(folder.resolve("order-media"),64L*1024*1024));
+             pass(assets.equals(media()),"order_checkpoint");
+            }
+           }
+           void orderRestart()throws Exception{
+            try(AppDatabase h=AppDatabase.openSchema3(getTargetContext(),orderName())){
+             pass(read("order-state").equals(snapshot(h).toString())&&read("order-ids").equals(h.todoIds().toString()),"order_restart");
+            }
+            String name="todo-order-restored-"+nonce+".db";need(!getTargetContext().getDatabasePath(name).exists(),"fresh order restore");
+            try(AppDatabase h=AppDatabase.openSchema3(getTargetContext(),name)){
+             com.supercubegame.pockettodo.MediaRepository m=new com.supercubegame.pockettodo.MediaRepository(folder.resolve("order-media"),64L*1024*1024);
+             try(AppDatabase.RestorePlan p=h.prepareRestore(folder.resolve("order.zip"),folder.resolve("order-stage"),64L*1024*1024)){h.confirmRestore(p,m);}
+             pass(Arrays.equals(Files.readAllBytes(folder.resolve("order.canonical")),h.exportState())&&read("order-ids").equals(h.todoIds().toString()),"order_backup");
+            }
+           }
+           static void orderControls(View up,View down,boolean canUp,boolean canDown){
+            need(up.isShown()&&down.isShown(),"order controls shown");
+            need(up.isEnabled()==canUp,"order up enabled");
+            need(down.isEnabled()==canDown,"order down enabled");
+           }
+           void filteredOrder(List<String> ids,String visible,String hidden)throws Exception{
+            ui(()->{
+             for(String id:ids)for(String prefix:new String[]{"todo-up-","todo-down-"}){
+              List<View> found=new ArrayList<>();find(root(),prefix+id,true,found);need(found.isEmpty(),"filtered order absent "+prefix+id);
+             }
+             need(unique(root(),"todo-"+visible,true).isShown(),"filtered expected row");
+             List<View> found=new ArrayList<>();find(root(),"todo-"+hidden,true,found);need(found.isEmpty(),"filtered excluded row");
+            });
+           }
+           void orderButtons()throws Exception{
+            Map<String,List<List<String>>> initial=state();
+            need(initial.get("todos").size()==3,"two surviving UI-created rows");
+            final String first=idAt(initial,0),last=idAt(initial,1);
+            need(first.equals(read("first-id"))&&db().todoIds().equals(Arrays.asList(first,last)),"known original order");
+            click(root(),"todo-"+last,true);
+            pass(!db().todo(first).done&&db().todo(last).done,"ui_order_fixture");
+            input("  order keeps composer  ");
+            Map<String,List<List<String>>> before=state();Map<String,String> assets=media();
+            final View[] saved=new View[4];
+            ui(()->{
+             saved[0]=unique(root(),"todo-up-"+first,true);saved[1]=unique(root(),"todo-down-"+first,true);
+             saved[2]=unique(root(),"todo-up-"+last,true);saved[3]=unique(root(),"todo-down-"+last,true);
+             orderControls(saved[0],saved[1],false,true);orderControls(saved[2],saved[3],true,false);
+             // Deliberate callback delivery to disabled boundary controls, not physical taps.
+             saved[0].performClick();saved[3].performClick();
+            });ready();
+            pass(before.equals(state())&&assets.equals(media()),"ui_order_boundaries_readonly");
+            ui(()->{
+             Rect rect=new Rect();need(saved[1].getGlobalVisibleRect(rect)&&rect.width()>0&&rect.height()>0,"visible down button");
+             clickOnce(saved[1],"order down");saved[1].performClick();saved[2].performClick();
+            });ready();
+            pass(orderExpected(before,first,1).equals(state())&&assets.equals(media()),"ui_order_down_once");
+            before=state();ui(()->{saved[1].performClick();saved[2].performClick();});ready();
+            pass(before.equals(state())&&assets.equals(media()),"ui_order_stale_callbacks_readonly");
+            click(root(),"todo-up-"+first,true);
+            pass(orderExpected(before,first,0).equals(state())&&assets.equals(media()),"ui_order_up");
+            pass(text(root(),"新待办输入").equals("  order keeps composer  "),"ui_order_composer");
+            before=state();
+            ui(()->{saved[1]=unique(root(),"todo-down-"+first,true);saved[2]=unique(root(),"todo-up-"+last,true);});
+            click(root(),"待办",false);filteredOrder(Arrays.asList(first,last),first,last);
+            ui(()->saved[1].performClick());ready();
+            pass(before.equals(state())&&assets.equals(media())&&text(root(),"新待办输入").equals("  order keeps composer  "),"ui_order_pending_readonly");
+            click(root(),"已完成",false);filteredOrder(Arrays.asList(first,last),last,first);
+            ui(()->saved[2].performClick());ready();
+            pass(before.equals(state())&&assets.equals(media()),"ui_order_completed_readonly");
+            click(root(),"全部",false);
+            ui(()->saved[1]=unique(root(),"todo-down-"+first,true));
+            click(root(),"活动",false);ui(()->saved[1].performClick());ready();click(root(),"今天",false);
+            pass(before.equals(state())&&assets.equals(media())&&text(root(),"新待办输入").equals("  order keeps composer  "),"ui_order_navigation_readonly");
+            ui(()->{saved[1]=unique(root(),"todo-down-"+first,true);saved[2]=unique(root(),"todo-up-"+last,true);});
+            SQLiteDatabase sql=db().getWritableDatabase();
+            sql.execSQL("CREATE TRIGGER ci_ui_order_fault BEFORE UPDATE OF value ON revision BEGIN SELECT RAISE(ABORT,'ui_order_late_fault'); END");
+            try{
+             click(root(),"todo-down-"+first,true);
+             pass(before.equals(state())&&assets.equals(media())&&text(root(),"v12-status").contains("未能调整待办顺序"),"ui_order_failure_rollback_readonly");
+            }finally{sql.execSQL("DROP TRIGGER ci_ui_order_fault");}
+            ui(()->{saved[1].performClick();saved[2].performClick();});ready();
+            pass(before.equals(state())&&assets.equals(media()),"ui_order_failed_callbacks_readonly");
+            click(root(),"todo-down-"+first,true);
+            pass(orderExpected(before,first,1).equals(state())&&assets.equals(media())&&text(root(),"新待办输入").equals("  order keeps composer  "),"ui_order_recovery");
+            save("ui-order-ids",db().todoIds().toString());
+            Files.write(folder.resolve("ui-order.canonical"),db().exportState(),StandardOpenOption.CREATE_NEW);
+            db().exportBackup(folder.resolve("ui-order.zip"),new com.supercubegame.pockettodo.MediaRepository(folder.resolve("ui-order-media"),64L*1024*1024));
+            pass(db().todoIds().equals(Arrays.asList(last,first))&&assets.equals(media()),"ui_order_checkpoint");
+           }
+           void orderButtonsRestart()throws Exception{
+            List<String> ids=db().todoIds();need(ids.size()==2,"UI order restart size");
+            ui(()->{orderControls(unique(root(),"todo-up-"+ids.get(0),true),unique(root(),"todo-down-"+ids.get(0),true),false,true);
+             orderControls(unique(root(),"todo-up-"+ids.get(1),true),unique(root(),"todo-down-"+ids.get(1),true),true,false);});
+            pass(read("ui-order-ids").equals(ids.toString())&&Arrays.equals(Files.readAllBytes(folder.resolve("ui-order.canonical")),db().exportState()),"ui_order_restart");
+            String name="todo-ui-order-restored-"+nonce+".db";need(!getTargetContext().getDatabasePath(name).exists(),"fresh UI order restore");
+            try(AppDatabase h=AppDatabase.openSchema3(getTargetContext(),name)){
+             com.supercubegame.pockettodo.MediaRepository m=new com.supercubegame.pockettodo.MediaRepository(folder.resolve("ui-order-media"),64L*1024*1024);
+             try(AppDatabase.RestorePlan p=h.prepareRestore(folder.resolve("ui-order.zip"),folder.resolve("ui-order-stage"),64L*1024*1024)){h.confirmRestore(p,m);}
+             pass(Arrays.equals(Files.readAllBytes(folder.resolve("ui-order.canonical")),h.exportState())&&read("ui-order-ids").equals(h.todoIds().toString()),"ui_order_backup");
+            }
+           }
+           void nodes(AccessibilityNodeInfo node,String value,boolean description,List<AccessibilityNodeInfo> out){
+            CharSequence actual=description?node.getContentDescription():node.getText();
+            if(value.contentEquals(actual==null?"":actual))out.add(node);
+            for(int i=0;i<node.getChildCount();i++){AccessibilityNodeInfo child=node.getChild(i);if(child!=null)nodes(child,value,description,out);}
+           }
+           AccessibilityNodeInfo editWindow(boolean present)throws Exception{
+            long deadline=SystemClock.elapsedRealtime()+10000;
+            while(true){
+             AccessibilityNodeInfo window=getUiAutomation().getRootInActiveWindow();
+             if(window!=null&&getTargetContext().getPackageName().contentEquals(window.getPackageName()==null?"":window.getPackageName())){
+              List<AccessibilityNodeInfo> found=new ArrayList<>();nodes(window,"编辑待办输入",true,found);
+              if(present&&found.size()==1||!present&&found.isEmpty())return window;
+             }
+             need(SystemClock.elapsedRealtime()<deadline,"editor accessibility window deadline");SystemClock.sleep(50);
+            }
+           }
+           static void readEditedText(AccessibilityNodeInfo input,String expected){
+            // refresh() bypasses the node cache; one read, no input replay or assertion retry.
+            need(input.refresh(),"edit text refresh: node obsolete");
+            CharSequence actual=input.getText();
+            need(actual!=null&&expected.contentEquals(actual),"edit text readback expected=["+expected+"] actual=["+actual+"]");
+           }
+           void editCancel(String first)throws Exception{
+            Map<String,List<List<String>>> initial=state();add("Edit cancellation victim");
+            Map<String,List<List<String>>> withVictim=state();String victim=null;
+            Set<String> old=new HashSet<>();for(int i=0;i<initial.get("todos").size()-1;i++)old.add(idAt(initial,i));
+            for(int i=0;i<withVictim.get("todos").size()-1;i++){String id=idAt(withVictim,i);if(!old.contains(id)){need(victim==null,"one added victim");victim=id;}}
+            need(victim!=null,"new victim identity");input("  cancel keeps composer  ");remove(victim);confirm();
+            Map<String,List<List<String>>> deleted=state();Map<String,String> assets=media();
+            pass(deleted.equals(expected(withVictim,victim,1)),"edit_cancel_fixture_created");
+            final View[] saved=new View[2];final Object[] rendered=new Object[1];
+            ui(()->{saved[0]=unique(root(),"todo-undo-notice",true);saved[1]=unique(root(),"撤销删除",false);
+             need(saved[0].isShown()&&saved[1].isShown()&&field(screen,"todoUndo")!=null,"live undo before edit");
+             rendered[0]=field(screen,"todoView");});
+            click(root(),"edit-"+first,true);
+            AccessibilityNodeInfo window=editWindow(true);
+            List<AccessibilityNodeInfo> inputs=new ArrayList<>();nodes(window,"编辑待办输入",true,inputs);
+            need(inputs.size()==1&&"Same native todo".contentEquals(inputs.get(0).getText()),"exact edit initial title");
+            ui(()->hiddenUndo(saved[0],saved[1],field(screen,"todoUndo")));
+            pass(deleted.equals(state())&&assets.equals(media()),"edit_open_invalidates_undo_controls");
+            Bundle text=new Bundle();text.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,"Do not save this edit");
+            need(inputs.get(0).performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,text),"edit text action");
+            readEditedText(inputs.get(0),"Do not save this edit");
+            window=editWindow(true);inputs.clear();nodes(window,"编辑待办输入",true,inputs);
+            need(inputs.size()==1,"unique edit input after text action");
+            List<AccessibilityNodeInfo> cancel=new ArrayList<>();nodes(window,"取消",false,cancel);
+            need(cancel.size()==1&&cancel.get(0).isEnabled()&&cancel.get(0).isVisibleToUser(),"unique visible editor cancel");
+            need(cancel.get(0).performAction(AccessibilityNodeInfo.ACTION_CLICK),"editor cancel action");editWindow(false);ready();
+            ui(()->{need(field(screen,"todoView")==rendered[0],"cancel without list redraw");hiddenUndo(saved[0],saved[1],field(screen,"todoUndo"));});
+            pass(deleted.equals(state())&&assets.equals(media()),"edit_cancel_readonly");
+            pass(text(root(),"新待办输入").equals("  cancel keeps composer  "),"edit_cancel_preserves_composer");
+            // Deliberately deliver a stale callback once; hidden views must not replay undo.
+            ui(()->saved[1].performClick());ready();
+            pass(deleted.equals(state())&&assets.equals(media()),"edit_cancel_stale_undo_readonly");
+           }
+           void seed()throws Exception{
+            need(!getTargetContext().getDatabasePath("pocket-v12.db").exists(),"no SQL-seeded live UI database");
+            need(!Files.exists(folder),"fresh native receipt directory");Files.createDirectory(folder);
+            launch();pass(state().get("todos").size()==1,"fresh_ui_database");
+            add("Same native todo");add("Same native todo");add("Keep native last");
+            Map<String,List<List<String>>> before=state();String first=idAt(before,0),target=idAt(before,1);
+            need(!first.equals(target),"different stable IDs");click(root(),"todo-"+target,true);
+            before=state();Map<String,String> assets=media();
+            List<List<String>> rows=before.get("todos");int title=rows.get(0).indexOf("title"),done=rows.get(0).indexOf("done");
+            pass(rows.size()==4&&rows.get(1).get(title).equals(rows.get(2).get(title))&&rows.get(2).get(done).equals("1:1"),"ui_created_same_title_completed");
+            input("  composer retained  ");remove(target);AlertDialog d=dialog();
+            pass(text(d.getWindow().getDecorView(),"todo-delete-details").equals("Same native todo\n状态：已完成\nID："+target),"exact_confirmation_identity");
+            pass(text(d.getWindow().getDecorView(),"todo-undo-limit").contains("重启后不可撤销"),"explicit_undo_limit");
+            pass(before.equals(state())&&assets.equals(media()),"preview_all_state_readonly");
+            click(d.getWindow().getDecorView(),"todo-delete-cancel",true);
+            pass(before.equals(state())&&assets.equals(media()),"cancel_all_state_readonly");
+            pass(text(root(),"新待办输入").equals("  composer retained  "),"cancel_preserves_composer");
+            remove(target);confirm();
+            pass(expected(before,target,1).equals(state())&&assets.equals(media()),"delete_exact_all_tables_media");
+            pass(text(root(),"新待办输入").equals("  composer retained  "),"delete_preserves_composer");
+            click(root(),"todo-undo-"+target,true);
+            pass(expected(before,null,2).equals(state())&&assets.equals(media()),"undo_exact_identity_done_position_rowid");
+            noUndo();pass(text(root(),"新待办输入").equals("  composer retained  "),"undo_single_use_and_composer");
+            // A second deletion is intentionally retained across the next instrumentation process.
+            before=state();remove(target);confirm();
+            pass(expected(before,target,1).equals(state()),"second_delete_exact");
+            click(root(),"活动",false);click(root(),"今天",false);noUndo();
+            pass(expected(before,target,1).equals(state())&&assets.equals(media()),"navigation_invalidates_undo_readonly");
+            save("deleted-state",state().toString());save("media",assets.toString());save("first-id",first);
+            pass(true,"deleted_restart_checkpoint");
+           }
+           void deleted()throws Exception{
+            launch();pass(read("deleted-state").equals(state().toString())&&read("media").equals(media().toString()),"deleted_restart_state");
+            noUndo();pass(true,"restart_has_no_undo");
+            Map<String,List<List<String>>> before=state();String first=read("first-id");remove(first);confirm();click(root(),"todo-undo-"+first,true);
+            pass(expected(before,null,2).equals(state())&&read("media").equals(media().toString()),"second_identity_delete_undo");
+            editCancel(first);
+            orderBackend();
+            orderButtons();
+            save("undone-state",state().toString());pass(true,"undone_restart_checkpoint");
+           }
+           void undone()throws Exception{
+            launch();pass(read("undone-state").equals(state().toString())&&read("media").equals(media().toString()),"undone_restart_state");
+            noUndo();pass(true,"undone_restart_no_replay");
+            orderRestart();
+            orderButtonsRestart();
+           }
+           @Override public void onCreate(Bundle b){super.onCreate(b);args=b;start();}
+           @Override public void onStart(){
+            Bundle result=new Bundle();java.io.ByteArrayOutputStream bytes=new java.io.ByteArrayOutputStream();java.io.PrintStream previous=System.out;
+            try(java.io.PrintStream log=new java.io.PrintStream(bytes,true,"UTF-8")){
+             System.setOut(log);String pkg=getTargetContext().getPackageName();int api=Build.VERSION.SDK_INT;nonce=args.getString("nonce");phase=args.getString("phase");
+             need(pkg.equals(args.getString("expectedPackage"))&&pkg.equals("com.supercubegame.pockettodo.v12.preview"),"target package");
+             need(api==Integer.parseInt(args.getString("expectedApi"))&&(api==26||api==34),"actual API");
+             need(android.os.Process.myUid()==getTargetContext().getApplicationInfo().uid&&android.os.Process.myUid()>=10000,"target uid");
+             need(Build.HARDWARE.contains("ranchu")||Build.HARDWARE.contains("goldfish"),"emulator only");
+             need(nonce!=null&&nonce.matches("[0-9]+-[0-9]+-(26|34)"),"nonce");
+             folder=getTargetContext().getCacheDir().toPath().resolve("native-todo-"+nonce);
+             System.out.println("TODO_TARGET "+pkg+" "+android.os.Process.myUid()+" "+api+" "+nonce+" "+phase);
+             if("diagnostic".equals(phase))throw new AssertionError("todo_diagnostic_sentinel");
+             if("seed".equals(phase))seed();else if("deleted".equals(phase))deleted();else if("undone".equals(phase))undone();else throw new AssertionError("phase");
+             System.out.println("TODO_RESULT "+phase+" "+count+" PASS");
+             result.putString("stream",bytes.toString("UTF-8"));finish(Activity.RESULT_OK,result);
+            }catch(Throwable e){
+             e.printStackTrace(new java.io.PrintStream(bytes));result.putString("stream",bytes.toString()+"\nTODO_FAILED\n");finish(Activity.RESULT_CANCELED,result);
+            }finally{System.setOut(previous);}
+           }
+          }
+          '''
+          
+          def validate(v,m,logs,api,source,run,attempt):
+              assert v["status"]=="PASS" and v["scope"]==SCOPE
+              for k,want in dict(api=api,commit=source,run_id=run,run_attempt=attempt).items():
+                  assert type(v[k]) is type(want) and v[k]==want
+                  assert type(m[k]) is type(want) and m[k]==want
+              for k in ("apk_sha256","certificate"):
+                  assert re.fullmatch("[0-9a-f]{64}",v[k]) and v[k]==m[k]
+              assert type(v["apk_bytes"]) is int and type(m["apk_bytes"]) is int and 0<v["apk_bytes"]==m["apk_bytes"]
+              assert type(v["checks"]) is int and v["checks"]==55 and v["labels"]==ACCEPTED
+              assert v["release_ready"] is False and v["cross_restart_undo"]=="NOT_SUPPORTED"
+              assert v["native_ui"]=="WIDGET_CALLBACKS_NOT_PHYSICAL_TOUCH"
+              assert v["default_test_restored"] is True and v["diagnostic_rejected"] is True
+              assert v["product_readback"]=="EXACT_BEFORE_AND_AFTER"
+              assert not any(k in v for k in ("error","restoration_error","command_failure"))
+              nonce=run+"-"+attempt+"-"+str(api)
+              # Clone the existing strict parser with this independently specified UI phase list.
+              namespace=dict(vars(backend));namespace["REQUIRED"]=LABELS
+              exec(compile(inspect.getsource(backend.observe),"<native-receipt-parser>","exec"),namespace)
+              for phase,labels in LABELS.items():
+                  assert namespace["observe"](logs[phase],backend.PACKAGE,api,nonce,phase)==labels==v[phase]["labels"]
+                  assert hashlib.sha256(logs[phase].encode()).hexdigest()==v[phase]["log_sha256"]
+              diagnostic=logs["diagnostic"]
+              assert "java.lang.AssertionError: todo_diagnostic_sentinel" in diagnostic
+              assert "TODO_FAILED" in diagnostic and "INSTRUMENTATION_CODE: 0" in diagnostic
+              assert "TODO_RESULT" not in diagnostic
+              assert len(v["stops"])==2
+              for s in v["stops"]:
+                  assert s["status"]=="PASS" and s["package"]==backend.PACKAGE
+                  assert s["scope"]=="COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK"
+                  assert type(s["force_stop_attempts"]) is int and s["force_stop_attempts"]==1
+                  c,p=s["command"],s["probes"][-1]
+                  assert type(c["returncode"]) is int and c["returncode"]==0 and c["stdout"]==c["stderr"]==""
+                  assert c["args"][-3:]==["am","force-stop",backend.PACKAGE]
+                  assert type(p["returncode"]) is int and p["returncode"]==1
+                  assert p["stdout"].strip()==p["stderr"].strip()=="" and p["args"][-2:]==["pidof",backend.PACKAGE]
+          
+          def fixture(api):
+              m=dict(api=api,commit="a"*40,run_id="123",run_attempt="1",apk_sha256="b"*64,certificate="c"*64,apk_bytes=100)
+              stop=dict(status="PASS",package=backend.PACKAGE,scope="COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",force_stop_attempts=1,
+                        command=dict(args=["am","force-stop",backend.PACKAGE],returncode=0,stdout="",stderr=""),
+                        probes=[dict(args=["pidof",backend.PACKAGE],returncode=1,stdout="",stderr="")])
+              v=dict(m,status="PASS",scope=SCOPE,checks=55,labels=ACCEPTED[:],release_ready=False,cross_restart_undo="NOT_SUPPORTED",
+                     native_ui="WIDGET_CALLBACKS_NOT_PHYSICAL_TOUCH",default_test_restored=True,diagnostic_rejected=True,
+                     product_readback="EXACT_BEFORE_AND_AFTER",stops=[copy.deepcopy(stop),copy.deepcopy(stop)])
+              logs={"diagnostic":"java.lang.AssertionError: todo_diagnostic_sentinel\nTODO_FAILED\nINSTRUMENTATION_CODE: 0"}
+              for phase,labels in LABELS.items():
+                  t="INSTRUMENTATION_RESULT: stream=TODO_TARGET "+backend.PACKAGE+" 10123 "+str(api)+" 123-1-"+str(api)+" "+phase+"\n"
+                  t+="".join("TODO_PASS "+x+"\n" for x in labels)+"TODO_RESULT "+phase+" "+str(len(labels))+" PASS\nINSTRUMENTATION_CODE: -1\n"
+                  logs[phase]=t;v[phase]=dict(labels=labels[:],log_sha256=hashlib.sha256(t.encode()).hexdigest())
+              return v,m,logs
+          
+          def isolated_native(gate, callback):
+              base,avd=gate.BASE,gate.AVD_HOME
+              assert avd==base/"avd","unexpected emulator path relationship"
+              target=base.with_name(base.name+"-todo-native")
+              if target.exists() or target.is_symlink():
+                  raise FileExistsError("native emulator directory already exists: "+str(target))
+              try:
+                  gate.BASE=target
+                  gate.AVD_HOME=target/"avd"
+                  return callback()
+              finally:
+                  gate.BASE,gate.AVD_HOME=base,avd
+          
+          def isolation_selftest():
+              from types import SimpleNamespace
+              source=inspect.getsource(isolated_native)
+              def exercise(invoke):
+                  for fail in (False,True):
+                      with tempfile.TemporaryDirectory(prefix="todo-isolation-") as tmp:
+                          base=Path(tmp)/"pocket-avd-123-26";avd=base/"avd";avd.mkdir(parents=True)
+                          sentinel=avd/"preserve";sentinel.write_bytes(b"backend-evidence")
+                          target=base.with_name(base.name+"-todo-native")
+                          gate=SimpleNamespace(BASE=base,AVD_HOME=avd);calls=[];error=RuntimeError("native-sentinel")
+                          def callback():
+                              assert gate.BASE==target and gate.AVD_HOME==target/"avd","native_paths"
+                              gate.BASE.mkdir(parents=True,exist_ok=False);gate.AVD_HOME.mkdir()
+                              calls.append(1)
+                              if fail:raise error
+                              return "native-return"
+                          caught=None
+                          try:assert invoke(gate,callback)=="native-return"
+                          except RuntimeError as e:caught=e
+                          assert caught is (error if fail else None),"original_failure"
+                          assert calls==[1] and target.is_dir(),"single_invocation"
+                          assert gate.BASE==base and gate.AVD_HOME==avd,"restore_paths"
+                          assert sentinel.read_bytes()==b"backend-evidence","backend_preserved"
+                          for symlink in (False,True):
+                              occupied_base=base
+                              if symlink:
+                                  occupied_base=base.with_name("linked")
+                                  link=occupied_base.with_name(occupied_base.name+"-todo-native")
+                                  link.symlink_to(target,target_is_directory=True)
+                              occupied=SimpleNamespace(BASE=occupied_base,AVD_HOME=occupied_base/"avd")
+                              old=(occupied.BASE,occupied.AVD_HOME);seen=[]
+                              try:invoke(occupied,lambda:seen.append(1))
+                              except FileExistsError:pass
+                              else:raise AssertionError("occupied_refused")
+                              assert not seen and (occupied.BASE,occupied.AVD_HOME)==old,"occupied_untouched"
+              exercise(isolated_native)
+              for old,new,label in (
+                  ('base.with_name(base.name+"-todo-native")','base',"native_paths"),
+                  ('gate.AVD_HOME=target/"avd"','gate.AVD_HOME=avd',"native_paths"),
+                  ('gate.BASE,gate.AVD_HOME=base,avd','pass',"restore_paths"),
+              ):
+                  assert source.count(old)==1
+                  namespace=dict(globals());exec(compile(source.replace(old,new),"<native-isolation-mutant>","exec"),namespace)
+                  try:exercise(namespace["isolated_native"])
+                  except (AssertionError,FileExistsError) as e:
+                      assert label in str(e) or (label=="native_paths" and isinstance(e,FileExistsError)),repr(e)
+                  else:raise AssertionError("isolation mutant survived "+label)
+              print("NATIVE_ISOLATION positive=2 occupied_negative=4 compiled_mutants=3 PASS; host filesystem, not emulator")
+          
+          def selftest():
+              isolation_selftest()
+              total=0
+              for api in (26,34):
+                  v,m,l=fixture(api);validate(v,m,l,api,"a"*40,"123","1");bad=[]
+                  for key in v:
+                      b=copy.deepcopy(v);del b[key];bad.append((b,m,l))
+                  for key in m:
+                      b=dict(m);del b[key];bad.append((v,b,l))
+                  for key,value in (("checks",55.0),("checks",True),("api",float(api)),("status","FAIL"),("commit","d"*40),
+                                    ("run_id","124"),("run_attempt","2"),("apk_bytes",True),("apk_sha256","d"*64),
+                                    ("certificate","d"*64),("native_ui","PASS"),("release_ready",0),("default_test_restored",1),
+                                    ("diagnostic_rejected",1),("command_failure",{}),("error","sentinel")):
+                      b=copy.deepcopy(v);b[key]=value;bad.append((b,m,l))
+                  for label in ACCEPTED:
+                      b=copy.deepcopy(v);b["labels"].remove(label);bad.append((b,m,l))
+                  for phase in LABELS:
+                      b=dict(l);b[phase]=b[phase].replace("INSTRUMENTATION_CODE: -1","INSTRUMENTATION_CODE: 0");bad.append((v,m,b))
+                      b=dict(l);del b[phase];bad.append((v,m,b))
+                  for code in (0,255,True):
+                      b=copy.deepcopy(v);b["stops"][0]["probes"][0]["returncode"]=code;bad.append((b,m,l))
+                  b=dict(l);b["diagnostic"]="";bad.append((v,m,b))
+                  for b,n,logs in bad:
+                      try:validate(b,n,logs,api,"a"*40,"123","1")
+                      except (AssertionError,KeyError,TypeError,IndexError):total+=1
+                      else:raise AssertionError("bad native receipt accepted")
+              # Actual compiled Python validator mutations, with otherwise valid fixtures.
+              source=inspect.getsource(validate);v,m,l=fixture(26)
+              changes=[
+                ('assert type(v["checks"]) is int and v["checks"]==55 and v["labels"]==ACCEPTED',"assert True","labels",[]),
+                ('assert type(v[k]) is type(want) and v[k]==want',"assert True","commit","d"*40),
+                ('assert v["native_ui"]=="WIDGET_CALLBACKS_NOT_PHYSICAL_TOUCH"',"assert True","native_ui","NOT_IMPLEMENTED"),
+              ]
+              for old,new,key,value in changes:
+                  assert source.count(old)==1
+                  b=copy.deepcopy(v);b[key]=value
+                  try:validate(b,m,l,26,"a"*40,"123","1")
+                  except AssertionError:pass
+                  else:raise AssertionError("mutation fixture not rejected")
+                  namespace=dict(globals());exec(compile(source.replace(old,new),"<native-validator-mutant>","exec"),namespace)
+                  namespace["validate"](b,m,l,26,"a"*40,"123","1")
+              # Parse the complete generated Java, not a hand-translated implementation.
+              parser='''import javax.tools.*;import com.sun.source.util.*;import com.sun.source.tree.*;import java.util.*;import java.nio.file.*;
+          class Parse{public static void main(String[] a)throws Exception{JavaCompiler c=ToolProvider.getSystemJavaCompiler();
+          DiagnosticCollector<JavaFileObject>d=new DiagnosticCollector<>();
+          try(StandardJavaFileManager f=c.getStandardFileManager(d,null,null)){
+          JavacTask t=(JavacTask)c.getTask(null,f,d,Arrays.asList("-proc:none"),null,f.getJavaFileObjects(a[0]));
+          CompilationUnitTree unit=t.parse().iterator().next();for(Diagnostic<?>x:d.getDiagnostics())if(x.getKind()==Diagnostic.Kind.ERROR)throw new AssertionError(x.toString());
+          String source=Files.readString(Path.of(a[0]));SourcePositions positions=Trees.instance(t).getSourcePositions();int found=0;
+          for(Tree type:unit.getTypeDecls())if(type instanceof ClassTree)for(Tree member:((ClassTree)type).getMembers())
+          if(member instanceof MethodTree&&((MethodTree)member).getName().contentEquals(a.length>2?a[2]:"expected")){
+          Files.writeString(Path.of(a[1]),source.substring((int)positions.getStartPosition(unit,member),(int)positions.getEndPosition(unit,member)));found++;}
+          if(found!=1)throw new AssertionError("one expected method required");}}}'''
+              oracle='''import java.util.*;class Oracle{
+          static void need(boolean b,String s){if(!b)throw new AssertionError(s);}
+          __METHOD__
+          static List<String> row(String...s){return new ArrayList<>(Arrays.asList(s));}
+          public static void main(String[]args){
+          Map<String,List<List<String>>> b=new TreeMap<>();
+          b.put("todos",new ArrayList<>(Arrays.asList(row("rowid","id","title","done","position"),row("1:1","3:first","3:same","1:0","1:10"),row("1:2","3:second","3:same","1:1","1:11"))));
+          b.put("revision",new ArrayList<>(Arrays.asList(row("rowid","id","value"),row("1:1","1:1","1:8"))));
+          b.put("other",new ArrayList<>(Arrays.asList(row("rowid","id"),row("1:3","3:keep"))));
+          String original=b.toString();Map<String,List<List<String>>> e=expected(b,"second",1);
+          need(e.get("todos").size()==2&&e.get("todos").get(1).get(1).equals("3:first"),"exact_delete");
+          need(e.get("revision").get(1).get(2).equals("1:9"),"revision_delta");
+          need(b.toString().equals(original),"input_immutable");
+          need(e.get("other").equals(b.get("other")),"other_preserved");
+          Map<String,List<List<String>>> u=expected(b,null,2);
+          need(u.get("todos").equals(b.get("todos"))&&u.get("revision").get(1).get(2).equals("1:10"),"undo_expected");
+          boolean refused=false;try{expected(b,"missing",1);}catch(AssertionError x){refused=true;}need(refused,"missing_target");
+          System.out.println("NATIVE_ORACLE 6 PASS");
+          }}'''
+              with tempfile.TemporaryDirectory() as tmp:
+                  p=Path(tmp);(p/"Parse.java").write_text(parser);(p/"TodoInstrumentation.java").write_text(JAVA)
+                  subprocess.run(["java",str(p/"Parse.java"),str(p/"TodoInstrumentation.java"),str(p/"method.txt")],check=True,timeout=30)
+                  method=(p/"method.txt").read_text()
+                  subprocess.run(["java",str(p/"Parse.java"),str(p/"TodoInstrumentation.java"),str(p/"order.txt"),"orderExpected"],check=True,timeout=30)
+                  order_method=(p/"order.txt").read_text()
+                  order_harness='''import java.util.*;class OrderOracle{
+          static void need(boolean b,String s){if(!b)throw new AssertionError(s);}
+          __EXPECTED__
+          __ORDER__
+          static List<String> row(String...s){return new ArrayList<>(Arrays.asList(s));}
+          static Map<String,List<List<String>>> fixture(boolean single){
+          Map<String,List<List<String>>> b=new TreeMap<>();
+          List<List<String>> rows=new ArrayList<>();rows.add(row("rowid","id","title","done","position"));
+          rows.add(row("1:11","3:first","3:same","1:0","1:0"));
+          if(!single){rows.add(row("1:22","3:middle","3:same","1:1","1:7"));rows.add(row("1:33","3:last","3:last","1:0","1:9223372036854775807"));}
+          b.put("todos",rows);b.put("revision",new ArrayList<>(Arrays.asList(row("rowid","id","value"),row("1:1","1:1","1:8"))));
+          b.put("other",new ArrayList<>(Arrays.asList(row("rowid","id"),row("1:9","3:keep"))));return b;}
+          public static void main(String[]args){
+          Map<String,List<List<String>>> single=fixture(true);
+          need(orderExpected(single,"first",0).equals(single),"single_noop");
+          System.out.println("ORDER_VALID_WITNESS_PASS");
+          Map<String,List<List<String>>> b=fixture(false);String before=b.toString();
+          need(orderExpected(b,"middle",1).equals(b),"gap_noop");
+          Map<String,List<List<String>>> forward=orderExpected(b,"first",2),want=fixture(false);
+          want.get("todos").get(1).set(4,"1:9223372036854775807");
+          want.get("todos").get(2).set(4,"1:0");want.get("todos").get(3).set(4,"1:7");
+          want.get("revision").get(1).set(2,"1:9");
+          need(forward.equals(want),"forward_exact_all_cells");need(b.toString().equals(before),"input_immutable");
+          Map<String,List<List<String>>> back=orderExpected(forward,"first",0),restored=fixture(false);
+          restored.get("revision").get(1).set(2,"1:10");
+          need(back.equals(restored),"backward_exact_all_cells");
+          for(int to:new int[]{-1,3}){boolean bad=false;try{orderExpected(b,"first",to);}catch(AssertionError e){bad=true;}need(bad,"bad_bound");}
+          boolean bad=false;try{orderExpected(b,"missing",0);}catch(AssertionError e){bad=true;}need(bad,"missing");
+          need(b.toString().equals(before),"negative_readonly");
+          System.out.println("ORDER_ORACLE positive=4 negative=3 PASS; actual Java oracle, not Android product");}}
+          '''
+                  def order_execute(code):
+                      (p/"OrderOracle.java").write_text(order_harness.replace("__EXPECTED__",method).replace("__ORDER__",code))
+                      return subprocess.run(["java",str(p/"OrderOracle.java")],capture_output=True,text=True,timeout=30)
+                  result=order_execute(order_method);assert result.returncode==0,(result.stdout,result.stderr);print(result.stdout.strip())
+                  for old,new,label in (
+                      ('from==to?0:1','0','forward_exact_all_cells'),
+                      ('"1:"+slots.get(index)','"1:"+index','gap_noop'),
+                      ('ids.add(to,ids.remove(from));',';','forward_exact_all_cells'),
+                  ):
+                      assert order_method.count(old)==1
+                      result=order_execute(order_method.replace(old,new))
+                      assert result.returncode!=0 and "ORDER_VALID_WITNESS_PASS" in result.stdout and "AssertionError: "+label in result.stderr,(label,result.stdout,result.stderr)
+                      print("ORDER_ORACLE_MUTANT_REJECTED",label)
+                  def execute(code):
+                      (p/"Oracle.java").write_text(oracle.replace("__METHOD__",code))
+                      return subprocess.run(["java",str(p/"Oracle.java")],capture_output=True,text=True,timeout=30)
+                  result=execute(method);assert result.returncode==0,(result.stdout,result.stderr);print(result.stdout.strip())
+                  for old,new,label in (
+                      ("if(omit!=null)","if(false)","exact_delete"),
+                      ("substring(2)),delta)","substring(2)),0)","revision_delta"),
+                      ("rows.add(new ArrayList<>(r))","rows.add(r)","input_immutable")):
+                      assert method.count(old)==1
+                      result=execute(method.replace(old,new))
+                      assert result.returncode!=0 and "AssertionError: "+label in result.stderr,(label,result.stdout,result.stderr)
+                      print("NATIVE_ORACLE_MUTANT_REJECTED",label)
+                  # Execute the actual generated click helper against explicit Android-style doubles.
+                  # CompoundButton toggles before delegating to View.performClick, whose return
+                  # reflects an OnClickListener, not successful OnCheckedChangeListener delivery.
+                  subprocess.run(["java",str(p/"Parse.java"),str(p/"TodoInstrumentation.java"),str(p/"click.txt"),"clickOnce"],check=True,timeout=30)
+                  click_method=(p/"click.txt").read_text()
+                  click_harness='''class ClickOracle{
+          static void need(boolean b,String s){if(!b)throw new AssertionError(s);}
+          static class View{boolean handled;int calls;View(boolean h){handled=h;}boolean performClick(){calls++;return handled;}}
+          static class CheckBox extends View{
+          boolean checked,toggles;CheckBox(boolean c,boolean h,boolean t){super(h);checked=c;toggles=t;}
+          boolean isChecked(){return checked;}boolean performClick(){if(toggles)checked=!checked;return super.performClick();}}
+          __METHOD__
+          static void check(View v,boolean accept,String label){
+          boolean passed=false;try{clickOnce(v,label);passed=true;}catch(AssertionError e){}
+          need(passed==accept,label);need(v.calls==1,"single_click_"+label);}
+          public static void main(String[]args){
+          check(new CheckBox(false,false,true),true,"checked_listener_only_on");
+          check(new CheckBox(true,false,true),true,"checked_listener_only_off");
+          check(new CheckBox(false,true,true),true,"checked_and_click_listener");
+          check(new View(true),true,"button_handled");
+          check(new CheckBox(false,false,false),false,"reject_no_toggle_false");
+          check(new CheckBox(false,true,false),false,"reject_no_toggle_true");
+          check(new View(false),false,"reject_unhandled_button");
+          System.out.println("NATIVE_CLICK_CONTRACT positive=4 negative=3 PASS; modeled widgets, not Android");
+          }}'''
+                  def click_execute(code):
+                      (p/"ClickOracle.java").write_text(click_harness.replace("__METHOD__",code))
+                      return subprocess.run(["java",str(p/"ClickOracle.java")],capture_output=True,text=True,timeout=30)
+                  click_result=click_execute(click_method)
+                  assert click_result.returncode==0,(click_result.stdout,click_result.stderr)
+                  print(click_result.stdout.strip())
+                  for old,new,label in (
+                      ('need(box.isChecked()!=before,"checkbox toggled "+value);',';',"reject_no_toggle_false"),
+                      ('need(v.performClick(),"click handled "+value);','v.performClick();',"reject_unhandled_button"),
+                      ('box.performClick();','box.performClick();box.performClick();',"checked_listener_only_on"),
+                  ):
+                      assert click_method.count(old)==1
+                      result=click_execute(click_method.replace(old,new))
+                      assert result.returncode!=0 and "AssertionError: "+label in result.stderr,(label,result.stdout,result.stderr)
+                      print("NATIVE_CLICK_MUTANT_REJECTED",label)
+                  subprocess.run(["java",str(p/"Parse.java"),str(p/"TodoInstrumentation.java"),str(p/"hidden.txt"),"hiddenUndo"],check=True,timeout=30)
+                  hidden_method=(p/"hidden.txt").read_text()
+                  hidden_harness='''class HiddenOracle{
+          static void need(boolean b,String s){if(!b)throw new AssertionError(s);}
+          static class View{static final int GONE=8;int visibility;View(int v){visibility=v;}int getVisibility(){return visibility;}}
+          __METHOD__
+          static void check(int hint,int button,Object token,boolean accept,String label){
+          boolean passed=false;try{hiddenUndo(new View(hint),new View(button),token);passed=true;}catch(AssertionError e){}
+          need(passed==accept,label);}
+          public static void main(String[]args){
+          check(8,8,null,true,"hidden_consumed");
+          System.out.println("HIDDEN_POSITIVE_PASS");
+          check(0,8,null,false,"reject_visible_hint");
+          check(8,0,null,false,"reject_visible_button");
+          check(8,8,new Object(),false,"reject_live_token");
+          System.out.println("NATIVE_HIDDEN_CONTRACT positive=1 negative=3 PASS; modeled visibility, not Android");
+          }}'''
+                  def hidden_execute(code):
+                      (p/"HiddenOracle.java").write_text(hidden_harness.replace("__METHOD__",code))
+                      return subprocess.run(["java",str(p/"HiddenOracle.java")],capture_output=True,text=True,timeout=30)
+                  result=hidden_execute(hidden_method);assert result.returncode==0,(result.stdout,result.stderr);print(result.stdout.strip())
+                  for old,label in (
+                      ('need(hint.getVisibility()==View.GONE,"undo hint hidden");',"reject_visible_hint"),
+                      ('need(button.getVisibility()==View.GONE,"undo button hidden");',"reject_visible_button"),
+                      ('need(token==null,"undo token invalidated");',"reject_live_token"),
+                  ):
+                      assert hidden_method.count(old)==1
+                      result=hidden_execute(hidden_method.replace(old,";"))
+                      assert result.returncode!=0 and "AssertionError: "+label in result.stderr and "HIDDEN_POSITIVE_PASS" in result.stdout,(label,result.stdout,result.stderr)
+                      print("NATIVE_HIDDEN_MUTANT_REJECTED",label)
+                  # Compile the actual generated fresh-read helper with explicit cache doubles.
+                  subprocess.run(["java",str(p/"Parse.java"),str(p/"TodoInstrumentation.java"),str(p/"edit-read.txt"),"readEditedText"],check=True,timeout=30)
+                  edit_method=(p/"edit-read.txt").read_text()
+                  edit_harness='class EditReadOracle{\nstatic void need(boolean b,String s){if(!b)throw new AssertionError(s);}\nstatic class AccessibilityNodeInfo{\nString cached,live;boolean ok;int refreshes,reads;RuntimeException failure;\nAccessibilityNodeInfo(String c,String l,boolean o){cached=c;live=l;ok=o;}\nboolean refresh(){refreshes++;if(failure!=null)throw failure;if(ok)cached=live;return ok;}\nCharSequence getText(){reads++;return cached;}\n}\n__METHOD__\nstatic void check(String cached,String live,boolean ok,boolean accept,String label){\nAccessibilityNodeInfo n=new AccessibilityNodeInfo(cached,live,ok);boolean passed=false;String error="";\ntry{readEditedText(n,"Do not save this edit");passed=true;}catch(AssertionError e){error=e.getMessage();}\nneed(passed==accept,label);\nneed(n.refreshes==1&&n.reads==(ok?1:0),"single_fresh_read_"+label);\nif(!accept)need(error.contains(ok?"actual=["+live+"]":"node obsolete"),"failure_detail_"+label);\n}\npublic static void main(String[]args){\nreadEditedText(new AccessibilityNodeInfo("Do not save this edit","Do not save this edit",true),"Do not save this edit");\nSystem.out.println("EDIT_READ_VALID_WITNESS_PASS");\ncheck("Same native todo","Do not save this edit",true,true,"fresh_after_stale_cache");\ncheck("Do not save this edit","Do not save this edit",true,true,"already_current");\ncheck("Do not save this edit","Do not save this edit",false,false,"obsolete_even_with_expected_cache");\ncheck("Do not save this edit","Wrong value",true,false,"reject_wrong_fresh_value");\ncheck("Do not save this edit",null,true,false,"reject_null_fresh_value");\ncheck("Do not save this edit","Do not save this edit ",true,false,"reject_whitespace_difference");\nAccessibilityNodeInfo n=new AccessibilityNodeInfo("Do not save this edit","Do not save this edit",true);\nRuntimeException sentinel=new RuntimeException("refresh_failure");n.failure=sentinel;Throwable caught=null;\ntry{readEditedText(n,"Do not save this edit");}catch(Throwable e){caught=e;}\nneed(caught==sentinel&&n.refreshes==1&&n.reads==0,"refresh_failure_preserved_without_read");\nSystem.out.println("NATIVE_EDIT_READ positive=2 negative=5 PASS; modeled node cache, not Android failure reproduction");\n}}'
+                  def edit_execute(code):
+                      (p/"EditReadOracle.java").write_text(edit_harness.replace("__METHOD__",code))
+                      return subprocess.run(["java",str(p/"EditReadOracle.java")],capture_output=True,text=True,timeout=30)
+                  result=edit_execute(edit_method);assert result.returncode==0,(result.stdout,result.stderr);print(result.stdout.strip())
+                  for before,after,label in (
+                      ('need(input.refresh(),"edit text refresh: node obsolete");','need(true,"edit text refresh: node obsolete");',"fresh_after_stale_cache"),
+                      ('need(input.refresh(),"edit text refresh: node obsolete");','input.refresh();',"obsolete_even_with_expected_cache"),
+                      ('actual!=null&&expected.contentEquals(actual)','true',"reject_wrong_fresh_value"),
+                  ):
+                      assert edit_method.count(before)==1
+                      result=edit_execute(edit_method.replace(before,after))
+                      assert result.returncode!=0 and "AssertionError: "+label in result.stderr and "EDIT_READ_VALID_WITNESS_PASS" in result.stdout,(label,result.stdout,result.stderr)
+                      print("NATIVE_EDIT_READ_MUTANT_REJECTED",label)
+                  # Scope the integration guard to the real parsed caller, not comments elsewhere.
+                  subprocess.run(["java",str(p/"Parse.java"),str(p/"TodoInstrumentation.java"),str(p/"edit-cancel.txt"),"editCancel"],check=True,timeout=30)
+                  caller=(p/"edit-cancel.txt").read_text()
+                  def edit_wiring(code):
+                      action='need(inputs.get(0).performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,text),"edit text action");'
+                      read='readEditedText(inputs.get(0),"Do not save this edit");'
+                      cancel='need(cancel.get(0).performAction(AccessibilityNodeInfo.ACTION_CLICK),"editor cancel action");'
+                      assert code.count(action)==code.count(read)==code.count(cancel)==1,"single action/read/cancel"
+                      assert code.index(action)<code.index(read)<code.index(cancel),"fresh read before cancel"
+                  edit_wiring(caller)
+                  call='readEditedText(inputs.get(0),"Do not save this edit");'
+                  action='need(inputs.get(0).performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,text),"edit text action");'
+                  for bad in (caller.replace(call,""),caller.replace(action,action+action),caller.replace(action,call+action).replace(call+"\n","",1)):
+                      try:edit_wiring(bad)
+                      except AssertionError:pass
+                      else:raise AssertionError("bad edit wiring accepted")
+                  print("NATIVE_EDIT_WIRING positive=1 negative=3 PASS; canonical caller guard, not general Java equivalence")
+                  subprocess.run(["java",str(p/"Parse.java"),str(p/"TodoInstrumentation.java"),str(p/"order-controls.txt"),"orderControls"],check=True,timeout=30)
+                  controls=(p/"order-controls.txt").read_text()
+                  controls_harness='''class OrderControlsOracle{
+          static void need(boolean b,String s){if(!b)throw new AssertionError(s);}
+          static class View{boolean shown,enabled;View(boolean s,boolean e){shown=s;enabled=e;}boolean isShown(){return shown;}boolean isEnabled(){return enabled;}}
+          __METHOD__
+          static void check(boolean us,boolean ds,boolean ue,boolean de,boolean cu,boolean cd,boolean accept,String label){
+          boolean passed=false;try{orderControls(new View(us,ue),new View(ds,de),cu,cd);passed=true;}catch(AssertionError e){}
+          need(passed==accept,label);}
+          public static void main(String[]args){
+          check(true,true,true,true,true,true,true,"middle");
+          System.out.println("ORDER_CONTROLS_VALID_WITNESS_PASS");
+          check(true,true,false,true,false,true,true,"first");
+          check(true,true,true,false,true,false,true,"last");
+          check(true,true,false,false,false,false,true,"single");
+          check(false,true,false,true,false,true,false,"hidden_up");
+          check(true,false,false,true,false,true,false,"hidden_down");
+          check(true,true,true,true,false,true,false,"wrong_up");
+          check(true,true,false,false,false,true,false,"wrong_down");
+          System.out.println("ORDER_CONTROLS positive=4 negative=4 PASS; actual Java helper with widget doubles, not Android");}}
+          '''
+                  def controls_execute(code):
+                      (p/"OrderControlsOracle.java").write_text(controls_harness.replace("__METHOD__",code))
+                      return subprocess.run(["java",str(p/"OrderControlsOracle.java")],capture_output=True,text=True,timeout=30)
+                  result=controls_execute(controls);assert result.returncode==0,(result.stdout,result.stderr);print(result.stdout.strip())
+                  for old,label in (
+                      ('need(up.isShown()&&down.isShown(),"order controls shown");',"hidden_up"),
+                      ('need(up.isEnabled()==canUp,"order up enabled");',"wrong_up"),
+                      ('need(down.isEnabled()==canDown,"order down enabled");',"wrong_down"),
+                  ):
+                      assert controls.count(old)==1
+                      result=controls_execute(controls.replace(old,";"))
+                      assert result.returncode!=0 and "ORDER_CONTROLS_VALID_WITNESS_PASS" in result.stdout and "AssertionError: "+label in result.stderr,(label,result.stdout,result.stderr)
+                      print("ORDER_CONTROLS_MUTANT_REJECTED",label)
+                  # AST pretty-print discards comments before checking the real phase callers.
+                  canonical_parser=parser.replace('source.substring((int)positions.getStartPosition(unit,member),(int)positions.getEndPosition(unit,member))','member.toString()')
+                  assert canonical_parser!=parser
+                  (p/"Parse.java").write_text(canonical_parser)
+                  for phase,call in (("deleted","orderButtons();"),("undone","orderButtonsRestart();")):
+                      subprocess.run(["java",str(p/"Parse.java"),str(p/"TodoInstrumentation.java"),str(p/"phase.txt"),phase],check=True,timeout=30)
+                      caller=(p/"phase.txt").read_text()
+                      def required_call(code):
+                          assert sum(line.strip()==call for line in code.splitlines())==1,"exact top-level phase call"
+                      required_call(caller)
+                      for bad in (caller.replace(call,";"),caller.replace(call,call+"\n"+call)):
+                          try:required_call(bad)
+                          except AssertionError:pass
+                          else:raise AssertionError("order phase omission/duplication accepted")
+                  print("ORDER_PHASE_WIRING positive=2 negative=4 PASS; AST canonical phase bodies, not whole host-step omission")
+              assert sum(LABELS.values(),[])==ACCEPTED and len(ACCEPTED)==55
+              print("TODO_NATIVE_HOST",json.dumps(dict(positive=2,negative=total,validator_mutants=3,java="SYNTAX_ONLY_NOT_ANDROID")))
+          
+          def android():
+              namespace=dict(vars(backend));namespace.update(JAVA=JAVA,REQUIRED=LABELS,SCOPE=SCOPE)
+              exec(compile(inspect.getsource(backend.observe),"<native-parser>","exec"),namespace)
+              driver=inspect.getsource(backend.android)
+              assert driver.count('ROOT/"todo-device"')==1 and driver.count('native_ui="NOT_IMPLEMENTED"')==1
+              driver=driver.replace('ROOT/"todo-device"','ROOT/"todo-native"').replace('native_ui="NOT_IMPLEMENTED"','native_ui="WIDGET_CALLBACKS_NOT_PHYSICAL_TOUCH"')
+              exec(compile(driver,"<native-device-driver>","exec"),namespace)
+              import emulator_gate as gate
+              isolated_native(gate,namespace["android"])
+          
+          def report():
+              import urllib.request
+              from verify_evidence import publish
+              source,run,attempt=(os.environ[k] for k in ("GITHUB_SHA","GITHUB_RUN_ID","GITHUB_RUN_ATTEMPT"))
+              needs=json.loads(os.environ["NEEDS_JSON"]);passed=all(needs.get(k,{}).get("result")=="success" for k in ("todo_host","todo_device"))
+              devices={}
+              for api in (26,34):
+                  folder=Path("collected-todos")/("todo-device-api-"+str(api));row={"status":"FAIL"};devices[str(api)]=row
+                  try:
+                      v=json.loads((folder/"todo-native/result.json").read_text());m=json.loads((folder/"todo-apk.json").read_text())
+                      logs={p:(folder/"todo-native"/(p+".log")).read_text() for p in (*LABELS,"diagnostic")}
+                      validate(v,m,logs,api,source,run,attempt);row.update(status="PASS",evidence=v,manifest=m)
+                  except (OSError,ValueError,AssertionError,KeyError,TypeError,IndexError) as e:passed=False;row["error"]=repr(e)
+                  row["diagnostics"]={}
+                  for name in ("result.json","build.log","diagnostic.log","seed.log","deleted.log","undone.log"):
+                      try:
+                          data=(folder/"todo-native"/name).read_bytes();row["diagnostics"][name]=dict(bytes=len(data),truncated=len(data)>12000,tail=data[-12000:].decode("utf-8","replace"))
+                      except OSError as e:row["diagnostics"][name]={"error":repr(e)}
+              value=dict(status="PASS" if passed else "FAIL",scope=SCOPE,commit=source,run_id=run,run_attempt=attempt,
+                         devices=devices,parents=needs,release_ready=False,durable_upgrade_ready=False,
+                         physical_touch="NOT_TESTED",keyboard="NOT_TESTED",media_fixture="NO_REFERENCED_IMAGE",category_drag="NOT_IMPLEMENTED")
+              data=(json.dumps(value,ensure_ascii=False,indent=2)+"\n").encode();Path("todo-native-report.json").write_bytes(data)
+              endpoint="https://api.github.com/repos/"+os.environ["GITHUB_REPOSITORY"]+"/"
+              def api_call(path,method="GET",body=None):
+                  request=urllib.request.Request(endpoint+path,method=method,data=None if body is None else json.dumps(body).encode(),
+                          headers={"Authorization":"Bearer "+os.environ["GH_TOKEN"],"Accept":"application/vnd.github+json"})
+                  with urllib.request.urlopen(request,timeout=30) as response:return json.load(response)
+              print("TODO_NATIVE_REPORT_PUBLISHED",publish(api_call,"reports/todo-native-"+source+"-"+run+"-"+attempt+".json",data))
+              assert passed,"Native todo evidence missing, mismatched or failed"
+          
+          assert not sys.flags.optimize
+          {"selftest":selftest,"android":android,"report":report}[os.environ.get("NATIVE_TODO_MODE","selftest")]()
+          PY
+          python3 "$RUNNER_TEMP/todo-native-gate.py" 2>&1 | tee "todo-native-${NATIVE_TODO_MODE:-selftest}.log"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: todo-host
+          path: |
+            todo-host.log
+            todo-order-models.log
+            todo-native-selftest.log
+          if-no-files-found: error
+  todo_device:
+    needs: todo_host
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [26, 34]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      TEST_API: ${{ matrix.api }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Fixed Android build setup
+        run: |
+          set -euo pipefail
+          exec > >(tee todo-setup.log) 2>&1
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip.sha256 -o /tmp/gradle.sha256
+          echo "$(cat /tmp/gradle.sha256)  /tmp/gradle.zip" | sha256sum -c -
+          unzip -q /tmp/gradle.zip -d /tmp
+          echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+      - name: Reuse unchanged configuration-only build guard
+        env:
+          BUILD_429_EXECUTE: 'true'
+          BUILD_LOG: todo-build.log
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          lines=Path('.github/workflows/android.yml').read_text().splitlines()
+          anchor='        run: &verified_build |'
+          assert lines.count(anchor)==1
+          body=[]
+          for line in lines[lines.index(anchor)+1:]:
+              if line and not line.startswith('          '):break
+              body.append(line[10:] if line else '')
+          script='\n'.join(body)+'\n'
+          assert script.startswith("set -euo pipefail\npython3 - <<'PY'\n") and script.endswith('PY\n')
+          assert 'selftest()' in script and 'rate_limited_configuration' in script
+          subprocess.run(['bash','-n'],input=script,text=True,check=True)
+          subprocess.run(['bash','-euo','pipefail','-c',script],check=True,timeout=900)
+          PY
+      - name: Freeze independent APK identity
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os,re,subprocess
+          from pathlib import Path
+          apks=list(Path('build/outputs/apk/debug').glob('*.apk'))
+          assert len(apks)==1
+          apk=apks[0];tools=Path(os.environ['ANDROID_HOME'])/'build-tools/35.0.0'
+          def run(args):return subprocess.check_output(list(map(str,args)),text=True,timeout=30)
+          badging=run([tools/'aapt','dump','badging',apk])
+          assert "name='com.supercubegame.pockettodo.v12.preview'" in badging
+          assert "versionCode='3'" in badging and "sdkVersion:'26'" in badging and "targetSdkVersion:'34'" in badging
+          assert 'uses-permission:' not in run([tools/'aapt','dump','permissions',apk])
+          certs=re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([0-9a-f]{64})$',run([tools/'apksigner','verify','--verbose','--print-certs',apk]),re.M)
+          assert len(certs)==1
+          data=apk.read_bytes()
+          receipt=dict(commit=os.environ['GITHUB_SHA'],run_id=os.environ['GITHUB_RUN_ID'],
+                       run_attempt=os.environ['GITHUB_RUN_ATTEMPT'],api=int(os.environ['TEST_API']),
+                       apk_sha256=hashlib.sha256(data).hexdigest(),apk_bytes=len(data),certificate=certs[0])
+          Path('todo-apk.json').write_text(json.dumps(receipt,indent=2)+'\n')
+          PY
+      - name: Real installed todo API, SQLite rollback, restart and backup checks
+        run: |
+          set -euo pipefail
+          python3 tools/verify_todo_management.py android 2>&1 | tee todo-android.log
+      - name: Real native todo controls and independent database readback
+        env:
+          NATIVE_TODO_MODE: android
+        run: *todo_native_gate
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: todo-device-api-${{ matrix.api }}
+          path: |
+            todo-apk.json
+            todo-device/
+            todo-native/
+            todo-native-android.log
+            todo-setup.log
+            todo-build.log
+            todo-android.log
+            emulator.log
+            device-schema3-registration-todo-*.txt
+          if-no-files-found: error
+          retention-days: 14
+  todo_report:
+    needs: [todo_host, todo_device]
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: todo-*
+          path: collected-todos
+      - name: Require both devices and publish bounded failure evidence
+        if: always()
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 tools/verify_todo_management.py report
+      - name: Require independent native UI evidence
+        if: always()
+        env:
+          NATIVE_TODO_MODE: report
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          GH_TOKEN: ${{ github.token }}
+        run: *todo_native_gate
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: independent-todo-report
+          path: |
+            todo-report.json
+            todo-native-report.json
+            todo-native-report.log
+          if-no-files-found: error
+          retention-days: 14

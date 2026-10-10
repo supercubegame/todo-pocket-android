@@ -1,0 +1,186 @@
+name: Bounded directory trace delivery
+on:
+  push:
+    branches: [feature/v1.2-activity-notes-ledger]
+    paths: [.github/workflows/deliver-directory-trace.yml]
+permissions:
+  contents: read
+concurrency:
+  group: bounded-directory-trace-delivery
+  cancel-in-progress: false
+jobs:
+  deliver:
+    if: github.repository == 'supercubegame/todo-pocket-android' && github.ref == 'refs/heads/feature/v1.2-activity-notes-ledger'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify fixed base and reconstruct exactly two files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/directory-delivery"
+          python3 - <<'PY' 2>&1 | tee "$RUNNER_TEMP/directory-delivery/reconstruct.log"
+          import base64, gzip, hashlib, json, os, subprocess
+          from pathlib import Path
+          BASE = "c75376983966369645153809b13608ce3c4bca9d"
+          WORKFLOW = ".github/workflows/deliver-directory-trace.yml"
+          FILES = {'tools/verify_process_control.py': {'base': '7fb312cb7f5c14612f0a3e079710e761c929ad24', 'blob': '813accba1c802540e5685b7a0eca2f4e87176a43', 'sha256': 'ff2ab446663d8026153e7f83c19f39a1c4c1fced68a586c37cfa020dfa7d60ad', 'bytes': 130499}, 'tools/emulator_gate.py': {'base': '99f37bb3c5d6d522022ffa4fe0cc19ddebb6f940', 'blob': '6932ff6c929b75eddc7a2e587c74ac540212b2a4', 'sha256': 'f98fe81813d41d316315412adf82dce423bae923b49d5861379500e841b924ab', 'bytes': 116921}}
+          def git(*args):
+              return subprocess.check_output(["git", *args], text=True).strip()
+          def blob(data):
+              return hashlib.sha1(b"blob "+str(len(data)).encode()+b"\0"+data).hexdigest()
+          def validate_context(repo, ref, event, head, expected, parent, paths):
+              if (repo, ref, event) != ("supercubegame/todo-pocket-android",
+                      "refs/heads/feature/v1.2-activity-notes-ledger", "push"):
+                  raise ValueError("wrong repository/ref/event")
+              if head != expected or parent != BASE or paths != [WORKFLOW]:
+                  raise ValueError("branch drift or unexpected bootstrap changes")
+          def validate_files(expected):
+              for path, digest in expected.items():
+                  if blob(Path(path).read_bytes()) != digest:
+                      raise ValueError("file identity mismatch: "+path)
+          def validate_candidate():
+              for path, value in FILES.items():
+                  data = Path(path).read_bytes()
+                  if (blob(data), len(data), hashlib.sha256(data).hexdigest()) != (
+                          value["blob"], value["bytes"], value["sha256"]):
+                      raise ValueError("candidate mismatch: "+path)
+              changed = git("diff", "--name-only").splitlines()
+              if sorted(changed) != sorted(FILES):
+                  raise ValueError("unexpected changed tracked paths")
+          good = ["supercubegame/todo-pocket-android", "refs/heads/feature/v1.2-activity-notes-ledger",
+                  "push", "fixture-head", "fixture-head", BASE, [WORKFLOW]]
+          validate_context(*good)
+          for index, value in ((0,"other/repo"), (1,"refs/heads/main"), (2,"pull_request"),
+                               (3,"drift"), (5,"other-parent"), (6,["tools/other.py"])):
+              altered = good[:]; altered[index] = value
+              validate_context(*good)
+              try: validate_context(*altered)
+              except ValueError: pass
+              else: raise AssertionError("delivery context guard failed")
+          print("DELIVERY_CONTEXT_CONTROLS positive=1 negative=6 PASS")
+          validate_context(os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_REF"],
+              os.environ["GITHUB_EVENT_NAME"], git("rev-parse","HEAD"), os.environ["GITHUB_SHA"],
+              git("rev-parse","HEAD^"), git("diff","--name-only","HEAD^","HEAD").splitlines())
+          validate_files({p:v["base"] for p,v in FILES.items()})
+          if git("status","--porcelain","--untracked-files=no"):
+              raise ValueError("dirty checkout")
+          unchanged_workflows = {
+           "android.yml":"b6c7d8766382719a9557e58eec406a6c8e11d319",
+           "note-drafts.yml":"21922203cc64c340dcfb2c3909a7da68dc41025a",
+           "todo-management.yml":"1e6964aa7191f248717e726e8be9c46d1bd57876",
+           "custom-fields.yml":"c0caf7a3c0aa5896540e82688dd660cb090a875a",
+           "category-drag.yml":"f33cd9b6389a613eff1e89c1262af963a0001dd2",
+           "app-catalog.yml":"5416834047407353be2aefbcaa1baefcefa21548"}
+          validate_files({".github/workflows/"+p:v for p,v in unchanged_workflows.items()})
+          for name in unchanged_workflows:
+              header = Path(".github/workflows/"+name).read_text().split("permissions:",1)[0]
+              if "  workflow_dispatch:\n" not in header:
+                  raise ValueError("existing dispatch unavailable: "+name)
+          patch = gzip.decompress(base64.b64decode("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", validate=True))
+          if hashlib.sha256(patch).hexdigest() != "25b70eee65033127dd60972e9b04fdf45b6a81269a46e7e4675d450a13d2918a":
+              raise ValueError("patch hash mismatch")
+          temporary = Path(os.environ["RUNNER_TEMP"])/"directory-delivery"
+          temporary.mkdir(exist_ok=True)
+          patchfile = temporary/"candidate.patch"
+          patchfile.write_bytes(patch)
+          subprocess.run(["git","apply","--check",str(patchfile)],check=True)
+          subprocess.run(["git","apply",str(patchfile)],check=True)
+          validate_candidate()
+          receipt = {"status":"RECONSTRUCTED_NOT_PUSHED","base":BASE,
+                     "bootstrap":os.environ["GITHUB_SHA"],"files":FILES,"patch_sha256":"25b70eee65033127dd60972e9b04fdf45b6a81269a46e7e4675d450a13d2918a"}
+          (temporary/"receipt.json").write_text(json.dumps(receipt,indent=2)+"\n")
+          print(json.dumps(receipt))
+          PY
+      - name: Run complete host entries and actual strace gate before any commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          export JAVA_HOME="$JAVA_HOME_17_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          if ! command -v strace >/dev/null 2>&1; then
+            timeout 90s sudo apt-get -o Acquire::Retries=0 update
+            timeout 60s sudo apt-get -o Acquire::Retries=0 install --no-install-recommends -y strace
+          fi
+          for entry in selftest connection-selftest isolated-selftest absence-selftest isolated-real-selftest; do
+            python3 tools/verify_process_control.py "$entry" 2>&1 | tee "$RUNNER_TEMP/directory-delivery/$entry.log"
+          done
+          ANDROID_HOME="$RUNNER_TEMP/no-sdk-host-parser" PYTHONPATH=tools python3 -c 'import emulator_gate; emulator_gate.parser_selftest()' 2>&1 | tee "$RUNNER_TEMP/directory-delivery/parser.log"
+      - name: Recheck byte identities and commit only the fixed Python paths
+        id: commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, subprocess
+          from pathlib import Path
+          FILES = {'tools/verify_process_control.py': {'base': '7fb312cb7f5c14612f0a3e079710e761c929ad24', 'blob': '813accba1c802540e5685b7a0eca2f4e87176a43', 'sha256': 'ff2ab446663d8026153e7f83c19f39a1c4c1fced68a586c37cfa020dfa7d60ad', 'bytes': 130499}, 'tools/emulator_gate.py': {'base': '99f37bb3c5d6d522022ffa4fe0cc19ddebb6f940', 'blob': '6932ff6c929b75eddc7a2e587c74ac540212b2a4', 'sha256': 'f98fe81813d41d316315412adf82dce423bae923b49d5861379500e841b924ab', 'bytes': 116921}}
+          def git(*args):
+              return subprocess.check_output(["git",*args],text=True).strip()
+          for path,value in FILES.items():
+              data=Path(path).read_bytes()
+              if hashlib.sha256(data).hexdigest()!=value["sha256"]:
+                  raise ValueError("tests changed candidate: "+path)
+          if sorted(git("diff","--name-only").splitlines())!=sorted(FILES):
+              raise ValueError("tests changed other tracked files")
+          if git("rev-parse","HEAD")!=os.environ["GITHUB_SHA"]:
+              raise ValueError("local branch drift")
+          branch="refs/heads/feature/v1.2-activity-notes-ledger"
+          remote=git("ls-remote","origin",branch).split()
+          if len(remote)!=2 or remote[0]!=os.environ["GITHUB_SHA"] or remote[1]!=branch:
+              raise ValueError("remote branch drift; no push")
+          subprocess.run(["git","add","--",*FILES],check=True)
+          if sorted(git("diff","--cached","--name-only").splitlines())!=sorted(FILES):
+              raise ValueError("unexpected staged paths")
+          subprocess.run(["git","-c","user.name=github-actions[bot]",
+           "-c","user.email=41898282+github-actions[bot]@users.noreply.github.com",
+           "commit","-m","ci: trace database directory command with setup identity"],check=True)
+          head=git("rev-parse","HEAD")
+          receipt_path=Path(os.environ["RUNNER_TEMP"])/"directory-delivery/receipt.json"
+          receipt=json.loads(receipt_path.read_text())
+          receipt.update(status="TESTED_COMMITTED_NOT_PUSHED",candidate_commit=head)
+          receipt_path.write_text(json.dumps(receipt,indent=2)+"\n")
+          with open(os.environ["GITHUB_OUTPUT"],"a") as out:out.write("candidate="+head+"\n")
+          print("CANDIDATE_COMMIT "+head)
+          PY
+      - name: One non-force push and explicit existing CI dispatch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE: ${{ steps.commit.outputs.candidate }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch='feature/v1.2-activity-notes-ledger'
+          test "$(git ls-remote origin "refs/heads/$branch" | cut -f1)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push origin "HEAD:refs/heads/$branch"
+          unset auth
+          test "$(git ls-remote origin "refs/heads/$branch" | cut -f1)" = "$CANDIDATE"
+          printf '%s\n' "$CANDIDATE" > "$RUNNER_TEMP/directory-delivery/pushed-commit.txt"
+          echo "Pushed: https://github.com/supercubegame/todo-pocket-android/commit/$CANDIDATE" >> "$GITHUB_STEP_SUMMARY"
+          failed=0
+          for workflow in android.yml note-drafts.yml todo-management.yml custom-fields.yml category-drag.yml app-catalog.yml; do
+            test "$(git ls-remote origin "refs/heads/$branch" | cut -f1)" = "$CANDIDATE"
+            if gh api --method POST "repos/supercubegame/todo-pocket-android/actions/workflows/$workflow/dispatches" -f "ref=$branch"; then
+              echo "$workflow DISPATCH_ACCEPTED_NOT_COMPLETED $CANDIDATE" | tee -a "$RUNNER_TEMP/directory-delivery/dispatch.log"
+            else
+              echo "$workflow DISPATCH_FAILED $CANDIDATE" | tee -a "$RUNNER_TEMP/directory-delivery/dispatch.log"
+              failed=1
+            fi
+          done
+          exit "$failed"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: bounded-directory-delivery-${{ github.run_id }}
+          path: ${{ runner.temp }}/directory-delivery/
+          if-no-files-found: error

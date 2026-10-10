@@ -1,0 +1,6092 @@
+{
+  "status": "PASS",
+  "scope": "REBUILT_OLD_SOURCE_SAME_FIXED_KEY_OVERWRITE_NOT_EXISTING_PHONE_CERTIFICATE",
+  "commit": "4d8742d5671f915c6887d11212ad973abb2a0d63",
+  "run_id": "38012763048",
+  "run_attempt": "1",
+  "devices": {
+    "26": {
+      "status": "PASS",
+      "scope": "REBUILT_OLD_SOURCE_SAME_FIXED_KEY_OVERWRITE_NOT_EXISTING_PHONE_CERTIFICATE",
+      "commit": "4d8742d5671f915c6887d11212ad973abb2a0d63",
+      "run_id": "38012763048",
+      "run_attempt": "1",
+      "api": 26,
+      "old_source": "f42e88e10052a4c71e21b83aa0d4475849b807a0",
+      "labels": [
+        "old_installed_exact",
+        "ui_nonempty_fixture",
+        "before_independent_snapshot",
+        "replace_without_uninstall",
+        "new_installed_exact",
+        "immediate_state_exact",
+        "new_ui_opens",
+        "restart_state_exact"
+      ],
+      "installed": {
+        "old_apk": "f508c1e10682e84a197076be4fdfb0a42e0595c7f0d98fa10126993fef121dcd",
+        "new_apk": "e098732d6d420acc750a7a3d2833f533e5e5c1e127df9f2de7f3c109684c0962"
+      },
+      "snapshots": {
+        "before": {
+          "database": {
+            "version": 3,
+            "schema": [
+              [
+                "index",
+                "application_package",
+                "applications",
+                "CREATE UNIQUE INDEX application_package ON applications(package_name) WHERE package_name<>''"
+              ],
+              [
+                "index",
+                "ledger_activity_day",
+                "ledger",
+                "CREATE INDEX ledger_activity_day ON ledger(activity_id,day)"
+              ],
+              [
+                "index",
+                "sqlite_autoindex_batches_1",
+                "batches",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_blocks_1",
+                "blocks",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_blocks_2",
+                "blocks",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_checkins_1",
+                "checkins",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_notes_1",
+                "field_notes",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_options_1",
+                "field_options",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_options_2",
+                "field_options",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_values_1",
+                "field_values",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_fields_1",
+                "fields",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_ledger_1",
+                "ledger",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_ledger_2",
+                "ledger",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_legacy_imports_1",
+                "legacy_imports",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_media_1",
+                "media",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_notes_1",
+                "notes",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_paths_1",
+                "paths",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_tags_1",
+                "tags",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_tags_2",
+                "tags",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_todos_1",
+                "todos",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_todos_2",
+                "todos",
+                null
+              ],
+              [
+                "table",
+                "activities",
+                "activities",
+                "CREATE TABLE activities(id INTEGER PRIMARY KEY CHECK(id>0),category_id INTEGER NOT NULL REFERENCES categories(id),application_id INTEGER REFERENCES applications(id),title TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN(0,1)))"
+              ],
+              [
+                "table",
+                "android_metadata",
+                "android_metadata",
+                "CREATE TABLE android_metadata (locale TEXT)"
+              ],
+              [
+                "table",
+                "applications",
+                "applications",
+                "CREATE TABLE applications(id INTEGER PRIMARY KEY CHECK(id>0),name TEXT NOT NULL,package_name TEXT NOT NULL)"
+              ],
+              [
+                "table",
+                "batches",
+                "batches",
+                "CREATE TABLE batches(id TEXT PRIMARY KEY NOT NULL,payload BLOB NOT NULL,revision INTEGER NOT NULL,undone INTEGER NOT NULL CHECK(undone IN(0,1)))"
+              ],
+              [
+                "table",
+                "blocks",
+                "blocks",
+                "CREATE TABLE blocks(note_id TEXT NOT NULL REFERENCES notes(id),id TEXT NOT NULL,position INTEGER NOT NULL CHECK(position>=0),kind TEXT NOT NULL CHECK(kind IN('TEXT','IMAGE')),text TEXT NOT NULL,asset_id TEXT REFERENCES media(id),caption TEXT NOT NULL,private INTEGER NOT NULL CHECK(private IN(0,1)), original_asset_id TEXT REFERENCES media(id) CHECK(kind='IMAGE' OR original_asset_id IS NULL),PRIMARY KEY(note_id,id),UNIQUE(note_id,position),CHECK((kind='TEXT' AND asset_id IS NULL) OR (kind='IMAGE' AND asset_id IS NOT NULL)))"
+              ],
+              [
+                "table",
+                "categories",
+                "categories",
+                "CREATE TABLE categories(id INTEGER PRIMARY KEY CHECK(id>0),name TEXT NOT NULL CHECK(length(trim(name))>0),position INTEGER NOT NULL CHECK(position>=0))"
+              ],
+              [
+                "table",
+                "checkins",
+                "checkins",
+                "CREATE TABLE checkins(activity_id INTEGER NOT NULL REFERENCES activities(id),day TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN('DONE','SKIPPED')),memo TEXT NOT NULL,recorded_at TEXT NOT NULL,PRIMARY KEY(activity_id,day))"
+              ],
+              [
+                "table",
+                "field_notes",
+                "field_notes",
+                "CREATE TABLE field_notes(note_id TEXT PRIMARY KEY NOT NULL REFERENCES notes(id),field_id TEXT NOT NULL REFERENCES fields(id))"
+              ],
+              [
+                "table",
+                "field_options",
+                "field_options",
+                "CREATE TABLE field_options(field_id TEXT NOT NULL REFERENCES fields(id),id TEXT NOT NULL,position INTEGER NOT NULL CHECK(position>=0),PRIMARY KEY(field_id,id),UNIQUE(field_id,position))"
+              ],
+              [
+                "table",
+                "field_values",
+                "field_values",
+                "CREATE TABLE field_values(activity_id INTEGER NOT NULL REFERENCES activities(id),field_id TEXT NOT NULL REFERENCES fields(id),position INTEGER NOT NULL CHECK(position>=0),value TEXT NOT NULL,PRIMARY KEY(activity_id,field_id,position))"
+              ],
+              [
+                "table",
+                "fields",
+                "fields",
+                "CREATE TABLE fields(id TEXT PRIMARY KEY NOT NULL,name TEXT NOT NULL,type TEXT NOT NULL CHECK(type IN('TEXT','LONG_TEXT','NUMBER','DATE','SELECT','MULTI_SELECT','LINK','BOOLEAN')),archived INTEGER NOT NULL CHECK(archived IN(0,1)))"
+              ],
+              [
+                "table",
+                "ledger",
+                "ledger",
+                "CREATE TABLE ledger(id TEXT PRIMARY KEY NOT NULL,activity_id INTEGER NOT NULL REFERENCES activities(id),day TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN('EXPENSE','REFUND','INCOME','PLANNED')),cents INTEGER NOT NULL CHECK(cents>=0),memo TEXT NOT NULL,batch_id TEXT NOT NULL REFERENCES batches(id),position INTEGER NOT NULL CHECK(position>=0),UNIQUE(batch_id,position))"
+              ],
+              [
+                "table",
+                "legacy_imports",
+                "legacy_imports",
+                "CREATE TABLE legacy_imports(source_id TEXT PRIMARY KEY NOT NULL,item_count INTEGER NOT NULL CHECK(item_count>=0))"
+              ],
+              [
+                "table",
+                "media",
+                "media",
+                "CREATE TABLE media(id TEXT PRIMARY KEY NOT NULL,mime TEXT NOT NULL,bytes INTEGER NOT NULL CHECK(bytes>0))"
+              ],
+              [
+                "table",
+                "notes",
+                "notes",
+                "CREATE TABLE notes(id TEXT PRIMARY KEY NOT NULL,activity_id INTEGER NOT NULL REFERENCES activities(id),title TEXT NOT NULL)"
+              ],
+              [
+                "table",
+                "paths",
+                "paths",
+                "CREATE TABLE paths(activity_id INTEGER NOT NULL REFERENCES activities(id),position INTEGER NOT NULL CHECK(position>=0),text TEXT NOT NULL,PRIMARY KEY(activity_id,position))"
+              ],
+              [
+                "table",
+                "revision",
+                "revision",
+                "CREATE TABLE revision(id INTEGER PRIMARY KEY CHECK(id=1), value INTEGER NOT NULL CHECK(value>=0))"
+              ],
+              [
+                "table",
+                "tags",
+                "tags",
+                "CREATE TABLE tags(activity_id INTEGER NOT NULL REFERENCES activities(id),position INTEGER NOT NULL CHECK(position>=0),text TEXT NOT NULL,PRIMARY KEY(activity_id,text),UNIQUE(activity_id,position))"
+              ],
+              [
+                "table",
+                "todos",
+                "todos",
+                "CREATE TABLE todos(id TEXT PRIMARY KEY NOT NULL,title TEXT NOT NULL CHECK(length(trim(title))>0),done INTEGER NOT NULL CHECK(done IN(0,1)),position INTEGER NOT NULL CHECK(position>=0) UNIQUE)"
+              ]
+            ],
+            "tables": {
+              "activities": {
+                "columns": [
+                  "id",
+                  "id",
+                  "category_id",
+                  "application_id",
+                  "title",
+                  "archived"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "null",
+                      null
+                    ],
+                    [
+                      "text",
+                      "Upgrade_activity"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ]
+                  ]
+                ]
+              },
+              "android_metadata": {
+                "columns": [
+                  "rowid",
+                  "locale"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "en_US"
+                    ]
+                  ]
+                ]
+              },
+              "applications": {
+                "columns": [
+                  "id",
+                  "id",
+                  "name",
+                  "package_name"
+                ],
+                "rows": []
+              },
+              "batches": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "payload",
+                  "revision",
+                  "undone"
+                ],
+                "rows": []
+              },
+              "blocks": {
+                "columns": [
+                  "rowid",
+                  "note_id",
+                  "id",
+                  "position",
+                  "kind",
+                  "text",
+                  "asset_id",
+                  "caption",
+                  "private",
+                  "original_asset_id"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "3e9fe62f-1705-46d1-ba6a-25a4d53866d3"
+                    ],
+                    [
+                      "text",
+                      "239e4cde-cdf8-40ae-bd8e-5439adb4a567"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "text",
+                      "TEXT"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_keep_text"
+                    ],
+                    [
+                      "null",
+                      null
+                    ],
+                    [
+                      "text",
+                      ""
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "null",
+                      null
+                    ]
+                  ],
+                  [
+                    [
+                      "integer",
+                      "2"
+                    ],
+                    [
+                      "text",
+                      "3e9fe62f-1705-46d1-ba6a-25a4d53866d3"
+                    ],
+                    [
+                      "text",
+                      "902c5774-0bfb-4ce5-85fe-91a9bca89b80"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "IMAGE"
+                    ],
+                    [
+                      "text",
+                      ""
+                    ],
+                    [
+                      "text",
+                      "fec9fa80aa4fbad4bbb4cba53702bbca25ab656a6a74cbedca862b25e30e3106"
+                    ],
+                    [
+                      "text",
+                      ""
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "null",
+                      null
+                    ]
+                  ]
+                ]
+              },
+              "categories": {
+                "columns": [
+                  "id",
+                  "id",
+                  "name",
+                  "position"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_category"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ]
+                  ]
+                ]
+              },
+              "checkins": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "day",
+                  "status",
+                  "memo",
+                  "recorded_at"
+                ],
+                "rows": []
+              },
+              "field_notes": {
+                "columns": [
+                  "rowid",
+                  "note_id",
+                  "field_id"
+                ],
+                "rows": []
+              },
+              "field_options": {
+                "columns": [
+                  "rowid",
+                  "field_id",
+                  "id",
+                  "position"
+                ],
+                "rows": []
+              },
+              "field_values": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "field_id",
+                  "position",
+                  "value"
+                ],
+                "rows": []
+              },
+              "fields": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "name",
+                  "type",
+                  "archived"
+                ],
+                "rows": []
+              },
+              "ledger": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "activity_id",
+                  "day",
+                  "kind",
+                  "cents",
+                  "memo",
+                  "batch_id",
+                  "position"
+                ],
+                "rows": []
+              },
+              "legacy_imports": {
+                "columns": [
+                  "rowid",
+                  "source_id",
+                  "item_count"
+                ],
+                "rows": []
+              },
+              "media": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "mime",
+                  "bytes"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "fec9fa80aa4fbad4bbb4cba53702bbca25ab656a6a74cbedca862b25e30e3106"
+                    ],
+                    [
+                      "text",
+                      "image/png"
+                    ],
+                    [
+                      "integer",
+                      "310"
+                    ]
+                  ]
+                ]
+              },
+              "notes": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "activity_id",
+                  "title"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "3e9fe62f-1705-46d1-ba6a-25a4d53866d3"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_activity"
+                    ]
+                  ]
+                ]
+              },
+              "paths": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "position",
+                  "text"
+                ],
+                "rows": []
+              },
+              "revision": {
+                "columns": [
+                  "id",
+                  "id",
+                  "value"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "7"
+                    ]
+                  ]
+                ]
+              },
+              "tags": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "position",
+                  "text"
+                ],
+                "rows": []
+              },
+              "todos": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "title",
+                  "done",
+                  "position"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "675ed8fa-bb16-4b7e-87ea-d7c642ac5a67"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_keep_todo"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ]
+                  ]
+                ]
+              }
+            }
+          },
+          "media": {
+            "fec9fa80aa4fbad4bbb4cba53702bbca25ab656a6a74cbedca862b25e30e3106": {
+              "bytes": 310,
+              "base64": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAABHNCSVQICAgIfAhkiAAAAO1JREFUeJzt0UERwCAAwDDACcqwgfshI481CnrXue/5RpilA/6uAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQBrANYArAFYA7AGYA3AGoA1AGsA1gCsAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQBrANYArAFYA7AGYA3AGoA1AGsA1gCsAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQBrANYArAFYA7AGYA3AGoA1AGsA1gCsAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQBrANYArAFYA7AGYA3AGoA1AHtupAK3kqDA4QAAAABJRU5ErkJggg=="
+            }
+          },
+          "uid": "10077"
+        },
+        "immediate": {
+          "database": {
+            "version": 3,
+            "schema": [
+              [
+                "index",
+                "application_package",
+                "applications",
+                "CREATE UNIQUE INDEX application_package ON applications(package_name) WHERE package_name<>''"
+              ],
+              [
+                "index",
+                "ledger_activity_day",
+                "ledger",
+                "CREATE INDEX ledger_activity_day ON ledger(activity_id,day)"
+              ],
+              [
+                "index",
+                "sqlite_autoindex_batches_1",
+                "batches",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_blocks_1",
+                "blocks",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_blocks_2",
+                "blocks",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_checkins_1",
+                "checkins",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_notes_1",
+                "field_notes",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_options_1",
+                "field_options",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_options_2",
+                "field_options",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_values_1",
+                "field_values",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_fields_1",
+                "fields",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_ledger_1",
+                "ledger",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_ledger_2",
+                "ledger",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_legacy_imports_1",
+                "legacy_imports",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_media_1",
+                "media",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_notes_1",
+                "notes",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_paths_1",
+                "paths",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_tags_1",
+                "tags",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_tags_2",
+                "tags",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_todos_1",
+                "todos",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_todos_2",
+                "todos",
+                null
+              ],
+              [
+                "table",
+                "activities",
+                "activities",
+                "CREATE TABLE activities(id INTEGER PRIMARY KEY CHECK(id>0),category_id INTEGER NOT NULL REFERENCES categories(id),application_id INTEGER REFERENCES applications(id),title TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN(0,1)))"
+              ],
+              [
+                "table",
+                "android_metadata",
+                "android_metadata",
+                "CREATE TABLE android_metadata (locale TEXT)"
+              ],
+              [
+                "table",
+                "applications",
+                "applications",
+                "CREATE TABLE applications(id INTEGER PRIMARY KEY CHECK(id>0),name TEXT NOT NULL,package_name TEXT NOT NULL)"
+              ],
+              [
+                "table",
+                "batches",
+                "batches",
+                "CREATE TABLE batches(id TEXT PRIMARY KEY NOT NULL,payload BLOB NOT NULL,revision INTEGER NOT NULL,undone INTEGER NOT NULL CHECK(undone IN(0,1)))"
+              ],
+              [
+                "table",
+                "blocks",
+                "blocks",
+                "CREATE TABLE blocks(note_id TEXT NOT NULL REFERENCES notes(id),id TEXT NOT NULL,position INTEGER NOT NULL CHECK(position>=0),kind TEXT NOT NULL CHECK(kind IN('TEXT','IMAGE')),text TEXT NOT NULL,asset_id TEXT REFERENCES media(id),caption TEXT NOT NULL,private INTEGER NOT NULL CHECK(private IN(0,1)), original_asset_id TEXT REFERENCES media(id) CHECK(kind='IMAGE' OR original_asset_id IS NULL),PRIMARY KEY(note_id,id),UNIQUE(note_id,position),CHECK((kind='TEXT' AND asset_id IS NULL) OR (kind='IMAGE' AND asset_id IS NOT NULL)))"
+              ],
+              [
+                "table",
+                "categories",
+                "categories",
+                "CREATE TABLE categories(id INTEGER PRIMARY KEY CHECK(id>0),name TEXT NOT NULL CHECK(length(trim(name))>0),position INTEGER NOT NULL CHECK(position>=0))"
+              ],
+              [
+                "table",
+                "checkins",
+                "checkins",
+                "CREATE TABLE checkins(activity_id INTEGER NOT NULL REFERENCES activities(id),day TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN('DONE','SKIPPED')),memo TEXT NOT NULL,recorded_at TEXT NOT NULL,PRIMARY KEY(activity_id,day))"
+              ],
+              [
+                "table",
+                "field_notes",
+                "field_notes",
+                "CREATE TABLE field_notes(note_id TEXT PRIMARY KEY NOT NULL REFERENCES notes(id),field_id TEXT NOT NULL REFERENCES fields(id))"
+              ],
+              [
+                "table",
+                "field_options",
+                "field_options",
+                "CREATE TABLE field_options(field_id TEXT NOT NULL REFERENCES fields(id),id TEXT NOT NULL,position INTEGER NOT NULL CHECK(position>=0),PRIMARY KEY(field_id,id),UNIQUE(field_id,position))"
+              ],
+              [
+                "table",
+                "field_values",
+                "field_values",
+                "CREATE TABLE field_values(activity_id INTEGER NOT NULL REFERENCES activities(id),field_id TEXT NOT NULL REFERENCES fields(id),position INTEGER NOT NULL CHECK(position>=0),value TEXT NOT NULL,PRIMARY KEY(activity_id,field_id,position))"
+              ],
+              [
+                "table",
+                "fields",
+                "fields",
+                "CREATE TABLE fields(id TEXT PRIMARY KEY NOT NULL,name TEXT NOT NULL,type TEXT NOT NULL CHECK(type IN('TEXT','LONG_TEXT','NUMBER','DATE','SELECT','MULTI_SELECT','LINK','BOOLEAN')),archived INTEGER NOT NULL CHECK(archived IN(0,1)))"
+              ],
+              [
+                "table",
+                "ledger",
+                "ledger",
+                "CREATE TABLE ledger(id TEXT PRIMARY KEY NOT NULL,activity_id INTEGER NOT NULL REFERENCES activities(id),day TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN('EXPENSE','REFUND','INCOME','PLANNED')),cents INTEGER NOT NULL CHECK(cents>=0),memo TEXT NOT NULL,batch_id TEXT NOT NULL REFERENCES batches(id),position INTEGER NOT NULL CHECK(position>=0),UNIQUE(batch_id,position))"
+              ],
+              [
+                "table",
+                "legacy_imports",
+                "legacy_imports",
+                "CREATE TABLE legacy_imports(source_id TEXT PRIMARY KEY NOT NULL,item_count INTEGER NOT NULL CHECK(item_count>=0))"
+              ],
+              [
+                "table",
+                "media",
+                "media",
+                "CREATE TABLE media(id TEXT PRIMARY KEY NOT NULL,mime TEXT NOT NULL,bytes INTEGER NOT NULL CHECK(bytes>0))"
+              ],
+              [
+                "table",
+                "notes",
+                "notes",
+                "CREATE TABLE notes(id TEXT PRIMARY KEY NOT NULL,activity_id INTEGER NOT NULL REFERENCES activities(id),title TEXT NOT NULL)"
+              ],
+              [
+                "table",
+                "paths",
+                "paths",
+                "CREATE TABLE paths(activity_id INTEGER NOT NULL REFERENCES activities(id),position INTEGER NOT NULL CHECK(position>=0),text TEXT NOT NULL,PRIMARY KEY(activity_id,position))"
+              ],
+              [
+                "table",
+                "revision",
+                "revision",
+                "CREATE TABLE revision(id INTEGER PRIMARY KEY CHECK(id=1), value INTEGER NOT NULL CHECK(value>=0))"
+              ],
+              [
+                "table",
+                "tags",
+                "tags",
+                "CREATE TABLE tags(activity_id INTEGER NOT NULL REFERENCES activities(id),position INTEGER NOT NULL CHECK(position>=0),text TEXT NOT NULL,PRIMARY KEY(activity_id,text),UNIQUE(activity_id,position))"
+              ],
+              [
+                "table",
+                "todos",
+                "todos",
+                "CREATE TABLE todos(id TEXT PRIMARY KEY NOT NULL,title TEXT NOT NULL CHECK(length(trim(title))>0),done INTEGER NOT NULL CHECK(done IN(0,1)),position INTEGER NOT NULL CHECK(position>=0) UNIQUE)"
+              ]
+            ],
+            "tables": {
+              "activities": {
+                "columns": [
+                  "id",
+                  "id",
+                  "category_id",
+                  "application_id",
+                  "title",
+                  "archived"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "null",
+                      null
+                    ],
+                    [
+                      "text",
+                      "Upgrade_activity"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ]
+                  ]
+                ]
+              },
+              "android_metadata": {
+                "columns": [
+                  "rowid",
+                  "locale"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "en_US"
+                    ]
+                  ]
+                ]
+              },
+              "applications": {
+                "columns": [
+                  "id",
+                  "id",
+                  "name",
+                  "package_name"
+                ],
+                "rows": []
+              },
+              "batches": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "payload",
+                  "revision",
+                  "undone"
+                ],
+                "rows": []
+              },
+              "blocks": {
+                "columns": [
+                  "rowid",
+                  "note_id",
+                  "id",
+                  "position",
+                  "kind",
+                  "text",
+                  "asset_id",
+                  "caption",
+                  "private",
+                  "original_asset_id"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "3e9fe62f-1705-46d1-ba6a-25a4d53866d3"
+                    ],
+                    [
+                      "text",
+                      "239e4cde-cdf8-40ae-bd8e-5439adb4a567"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "text",
+                      "TEXT"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_keep_text"
+                    ],
+                    [
+                      "null",
+                      null
+                    ],
+                    [
+                      "text",
+                      ""
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "null",
+                      null
+                    ]
+                  ],
+                  [
+                    [
+                      "integer",
+                      "2"
+                    ],
+                    [
+                      "text",
+                      "3e9fe62f-1705-46d1-ba6a-25a4d53866d3"
+                    ],
+                    [
+                      "text",
+                      "902c5774-0bfb-4ce5-85fe-91a9bca89b80"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "IMAGE"
+                    ],
+                    [
+                      "text",
+                      ""
+                    ],
+                    [
+                      "text",
+                      "fec9fa80aa4fbad4bbb4cba53702bbca25ab656a6a74cbedca862b25e30e3106"
+                    ],
+                    [
+                      "text",
+                      ""
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "null",
+                      null
+                    ]
+                  ]
+                ]
+              },
+              "categories": {
+                "columns": [
+                  "id",
+                  "id",
+                  "name",
+                  "position"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_category"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ]
+                  ]
+                ]
+              },
+              "checkins": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "day",
+                  "status",
+                  "memo",
+                  "recorded_at"
+                ],
+                "rows": []
+              },
+              "field_notes": {
+                "columns": [
+                  "rowid",
+                  "note_id",
+                  "field_id"
+                ],
+                "rows": []
+              },
+              "field_options": {
+                "columns": [
+                  "rowid",
+                  "field_id",
+                  "id",
+                  "position"
+                ],
+                "rows": []
+              },
+              "field_values": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "field_id",
+                  "position",
+                  "value"
+                ],
+                "rows": []
+              },
+              "fields": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "name",
+                  "type",
+                  "archived"
+                ],
+                "rows": []
+              },
+              "ledger": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "activity_id",
+                  "day",
+                  "kind",
+                  "cents",
+                  "memo",
+                  "batch_id",
+                  "position"
+                ],
+                "rows": []
+              },
+              "legacy_imports": {
+                "columns": [
+                  "rowid",
+                  "source_id",
+                  "item_count"
+                ],
+                "rows": []
+              },
+              "media": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "mime",
+                  "bytes"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "fec9fa80aa4fbad4bbb4cba53702bbca25ab656a6a74cbedca862b25e30e3106"
+                    ],
+                    [
+                      "text",
+                      "image/png"
+                    ],
+                    [
+                      "integer",
+                      "310"
+                    ]
+                  ]
+                ]
+              },
+              "notes": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "activity_id",
+                  "title"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "3e9fe62f-1705-46d1-ba6a-25a4d53866d3"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_activity"
+                    ]
+                  ]
+                ]
+              },
+              "paths": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "position",
+                  "text"
+                ],
+                "rows": []
+              },
+              "revision": {
+                "columns": [
+                  "id",
+                  "id",
+                  "value"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "7"
+                    ]
+                  ]
+                ]
+              },
+              "tags": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "position",
+                  "text"
+                ],
+                "rows": []
+              },
+              "todos": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "title",
+                  "done",
+                  "position"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "675ed8fa-bb16-4b7e-87ea-d7c642ac5a67"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_keep_todo"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ]
+                  ]
+                ]
+              }
+            }
+          },
+          "media": {
+            "fec9fa80aa4fbad4bbb4cba53702bbca25ab656a6a74cbedca862b25e30e3106": {
+              "bytes": 310,
+              "base64": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAABHNCSVQICAgIfAhkiAAAAO1JREFUeJzt0UERwCAAwDDACcqwgfshI481CnrXue/5RpilA/6uAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQBrANYArAFYA7AGYA3AGoA1AGsA1gCsAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQBrANYArAFYA7AGYA3AGoA1AGsA1gCsAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQBrANYArAFYA7AGYA3AGoA1AGsA1gCsAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQBrANYArAFYA7AGYA3AGoA1AHtupAK3kqDA4QAAAABJRU5ErkJggg=="
+            }
+          },
+          "uid": "10077"
+        },
+        "restart": {
+          "database": {
+            "version": 3,
+            "schema": [
+              [
+                "index",
+                "application_package",
+                "applications",
+                "CREATE UNIQUE INDEX application_package ON applications(package_name) WHERE package_name<>''"
+              ],
+              [
+                "index",
+                "ledger_activity_day",
+                "ledger",
+                "CREATE INDEX ledger_activity_day ON ledger(activity_id,day)"
+              ],
+              [
+                "index",
+                "sqlite_autoindex_batches_1",
+                "batches",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_blocks_1",
+                "blocks",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_blocks_2",
+                "blocks",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_checkins_1",
+                "checkins",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_notes_1",
+                "field_notes",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_options_1",
+                "field_options",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_options_2",
+                "field_options",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_values_1",
+                "field_values",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_fields_1",
+                "fields",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_ledger_1",
+                "ledger",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_ledger_2",
+                "ledger",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_legacy_imports_1",
+                "legacy_imports",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_media_1",
+                "media",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_notes_1",
+                "notes",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_paths_1",
+                "paths",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_tags_1",
+                "tags",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_tags_2",
+                "tags",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_todos_1",
+                "todos",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_todos_2",
+                "todos",
+                null
+              ],
+              [
+                "table",
+                "activities",
+                "activities",
+                "CREATE TABLE activities(id INTEGER PRIMARY KEY CHECK(id>0),category_id INTEGER NOT NULL REFERENCES categories(id),application_id INTEGER REFERENCES applications(id),title TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN(0,1)))"
+              ],
+              [
+                "table",
+                "android_metadata",
+                "android_metadata",
+                "CREATE TABLE android_metadata (locale TEXT)"
+              ],
+              [
+                "table",
+                "applications",
+                "applications",
+                "CREATE TABLE applications(id INTEGER PRIMARY KEY CHECK(id>0),name TEXT NOT NULL,package_name TEXT NOT NULL)"
+              ],
+              [
+                "table",
+                "batches",
+                "batches",
+                "CREATE TABLE batches(id TEXT PRIMARY KEY NOT NULL,payload BLOB NOT NULL,revision INTEGER NOT NULL,undone INTEGER NOT NULL CHECK(undone IN(0,1)))"
+              ],
+              [
+                "table",
+                "blocks",
+                "blocks",
+                "CREATE TABLE blocks(note_id TEXT NOT NULL REFERENCES notes(id),id TEXT NOT NULL,position INTEGER NOT NULL CHECK(position>=0),kind TEXT NOT NULL CHECK(kind IN('TEXT','IMAGE')),text TEXT NOT NULL,asset_id TEXT REFERENCES media(id),caption TEXT NOT NULL,private INTEGER NOT NULL CHECK(private IN(0,1)), original_asset_id TEXT REFERENCES media(id) CHECK(kind='IMAGE' OR original_asset_id IS NULL),PRIMARY KEY(note_id,id),UNIQUE(note_id,position),CHECK((kind='TEXT' AND asset_id IS NULL) OR (kind='IMAGE' AND asset_id IS NOT NULL)))"
+              ],
+              [
+                "table",
+                "categories",
+                "categories",
+                "CREATE TABLE categories(id INTEGER PRIMARY KEY CHECK(id>0),name TEXT NOT NULL CHECK(length(trim(name))>0),position INTEGER NOT NULL CHECK(position>=0))"
+              ],
+              [
+                "table",
+                "checkins",
+                "checkins",
+                "CREATE TABLE checkins(activity_id INTEGER NOT NULL REFERENCES activities(id),day TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN('DONE','SKIPPED')),memo TEXT NOT NULL,recorded_at TEXT NOT NULL,PRIMARY KEY(activity_id,day))"
+              ],
+              [
+                "table",
+                "field_notes",
+                "field_notes",
+                "CREATE TABLE field_notes(note_id TEXT PRIMARY KEY NOT NULL REFERENCES notes(id),field_id TEXT NOT NULL REFERENCES fields(id))"
+              ],
+              [
+                "table",
+                "field_options",
+                "field_options",
+                "CREATE TABLE field_options(field_id TEXT NOT NULL REFERENCES fields(id),id TEXT NOT NULL,position INTEGER NOT NULL CHECK(position>=0),PRIMARY KEY(field_id,id),UNIQUE(field_id,position))"
+              ],
+              [
+                "table",
+                "field_values",
+                "field_values",
+                "CREATE TABLE field_values(activity_id INTEGER NOT NULL REFERENCES activities(id),field_id TEXT NOT NULL REFERENCES fields(id),position INTEGER NOT NULL CHECK(position>=0),value TEXT NOT NULL,PRIMARY KEY(activity_id,field_id,position))"
+              ],
+              [
+                "table",
+                "fields",
+                "fields",
+                "CREATE TABLE fields(id TEXT PRIMARY KEY NOT NULL,name TEXT NOT NULL,type TEXT NOT NULL CHECK(type IN('TEXT','LONG_TEXT','NUMBER','DATE','SELECT','MULTI_SELECT','LINK','BOOLEAN')),archived INTEGER NOT NULL CHECK(archived IN(0,1)))"
+              ],
+              [
+                "table",
+                "ledger",
+                "ledger",
+                "CREATE TABLE ledger(id TEXT PRIMARY KEY NOT NULL,activity_id INTEGER NOT NULL REFERENCES activities(id),day TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN('EXPENSE','REFUND','INCOME','PLANNED')),cents INTEGER NOT NULL CHECK(cents>=0),memo TEXT NOT NULL,batch_id TEXT NOT NULL REFERENCES batches(id),position INTEGER NOT NULL CHECK(position>=0),UNIQUE(batch_id,position))"
+              ],
+              [
+                "table",
+                "legacy_imports",
+                "legacy_imports",
+                "CREATE TABLE legacy_imports(source_id TEXT PRIMARY KEY NOT NULL,item_count INTEGER NOT NULL CHECK(item_count>=0))"
+              ],
+              [
+                "table",
+                "media",
+                "media",
+                "CREATE TABLE media(id TEXT PRIMARY KEY NOT NULL,mime TEXT NOT NULL,bytes INTEGER NOT NULL CHECK(bytes>0))"
+              ],
+              [
+                "table",
+                "notes",
+                "notes",
+                "CREATE TABLE notes(id TEXT PRIMARY KEY NOT NULL,activity_id INTEGER NOT NULL REFERENCES activities(id),title TEXT NOT NULL)"
+              ],
+              [
+                "table",
+                "paths",
+                "paths",
+                "CREATE TABLE paths(activity_id INTEGER NOT NULL REFERENCES activities(id),position INTEGER NOT NULL CHECK(position>=0),text TEXT NOT NULL,PRIMARY KEY(activity_id,position))"
+              ],
+              [
+                "table",
+                "revision",
+                "revision",
+                "CREATE TABLE revision(id INTEGER PRIMARY KEY CHECK(id=1), value INTEGER NOT NULL CHECK(value>=0))"
+              ],
+              [
+                "table",
+                "tags",
+                "tags",
+                "CREATE TABLE tags(activity_id INTEGER NOT NULL REFERENCES activities(id),position INTEGER NOT NULL CHECK(position>=0),text TEXT NOT NULL,PRIMARY KEY(activity_id,text),UNIQUE(activity_id,position))"
+              ],
+              [
+                "table",
+                "todos",
+                "todos",
+                "CREATE TABLE todos(id TEXT PRIMARY KEY NOT NULL,title TEXT NOT NULL CHECK(length(trim(title))>0),done INTEGER NOT NULL CHECK(done IN(0,1)),position INTEGER NOT NULL CHECK(position>=0) UNIQUE)"
+              ]
+            ],
+            "tables": {
+              "activities": {
+                "columns": [
+                  "id",
+                  "id",
+                  "category_id",
+                  "application_id",
+                  "title",
+                  "archived"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "null",
+                      null
+                    ],
+                    [
+                      "text",
+                      "Upgrade_activity"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ]
+                  ]
+                ]
+              },
+              "android_metadata": {
+                "columns": [
+                  "rowid",
+                  "locale"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "en_US"
+                    ]
+                  ]
+                ]
+              },
+              "applications": {
+                "columns": [
+                  "id",
+                  "id",
+                  "name",
+                  "package_name"
+                ],
+                "rows": []
+              },
+              "batches": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "payload",
+                  "revision",
+                  "undone"
+                ],
+                "rows": []
+              },
+              "blocks": {
+                "columns": [
+                  "rowid",
+                  "note_id",
+                  "id",
+                  "position",
+                  "kind",
+                  "text",
+                  "asset_id",
+                  "caption",
+                  "private",
+                  "original_asset_id"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "3e9fe62f-1705-46d1-ba6a-25a4d53866d3"
+                    ],
+                    [
+                      "text",
+                      "239e4cde-cdf8-40ae-bd8e-5439adb4a567"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "text",
+                      "TEXT"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_keep_text"
+                    ],
+                    [
+                      "null",
+                      null
+                    ],
+                    [
+                      "text",
+                      ""
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "null",
+                      null
+                    ]
+                  ],
+                  [
+                    [
+                      "integer",
+                      "2"
+                    ],
+                    [
+                      "text",
+                      "3e9fe62f-1705-46d1-ba6a-25a4d53866d3"
+                    ],
+                    [
+                      "text",
+                      "902c5774-0bfb-4ce5-85fe-91a9bca89b80"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "IMAGE"
+                    ],
+                    [
+                      "text",
+                      ""
+                    ],
+                    [
+                      "text",
+                      "fec9fa80aa4fbad4bbb4cba53702bbca25ab656a6a74cbedca862b25e30e3106"
+                    ],
+                    [
+                      "text",
+                      ""
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "null",
+                      null
+                    ]
+                  ]
+                ]
+              },
+              "categories": {
+                "columns": [
+                  "id",
+                  "id",
+                  "name",
+                  "position"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_category"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ]
+                  ]
+                ]
+              },
+              "checkins": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "day",
+                  "status",
+                  "memo",
+                  "recorded_at"
+                ],
+                "rows": []
+              },
+              "field_notes": {
+                "columns": [
+                  "rowid",
+                  "note_id",
+                  "field_id"
+                ],
+                "rows": []
+              },
+              "field_options": {
+                "columns": [
+                  "rowid",
+                  "field_id",
+                  "id",
+                  "position"
+                ],
+                "rows": []
+              },
+              "field_values": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "field_id",
+                  "position",
+                  "value"
+                ],
+                "rows": []
+              },
+              "fields": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "name",
+                  "type",
+                  "archived"
+                ],
+                "rows": []
+              },
+              "ledger": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "activity_id",
+                  "day",
+                  "kind",
+                  "cents",
+                  "memo",
+                  "batch_id",
+                  "position"
+                ],
+                "rows": []
+              },
+              "legacy_imports": {
+                "columns": [
+                  "rowid",
+                  "source_id",
+                  "item_count"
+                ],
+                "rows": []
+              },
+              "media": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "mime",
+                  "bytes"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "fec9fa80aa4fbad4bbb4cba53702bbca25ab656a6a74cbedca862b25e30e3106"
+                    ],
+                    [
+                      "text",
+                      "image/png"
+                    ],
+                    [
+                      "integer",
+                      "310"
+                    ]
+                  ]
+                ]
+              },
+              "notes": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "activity_id",
+                  "title"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "3e9fe62f-1705-46d1-ba6a-25a4d53866d3"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_activity"
+                    ]
+                  ]
+                ]
+              },
+              "paths": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "position",
+                  "text"
+                ],
+                "rows": []
+              },
+              "revision": {
+                "columns": [
+                  "id",
+                  "id",
+                  "value"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "7"
+                    ]
+                  ]
+                ]
+              },
+              "tags": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "position",
+                  "text"
+                ],
+                "rows": []
+              },
+              "todos": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "title",
+                  "done",
+                  "position"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "675ed8fa-bb16-4b7e-87ea-d7c642ac5a67"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_keep_todo"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ]
+                  ]
+                ]
+              }
+            }
+          },
+          "media": {
+            "fec9fa80aa4fbad4bbb4cba53702bbca25ab656a6a74cbedca862b25e30e3106": {
+              "bytes": 310,
+              "base64": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAABHNCSVQICAgIfAhkiAAAAO1JREFUeJzt0UERwCAAwDDACcqwgfshI481CnrXue/5RpilA/6uAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQBrANYArAFYA7AGYA3AGoA1AGsA1gCsAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQBrANYArAFYA7AGYA3AGoA1AGsA1gCsAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQBrANYArAFYA7AGYA3AGoA1AGsA1gCsAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQBrANYArAFYA7AGYA3AGoA1AHtupAK3kqDA4QAAAABJRU5ErkJggg=="
+            }
+          },
+          "uid": "10077"
+        }
+      },
+      "commands": [
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "getprop",
+            "ro.kernel.qemu"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 2,
+          "stderr_bytes": 0,
+          "stdout_sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "pm",
+            "list",
+            "packages",
+            "com.supercubegame.pockettodo.v12.preview"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "install",
+            "-t",
+            "upgrade-old/build/outputs/apk/debug/todo-pocket-android-debug.apk"
+          ],
+          "timeout": 120,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 36,
+          "stderr_bytes": 0,
+          "stdout_sha256": "781a31c82430c97897af612ece5e0ca2205e301cb5ff121ce2660541ea5182c7",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "pm",
+            "path",
+            "com.supercubegame.pockettodo.v12.preview"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 93,
+          "stderr_bytes": 0,
+          "stdout_sha256": "0b97aec695241c6ab8d63af766f416fee4b1c3786529ceca549187d471783f6f",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "am",
+            "start",
+            "-W",
+            "-n",
+            "com.supercubegame.pockettodo.v12.preview/com.supercubegame.pockettodo.MainActivity"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 264,
+          "stderr_bytes": 0,
+          "stdout_sha256": "25e3d6d4bd7b1408d69ba4c0bb683f0c6b0d2fdbb7f3071eec18337e5846d74b",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "126",
+            "550"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "text",
+            "Upgrade_keep_todo"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "268",
+            "301"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "159",
+            "604"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "65",
+            "194"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "160",
+            "315"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "text",
+            "Upgrade_category"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "252",
+            "268"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "62",
+            "311"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "160",
+            "315"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "text",
+            "Upgrade_activity"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "252",
+            "268"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "160",
+            "355"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "160",
+            "478"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "89",
+            "264"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "160",
+            "315"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "text",
+            "Upgrade_keep_text"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "252",
+            "288"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "231",
+            "264"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "245",
+            "408"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "ls",
+            "databases"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 50,
+          "stderr_bytes": 0,
+          "stdout_sha256": "5691153cc8b53999ad12e62048227e38a599cdb8df24c34ea192df5d6e31348c",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "databases/pocket-v12.db"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 4096,
+          "stderr_bytes": 0,
+          "stdout_sha256": "295ae3bff4a9fd227803c567916a72dd83715effd999e086c751a307f2708e0d",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "databases/pocket-v12.db-wal"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 284312,
+          "stderr_bytes": 0,
+          "stdout_sha256": "45c0a1f50bf15709954d287131a9d9caf6167cf0ceda7ec5dbab39fc55cb2bef",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "ls",
+            "files/media"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 65,
+          "stderr_bytes": 0,
+          "stdout_sha256": "6023e10b9b3f3c487b769af1fdb2b6654371a86728dc5ae0342b8c9e1de11dbd",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "files/media/fec9fa80aa4fbad4bbb4cba53702bbca25ab656a6a74cbedca862b25e30e3106"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 310,
+          "stderr_bytes": 0,
+          "stdout_sha256": "fec9fa80aa4fbad4bbb4cba53702bbca25ab656a6a74cbedca862b25e30e3106",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "id",
+            "-u"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 6,
+          "stderr_bytes": 0,
+          "stdout_sha256": "b426cedf0d9ff7c81bf6818cca211a4179f330db3f884754c7f83dd73f778678",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "install",
+            "-r",
+            "-t",
+            "upgrade-evidence/candidate.apk"
+          ],
+          "timeout": 120,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 36,
+          "stderr_bytes": 0,
+          "stdout_sha256": "781a31c82430c97897af612ece5e0ca2205e301cb5ff121ce2660541ea5182c7",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "pm",
+            "path",
+            "com.supercubegame.pockettodo.v12.preview"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 93,
+          "stderr_bytes": 0,
+          "stdout_sha256": "d03fecf4d7d1bf4e70bd6f227711e8e996571d805853333755087a843c3bf274",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "ls",
+            "databases"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 50,
+          "stderr_bytes": 0,
+          "stdout_sha256": "5691153cc8b53999ad12e62048227e38a599cdb8df24c34ea192df5d6e31348c",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "databases/pocket-v12.db"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 4096,
+          "stderr_bytes": 0,
+          "stdout_sha256": "295ae3bff4a9fd227803c567916a72dd83715effd999e086c751a307f2708e0d",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "databases/pocket-v12.db-wal"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 284312,
+          "stderr_bytes": 0,
+          "stdout_sha256": "45c0a1f50bf15709954d287131a9d9caf6167cf0ceda7ec5dbab39fc55cb2bef",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "ls",
+            "files/media"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 65,
+          "stderr_bytes": 0,
+          "stdout_sha256": "6023e10b9b3f3c487b769af1fdb2b6654371a86728dc5ae0342b8c9e1de11dbd",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "files/media/fec9fa80aa4fbad4bbb4cba53702bbca25ab656a6a74cbedca862b25e30e3106"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 310,
+          "stderr_bytes": 0,
+          "stdout_sha256": "fec9fa80aa4fbad4bbb4cba53702bbca25ab656a6a74cbedca862b25e30e3106",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "id",
+            "-u"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 6,
+          "stderr_bytes": 0,
+          "stdout_sha256": "b426cedf0d9ff7c81bf6818cca211a4179f330db3f884754c7f83dd73f778678",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "am",
+            "start",
+            "-W",
+            "-n",
+            "com.supercubegame.pockettodo.v12.preview/com.supercubegame.pockettodo.MainActivity"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 264,
+          "stderr_bytes": 0,
+          "stdout_sha256": "65e0c4a0f6320dd50a33ecc7f95438177d5ab62806a5797f258da23f779813e3",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "ls",
+            "databases"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 50,
+          "stderr_bytes": 0,
+          "stdout_sha256": "5691153cc8b53999ad12e62048227e38a599cdb8df24c34ea192df5d6e31348c",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "databases/pocket-v12.db"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 4096,
+          "stderr_bytes": 0,
+          "stdout_sha256": "295ae3bff4a9fd227803c567916a72dd83715effd999e086c751a307f2708e0d",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "databases/pocket-v12.db-wal"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 284312,
+          "stderr_bytes": 0,
+          "stdout_sha256": "45c0a1f50bf15709954d287131a9d9caf6167cf0ceda7ec5dbab39fc55cb2bef",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "ls",
+            "files/media"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 65,
+          "stderr_bytes": 0,
+          "stdout_sha256": "6023e10b9b3f3c487b769af1fdb2b6654371a86728dc5ae0342b8c9e1de11dbd",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "files/media/fec9fa80aa4fbad4bbb4cba53702bbca25ab656a6a74cbedca862b25e30e3106"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 310,
+          "stderr_bytes": 0,
+          "stdout_sha256": "fec9fa80aa4fbad4bbb4cba53702bbca25ab656a6a74cbedca862b25e30e3106",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "id",
+            "-u"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 6,
+          "stderr_bytes": 0,
+          "stdout_sha256": "b426cedf0d9ff7c81bf6818cca211a4179f330db3f884754c7f83dd73f778678",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "stops": [
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "4379\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.047052
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "5050\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.04613
+        }
+      ],
+      "release_ready": false,
+      "durable_upgrade_ready": false,
+      "current_phone_certificate_compatible": false,
+      "old_apk": {
+        "package": "com.supercubegame.pockettodo.v12.preview",
+        "version_code": 3,
+        "version_name": "1.2",
+        "min_sdk": 26,
+        "certificate": "c0f2373329a622978b9f22d7f2212ac0e131c14839af85b277ecf5fe728bf86d",
+        "sha256": "f508c1e10682e84a197076be4fdfb0a42e0595c7f0d98fa10126993fef121dcd",
+        "bytes": 9362301
+      },
+      "new_apk": {
+        "package": "com.supercubegame.pockettodo.v12.preview",
+        "version_code": 3,
+        "version_name": "1.2",
+        "min_sdk": 26,
+        "certificate": "c0f2373329a622978b9f22d7f2212ac0e131c14839af85b277ecf5fe728bf86d",
+        "sha256": "e098732d6d420acc750a7a3d2833f533e5e5c1e127df9f2de7f3c109684c0962",
+        "bytes": 9376689
+      },
+      "transfers": [
+        {
+          "status": "PASS",
+          "method": "ADB_PULL_SINGLE_PRIMARY_EXACT_BYTES",
+          "attempts": 1,
+          "budget_seconds": 30,
+          "expected_bytes": 9362301,
+          "expected_sha256": "f508c1e10682e84a197076be4fdfb0a42e0595c7f0d98fa10126993fef121dcd",
+          "command": [
+            "/usr/local/lib/android/sdk/platform-tools/adb",
+            "-s",
+            "emulator-5554",
+            "pull",
+            "-Z",
+            "/data/app/com.supercubegame.pockettodo.v12.preview-Qj8AWY7Or33BVZEyC3-ZrQ==/base.apk",
+            "/tmp/installed-apk-pull-81ua4vrv/base.apk"
+          ],
+          "stdin": "DEVNULL",
+          "timeout_seconds": 29.993866182999966,
+          "returncode": 0,
+          "stdout_tail": "",
+          "stderr_tail": "/data/app/com.supercubegame.pockettodo.v12.preview-Qj8AWY7Or33BVZEyC3-ZrQ==/base.apk: 1 file pulled, 0 skipped. 140.3 MB/s (9362301 bytes in 0.064s)\n",
+          "actual_bytes": 9362301,
+          "file_bytes": 9362301,
+          "actual_sha256": "f508c1e10682e84a197076be4fdfb0a42e0595c7f0d98fa10126993fef121dcd",
+          "read_limited": false,
+          "elapsed_seconds": 0.19699651199999835
+        },
+        {
+          "status": "PASS",
+          "method": "ADB_PULL_SINGLE_PRIMARY_EXACT_BYTES",
+          "attempts": 1,
+          "budget_seconds": 30,
+          "expected_bytes": 9376689,
+          "expected_sha256": "e098732d6d420acc750a7a3d2833f533e5e5c1e127df9f2de7f3c109684c0962",
+          "command": [
+            "/usr/local/lib/android/sdk/platform-tools/adb",
+            "-s",
+            "emulator-5554",
+            "pull",
+            "-Z",
+            "/data/app/com.supercubegame.pockettodo.v12.preview-5tmOM0EndFXHkQcsc0EDtg==/base.apk",
+            "/tmp/installed-apk-pull-hnxc3ktv/base.apk"
+          ],
+          "stdin": "DEVNULL",
+          "timeout_seconds": 29.994324516000006,
+          "returncode": 0,
+          "stdout_tail": "",
+          "stderr_tail": "/data/app/com.supercubegame.pockettodo.v12.preview-5tmOM0EndFXHkQcsc0EDtg==/base.apk: 1 file pulled, 0 skipped. 312.9 MB/s (9376689 bytes in 0.029s)\n",
+          "actual_bytes": 9376689,
+          "file_bytes": 9376689,
+          "actual_sha256": "e098732d6d420acc750a7a3d2833f533e5e5c1e127df9f2de7f3c109684c0962",
+          "read_limited": false,
+          "elapsed_seconds": 0.04579395899997962
+        }
+      ],
+      "observer": {
+        "status": "CLOSED",
+        "scope": "CI_PERSISTENT_READONLY_UI_NOT_PRODUCT_OR_ROOT_CAUSE_PROOF",
+        "nonce": "8dfa952cc4974a4597542f2759fe3ec2",
+        "starts": 1,
+        "reads": 25,
+        "reconnects": 0,
+        "commit": "4d8742d5671f915c6887d11212ad973abb2a0d63",
+        "run_id": "38012763048",
+        "run_attempt": "1",
+        "api": 26,
+        "dex_sha256": "0b9d89e010daaa20158309146e2f30ae338796ba4d274cf573f3750edd8a60c6",
+        "last_sequence": 25,
+        "last_xml_sha256": "7cefa9d3b6ee5860082b7cc06d13844eae694545673ea6b74f204ff2ff824e36",
+        "exit_code": 0
+      },
+      "install_command": [
+        "install",
+        "-r",
+        "-t",
+        "candidate.apk"
+      ],
+      "new_observer": {
+        "status": "CLOSED",
+        "scope": "CI_PERSISTENT_READONLY_UI_NOT_PRODUCT_OR_ROOT_CAUSE_PROOF",
+        "nonce": "bf6b4f1e8b0e40f1b75a2e4c8ac254e3",
+        "starts": 1,
+        "reads": 2,
+        "reconnects": 0,
+        "commit": "4d8742d5671f915c6887d11212ad973abb2a0d63",
+        "run_id": "38012763048",
+        "run_attempt": "1",
+        "api": 26,
+        "dex_sha256": "0b9d89e010daaa20158309146e2f30ae338796ba4d274cf573f3750edd8a60c6",
+        "last_sequence": 2,
+        "last_xml_sha256": "242859fb0d87a2432f94f2035f02d132a7fbef9f313699535d3a2d817dddb006",
+        "exit_code": 0
+      }
+    },
+    "34": {
+      "status": "PASS",
+      "scope": "REBUILT_OLD_SOURCE_SAME_FIXED_KEY_OVERWRITE_NOT_EXISTING_PHONE_CERTIFICATE",
+      "commit": "4d8742d5671f915c6887d11212ad973abb2a0d63",
+      "run_id": "38012763048",
+      "run_attempt": "1",
+      "api": 34,
+      "old_source": "f42e88e10052a4c71e21b83aa0d4475849b807a0",
+      "labels": [
+        "old_installed_exact",
+        "ui_nonempty_fixture",
+        "before_independent_snapshot",
+        "replace_without_uninstall",
+        "new_installed_exact",
+        "immediate_state_exact",
+        "new_ui_opens",
+        "restart_state_exact"
+      ],
+      "installed": {
+        "old_apk": "f508c1e10682e84a197076be4fdfb0a42e0595c7f0d98fa10126993fef121dcd",
+        "new_apk": "e098732d6d420acc750a7a3d2833f533e5e5c1e127df9f2de7f3c109684c0962"
+      },
+      "snapshots": {
+        "before": {
+          "database": {
+            "version": 3,
+            "schema": [
+              [
+                "index",
+                "application_package",
+                "applications",
+                "CREATE UNIQUE INDEX application_package ON applications(package_name) WHERE package_name<>''"
+              ],
+              [
+                "index",
+                "ledger_activity_day",
+                "ledger",
+                "CREATE INDEX ledger_activity_day ON ledger(activity_id,day)"
+              ],
+              [
+                "index",
+                "sqlite_autoindex_batches_1",
+                "batches",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_blocks_1",
+                "blocks",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_blocks_2",
+                "blocks",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_checkins_1",
+                "checkins",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_notes_1",
+                "field_notes",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_options_1",
+                "field_options",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_options_2",
+                "field_options",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_values_1",
+                "field_values",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_fields_1",
+                "fields",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_ledger_1",
+                "ledger",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_ledger_2",
+                "ledger",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_legacy_imports_1",
+                "legacy_imports",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_media_1",
+                "media",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_notes_1",
+                "notes",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_paths_1",
+                "paths",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_tags_1",
+                "tags",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_tags_2",
+                "tags",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_todos_1",
+                "todos",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_todos_2",
+                "todos",
+                null
+              ],
+              [
+                "table",
+                "activities",
+                "activities",
+                "CREATE TABLE activities(id INTEGER PRIMARY KEY CHECK(id>0),category_id INTEGER NOT NULL REFERENCES categories(id),application_id INTEGER REFERENCES applications(id),title TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN(0,1)))"
+              ],
+              [
+                "table",
+                "android_metadata",
+                "android_metadata",
+                "CREATE TABLE android_metadata (locale TEXT)"
+              ],
+              [
+                "table",
+                "applications",
+                "applications",
+                "CREATE TABLE applications(id INTEGER PRIMARY KEY CHECK(id>0),name TEXT NOT NULL,package_name TEXT NOT NULL)"
+              ],
+              [
+                "table",
+                "batches",
+                "batches",
+                "CREATE TABLE batches(id TEXT PRIMARY KEY NOT NULL,payload BLOB NOT NULL,revision INTEGER NOT NULL,undone INTEGER NOT NULL CHECK(undone IN(0,1)))"
+              ],
+              [
+                "table",
+                "blocks",
+                "blocks",
+                "CREATE TABLE blocks(note_id TEXT NOT NULL REFERENCES notes(id),id TEXT NOT NULL,position INTEGER NOT NULL CHECK(position>=0),kind TEXT NOT NULL CHECK(kind IN('TEXT','IMAGE')),text TEXT NOT NULL,asset_id TEXT REFERENCES media(id),caption TEXT NOT NULL,private INTEGER NOT NULL CHECK(private IN(0,1)), original_asset_id TEXT REFERENCES media(id) CHECK(kind='IMAGE' OR original_asset_id IS NULL),PRIMARY KEY(note_id,id),UNIQUE(note_id,position),CHECK((kind='TEXT' AND asset_id IS NULL) OR (kind='IMAGE' AND asset_id IS NOT NULL)))"
+              ],
+              [
+                "table",
+                "categories",
+                "categories",
+                "CREATE TABLE categories(id INTEGER PRIMARY KEY CHECK(id>0),name TEXT NOT NULL CHECK(length(trim(name))>0),position INTEGER NOT NULL CHECK(position>=0))"
+              ],
+              [
+                "table",
+                "checkins",
+                "checkins",
+                "CREATE TABLE checkins(activity_id INTEGER NOT NULL REFERENCES activities(id),day TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN('DONE','SKIPPED')),memo TEXT NOT NULL,recorded_at TEXT NOT NULL,PRIMARY KEY(activity_id,day))"
+              ],
+              [
+                "table",
+                "field_notes",
+                "field_notes",
+                "CREATE TABLE field_notes(note_id TEXT PRIMARY KEY NOT NULL REFERENCES notes(id),field_id TEXT NOT NULL REFERENCES fields(id))"
+              ],
+              [
+                "table",
+                "field_options",
+                "field_options",
+                "CREATE TABLE field_options(field_id TEXT NOT NULL REFERENCES fields(id),id TEXT NOT NULL,position INTEGER NOT NULL CHECK(position>=0),PRIMARY KEY(field_id,id),UNIQUE(field_id,position))"
+              ],
+              [
+                "table",
+                "field_values",
+                "field_values",
+                "CREATE TABLE field_values(activity_id INTEGER NOT NULL REFERENCES activities(id),field_id TEXT NOT NULL REFERENCES fields(id),position INTEGER NOT NULL CHECK(position>=0),value TEXT NOT NULL,PRIMARY KEY(activity_id,field_id,position))"
+              ],
+              [
+                "table",
+                "fields",
+                "fields",
+                "CREATE TABLE fields(id TEXT PRIMARY KEY NOT NULL,name TEXT NOT NULL,type TEXT NOT NULL CHECK(type IN('TEXT','LONG_TEXT','NUMBER','DATE','SELECT','MULTI_SELECT','LINK','BOOLEAN')),archived INTEGER NOT NULL CHECK(archived IN(0,1)))"
+              ],
+              [
+                "table",
+                "ledger",
+                "ledger",
+                "CREATE TABLE ledger(id TEXT PRIMARY KEY NOT NULL,activity_id INTEGER NOT NULL REFERENCES activities(id),day TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN('EXPENSE','REFUND','INCOME','PLANNED')),cents INTEGER NOT NULL CHECK(cents>=0),memo TEXT NOT NULL,batch_id TEXT NOT NULL REFERENCES batches(id),position INTEGER NOT NULL CHECK(position>=0),UNIQUE(batch_id,position))"
+              ],
+              [
+                "table",
+                "legacy_imports",
+                "legacy_imports",
+                "CREATE TABLE legacy_imports(source_id TEXT PRIMARY KEY NOT NULL,item_count INTEGER NOT NULL CHECK(item_count>=0))"
+              ],
+              [
+                "table",
+                "media",
+                "media",
+                "CREATE TABLE media(id TEXT PRIMARY KEY NOT NULL,mime TEXT NOT NULL,bytes INTEGER NOT NULL CHECK(bytes>0))"
+              ],
+              [
+                "table",
+                "notes",
+                "notes",
+                "CREATE TABLE notes(id TEXT PRIMARY KEY NOT NULL,activity_id INTEGER NOT NULL REFERENCES activities(id),title TEXT NOT NULL)"
+              ],
+              [
+                "table",
+                "paths",
+                "paths",
+                "CREATE TABLE paths(activity_id INTEGER NOT NULL REFERENCES activities(id),position INTEGER NOT NULL CHECK(position>=0),text TEXT NOT NULL,PRIMARY KEY(activity_id,position))"
+              ],
+              [
+                "table",
+                "revision",
+                "revision",
+                "CREATE TABLE revision(id INTEGER PRIMARY KEY CHECK(id=1), value INTEGER NOT NULL CHECK(value>=0))"
+              ],
+              [
+                "table",
+                "tags",
+                "tags",
+                "CREATE TABLE tags(activity_id INTEGER NOT NULL REFERENCES activities(id),position INTEGER NOT NULL CHECK(position>=0),text TEXT NOT NULL,PRIMARY KEY(activity_id,text),UNIQUE(activity_id,position))"
+              ],
+              [
+                "table",
+                "todos",
+                "todos",
+                "CREATE TABLE todos(id TEXT PRIMARY KEY NOT NULL,title TEXT NOT NULL CHECK(length(trim(title))>0),done INTEGER NOT NULL CHECK(done IN(0,1)),position INTEGER NOT NULL CHECK(position>=0) UNIQUE)"
+              ]
+            ],
+            "tables": {
+              "activities": {
+                "columns": [
+                  "id",
+                  "id",
+                  "category_id",
+                  "application_id",
+                  "title",
+                  "archived"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "null",
+                      null
+                    ],
+                    [
+                      "text",
+                      "Upgrade_activity"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ]
+                  ]
+                ]
+              },
+              "android_metadata": {
+                "columns": [
+                  "rowid",
+                  "locale"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "en_US"
+                    ]
+                  ]
+                ]
+              },
+              "applications": {
+                "columns": [
+                  "id",
+                  "id",
+                  "name",
+                  "package_name"
+                ],
+                "rows": []
+              },
+              "batches": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "payload",
+                  "revision",
+                  "undone"
+                ],
+                "rows": []
+              },
+              "blocks": {
+                "columns": [
+                  "rowid",
+                  "note_id",
+                  "id",
+                  "position",
+                  "kind",
+                  "text",
+                  "asset_id",
+                  "caption",
+                  "private",
+                  "original_asset_id"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "8cb094e4-ca72-4f2f-8834-716b44432bca"
+                    ],
+                    [
+                      "text",
+                      "d751db32-ce69-4916-85c3-73850b525a65"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "text",
+                      "TEXT"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_keep_text"
+                    ],
+                    [
+                      "null",
+                      null
+                    ],
+                    [
+                      "text",
+                      ""
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "null",
+                      null
+                    ]
+                  ],
+                  [
+                    [
+                      "integer",
+                      "2"
+                    ],
+                    [
+                      "text",
+                      "8cb094e4-ca72-4f2f-8834-716b44432bca"
+                    ],
+                    [
+                      "text",
+                      "0f62584f-6e7a-4f1d-82d1-d0a1f33be24f"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "IMAGE"
+                    ],
+                    [
+                      "text",
+                      ""
+                    ],
+                    [
+                      "text",
+                      "8880b1c84ddbdca3c4473711900fe94e549356071c7d054f9585c1e2178d64b8"
+                    ],
+                    [
+                      "text",
+                      ""
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "null",
+                      null
+                    ]
+                  ]
+                ]
+              },
+              "categories": {
+                "columns": [
+                  "id",
+                  "id",
+                  "name",
+                  "position"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_category"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ]
+                  ]
+                ]
+              },
+              "checkins": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "day",
+                  "status",
+                  "memo",
+                  "recorded_at"
+                ],
+                "rows": []
+              },
+              "field_notes": {
+                "columns": [
+                  "rowid",
+                  "note_id",
+                  "field_id"
+                ],
+                "rows": []
+              },
+              "field_options": {
+                "columns": [
+                  "rowid",
+                  "field_id",
+                  "id",
+                  "position"
+                ],
+                "rows": []
+              },
+              "field_values": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "field_id",
+                  "position",
+                  "value"
+                ],
+                "rows": []
+              },
+              "fields": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "name",
+                  "type",
+                  "archived"
+                ],
+                "rows": []
+              },
+              "ledger": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "activity_id",
+                  "day",
+                  "kind",
+                  "cents",
+                  "memo",
+                  "batch_id",
+                  "position"
+                ],
+                "rows": []
+              },
+              "legacy_imports": {
+                "columns": [
+                  "rowid",
+                  "source_id",
+                  "item_count"
+                ],
+                "rows": []
+              },
+              "media": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "mime",
+                  "bytes"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "8880b1c84ddbdca3c4473711900fe94e549356071c7d054f9585c1e2178d64b8"
+                    ],
+                    [
+                      "text",
+                      "image/png"
+                    ],
+                    [
+                      "integer",
+                      "323"
+                    ]
+                  ]
+                ]
+              },
+              "notes": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "activity_id",
+                  "title"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "8cb094e4-ca72-4f2f-8834-716b44432bca"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_activity"
+                    ]
+                  ]
+                ]
+              },
+              "paths": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "position",
+                  "text"
+                ],
+                "rows": []
+              },
+              "revision": {
+                "columns": [
+                  "id",
+                  "id",
+                  "value"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "7"
+                    ]
+                  ]
+                ]
+              },
+              "tags": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "position",
+                  "text"
+                ],
+                "rows": []
+              },
+              "todos": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "title",
+                  "done",
+                  "position"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "2a8b58d5-efb1-4c53-894f-fd46fec57895"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_keep_todo"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ]
+                  ]
+                ]
+              }
+            }
+          },
+          "media": {
+            "8880b1c84ddbdca3c4473711900fe94e549356071c7d054f9585c1e2178d64b8": {
+              "bytes": 323,
+              "base64": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAAAXNSR0IArs4c6QAAAARzQklUCAgICHwIZIgAAADtSURBVHic7dFBEcAgAMAwwAnKsIH7ISOPNQp617nv+UaYpQP+rgFYA7AGYA3AGoA1AGsA1gCsAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQBrANYArAFYA7AGYA3AGoA1AGsA1gCsAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQBrANYArAFYA7AGYA3AGoA1AGsA1gCsAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQBrANYArAFYA7AGYA3AGoA1AGsA1gCsAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQB7bqQCt5KgwOEAAAAASUVORK5CYII="
+            }
+          },
+          "uid": "10192"
+        },
+        "immediate": {
+          "database": {
+            "version": 3,
+            "schema": [
+              [
+                "index",
+                "application_package",
+                "applications",
+                "CREATE UNIQUE INDEX application_package ON applications(package_name) WHERE package_name<>''"
+              ],
+              [
+                "index",
+                "ledger_activity_day",
+                "ledger",
+                "CREATE INDEX ledger_activity_day ON ledger(activity_id,day)"
+              ],
+              [
+                "index",
+                "sqlite_autoindex_batches_1",
+                "batches",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_blocks_1",
+                "blocks",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_blocks_2",
+                "blocks",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_checkins_1",
+                "checkins",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_notes_1",
+                "field_notes",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_options_1",
+                "field_options",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_options_2",
+                "field_options",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_values_1",
+                "field_values",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_fields_1",
+                "fields",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_ledger_1",
+                "ledger",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_ledger_2",
+                "ledger",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_legacy_imports_1",
+                "legacy_imports",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_media_1",
+                "media",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_notes_1",
+                "notes",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_paths_1",
+                "paths",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_tags_1",
+                "tags",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_tags_2",
+                "tags",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_todos_1",
+                "todos",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_todos_2",
+                "todos",
+                null
+              ],
+              [
+                "table",
+                "activities",
+                "activities",
+                "CREATE TABLE activities(id INTEGER PRIMARY KEY CHECK(id>0),category_id INTEGER NOT NULL REFERENCES categories(id),application_id INTEGER REFERENCES applications(id),title TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN(0,1)))"
+              ],
+              [
+                "table",
+                "android_metadata",
+                "android_metadata",
+                "CREATE TABLE android_metadata (locale TEXT)"
+              ],
+              [
+                "table",
+                "applications",
+                "applications",
+                "CREATE TABLE applications(id INTEGER PRIMARY KEY CHECK(id>0),name TEXT NOT NULL,package_name TEXT NOT NULL)"
+              ],
+              [
+                "table",
+                "batches",
+                "batches",
+                "CREATE TABLE batches(id TEXT PRIMARY KEY NOT NULL,payload BLOB NOT NULL,revision INTEGER NOT NULL,undone INTEGER NOT NULL CHECK(undone IN(0,1)))"
+              ],
+              [
+                "table",
+                "blocks",
+                "blocks",
+                "CREATE TABLE blocks(note_id TEXT NOT NULL REFERENCES notes(id),id TEXT NOT NULL,position INTEGER NOT NULL CHECK(position>=0),kind TEXT NOT NULL CHECK(kind IN('TEXT','IMAGE')),text TEXT NOT NULL,asset_id TEXT REFERENCES media(id),caption TEXT NOT NULL,private INTEGER NOT NULL CHECK(private IN(0,1)), original_asset_id TEXT REFERENCES media(id) CHECK(kind='IMAGE' OR original_asset_id IS NULL),PRIMARY KEY(note_id,id),UNIQUE(note_id,position),CHECK((kind='TEXT' AND asset_id IS NULL) OR (kind='IMAGE' AND asset_id IS NOT NULL)))"
+              ],
+              [
+                "table",
+                "categories",
+                "categories",
+                "CREATE TABLE categories(id INTEGER PRIMARY KEY CHECK(id>0),name TEXT NOT NULL CHECK(length(trim(name))>0),position INTEGER NOT NULL CHECK(position>=0))"
+              ],
+              [
+                "table",
+                "checkins",
+                "checkins",
+                "CREATE TABLE checkins(activity_id INTEGER NOT NULL REFERENCES activities(id),day TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN('DONE','SKIPPED')),memo TEXT NOT NULL,recorded_at TEXT NOT NULL,PRIMARY KEY(activity_id,day))"
+              ],
+              [
+                "table",
+                "field_notes",
+                "field_notes",
+                "CREATE TABLE field_notes(note_id TEXT PRIMARY KEY NOT NULL REFERENCES notes(id),field_id TEXT NOT NULL REFERENCES fields(id))"
+              ],
+              [
+                "table",
+                "field_options",
+                "field_options",
+                "CREATE TABLE field_options(field_id TEXT NOT NULL REFERENCES fields(id),id TEXT NOT NULL,position INTEGER NOT NULL CHECK(position>=0),PRIMARY KEY(field_id,id),UNIQUE(field_id,position))"
+              ],
+              [
+                "table",
+                "field_values",
+                "field_values",
+                "CREATE TABLE field_values(activity_id INTEGER NOT NULL REFERENCES activities(id),field_id TEXT NOT NULL REFERENCES fields(id),position INTEGER NOT NULL CHECK(position>=0),value TEXT NOT NULL,PRIMARY KEY(activity_id,field_id,position))"
+              ],
+              [
+                "table",
+                "fields",
+                "fields",
+                "CREATE TABLE fields(id TEXT PRIMARY KEY NOT NULL,name TEXT NOT NULL,type TEXT NOT NULL CHECK(type IN('TEXT','LONG_TEXT','NUMBER','DATE','SELECT','MULTI_SELECT','LINK','BOOLEAN')),archived INTEGER NOT NULL CHECK(archived IN(0,1)))"
+              ],
+              [
+                "table",
+                "ledger",
+                "ledger",
+                "CREATE TABLE ledger(id TEXT PRIMARY KEY NOT NULL,activity_id INTEGER NOT NULL REFERENCES activities(id),day TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN('EXPENSE','REFUND','INCOME','PLANNED')),cents INTEGER NOT NULL CHECK(cents>=0),memo TEXT NOT NULL,batch_id TEXT NOT NULL REFERENCES batches(id),position INTEGER NOT NULL CHECK(position>=0),UNIQUE(batch_id,position))"
+              ],
+              [
+                "table",
+                "legacy_imports",
+                "legacy_imports",
+                "CREATE TABLE legacy_imports(source_id TEXT PRIMARY KEY NOT NULL,item_count INTEGER NOT NULL CHECK(item_count>=0))"
+              ],
+              [
+                "table",
+                "media",
+                "media",
+                "CREATE TABLE media(id TEXT PRIMARY KEY NOT NULL,mime TEXT NOT NULL,bytes INTEGER NOT NULL CHECK(bytes>0))"
+              ],
+              [
+                "table",
+                "notes",
+                "notes",
+                "CREATE TABLE notes(id TEXT PRIMARY KEY NOT NULL,activity_id INTEGER NOT NULL REFERENCES activities(id),title TEXT NOT NULL)"
+              ],
+              [
+                "table",
+                "paths",
+                "paths",
+                "CREATE TABLE paths(activity_id INTEGER NOT NULL REFERENCES activities(id),position INTEGER NOT NULL CHECK(position>=0),text TEXT NOT NULL,PRIMARY KEY(activity_id,position))"
+              ],
+              [
+                "table",
+                "revision",
+                "revision",
+                "CREATE TABLE revision(id INTEGER PRIMARY KEY CHECK(id=1), value INTEGER NOT NULL CHECK(value>=0))"
+              ],
+              [
+                "table",
+                "tags",
+                "tags",
+                "CREATE TABLE tags(activity_id INTEGER NOT NULL REFERENCES activities(id),position INTEGER NOT NULL CHECK(position>=0),text TEXT NOT NULL,PRIMARY KEY(activity_id,text),UNIQUE(activity_id,position))"
+              ],
+              [
+                "table",
+                "todos",
+                "todos",
+                "CREATE TABLE todos(id TEXT PRIMARY KEY NOT NULL,title TEXT NOT NULL CHECK(length(trim(title))>0),done INTEGER NOT NULL CHECK(done IN(0,1)),position INTEGER NOT NULL CHECK(position>=0) UNIQUE)"
+              ]
+            ],
+            "tables": {
+              "activities": {
+                "columns": [
+                  "id",
+                  "id",
+                  "category_id",
+                  "application_id",
+                  "title",
+                  "archived"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "null",
+                      null
+                    ],
+                    [
+                      "text",
+                      "Upgrade_activity"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ]
+                  ]
+                ]
+              },
+              "android_metadata": {
+                "columns": [
+                  "rowid",
+                  "locale"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "en_US"
+                    ]
+                  ]
+                ]
+              },
+              "applications": {
+                "columns": [
+                  "id",
+                  "id",
+                  "name",
+                  "package_name"
+                ],
+                "rows": []
+              },
+              "batches": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "payload",
+                  "revision",
+                  "undone"
+                ],
+                "rows": []
+              },
+              "blocks": {
+                "columns": [
+                  "rowid",
+                  "note_id",
+                  "id",
+                  "position",
+                  "kind",
+                  "text",
+                  "asset_id",
+                  "caption",
+                  "private",
+                  "original_asset_id"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "8cb094e4-ca72-4f2f-8834-716b44432bca"
+                    ],
+                    [
+                      "text",
+                      "d751db32-ce69-4916-85c3-73850b525a65"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "text",
+                      "TEXT"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_keep_text"
+                    ],
+                    [
+                      "null",
+                      null
+                    ],
+                    [
+                      "text",
+                      ""
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "null",
+                      null
+                    ]
+                  ],
+                  [
+                    [
+                      "integer",
+                      "2"
+                    ],
+                    [
+                      "text",
+                      "8cb094e4-ca72-4f2f-8834-716b44432bca"
+                    ],
+                    [
+                      "text",
+                      "0f62584f-6e7a-4f1d-82d1-d0a1f33be24f"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "IMAGE"
+                    ],
+                    [
+                      "text",
+                      ""
+                    ],
+                    [
+                      "text",
+                      "8880b1c84ddbdca3c4473711900fe94e549356071c7d054f9585c1e2178d64b8"
+                    ],
+                    [
+                      "text",
+                      ""
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "null",
+                      null
+                    ]
+                  ]
+                ]
+              },
+              "categories": {
+                "columns": [
+                  "id",
+                  "id",
+                  "name",
+                  "position"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_category"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ]
+                  ]
+                ]
+              },
+              "checkins": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "day",
+                  "status",
+                  "memo",
+                  "recorded_at"
+                ],
+                "rows": []
+              },
+              "field_notes": {
+                "columns": [
+                  "rowid",
+                  "note_id",
+                  "field_id"
+                ],
+                "rows": []
+              },
+              "field_options": {
+                "columns": [
+                  "rowid",
+                  "field_id",
+                  "id",
+                  "position"
+                ],
+                "rows": []
+              },
+              "field_values": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "field_id",
+                  "position",
+                  "value"
+                ],
+                "rows": []
+              },
+              "fields": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "name",
+                  "type",
+                  "archived"
+                ],
+                "rows": []
+              },
+              "ledger": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "activity_id",
+                  "day",
+                  "kind",
+                  "cents",
+                  "memo",
+                  "batch_id",
+                  "position"
+                ],
+                "rows": []
+              },
+              "legacy_imports": {
+                "columns": [
+                  "rowid",
+                  "source_id",
+                  "item_count"
+                ],
+                "rows": []
+              },
+              "media": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "mime",
+                  "bytes"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "8880b1c84ddbdca3c4473711900fe94e549356071c7d054f9585c1e2178d64b8"
+                    ],
+                    [
+                      "text",
+                      "image/png"
+                    ],
+                    [
+                      "integer",
+                      "323"
+                    ]
+                  ]
+                ]
+              },
+              "notes": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "activity_id",
+                  "title"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "8cb094e4-ca72-4f2f-8834-716b44432bca"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_activity"
+                    ]
+                  ]
+                ]
+              },
+              "paths": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "position",
+                  "text"
+                ],
+                "rows": []
+              },
+              "revision": {
+                "columns": [
+                  "id",
+                  "id",
+                  "value"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "7"
+                    ]
+                  ]
+                ]
+              },
+              "tags": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "position",
+                  "text"
+                ],
+                "rows": []
+              },
+              "todos": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "title",
+                  "done",
+                  "position"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "2a8b58d5-efb1-4c53-894f-fd46fec57895"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_keep_todo"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ]
+                  ]
+                ]
+              }
+            }
+          },
+          "media": {
+            "8880b1c84ddbdca3c4473711900fe94e549356071c7d054f9585c1e2178d64b8": {
+              "bytes": 323,
+              "base64": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAAAXNSR0IArs4c6QAAAARzQklUCAgICHwIZIgAAADtSURBVHic7dFBEcAgAMAwwAnKsIH7ISOPNQp617nv+UaYpQP+rgFYA7AGYA3AGoA1AGsA1gCsAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQBrANYArAFYA7AGYA3AGoA1AGsA1gCsAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQBrANYArAFYA7AGYA3AGoA1AGsA1gCsAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQBrANYArAFYA7AGYA3AGoA1AGsA1gCsAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQB7bqQCt5KgwOEAAAAASUVORK5CYII="
+            }
+          },
+          "uid": "10192"
+        },
+        "restart": {
+          "database": {
+            "version": 3,
+            "schema": [
+              [
+                "index",
+                "application_package",
+                "applications",
+                "CREATE UNIQUE INDEX application_package ON applications(package_name) WHERE package_name<>''"
+              ],
+              [
+                "index",
+                "ledger_activity_day",
+                "ledger",
+                "CREATE INDEX ledger_activity_day ON ledger(activity_id,day)"
+              ],
+              [
+                "index",
+                "sqlite_autoindex_batches_1",
+                "batches",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_blocks_1",
+                "blocks",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_blocks_2",
+                "blocks",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_checkins_1",
+                "checkins",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_notes_1",
+                "field_notes",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_options_1",
+                "field_options",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_options_2",
+                "field_options",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_field_values_1",
+                "field_values",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_fields_1",
+                "fields",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_ledger_1",
+                "ledger",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_ledger_2",
+                "ledger",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_legacy_imports_1",
+                "legacy_imports",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_media_1",
+                "media",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_notes_1",
+                "notes",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_paths_1",
+                "paths",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_tags_1",
+                "tags",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_tags_2",
+                "tags",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_todos_1",
+                "todos",
+                null
+              ],
+              [
+                "index",
+                "sqlite_autoindex_todos_2",
+                "todos",
+                null
+              ],
+              [
+                "table",
+                "activities",
+                "activities",
+                "CREATE TABLE activities(id INTEGER PRIMARY KEY CHECK(id>0),category_id INTEGER NOT NULL REFERENCES categories(id),application_id INTEGER REFERENCES applications(id),title TEXT NOT NULL,archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN(0,1)))"
+              ],
+              [
+                "table",
+                "android_metadata",
+                "android_metadata",
+                "CREATE TABLE android_metadata (locale TEXT)"
+              ],
+              [
+                "table",
+                "applications",
+                "applications",
+                "CREATE TABLE applications(id INTEGER PRIMARY KEY CHECK(id>0),name TEXT NOT NULL,package_name TEXT NOT NULL)"
+              ],
+              [
+                "table",
+                "batches",
+                "batches",
+                "CREATE TABLE batches(id TEXT PRIMARY KEY NOT NULL,payload BLOB NOT NULL,revision INTEGER NOT NULL,undone INTEGER NOT NULL CHECK(undone IN(0,1)))"
+              ],
+              [
+                "table",
+                "blocks",
+                "blocks",
+                "CREATE TABLE blocks(note_id TEXT NOT NULL REFERENCES notes(id),id TEXT NOT NULL,position INTEGER NOT NULL CHECK(position>=0),kind TEXT NOT NULL CHECK(kind IN('TEXT','IMAGE')),text TEXT NOT NULL,asset_id TEXT REFERENCES media(id),caption TEXT NOT NULL,private INTEGER NOT NULL CHECK(private IN(0,1)), original_asset_id TEXT REFERENCES media(id) CHECK(kind='IMAGE' OR original_asset_id IS NULL),PRIMARY KEY(note_id,id),UNIQUE(note_id,position),CHECK((kind='TEXT' AND asset_id IS NULL) OR (kind='IMAGE' AND asset_id IS NOT NULL)))"
+              ],
+              [
+                "table",
+                "categories",
+                "categories",
+                "CREATE TABLE categories(id INTEGER PRIMARY KEY CHECK(id>0),name TEXT NOT NULL CHECK(length(trim(name))>0),position INTEGER NOT NULL CHECK(position>=0))"
+              ],
+              [
+                "table",
+                "checkins",
+                "checkins",
+                "CREATE TABLE checkins(activity_id INTEGER NOT NULL REFERENCES activities(id),day TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN('DONE','SKIPPED')),memo TEXT NOT NULL,recorded_at TEXT NOT NULL,PRIMARY KEY(activity_id,day))"
+              ],
+              [
+                "table",
+                "field_notes",
+                "field_notes",
+                "CREATE TABLE field_notes(note_id TEXT PRIMARY KEY NOT NULL REFERENCES notes(id),field_id TEXT NOT NULL REFERENCES fields(id))"
+              ],
+              [
+                "table",
+                "field_options",
+                "field_options",
+                "CREATE TABLE field_options(field_id TEXT NOT NULL REFERENCES fields(id),id TEXT NOT NULL,position INTEGER NOT NULL CHECK(position>=0),PRIMARY KEY(field_id,id),UNIQUE(field_id,position))"
+              ],
+              [
+                "table",
+                "field_values",
+                "field_values",
+                "CREATE TABLE field_values(activity_id INTEGER NOT NULL REFERENCES activities(id),field_id TEXT NOT NULL REFERENCES fields(id),position INTEGER NOT NULL CHECK(position>=0),value TEXT NOT NULL,PRIMARY KEY(activity_id,field_id,position))"
+              ],
+              [
+                "table",
+                "fields",
+                "fields",
+                "CREATE TABLE fields(id TEXT PRIMARY KEY NOT NULL,name TEXT NOT NULL,type TEXT NOT NULL CHECK(type IN('TEXT','LONG_TEXT','NUMBER','DATE','SELECT','MULTI_SELECT','LINK','BOOLEAN')),archived INTEGER NOT NULL CHECK(archived IN(0,1)))"
+              ],
+              [
+                "table",
+                "ledger",
+                "ledger",
+                "CREATE TABLE ledger(id TEXT PRIMARY KEY NOT NULL,activity_id INTEGER NOT NULL REFERENCES activities(id),day TEXT NOT NULL,kind TEXT NOT NULL CHECK(kind IN('EXPENSE','REFUND','INCOME','PLANNED')),cents INTEGER NOT NULL CHECK(cents>=0),memo TEXT NOT NULL,batch_id TEXT NOT NULL REFERENCES batches(id),position INTEGER NOT NULL CHECK(position>=0),UNIQUE(batch_id,position))"
+              ],
+              [
+                "table",
+                "legacy_imports",
+                "legacy_imports",
+                "CREATE TABLE legacy_imports(source_id TEXT PRIMARY KEY NOT NULL,item_count INTEGER NOT NULL CHECK(item_count>=0))"
+              ],
+              [
+                "table",
+                "media",
+                "media",
+                "CREATE TABLE media(id TEXT PRIMARY KEY NOT NULL,mime TEXT NOT NULL,bytes INTEGER NOT NULL CHECK(bytes>0))"
+              ],
+              [
+                "table",
+                "notes",
+                "notes",
+                "CREATE TABLE notes(id TEXT PRIMARY KEY NOT NULL,activity_id INTEGER NOT NULL REFERENCES activities(id),title TEXT NOT NULL)"
+              ],
+              [
+                "table",
+                "paths",
+                "paths",
+                "CREATE TABLE paths(activity_id INTEGER NOT NULL REFERENCES activities(id),position INTEGER NOT NULL CHECK(position>=0),text TEXT NOT NULL,PRIMARY KEY(activity_id,position))"
+              ],
+              [
+                "table",
+                "revision",
+                "revision",
+                "CREATE TABLE revision(id INTEGER PRIMARY KEY CHECK(id=1), value INTEGER NOT NULL CHECK(value>=0))"
+              ],
+              [
+                "table",
+                "tags",
+                "tags",
+                "CREATE TABLE tags(activity_id INTEGER NOT NULL REFERENCES activities(id),position INTEGER NOT NULL CHECK(position>=0),text TEXT NOT NULL,PRIMARY KEY(activity_id,text),UNIQUE(activity_id,position))"
+              ],
+              [
+                "table",
+                "todos",
+                "todos",
+                "CREATE TABLE todos(id TEXT PRIMARY KEY NOT NULL,title TEXT NOT NULL CHECK(length(trim(title))>0),done INTEGER NOT NULL CHECK(done IN(0,1)),position INTEGER NOT NULL CHECK(position>=0) UNIQUE)"
+              ]
+            ],
+            "tables": {
+              "activities": {
+                "columns": [
+                  "id",
+                  "id",
+                  "category_id",
+                  "application_id",
+                  "title",
+                  "archived"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "null",
+                      null
+                    ],
+                    [
+                      "text",
+                      "Upgrade_activity"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ]
+                  ]
+                ]
+              },
+              "android_metadata": {
+                "columns": [
+                  "rowid",
+                  "locale"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "en_US"
+                    ]
+                  ]
+                ]
+              },
+              "applications": {
+                "columns": [
+                  "id",
+                  "id",
+                  "name",
+                  "package_name"
+                ],
+                "rows": []
+              },
+              "batches": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "payload",
+                  "revision",
+                  "undone"
+                ],
+                "rows": []
+              },
+              "blocks": {
+                "columns": [
+                  "rowid",
+                  "note_id",
+                  "id",
+                  "position",
+                  "kind",
+                  "text",
+                  "asset_id",
+                  "caption",
+                  "private",
+                  "original_asset_id"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "8cb094e4-ca72-4f2f-8834-716b44432bca"
+                    ],
+                    [
+                      "text",
+                      "d751db32-ce69-4916-85c3-73850b525a65"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "text",
+                      "TEXT"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_keep_text"
+                    ],
+                    [
+                      "null",
+                      null
+                    ],
+                    [
+                      "text",
+                      ""
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "null",
+                      null
+                    ]
+                  ],
+                  [
+                    [
+                      "integer",
+                      "2"
+                    ],
+                    [
+                      "text",
+                      "8cb094e4-ca72-4f2f-8834-716b44432bca"
+                    ],
+                    [
+                      "text",
+                      "0f62584f-6e7a-4f1d-82d1-d0a1f33be24f"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "IMAGE"
+                    ],
+                    [
+                      "text",
+                      ""
+                    ],
+                    [
+                      "text",
+                      "8880b1c84ddbdca3c4473711900fe94e549356071c7d054f9585c1e2178d64b8"
+                    ],
+                    [
+                      "text",
+                      ""
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "null",
+                      null
+                    ]
+                  ]
+                ]
+              },
+              "categories": {
+                "columns": [
+                  "id",
+                  "id",
+                  "name",
+                  "position"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_category"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ]
+                  ]
+                ]
+              },
+              "checkins": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "day",
+                  "status",
+                  "memo",
+                  "recorded_at"
+                ],
+                "rows": []
+              },
+              "field_notes": {
+                "columns": [
+                  "rowid",
+                  "note_id",
+                  "field_id"
+                ],
+                "rows": []
+              },
+              "field_options": {
+                "columns": [
+                  "rowid",
+                  "field_id",
+                  "id",
+                  "position"
+                ],
+                "rows": []
+              },
+              "field_values": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "field_id",
+                  "position",
+                  "value"
+                ],
+                "rows": []
+              },
+              "fields": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "name",
+                  "type",
+                  "archived"
+                ],
+                "rows": []
+              },
+              "ledger": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "activity_id",
+                  "day",
+                  "kind",
+                  "cents",
+                  "memo",
+                  "batch_id",
+                  "position"
+                ],
+                "rows": []
+              },
+              "legacy_imports": {
+                "columns": [
+                  "rowid",
+                  "source_id",
+                  "item_count"
+                ],
+                "rows": []
+              },
+              "media": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "mime",
+                  "bytes"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "8880b1c84ddbdca3c4473711900fe94e549356071c7d054f9585c1e2178d64b8"
+                    ],
+                    [
+                      "text",
+                      "image/png"
+                    ],
+                    [
+                      "integer",
+                      "323"
+                    ]
+                  ]
+                ]
+              },
+              "notes": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "activity_id",
+                  "title"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "8cb094e4-ca72-4f2f-8834-716b44432bca"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_activity"
+                    ]
+                  ]
+                ]
+              },
+              "paths": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "position",
+                  "text"
+                ],
+                "rows": []
+              },
+              "revision": {
+                "columns": [
+                  "id",
+                  "id",
+                  "value"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "integer",
+                      "7"
+                    ]
+                  ]
+                ]
+              },
+              "tags": {
+                "columns": [
+                  "rowid",
+                  "activity_id",
+                  "position",
+                  "text"
+                ],
+                "rows": []
+              },
+              "todos": {
+                "columns": [
+                  "rowid",
+                  "id",
+                  "title",
+                  "done",
+                  "position"
+                ],
+                "rows": [
+                  [
+                    [
+                      "integer",
+                      "1"
+                    ],
+                    [
+                      "text",
+                      "2a8b58d5-efb1-4c53-894f-fd46fec57895"
+                    ],
+                    [
+                      "text",
+                      "Upgrade_keep_todo"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ],
+                    [
+                      "integer",
+                      "0"
+                    ]
+                  ]
+                ]
+              }
+            }
+          },
+          "media": {
+            "8880b1c84ddbdca3c4473711900fe94e549356071c7d054f9585c1e2178d64b8": {
+              "bytes": 323,
+              "base64": "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAAAXNSR0IArs4c6QAAAARzQklUCAgICHwIZIgAAADtSURBVHic7dFBEcAgAMAwwAnKsIH7ISOPNQp617nv+UaYpQP+rgFYA7AGYA3AGoA1AGsA1gCsAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQBrANYArAFYA7AGYA3AGoA1AGsA1gCsAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQBrANYArAFYA7AGYA3AGoA1AGsA1gCsAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQBrANYArAFYA7AGYA3AGoA1AGsA1gCsAVgDsAZgDcAagDUAawDWAKwBWAOwBmANwBqANQB7bqQCt5KgwOEAAAAASUVORK5CYII="
+            }
+          },
+          "uid": "10192"
+        }
+      },
+      "commands": [
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "getprop",
+            "ro.kernel.qemu"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 2,
+          "stderr_bytes": 0,
+          "stdout_sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "pm",
+            "list",
+            "packages",
+            "com.supercubegame.pockettodo.v12.preview"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "install",
+            "-t",
+            "upgrade-old/build/outputs/apk/debug/todo-pocket-android-debug.apk"
+          ],
+          "timeout": 120,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 36,
+          "stderr_bytes": 0,
+          "stdout_sha256": "781a31c82430c97897af612ece5e0ca2205e301cb5ff121ce2660541ea5182c7",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "pm",
+            "path",
+            "com.supercubegame.pockettodo.v12.preview"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 120,
+          "stderr_bytes": 0,
+          "stdout_sha256": "b63505b7226041a64245ef30dc45aa4c206ec84d0e39f23f376dbfeda54a1c1b",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "am",
+            "start",
+            "-W",
+            "-n",
+            "com.supercubegame.pockettodo.v12.preview/com.supercubegame.pockettodo.MainActivity"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 270,
+          "stderr_bytes": 0,
+          "stdout_sha256": "6e4bd748aa5e793686db77a5932cc04f44d8caf57d1074b2998eaa0c9f1b4a31",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "126",
+            "550"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "text",
+            "Upgrade_keep_todo"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "268",
+            "315"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "159",
+            "604"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "65",
+            "207"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "160",
+            "315"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "text",
+            "Upgrade_category"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "252",
+            "277"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "62",
+            "325"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "160",
+            "315"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "text",
+            "Upgrade_activity"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "252",
+            "277"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "160",
+            "368"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "160",
+            "495"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "89",
+            "276"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "160",
+            "315"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "text",
+            "Upgrade_keep_text"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "252",
+            "297"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "231",
+            "274"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "input",
+            "tap",
+            "245",
+            "420"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 0,
+          "stderr_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "ls",
+            "databases"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 50,
+          "stderr_bytes": 0,
+          "stdout_sha256": "5691153cc8b53999ad12e62048227e38a599cdb8df24c34ea192df5d6e31348c",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "databases/pocket-v12.db"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 4096,
+          "stderr_bytes": 0,
+          "stdout_sha256": "f8046fb6523b685349e4ceaa5b63d5653f3d4d9bc0291dd9546056bfabd76205",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "databases/pocket-v12.db-wal"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 284312,
+          "stderr_bytes": 0,
+          "stdout_sha256": "2bd2df3551123a3b1eedb9502229e64dacf30b5f9e7ead2104341413be1421bc",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "ls",
+            "files/media"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 65,
+          "stderr_bytes": 0,
+          "stdout_sha256": "6a0d6bd57a233b56c7d266ad79eab9165f1953f3d62be729bd745502fee625e8",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "files/media/8880b1c84ddbdca3c4473711900fe94e549356071c7d054f9585c1e2178d64b8"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 323,
+          "stderr_bytes": 0,
+          "stdout_sha256": "8880b1c84ddbdca3c4473711900fe94e549356071c7d054f9585c1e2178d64b8",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "id",
+            "-u"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 6,
+          "stderr_bytes": 0,
+          "stdout_sha256": "a5aa70110f593ad456778a8896bfbf0f1748ff500d3c783c4a05c094430392af",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "install",
+            "-r",
+            "-t",
+            "upgrade-evidence/candidate.apk"
+          ],
+          "timeout": 120,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 36,
+          "stderr_bytes": 0,
+          "stdout_sha256": "781a31c82430c97897af612ece5e0ca2205e301cb5ff121ce2660541ea5182c7",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "pm",
+            "path",
+            "com.supercubegame.pockettodo.v12.preview"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 120,
+          "stderr_bytes": 0,
+          "stdout_sha256": "86a531fcd146033a6732f1b9ec853785868fb0e83679ccd3ea2fe13ebb132ace",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "ls",
+            "databases"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 50,
+          "stderr_bytes": 0,
+          "stdout_sha256": "5691153cc8b53999ad12e62048227e38a599cdb8df24c34ea192df5d6e31348c",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "databases/pocket-v12.db"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 4096,
+          "stderr_bytes": 0,
+          "stdout_sha256": "f8046fb6523b685349e4ceaa5b63d5653f3d4d9bc0291dd9546056bfabd76205",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "databases/pocket-v12.db-wal"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 284312,
+          "stderr_bytes": 0,
+          "stdout_sha256": "2bd2df3551123a3b1eedb9502229e64dacf30b5f9e7ead2104341413be1421bc",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "ls",
+            "files/media"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 65,
+          "stderr_bytes": 0,
+          "stdout_sha256": "6a0d6bd57a233b56c7d266ad79eab9165f1953f3d62be729bd745502fee625e8",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "files/media/8880b1c84ddbdca3c4473711900fe94e549356071c7d054f9585c1e2178d64b8"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 323,
+          "stderr_bytes": 0,
+          "stdout_sha256": "8880b1c84ddbdca3c4473711900fe94e549356071c7d054f9585c1e2178d64b8",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "id",
+            "-u"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 6,
+          "stderr_bytes": 0,
+          "stdout_sha256": "a5aa70110f593ad456778a8896bfbf0f1748ff500d3c783c4a05c094430392af",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "am",
+            "start",
+            "-W",
+            "-n",
+            "com.supercubegame.pockettodo.v12.preview/com.supercubegame.pockettodo.MainActivity"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 268,
+          "stderr_bytes": 0,
+          "stdout_sha256": "74b94d3b5f95cd56b64f7fc082beaa33bf01340c1eee00861fc459f50b257ff9",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "ls",
+            "databases"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 50,
+          "stderr_bytes": 0,
+          "stdout_sha256": "5691153cc8b53999ad12e62048227e38a599cdb8df24c34ea192df5d6e31348c",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "databases/pocket-v12.db"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 4096,
+          "stderr_bytes": 0,
+          "stdout_sha256": "f8046fb6523b685349e4ceaa5b63d5653f3d4d9bc0291dd9546056bfabd76205",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "databases/pocket-v12.db-wal"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 284312,
+          "stderr_bytes": 0,
+          "stdout_sha256": "2bd2df3551123a3b1eedb9502229e64dacf30b5f9e7ead2104341413be1421bc",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "ls",
+            "files/media"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 65,
+          "stderr_bytes": 0,
+          "stdout_sha256": "6a0d6bd57a233b56c7d266ad79eab9165f1953f3d62be729bd745502fee625e8",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "files/media/8880b1c84ddbdca3c4473711900fe94e549356071c7d054f9585c1e2178d64b8"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 323,
+          "stderr_bytes": 0,
+          "stdout_sha256": "8880b1c84ddbdca3c4473711900fe94e549356071c7d054f9585c1e2178d64b8",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "id",
+            "-u"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout_bytes": 6,
+          "stderr_bytes": 0,
+          "stdout_sha256": "a5aa70110f593ad456778a8896bfbf0f1748ff500d3c783c4a05c094430392af",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "stops": [
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "3607\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.134757
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 0,
+            "stdout": "5723\n",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.100778
+        }
+      ],
+      "release_ready": false,
+      "durable_upgrade_ready": false,
+      "current_phone_certificate_compatible": false,
+      "old_apk": {
+        "package": "com.supercubegame.pockettodo.v12.preview",
+        "version_code": 3,
+        "version_name": "1.2",
+        "min_sdk": 26,
+        "certificate": "c0f2373329a622978b9f22d7f2212ac0e131c14839af85b277ecf5fe728bf86d",
+        "sha256": "f508c1e10682e84a197076be4fdfb0a42e0595c7f0d98fa10126993fef121dcd",
+        "bytes": 9362301
+      },
+      "new_apk": {
+        "package": "com.supercubegame.pockettodo.v12.preview",
+        "version_code": 3,
+        "version_name": "1.2",
+        "min_sdk": 26,
+        "certificate": "c0f2373329a622978b9f22d7f2212ac0e131c14839af85b277ecf5fe728bf86d",
+        "sha256": "e098732d6d420acc750a7a3d2833f533e5e5c1e127df9f2de7f3c109684c0962",
+        "bytes": 9376689
+      },
+      "transfers": [
+        {
+          "status": "PASS",
+          "method": "ADB_PULL_SINGLE_PRIMARY_EXACT_BYTES",
+          "attempts": 1,
+          "budget_seconds": 30,
+          "expected_bytes": 9362301,
+          "expected_sha256": "f508c1e10682e84a197076be4fdfb0a42e0595c7f0d98fa10126993fef121dcd",
+          "command": [
+            "/usr/local/lib/android/sdk/platform-tools/adb",
+            "-s",
+            "emulator-5554",
+            "pull",
+            "-Z",
+            "/data/app/~~c_QginarPutDtiZtAlsHNQ==/com.supercubegame.pockettodo.v12.preview-uHMZpgB2Pnie63n1OSOgaQ==/base.apk",
+            "/tmp/installed-apk-pull-qo06leoy/base.apk"
+          ],
+          "stdin": "DEVNULL",
+          "timeout_seconds": 29.99290724100001,
+          "returncode": 0,
+          "stdout_tail": "",
+          "stderr_tail": "/data/app/~~c_QginarPutDtiZtAlsHNQ==/com.supercubegame.pockettodo.v12.preview-uHMZpgB2Pnie63n1OSOgaQ==/base.apk: 1 file pulled, 0 skipped. 222.8 MB/s (9362301 bytes in 0.040s)\n",
+          "actual_bytes": 9362301,
+          "file_bytes": 9362301,
+          "actual_sha256": "f508c1e10682e84a197076be4fdfb0a42e0595c7f0d98fa10126993fef121dcd",
+          "read_limited": false,
+          "elapsed_seconds": 0.06907802299997456
+        },
+        {
+          "status": "PASS",
+          "method": "ADB_PULL_SINGLE_PRIMARY_EXACT_BYTES",
+          "attempts": 1,
+          "budget_seconds": 30,
+          "expected_bytes": 9376689,
+          "expected_sha256": "e098732d6d420acc750a7a3d2833f533e5e5c1e127df9f2de7f3c109684c0962",
+          "command": [
+            "/usr/local/lib/android/sdk/platform-tools/adb",
+            "-s",
+            "emulator-5554",
+            "pull",
+            "-Z",
+            "/data/app/~~L8dmrIJMhkAT-PX0hoivSA==/com.supercubegame.pockettodo.v12.preview-w1WD5xe3bSqSHF-lAbDLPQ==/base.apk",
+            "/tmp/installed-apk-pull-ma0qs4mk/base.apk"
+          ],
+          "stdin": "DEVNULL",
+          "timeout_seconds": 29.99427051799995,
+          "returncode": 0,
+          "stdout_tail": "",
+          "stderr_tail": "/data/app/~~L8dmrIJMhkAT-PX0hoivSA==/com.supercubegame.pockettodo.v12.preview-w1WD5xe3bSqSHF-lAbDLPQ==/base.apk: 1 file pulled, 0 skipped. 275.2 MB/s (9376689 bytes in 0.032s)\n",
+          "actual_bytes": 9376689,
+          "file_bytes": 9376689,
+          "actual_sha256": "e098732d6d420acc750a7a3d2833f533e5e5c1e127df9f2de7f3c109684c0962",
+          "read_limited": false,
+          "elapsed_seconds": 0.06384421400002793
+        }
+      ],
+      "observer": {
+        "status": "CLOSED",
+        "scope": "CI_PERSISTENT_READONLY_UI_NOT_PRODUCT_OR_ROOT_CAUSE_PROOF",
+        "nonce": "e0f354a3c16b461cab16414c73dfb9c1",
+        "starts": 1,
+        "reads": 25,
+        "reconnects": 0,
+        "commit": "4d8742d5671f915c6887d11212ad973abb2a0d63",
+        "run_id": "38012763048",
+        "run_attempt": "1",
+        "api": 34,
+        "dex_sha256": "0b9d89e010daaa20158309146e2f30ae338796ba4d274cf573f3750edd8a60c6",
+        "last_sequence": 25,
+        "last_xml_sha256": "0a9d4e5fc65367d6a974af102a9ac8d9031aeacc94c51aa017ffa6ac895a65f0",
+        "exit_code": 0
+      },
+      "install_command": [
+        "install",
+        "-r",
+        "-t",
+        "candidate.apk"
+      ],
+      "new_observer": {
+        "status": "CLOSED",
+        "scope": "CI_PERSISTENT_READONLY_UI_NOT_PRODUCT_OR_ROOT_CAUSE_PROOF",
+        "nonce": "0ab795b8d6dc42d1b7dbc2ad6576be29",
+        "starts": 1,
+        "reads": 2,
+        "reconnects": 0,
+        "commit": "4d8742d5671f915c6887d11212ad973abb2a0d63",
+        "run_id": "38012763048",
+        "run_attempt": "1",
+        "api": 34,
+        "dex_sha256": "0b9d89e010daaa20158309146e2f30ae338796ba4d274cf573f3750edd8a60c6",
+        "last_sequence": 2,
+        "last_xml_sha256": "2afd864494f53ac4853acd43602e0d248527c1bc0e2eeac739ba1734e97bef02",
+        "exit_code": 0
+      }
+    }
+  },
+  "release_ready": false,
+  "durable_upgrade_ready": false,
+  "current_phone_certificate_compatible": false,
+  "device_readback": {
+    "26": {
+      "bytes": 83952,
+      "sha256": "84b11277174e4bbb7b3fd797d6577606726d5d6ef2576fc119e1d41c5c0a2a33"
+    },
+    "34": {
+      "bytes": 84109,
+      "sha256": "90a13b3dc467982773d53312472b01eadc64800da4002f15d55cd0e0f739a805"
+    }
+  },
+  "device_read_errors": {},
+  "device_validation_errors": {}
+}

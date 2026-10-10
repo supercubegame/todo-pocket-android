@@ -1,0 +1,4471 @@
+{
+  "status": "PASS",
+  "scope": "OPT_IN_SCHEMA4_STORAGE_NOT_LIVE_UI_NOT_RELEASE",
+  "commit": "2b94a08c1f4ce9245d11971cd7a6993a10e4877a",
+  "run_id": "38024836906",
+  "run_attempt": "1",
+  "devices": {
+    "26": {
+      "status": "PASS",
+      "scope": "OPT_IN_SCHEMA4_STORAGE_NOT_LIVE_UI_NOT_RELEASE",
+      "commit": "2b94a08c1f4ce9245d11971cd7a6993a10e4877a",
+      "run_id": "38024836906",
+      "run_attempt": "1",
+      "api": 26,
+      "source_files": {
+        "src/main/java/com/supercubegame/pockettodo/Schema3Store.java": "366e8a9495d47d262007eafb436664e077cf99e5f5457514d16c8b7e40dd7bba",
+        "src/main/java/com/supercubegame/pockettodo/Schema4Store.java": "a62d9fe0e012642814addf209fc5ac55d83e26bc5bf4e3646c2c851a72aab863",
+        "src/androidTest/java/com/supercubegame/pockettodo/Schema4DeviceTest.java": "2d0bc7772e020e07027589d1b7a925f408f5b17e02e59d2d95bc9df06430465a",
+        "tools/verify_shortcuts.py": "d62b9bd77500a5a25d982d1e62b429d46fb6503fc1dab8b5de3b9dbc98357e3c",
+        ".github/workflows/shortcut-storage.yml": "f3353035ad996e72c90fff5220440dc82ce9af07756d627907f53ad8e66c7f94",
+        "AGENTS.md": "14bb2b000405ad71f12283129a410cec0058ce122d892412815ce61dcc8e3847",
+        "CLAUDE.md": "14bb2b000405ad71f12283129a410cec0058ce122d892412815ce61dcc8e3847"
+      },
+      "phases": {
+        "seed": {
+          "bytes": 1797,
+          "sha256": "2892e379b10c23438ab975ff45b9b84b99769807236c5c57254144593fdcaa88",
+          "labels": [
+            "all_18_tables_nonempty_before_migration",
+            "migration_preserves_all_old_cells",
+            "migration_only_adds_shortcut_table",
+            "stable_ids_and_multi_category_links",
+            "repeat_setting_is_exact_noop",
+            "same_name_targets_not_confused",
+            "invalid_targets_leave_exact_state",
+            "remove_relation_only_and_repeat_noop",
+            "navigation_read_is_pure_and_excludes_archived",
+            "missing_navigation_no_business_writes",
+            "late_sql_failure_rolls_back_link_and_revision",
+            "unknown_tables_never_silently_omitted",
+            "backup_preserves_source_and_original_media",
+            "restore_preview_is_read_only_and_counts_complete",
+            "restore_counts_immutable",
+            "cancel_and_replay_preserve_state",
+            "foreign_owner_refused_without_consuming_valid_plan",
+            "helper_close_invalidates_restore_session",
+            "same_revision_stale_restore_refused",
+            "new_backup_restore_exact_and_single_use",
+            "old_backup_replacement_clears_new_relationships",
+            "late_restore_failure_rolls_back_every_table",
+            "changed_staged_media_refused_without_live_damage",
+            "reviewed_source_frozen_against_file_replacement",
+            "staging_closed_and_original_media_exact",
+            "restore_suite_preserves_all_business_cells",
+            "v2_backup_normalizes_empty_shortcuts",
+            "v3_backup_normalizes_empty_shortcuts",
+            "malformed_and_new_to_old_backups_refused",
+            "migration_conflict_keeps_version_and_schema",
+            "future_schema_refused_without_damage",
+            "live_ui_database_never_opened"
+          ],
+          "media_sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        },
+        "reopen": {
+          "bytes": 399,
+          "sha256": "6926ee37c1b249161bb433a23d90b7dff8d1a14f2e91944f26f2ea9132c29a1b",
+          "labels": [
+            "separate_process_exact_state",
+            "separate_process_all_business_cells",
+            "separate_process_relationships_and_read_only_targets",
+            "separate_process_original_media",
+            "separate_process_backup_restore_exact",
+            "separate_process_no_live_ui_database"
+          ],
+          "media_sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        }
+      },
+      "commands": [
+        {
+          "args": [
+            "install",
+            "-r",
+            "-t",
+            "/home/runner/work/todo-pocket-android/todo-pocket-android/build/outputs/apk/debug/todo-pocket-android-debug.apk"
+          ],
+          "timeout": 120,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-0-stdout.bin",
+            "bytes": 36,
+            "sha256": "781a31c82430c97897af612ece5e0ca2205e301cb5ff121ce2660541ea5182c7"
+          },
+          "stderr": {
+            "file": "command-0-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "pm",
+            "path",
+            "com.supercubegame.pockettodo.v12.preview"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-1-stdout.bin",
+            "bytes": 93,
+            "sha256": "9bca51611c9b86e745b7ea7b4d860c8f2d476b2d3298467761a747f46b56020b"
+          },
+          "stderr": {
+            "file": "command-1-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "install",
+            "-r",
+            "-t",
+            "/home/runner/work/todo-pocket-android/todo-pocket-android/build/outputs/apk/androidTest/debug/todo-pocket-android-debug-androidTest.apk"
+          ],
+          "timeout": 120,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-2-stdout.bin",
+            "bytes": 36,
+            "sha256": "781a31c82430c97897af612ece5e0ca2205e301cb5ff121ce2660541ea5182c7"
+          },
+          "stderr": {
+            "file": "command-2-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "pm",
+            "path",
+            "com.supercubegame.pockettodo.v12.preview.test"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-3-stdout.bin",
+            "bytes": 98,
+            "sha256": "474370b404e6f9845227f0f32e0b8f6d62c332f6c3e46a468785630089a3787f"
+          },
+          "stderr": {
+            "file": "command-3-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "pm",
+            "list",
+            "instrumentation"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-4-stdout.bin",
+            "bytes": 263,
+            "sha256": "d64c097370e86ae32f67e26f9f473a0657665ea64d5a2fea9605381c5c71a332"
+          },
+          "stderr": {
+            "file": "command-4-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "am",
+            "instrument",
+            "-w",
+            "-r",
+            "-e",
+            "expectedApi",
+            "26",
+            "-e",
+            "phase",
+            "seed",
+            "com.supercubegame.pockettodo.v12.preview.test/com.supercubegame.pockettodo.Schema4DeviceTest"
+          ],
+          "timeout": 180,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-5-stdout.bin",
+            "bytes": 1797,
+            "sha256": "2892e379b10c23438ab975ff45b9b84b99769807236c5c57254144593fdcaa88"
+          },
+          "stderr": {
+            "file": "command-5-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "ls",
+            "databases"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-6-stdout.bin",
+            "bytes": 112,
+            "sha256": "58d4519fdd2e9ced4292dd4df6757567600453c060d095ecda33972f331a1b7f"
+          },
+          "stderr": {
+            "file": "command-6-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "databases/schema4-contract.db"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-7-stdout.bin",
+            "bytes": 184320,
+            "sha256": "5420c20e1a3ebb70c6ec3575eb8ca7676aa390979fdf0b2963a5087f628fad3c"
+          },
+          "stderr": {
+            "file": "command-7-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "files/schema4-media/ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-8-stdout.bin",
+            "bytes": 3,
+            "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+          },
+          "stderr": {
+            "file": "command-8-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "am",
+            "instrument",
+            "-w",
+            "-r",
+            "-e",
+            "expectedApi",
+            "26",
+            "-e",
+            "phase",
+            "reopen",
+            "com.supercubegame.pockettodo.v12.preview.test/com.supercubegame.pockettodo.Schema4DeviceTest"
+          ],
+          "timeout": 180,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-9-stdout.bin",
+            "bytes": 399,
+            "sha256": "6926ee37c1b249161bb433a23d90b7dff8d1a14f2e91944f26f2ea9132c29a1b"
+          },
+          "stderr": {
+            "file": "command-9-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "ls",
+            "databases"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-10-stdout.bin",
+            "bytes": 112,
+            "sha256": "58d4519fdd2e9ced4292dd4df6757567600453c060d095ecda33972f331a1b7f"
+          },
+          "stderr": {
+            "file": "command-10-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "databases/schema4-contract.db"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-11-stdout.bin",
+            "bytes": 184320,
+            "sha256": "5420c20e1a3ebb70c6ec3575eb8ca7676aa390979fdf0b2963a5087f628fad3c"
+          },
+          "stderr": {
+            "file": "command-11-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "files/schema4-media/ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-12-stdout.bin",
+            "bytes": 3,
+            "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+          },
+          "stderr": {
+            "file": "command-12-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      ],
+      "stops": [
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.077148
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.07553
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.057805
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.070219
+        }
+      ],
+      "snapshots": {
+        "seed": {
+          "revision": {
+            "columns": [
+              "id",
+              "id",
+              "value"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  46
+                ]
+              ]
+            ]
+          },
+          "categories": {
+            "columns": [
+              "id",
+              "id",
+              "name",
+              "position"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "text",
+                  "分类同名"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  8
+                ],
+                [
+                  "integer",
+                  8
+                ],
+                [
+                  "text",
+                  "分类同名"
+                ],
+                [
+                  "integer",
+                  1
+                ]
+              ]
+            ]
+          },
+          "applications": {
+            "columns": [
+              "id",
+              "id",
+              "name",
+              "package_name"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  10
+                ],
+                [
+                  "integer",
+                  10
+                ],
+                [
+                  "text",
+                  "应用同名"
+                ],
+                [
+                  "text",
+                  ""
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  11
+                ],
+                [
+                  "integer",
+                  11
+                ],
+                [
+                  "text",
+                  "应用同名"
+                ],
+                [
+                  "text",
+                  ""
+                ]
+              ]
+            ]
+          },
+          "activities": {
+            "columns": [
+              "id",
+              "id",
+              "category_id",
+              "application_id",
+              "title",
+              "archived"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "integer",
+                  10
+                ],
+                [
+                  "text",
+                  "活动同名"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  21
+                ],
+                [
+                  "integer",
+                  21
+                ],
+                [
+                  "integer",
+                  8
+                ],
+                [
+                  "integer",
+                  10
+                ],
+                [
+                  "text",
+                  "活动同名"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  22
+                ],
+                [
+                  "integer",
+                  22
+                ],
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "integer",
+                  11
+                ],
+                [
+                  "text",
+                  "活动同名"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  23
+                ],
+                [
+                  "integer",
+                  23
+                ],
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "integer",
+                  10
+                ],
+                [
+                  "text",
+                  "归档活动"
+                ],
+                [
+                  "integer",
+                  1
+                ]
+              ]
+            ]
+          },
+          "paths": {
+            "columns": [
+              "rowid",
+              "activity_id",
+              "position",
+              "text"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "integer",
+                  0
+                ],
+                [
+                  "text",
+                  "首页"
+                ]
+              ]
+            ]
+          },
+          "tags": {
+            "columns": [
+              "rowid",
+              "activity_id",
+              "position",
+              "text"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "integer",
+                  0
+                ],
+                [
+                  "text",
+                  "历史"
+                ]
+              ]
+            ]
+          },
+          "batches": {
+            "columns": [
+              "rowid",
+              "id",
+              "payload",
+              "revision",
+              "undone"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "batch"
+                ],
+                [
+                  "blob",
+                  "0000000100000005656e74727900000000000000140000000a323032362d30392d303100000007455850454e5345000000000000007b0000000ce58e86e58fb2e8b4a6e79bae"
+                ],
+                [
+                  "integer",
+                  42
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ]
+            ]
+          },
+          "ledger": {
+            "columns": [
+              "rowid",
+              "id",
+              "activity_id",
+              "day",
+              "kind",
+              "cents",
+              "memo",
+              "batch_id",
+              "position"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "entry"
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "text",
+                  "2026-09-01"
+                ],
+                [
+                  "text",
+                  "EXPENSE"
+                ],
+                [
+                  "integer",
+                  123
+                ],
+                [
+                  "text",
+                  "历史账目"
+                ],
+                [
+                  "text",
+                  "batch"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ]
+            ]
+          },
+          "checkins": {
+            "columns": [
+              "rowid",
+              "activity_id",
+              "day",
+              "status",
+              "memo",
+              "recorded_at"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "text",
+                  "2026-09-01"
+                ],
+                [
+                  "text",
+                  "DONE"
+                ],
+                [
+                  "text",
+                  "历史打卡"
+                ],
+                [
+                  "text",
+                  "2026-09-21T12:00:00Z"
+                ]
+              ]
+            ]
+          },
+          "media": {
+            "columns": [
+              "rowid",
+              "id",
+              "mime",
+              "bytes"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+                ],
+                [
+                  "text",
+                  "application/octet-stream"
+                ],
+                [
+                  "integer",
+                  3
+                ]
+              ]
+            ]
+          },
+          "notes": {
+            "columns": [
+              "rowid",
+              "id",
+              "activity_id",
+              "title"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "note"
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "text",
+                  "历史笔记"
+                ]
+              ]
+            ]
+          },
+          "blocks": {
+            "columns": [
+              "rowid",
+              "note_id",
+              "id",
+              "position",
+              "kind",
+              "text",
+              "asset_id",
+              "caption",
+              "private",
+              "original_asset_id"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "note"
+                ],
+                [
+                  "text",
+                  "image"
+                ],
+                [
+                  "integer",
+                  0
+                ],
+                [
+                  "text",
+                  "IMAGE"
+                ],
+                [
+                  "text",
+                  ""
+                ],
+                [
+                  "text",
+                  "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+                ],
+                [
+                  "text",
+                  "私有图片"
+                ],
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "null",
+                  null
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  2
+                ],
+                [
+                  "text",
+                  "note"
+                ],
+                [
+                  "text",
+                  "text"
+                ],
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "TEXT"
+                ],
+                [
+                  "text",
+                  "私有文字"
+                ],
+                [
+                  "null",
+                  null
+                ],
+                [
+                  "text",
+                  ""
+                ],
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "null",
+                  null
+                ]
+              ]
+            ]
+          },
+          "fields": {
+            "columns": [
+              "rowid",
+              "id",
+              "name",
+              "type",
+              "archived"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "field"
+                ],
+                [
+                  "text",
+                  "选项"
+                ],
+                [
+                  "text",
+                  "SELECT"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ]
+            ]
+          },
+          "field_options": {
+            "columns": [
+              "rowid",
+              "field_id",
+              "id",
+              "position"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "field"
+                ],
+                [
+                  "text",
+                  "yes"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ]
+            ]
+          },
+          "field_values": {
+            "columns": [
+              "rowid",
+              "activity_id",
+              "field_id",
+              "position",
+              "value"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "text",
+                  "field"
+                ],
+                [
+                  "integer",
+                  0
+                ],
+                [
+                  "text",
+                  "yes"
+                ]
+              ]
+            ]
+          },
+          "field_notes": {
+            "columns": [
+              "rowid",
+              "note_id",
+              "field_id"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "note"
+                ],
+                [
+                  "text",
+                  "field"
+                ]
+              ]
+            ]
+          },
+          "todos": {
+            "columns": [
+              "rowid",
+              "id",
+              "title",
+              "done",
+              "position"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "todo"
+                ],
+                [
+                  "text",
+                  "历史待办"
+                ],
+                [
+                  "integer",
+                  0
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ]
+            ]
+          },
+          "legacy_imports": {
+            "columns": [
+              "rowid",
+              "source_id",
+              "item_count"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                ],
+                [
+                  "integer",
+                  1
+                ]
+              ]
+            ]
+          },
+          "category_shortcuts": {
+            "columns": [
+              "category_id",
+              "application_id"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "integer",
+                  10
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  8
+                ],
+                [
+                  "integer",
+                  10
+                ]
+              ]
+            ]
+          }
+        },
+        "reopen": {
+          "revision": {
+            "columns": [
+              "id",
+              "id",
+              "value"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  46
+                ]
+              ]
+            ]
+          },
+          "categories": {
+            "columns": [
+              "id",
+              "id",
+              "name",
+              "position"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "text",
+                  "分类同名"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  8
+                ],
+                [
+                  "integer",
+                  8
+                ],
+                [
+                  "text",
+                  "分类同名"
+                ],
+                [
+                  "integer",
+                  1
+                ]
+              ]
+            ]
+          },
+          "applications": {
+            "columns": [
+              "id",
+              "id",
+              "name",
+              "package_name"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  10
+                ],
+                [
+                  "integer",
+                  10
+                ],
+                [
+                  "text",
+                  "应用同名"
+                ],
+                [
+                  "text",
+                  ""
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  11
+                ],
+                [
+                  "integer",
+                  11
+                ],
+                [
+                  "text",
+                  "应用同名"
+                ],
+                [
+                  "text",
+                  ""
+                ]
+              ]
+            ]
+          },
+          "activities": {
+            "columns": [
+              "id",
+              "id",
+              "category_id",
+              "application_id",
+              "title",
+              "archived"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "integer",
+                  10
+                ],
+                [
+                  "text",
+                  "活动同名"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  21
+                ],
+                [
+                  "integer",
+                  21
+                ],
+                [
+                  "integer",
+                  8
+                ],
+                [
+                  "integer",
+                  10
+                ],
+                [
+                  "text",
+                  "活动同名"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  22
+                ],
+                [
+                  "integer",
+                  22
+                ],
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "integer",
+                  11
+                ],
+                [
+                  "text",
+                  "活动同名"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  23
+                ],
+                [
+                  "integer",
+                  23
+                ],
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "integer",
+                  10
+                ],
+                [
+                  "text",
+                  "归档活动"
+                ],
+                [
+                  "integer",
+                  1
+                ]
+              ]
+            ]
+          },
+          "paths": {
+            "columns": [
+              "rowid",
+              "activity_id",
+              "position",
+              "text"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "integer",
+                  0
+                ],
+                [
+                  "text",
+                  "首页"
+                ]
+              ]
+            ]
+          },
+          "tags": {
+            "columns": [
+              "rowid",
+              "activity_id",
+              "position",
+              "text"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "integer",
+                  0
+                ],
+                [
+                  "text",
+                  "历史"
+                ]
+              ]
+            ]
+          },
+          "batches": {
+            "columns": [
+              "rowid",
+              "id",
+              "payload",
+              "revision",
+              "undone"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "batch"
+                ],
+                [
+                  "blob",
+                  "0000000100000005656e74727900000000000000140000000a323032362d30392d303100000007455850454e5345000000000000007b0000000ce58e86e58fb2e8b4a6e79bae"
+                ],
+                [
+                  "integer",
+                  42
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ]
+            ]
+          },
+          "ledger": {
+            "columns": [
+              "rowid",
+              "id",
+              "activity_id",
+              "day",
+              "kind",
+              "cents",
+              "memo",
+              "batch_id",
+              "position"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "entry"
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "text",
+                  "2026-09-01"
+                ],
+                [
+                  "text",
+                  "EXPENSE"
+                ],
+                [
+                  "integer",
+                  123
+                ],
+                [
+                  "text",
+                  "历史账目"
+                ],
+                [
+                  "text",
+                  "batch"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ]
+            ]
+          },
+          "checkins": {
+            "columns": [
+              "rowid",
+              "activity_id",
+              "day",
+              "status",
+              "memo",
+              "recorded_at"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "text",
+                  "2026-09-01"
+                ],
+                [
+                  "text",
+                  "DONE"
+                ],
+                [
+                  "text",
+                  "历史打卡"
+                ],
+                [
+                  "text",
+                  "2026-09-21T12:00:00Z"
+                ]
+              ]
+            ]
+          },
+          "media": {
+            "columns": [
+              "rowid",
+              "id",
+              "mime",
+              "bytes"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+                ],
+                [
+                  "text",
+                  "application/octet-stream"
+                ],
+                [
+                  "integer",
+                  3
+                ]
+              ]
+            ]
+          },
+          "notes": {
+            "columns": [
+              "rowid",
+              "id",
+              "activity_id",
+              "title"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "note"
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "text",
+                  "历史笔记"
+                ]
+              ]
+            ]
+          },
+          "blocks": {
+            "columns": [
+              "rowid",
+              "note_id",
+              "id",
+              "position",
+              "kind",
+              "text",
+              "asset_id",
+              "caption",
+              "private",
+              "original_asset_id"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "note"
+                ],
+                [
+                  "text",
+                  "image"
+                ],
+                [
+                  "integer",
+                  0
+                ],
+                [
+                  "text",
+                  "IMAGE"
+                ],
+                [
+                  "text",
+                  ""
+                ],
+                [
+                  "text",
+                  "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+                ],
+                [
+                  "text",
+                  "私有图片"
+                ],
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "null",
+                  null
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  2
+                ],
+                [
+                  "text",
+                  "note"
+                ],
+                [
+                  "text",
+                  "text"
+                ],
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "TEXT"
+                ],
+                [
+                  "text",
+                  "私有文字"
+                ],
+                [
+                  "null",
+                  null
+                ],
+                [
+                  "text",
+                  ""
+                ],
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "null",
+                  null
+                ]
+              ]
+            ]
+          },
+          "fields": {
+            "columns": [
+              "rowid",
+              "id",
+              "name",
+              "type",
+              "archived"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "field"
+                ],
+                [
+                  "text",
+                  "选项"
+                ],
+                [
+                  "text",
+                  "SELECT"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ]
+            ]
+          },
+          "field_options": {
+            "columns": [
+              "rowid",
+              "field_id",
+              "id",
+              "position"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "field"
+                ],
+                [
+                  "text",
+                  "yes"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ]
+            ]
+          },
+          "field_values": {
+            "columns": [
+              "rowid",
+              "activity_id",
+              "field_id",
+              "position",
+              "value"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "text",
+                  "field"
+                ],
+                [
+                  "integer",
+                  0
+                ],
+                [
+                  "text",
+                  "yes"
+                ]
+              ]
+            ]
+          },
+          "field_notes": {
+            "columns": [
+              "rowid",
+              "note_id",
+              "field_id"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "note"
+                ],
+                [
+                  "text",
+                  "field"
+                ]
+              ]
+            ]
+          },
+          "todos": {
+            "columns": [
+              "rowid",
+              "id",
+              "title",
+              "done",
+              "position"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "todo"
+                ],
+                [
+                  "text",
+                  "历史待办"
+                ],
+                [
+                  "integer",
+                  0
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ]
+            ]
+          },
+          "legacy_imports": {
+            "columns": [
+              "rowid",
+              "source_id",
+              "item_count"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                ],
+                [
+                  "integer",
+                  1
+                ]
+              ]
+            ]
+          },
+          "category_shortcuts": {
+            "columns": [
+              "category_id",
+              "application_id"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "integer",
+                  10
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  8
+                ],
+                [
+                  "integer",
+                  10
+                ]
+              ]
+            ]
+          }
+        }
+      },
+      "installed": {
+        "product": {
+          "bytes": 9385289,
+          "sha256": "f7652d4e7fd82f711b1e2d8cfe7bd7983c17382bd201bd5aa9efefbd12128367",
+          "transfer": {
+            "status": "PASS",
+            "method": "ADB_PULL_SINGLE_PRIMARY_EXACT_BYTES",
+            "attempts": 1,
+            "budget_seconds": 30,
+            "expected_bytes": 9385289,
+            "expected_sha256": "f7652d4e7fd82f711b1e2d8cfe7bd7983c17382bd201bd5aa9efefbd12128367",
+            "command": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "pull",
+              "-Z",
+              "/data/app/com.supercubegame.pockettodo.v12.preview-Yq_aD_xM9YhhDoVEVV03eQ==/base.apk",
+              "/tmp/installed-apk-pull-tvjb51dy/base.apk"
+            ],
+            "stdin": "DEVNULL",
+            "timeout_seconds": 29.995570382999972,
+            "returncode": 0,
+            "stdout_tail": "",
+            "stderr_tail": "/data/app/com.supercubegame.pockettodo.v12.preview-Yq_aD_xM9YhhDoVEVV03eQ==/base.apk: 1 file pulled, 0 skipped. 86.1 MB/s (9385289 bytes in 0.104s)\n",
+            "actual_bytes": 9385289,
+            "file_bytes": 9385289,
+            "actual_sha256": "f7652d4e7fd82f711b1e2d8cfe7bd7983c17382bd201bd5aa9efefbd12128367",
+            "read_limited": false,
+            "elapsed_seconds": 0.11997508499999299
+          }
+        },
+        "test": {
+          "bytes": 122374,
+          "sha256": "4016dd4226f9f41ea283b4322ba0cb8dac29322c4086af7a0e8d5df09f7faa03",
+          "transfer": {
+            "status": "PASS",
+            "method": "ADB_PULL_SINGLE_PRIMARY_EXACT_BYTES",
+            "attempts": 1,
+            "budget_seconds": 30,
+            "expected_bytes": 122374,
+            "expected_sha256": "4016dd4226f9f41ea283b4322ba0cb8dac29322c4086af7a0e8d5df09f7faa03",
+            "command": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "pull",
+              "-Z",
+              "/data/app/com.supercubegame.pockettodo.v12.preview.test-08f17-si1FunbY1HG0nDtQ==/base.apk",
+              "/tmp/installed-apk-pull-8ys0lnhi/base.apk"
+            ],
+            "stdin": "DEVNULL",
+            "timeout_seconds": 29.99973658199997,
+            "returncode": 0,
+            "stdout_tail": "",
+            "stderr_tail": "/data/app/com.supercubegame.pockettodo.v12.preview.test-08f17-si1FunbY1HG0nDtQ==/base.apk: 1 file pulled, 0 skipped. 24.4 MB/s (122374 bytes in 0.005s)\n",
+            "actual_bytes": 122374,
+            "file_bytes": 122374,
+            "actual_sha256": "4016dd4226f9f41ea283b4322ba0cb8dac29322c4086af7a0e8d5df09f7faa03",
+            "read_limited": false,
+            "elapsed_seconds": 0.012551550000011957
+          }
+        }
+      },
+      "release_ready": false,
+      "live_ui_enabled": false
+    },
+    "34": {
+      "status": "PASS",
+      "scope": "OPT_IN_SCHEMA4_STORAGE_NOT_LIVE_UI_NOT_RELEASE",
+      "commit": "2b94a08c1f4ce9245d11971cd7a6993a10e4877a",
+      "run_id": "38024836906",
+      "run_attempt": "1",
+      "api": 34,
+      "source_files": {
+        "src/main/java/com/supercubegame/pockettodo/Schema3Store.java": "366e8a9495d47d262007eafb436664e077cf99e5f5457514d16c8b7e40dd7bba",
+        "src/main/java/com/supercubegame/pockettodo/Schema4Store.java": "a62d9fe0e012642814addf209fc5ac55d83e26bc5bf4e3646c2c851a72aab863",
+        "src/androidTest/java/com/supercubegame/pockettodo/Schema4DeviceTest.java": "2d0bc7772e020e07027589d1b7a925f408f5b17e02e59d2d95bc9df06430465a",
+        "tools/verify_shortcuts.py": "d62b9bd77500a5a25d982d1e62b429d46fb6503fc1dab8b5de3b9dbc98357e3c",
+        ".github/workflows/shortcut-storage.yml": "f3353035ad996e72c90fff5220440dc82ce9af07756d627907f53ad8e66c7f94",
+        "AGENTS.md": "14bb2b000405ad71f12283129a410cec0058ce122d892412815ce61dcc8e3847",
+        "CLAUDE.md": "14bb2b000405ad71f12283129a410cec0058ce122d892412815ce61dcc8e3847"
+      },
+      "phases": {
+        "seed": {
+          "bytes": 1797,
+          "sha256": "2fdfa961b3d244c0969ad31d78cee5b4998c4d867c85af9776d8d887675bc1f1",
+          "labels": [
+            "all_18_tables_nonempty_before_migration",
+            "migration_preserves_all_old_cells",
+            "migration_only_adds_shortcut_table",
+            "stable_ids_and_multi_category_links",
+            "repeat_setting_is_exact_noop",
+            "same_name_targets_not_confused",
+            "invalid_targets_leave_exact_state",
+            "remove_relation_only_and_repeat_noop",
+            "navigation_read_is_pure_and_excludes_archived",
+            "missing_navigation_no_business_writes",
+            "late_sql_failure_rolls_back_link_and_revision",
+            "unknown_tables_never_silently_omitted",
+            "backup_preserves_source_and_original_media",
+            "restore_preview_is_read_only_and_counts_complete",
+            "restore_counts_immutable",
+            "cancel_and_replay_preserve_state",
+            "foreign_owner_refused_without_consuming_valid_plan",
+            "helper_close_invalidates_restore_session",
+            "same_revision_stale_restore_refused",
+            "new_backup_restore_exact_and_single_use",
+            "old_backup_replacement_clears_new_relationships",
+            "late_restore_failure_rolls_back_every_table",
+            "changed_staged_media_refused_without_live_damage",
+            "reviewed_source_frozen_against_file_replacement",
+            "staging_closed_and_original_media_exact",
+            "restore_suite_preserves_all_business_cells",
+            "v2_backup_normalizes_empty_shortcuts",
+            "v3_backup_normalizes_empty_shortcuts",
+            "malformed_and_new_to_old_backups_refused",
+            "migration_conflict_keeps_version_and_schema",
+            "future_schema_refused_without_damage",
+            "live_ui_database_never_opened"
+          ],
+          "media_sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        },
+        "reopen": {
+          "bytes": 399,
+          "sha256": "5aa1c38c4b91f9d699f01672e21c76f1f91e9faa5ccaef99f08cdc4ab74b5c7c",
+          "labels": [
+            "separate_process_exact_state",
+            "separate_process_all_business_cells",
+            "separate_process_relationships_and_read_only_targets",
+            "separate_process_original_media",
+            "separate_process_backup_restore_exact",
+            "separate_process_no_live_ui_database"
+          ],
+          "media_sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        }
+      },
+      "commands": [
+        {
+          "args": [
+            "install",
+            "-r",
+            "-t",
+            "/home/runner/work/todo-pocket-android/todo-pocket-android/build/outputs/apk/debug/todo-pocket-android-debug.apk"
+          ],
+          "timeout": 120,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-0-stdout.bin",
+            "bytes": 36,
+            "sha256": "781a31c82430c97897af612ece5e0ca2205e301cb5ff121ce2660541ea5182c7"
+          },
+          "stderr": {
+            "file": "command-0-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "pm",
+            "path",
+            "com.supercubegame.pockettodo.v12.preview"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-1-stdout.bin",
+            "bytes": 120,
+            "sha256": "371911daa1dbbda75274b82354151b62b14606bc576ecfccf03be6a2a958c157"
+          },
+          "stderr": {
+            "file": "command-1-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "install",
+            "-r",
+            "-t",
+            "/home/runner/work/todo-pocket-android/todo-pocket-android/build/outputs/apk/androidTest/debug/todo-pocket-android-debug-androidTest.apk"
+          ],
+          "timeout": 120,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-2-stdout.bin",
+            "bytes": 36,
+            "sha256": "781a31c82430c97897af612ece5e0ca2205e301cb5ff121ce2660541ea5182c7"
+          },
+          "stderr": {
+            "file": "command-2-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "pm",
+            "path",
+            "com.supercubegame.pockettodo.v12.preview.test"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-3-stdout.bin",
+            "bytes": 125,
+            "sha256": "3d24aebe32b1260ea2a2b9107c16cee2a041b729c32c4cdeff0708916388d120"
+          },
+          "stderr": {
+            "file": "command-3-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "pm",
+            "list",
+            "instrumentation"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-4-stdout.bin",
+            "bytes": 159,
+            "sha256": "9d5025b8bce97712f1f27bcbd7f253b2eebf93d115edbb78eef7e21530693d3a"
+          },
+          "stderr": {
+            "file": "command-4-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "am",
+            "instrument",
+            "-w",
+            "-r",
+            "-e",
+            "expectedApi",
+            "34",
+            "-e",
+            "phase",
+            "seed",
+            "com.supercubegame.pockettodo.v12.preview.test/com.supercubegame.pockettodo.Schema4DeviceTest"
+          ],
+          "timeout": 180,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-5-stdout.bin",
+            "bytes": 1797,
+            "sha256": "2fdfa961b3d244c0969ad31d78cee5b4998c4d867c85af9776d8d887675bc1f1"
+          },
+          "stderr": {
+            "file": "command-5-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "ls",
+            "databases"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-6-stdout.bin",
+            "bytes": 112,
+            "sha256": "58d4519fdd2e9ced4292dd4df6757567600453c060d095ecda33972f331a1b7f"
+          },
+          "stderr": {
+            "file": "command-6-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "databases/schema4-contract.db"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-7-stdout.bin",
+            "bytes": 184320,
+            "sha256": "91c770d4172fecf16d4c5cfd3b68e994f209c78ef3db5092d179e11f7d780fff"
+          },
+          "stderr": {
+            "file": "command-7-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "files/schema4-media/ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-8-stdout.bin",
+            "bytes": 3,
+            "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+          },
+          "stderr": {
+            "file": "command-8-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "am",
+            "instrument",
+            "-w",
+            "-r",
+            "-e",
+            "expectedApi",
+            "34",
+            "-e",
+            "phase",
+            "reopen",
+            "com.supercubegame.pockettodo.v12.preview.test/com.supercubegame.pockettodo.Schema4DeviceTest"
+          ],
+          "timeout": 180,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-9-stdout.bin",
+            "bytes": 399,
+            "sha256": "5aa1c38c4b91f9d699f01672e21c76f1f91e9faa5ccaef99f08cdc4ab74b5c7c"
+          },
+          "stderr": {
+            "file": "command-9-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "shell",
+            "-n",
+            "-T",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "ls",
+            "databases"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-10-stdout.bin",
+            "bytes": 112,
+            "sha256": "58d4519fdd2e9ced4292dd4df6757567600453c060d095ecda33972f331a1b7f"
+          },
+          "stderr": {
+            "file": "command-10-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "databases/schema4-contract.db"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-11-stdout.bin",
+            "bytes": 184320,
+            "sha256": "91c770d4172fecf16d4c5cfd3b68e994f209c78ef3db5092d179e11f7d780fff"
+          },
+          "stderr": {
+            "file": "command-11-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        {
+          "args": [
+            "exec-out",
+            "run-as",
+            "com.supercubegame.pockettodo.v12.preview",
+            "cat",
+            "files/schema4-media/ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+          ],
+          "timeout": 40,
+          "attempts": 1,
+          "returncode": 0,
+          "stdout": {
+            "file": "command-12-stdout.bin",
+            "bytes": 3,
+            "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+          },
+          "stderr": {
+            "file": "command-12-stderr.bin",
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      ],
+      "stops": [
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.329173
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.174105
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.191112
+        },
+        {
+          "status": "PASS",
+          "package": "com.supercubegame.pockettodo.v12.preview",
+          "force_stop_attempts": 1,
+          "probes": [
+            {
+              "args": [
+                "/usr/local/lib/android/sdk/platform-tools/adb",
+                "-s",
+                "emulator-5554",
+                "shell",
+                "-n",
+                "-T",
+                "pidof",
+                "com.supercubegame.pockettodo.v12.preview"
+              ],
+              "timeout": 10,
+              "returncode": 1,
+              "stdout": "",
+              "stderr": ""
+            }
+          ],
+          "scope": "COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK",
+          "before": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "pidof",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 10,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": ""
+          },
+          "command": {
+            "args": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "shell",
+              "-n",
+              "-T",
+              "am",
+              "force-stop",
+              "com.supercubegame.pockettodo.v12.preview"
+            ],
+            "timeout": 40,
+            "returncode": 0,
+            "stdout": "",
+            "stderr": ""
+          },
+          "elapsed_seconds": 0.167596
+        }
+      ],
+      "snapshots": {
+        "seed": {
+          "revision": {
+            "columns": [
+              "id",
+              "id",
+              "value"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  46
+                ]
+              ]
+            ]
+          },
+          "categories": {
+            "columns": [
+              "id",
+              "id",
+              "name",
+              "position"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "text",
+                  "分类同名"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  8
+                ],
+                [
+                  "integer",
+                  8
+                ],
+                [
+                  "text",
+                  "分类同名"
+                ],
+                [
+                  "integer",
+                  1
+                ]
+              ]
+            ]
+          },
+          "applications": {
+            "columns": [
+              "id",
+              "id",
+              "name",
+              "package_name"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  10
+                ],
+                [
+                  "integer",
+                  10
+                ],
+                [
+                  "text",
+                  "应用同名"
+                ],
+                [
+                  "text",
+                  ""
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  11
+                ],
+                [
+                  "integer",
+                  11
+                ],
+                [
+                  "text",
+                  "应用同名"
+                ],
+                [
+                  "text",
+                  ""
+                ]
+              ]
+            ]
+          },
+          "activities": {
+            "columns": [
+              "id",
+              "id",
+              "category_id",
+              "application_id",
+              "title",
+              "archived"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "integer",
+                  10
+                ],
+                [
+                  "text",
+                  "活动同名"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  21
+                ],
+                [
+                  "integer",
+                  21
+                ],
+                [
+                  "integer",
+                  8
+                ],
+                [
+                  "integer",
+                  10
+                ],
+                [
+                  "text",
+                  "活动同名"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  22
+                ],
+                [
+                  "integer",
+                  22
+                ],
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "integer",
+                  11
+                ],
+                [
+                  "text",
+                  "活动同名"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  23
+                ],
+                [
+                  "integer",
+                  23
+                ],
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "integer",
+                  10
+                ],
+                [
+                  "text",
+                  "归档活动"
+                ],
+                [
+                  "integer",
+                  1
+                ]
+              ]
+            ]
+          },
+          "paths": {
+            "columns": [
+              "rowid",
+              "activity_id",
+              "position",
+              "text"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "integer",
+                  0
+                ],
+                [
+                  "text",
+                  "首页"
+                ]
+              ]
+            ]
+          },
+          "tags": {
+            "columns": [
+              "rowid",
+              "activity_id",
+              "position",
+              "text"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "integer",
+                  0
+                ],
+                [
+                  "text",
+                  "历史"
+                ]
+              ]
+            ]
+          },
+          "batches": {
+            "columns": [
+              "rowid",
+              "id",
+              "payload",
+              "revision",
+              "undone"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "batch"
+                ],
+                [
+                  "blob",
+                  "0000000100000005656e74727900000000000000140000000a323032362d30392d303100000007455850454e5345000000000000007b0000000ce58e86e58fb2e8b4a6e79bae"
+                ],
+                [
+                  "integer",
+                  42
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ]
+            ]
+          },
+          "ledger": {
+            "columns": [
+              "rowid",
+              "id",
+              "activity_id",
+              "day",
+              "kind",
+              "cents",
+              "memo",
+              "batch_id",
+              "position"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "entry"
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "text",
+                  "2026-09-01"
+                ],
+                [
+                  "text",
+                  "EXPENSE"
+                ],
+                [
+                  "integer",
+                  123
+                ],
+                [
+                  "text",
+                  "历史账目"
+                ],
+                [
+                  "text",
+                  "batch"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ]
+            ]
+          },
+          "checkins": {
+            "columns": [
+              "rowid",
+              "activity_id",
+              "day",
+              "status",
+              "memo",
+              "recorded_at"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "text",
+                  "2026-09-01"
+                ],
+                [
+                  "text",
+                  "DONE"
+                ],
+                [
+                  "text",
+                  "历史打卡"
+                ],
+                [
+                  "text",
+                  "2026-09-21T12:00:00Z"
+                ]
+              ]
+            ]
+          },
+          "media": {
+            "columns": [
+              "rowid",
+              "id",
+              "mime",
+              "bytes"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+                ],
+                [
+                  "text",
+                  "application/octet-stream"
+                ],
+                [
+                  "integer",
+                  3
+                ]
+              ]
+            ]
+          },
+          "notes": {
+            "columns": [
+              "rowid",
+              "id",
+              "activity_id",
+              "title"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "note"
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "text",
+                  "历史笔记"
+                ]
+              ]
+            ]
+          },
+          "blocks": {
+            "columns": [
+              "rowid",
+              "note_id",
+              "id",
+              "position",
+              "kind",
+              "text",
+              "asset_id",
+              "caption",
+              "private",
+              "original_asset_id"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "note"
+                ],
+                [
+                  "text",
+                  "image"
+                ],
+                [
+                  "integer",
+                  0
+                ],
+                [
+                  "text",
+                  "IMAGE"
+                ],
+                [
+                  "text",
+                  ""
+                ],
+                [
+                  "text",
+                  "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+                ],
+                [
+                  "text",
+                  "私有图片"
+                ],
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "null",
+                  null
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  2
+                ],
+                [
+                  "text",
+                  "note"
+                ],
+                [
+                  "text",
+                  "text"
+                ],
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "TEXT"
+                ],
+                [
+                  "text",
+                  "私有文字"
+                ],
+                [
+                  "null",
+                  null
+                ],
+                [
+                  "text",
+                  ""
+                ],
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "null",
+                  null
+                ]
+              ]
+            ]
+          },
+          "fields": {
+            "columns": [
+              "rowid",
+              "id",
+              "name",
+              "type",
+              "archived"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "field"
+                ],
+                [
+                  "text",
+                  "选项"
+                ],
+                [
+                  "text",
+                  "SELECT"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ]
+            ]
+          },
+          "field_options": {
+            "columns": [
+              "rowid",
+              "field_id",
+              "id",
+              "position"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "field"
+                ],
+                [
+                  "text",
+                  "yes"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ]
+            ]
+          },
+          "field_values": {
+            "columns": [
+              "rowid",
+              "activity_id",
+              "field_id",
+              "position",
+              "value"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "text",
+                  "field"
+                ],
+                [
+                  "integer",
+                  0
+                ],
+                [
+                  "text",
+                  "yes"
+                ]
+              ]
+            ]
+          },
+          "field_notes": {
+            "columns": [
+              "rowid",
+              "note_id",
+              "field_id"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "note"
+                ],
+                [
+                  "text",
+                  "field"
+                ]
+              ]
+            ]
+          },
+          "todos": {
+            "columns": [
+              "rowid",
+              "id",
+              "title",
+              "done",
+              "position"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "todo"
+                ],
+                [
+                  "text",
+                  "历史待办"
+                ],
+                [
+                  "integer",
+                  0
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ]
+            ]
+          },
+          "legacy_imports": {
+            "columns": [
+              "rowid",
+              "source_id",
+              "item_count"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                ],
+                [
+                  "integer",
+                  1
+                ]
+              ]
+            ]
+          },
+          "category_shortcuts": {
+            "columns": [
+              "category_id",
+              "application_id"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "integer",
+                  10
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  8
+                ],
+                [
+                  "integer",
+                  10
+                ]
+              ]
+            ]
+          }
+        },
+        "reopen": {
+          "revision": {
+            "columns": [
+              "id",
+              "id",
+              "value"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  46
+                ]
+              ]
+            ]
+          },
+          "categories": {
+            "columns": [
+              "id",
+              "id",
+              "name",
+              "position"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "text",
+                  "分类同名"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  8
+                ],
+                [
+                  "integer",
+                  8
+                ],
+                [
+                  "text",
+                  "分类同名"
+                ],
+                [
+                  "integer",
+                  1
+                ]
+              ]
+            ]
+          },
+          "applications": {
+            "columns": [
+              "id",
+              "id",
+              "name",
+              "package_name"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  10
+                ],
+                [
+                  "integer",
+                  10
+                ],
+                [
+                  "text",
+                  "应用同名"
+                ],
+                [
+                  "text",
+                  ""
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  11
+                ],
+                [
+                  "integer",
+                  11
+                ],
+                [
+                  "text",
+                  "应用同名"
+                ],
+                [
+                  "text",
+                  ""
+                ]
+              ]
+            ]
+          },
+          "activities": {
+            "columns": [
+              "id",
+              "id",
+              "category_id",
+              "application_id",
+              "title",
+              "archived"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "integer",
+                  10
+                ],
+                [
+                  "text",
+                  "活动同名"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  21
+                ],
+                [
+                  "integer",
+                  21
+                ],
+                [
+                  "integer",
+                  8
+                ],
+                [
+                  "integer",
+                  10
+                ],
+                [
+                  "text",
+                  "活动同名"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  22
+                ],
+                [
+                  "integer",
+                  22
+                ],
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "integer",
+                  11
+                ],
+                [
+                  "text",
+                  "活动同名"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  23
+                ],
+                [
+                  "integer",
+                  23
+                ],
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "integer",
+                  10
+                ],
+                [
+                  "text",
+                  "归档活动"
+                ],
+                [
+                  "integer",
+                  1
+                ]
+              ]
+            ]
+          },
+          "paths": {
+            "columns": [
+              "rowid",
+              "activity_id",
+              "position",
+              "text"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "integer",
+                  0
+                ],
+                [
+                  "text",
+                  "首页"
+                ]
+              ]
+            ]
+          },
+          "tags": {
+            "columns": [
+              "rowid",
+              "activity_id",
+              "position",
+              "text"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "integer",
+                  0
+                ],
+                [
+                  "text",
+                  "历史"
+                ]
+              ]
+            ]
+          },
+          "batches": {
+            "columns": [
+              "rowid",
+              "id",
+              "payload",
+              "revision",
+              "undone"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "batch"
+                ],
+                [
+                  "blob",
+                  "0000000100000005656e74727900000000000000140000000a323032362d30392d303100000007455850454e5345000000000000007b0000000ce58e86e58fb2e8b4a6e79bae"
+                ],
+                [
+                  "integer",
+                  42
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ]
+            ]
+          },
+          "ledger": {
+            "columns": [
+              "rowid",
+              "id",
+              "activity_id",
+              "day",
+              "kind",
+              "cents",
+              "memo",
+              "batch_id",
+              "position"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "entry"
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "text",
+                  "2026-09-01"
+                ],
+                [
+                  "text",
+                  "EXPENSE"
+                ],
+                [
+                  "integer",
+                  123
+                ],
+                [
+                  "text",
+                  "历史账目"
+                ],
+                [
+                  "text",
+                  "batch"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ]
+            ]
+          },
+          "checkins": {
+            "columns": [
+              "rowid",
+              "activity_id",
+              "day",
+              "status",
+              "memo",
+              "recorded_at"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "text",
+                  "2026-09-01"
+                ],
+                [
+                  "text",
+                  "DONE"
+                ],
+                [
+                  "text",
+                  "历史打卡"
+                ],
+                [
+                  "text",
+                  "2026-09-21T12:00:00Z"
+                ]
+              ]
+            ]
+          },
+          "media": {
+            "columns": [
+              "rowid",
+              "id",
+              "mime",
+              "bytes"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+                ],
+                [
+                  "text",
+                  "application/octet-stream"
+                ],
+                [
+                  "integer",
+                  3
+                ]
+              ]
+            ]
+          },
+          "notes": {
+            "columns": [
+              "rowid",
+              "id",
+              "activity_id",
+              "title"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "note"
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "text",
+                  "历史笔记"
+                ]
+              ]
+            ]
+          },
+          "blocks": {
+            "columns": [
+              "rowid",
+              "note_id",
+              "id",
+              "position",
+              "kind",
+              "text",
+              "asset_id",
+              "caption",
+              "private",
+              "original_asset_id"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "note"
+                ],
+                [
+                  "text",
+                  "image"
+                ],
+                [
+                  "integer",
+                  0
+                ],
+                [
+                  "text",
+                  "IMAGE"
+                ],
+                [
+                  "text",
+                  ""
+                ],
+                [
+                  "text",
+                  "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+                ],
+                [
+                  "text",
+                  "私有图片"
+                ],
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "null",
+                  null
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  2
+                ],
+                [
+                  "text",
+                  "note"
+                ],
+                [
+                  "text",
+                  "text"
+                ],
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "TEXT"
+                ],
+                [
+                  "text",
+                  "私有文字"
+                ],
+                [
+                  "null",
+                  null
+                ],
+                [
+                  "text",
+                  ""
+                ],
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "null",
+                  null
+                ]
+              ]
+            ]
+          },
+          "fields": {
+            "columns": [
+              "rowid",
+              "id",
+              "name",
+              "type",
+              "archived"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "field"
+                ],
+                [
+                  "text",
+                  "选项"
+                ],
+                [
+                  "text",
+                  "SELECT"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ]
+            ]
+          },
+          "field_options": {
+            "columns": [
+              "rowid",
+              "field_id",
+              "id",
+              "position"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "field"
+                ],
+                [
+                  "text",
+                  "yes"
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ]
+            ]
+          },
+          "field_values": {
+            "columns": [
+              "rowid",
+              "activity_id",
+              "field_id",
+              "position",
+              "value"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "integer",
+                  20
+                ],
+                [
+                  "text",
+                  "field"
+                ],
+                [
+                  "integer",
+                  0
+                ],
+                [
+                  "text",
+                  "yes"
+                ]
+              ]
+            ]
+          },
+          "field_notes": {
+            "columns": [
+              "rowid",
+              "note_id",
+              "field_id"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "note"
+                ],
+                [
+                  "text",
+                  "field"
+                ]
+              ]
+            ]
+          },
+          "todos": {
+            "columns": [
+              "rowid",
+              "id",
+              "title",
+              "done",
+              "position"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "todo"
+                ],
+                [
+                  "text",
+                  "历史待办"
+                ],
+                [
+                  "integer",
+                  0
+                ],
+                [
+                  "integer",
+                  0
+                ]
+              ]
+            ]
+          },
+          "legacy_imports": {
+            "columns": [
+              "rowid",
+              "source_id",
+              "item_count"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  1
+                ],
+                [
+                  "text",
+                  "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                ],
+                [
+                  "integer",
+                  1
+                ]
+              ]
+            ]
+          },
+          "category_shortcuts": {
+            "columns": [
+              "category_id",
+              "application_id"
+            ],
+            "rows": [
+              [
+                [
+                  "integer",
+                  7
+                ],
+                [
+                  "integer",
+                  10
+                ]
+              ],
+              [
+                [
+                  "integer",
+                  8
+                ],
+                [
+                  "integer",
+                  10
+                ]
+              ]
+            ]
+          }
+        }
+      },
+      "installed": {
+        "product": {
+          "bytes": 9385289,
+          "sha256": "8eda0a59fa638af29a5a498a1d719bdd5c19afdd232770ebde28b8a0ffae725c",
+          "transfer": {
+            "status": "PASS",
+            "method": "ADB_PULL_SINGLE_PRIMARY_EXACT_BYTES",
+            "attempts": 1,
+            "budget_seconds": 30,
+            "expected_bytes": 9385289,
+            "expected_sha256": "8eda0a59fa638af29a5a498a1d719bdd5c19afdd232770ebde28b8a0ffae725c",
+            "command": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "pull",
+              "-Z",
+              "/data/app/~~Obv1ZjDxboz8CC7pQzbzCQ==/com.supercubegame.pockettodo.v12.preview-QOovlmAlaat71QrS8yvsPg==/base.apk",
+              "/tmp/installed-apk-pull-s7zkcpnz/base.apk"
+            ],
+            "stdin": "DEVNULL",
+            "timeout_seconds": 29.99222592000001,
+            "returncode": 0,
+            "stdout_tail": "",
+            "stderr_tail": "/data/app/~~Obv1ZjDxboz8CC7pQzbzCQ==/com.supercubegame.pockettodo.v12.preview-QOovlmAlaat71QrS8yvsPg==/base.apk: 1 file pulled, 0 skipped. 150.1 MB/s (9385289 bytes in 0.060s)\n",
+            "actual_bytes": 9385289,
+            "file_bytes": 9385289,
+            "actual_sha256": "8eda0a59fa638af29a5a498a1d719bdd5c19afdd232770ebde28b8a0ffae725c",
+            "read_limited": false,
+            "elapsed_seconds": 0.08350475299999971
+          }
+        },
+        "test": {
+          "bytes": 122374,
+          "sha256": "f423446c59cf54e88f1b15032dad4c092ea984ceb7dfc5ebce8cb45e185e04bb",
+          "transfer": {
+            "status": "PASS",
+            "method": "ADB_PULL_SINGLE_PRIMARY_EXACT_BYTES",
+            "attempts": 1,
+            "budget_seconds": 30,
+            "expected_bytes": 122374,
+            "expected_sha256": "f423446c59cf54e88f1b15032dad4c092ea984ceb7dfc5ebce8cb45e185e04bb",
+            "command": [
+              "/usr/local/lib/android/sdk/platform-tools/adb",
+              "-s",
+              "emulator-5554",
+              "pull",
+              "-Z",
+              "/data/app/~~oDVc89arJitvSdLBSEr-sA==/com.supercubegame.pockettodo.v12.preview.test-ZFOI9W5C-TeMVN673VJIKw==/base.apk",
+              "/tmp/installed-apk-pull-6nt7c_kl/base.apk"
+            ],
+            "stdin": "DEVNULL",
+            "timeout_seconds": 29.999657442,
+            "returncode": 0,
+            "stdout_tail": "",
+            "stderr_tail": "/data/app/~~oDVc89arJitvSdLBSEr-sA==/com.supercubegame.pockettodo.v12.preview.test-ZFOI9W5C-TeMVN673VJIKw==/base.apk: 1 file pulled, 0 skipped. 72.9 MB/s (122374 bytes in 0.002s)\n",
+            "actual_bytes": 122374,
+            "file_bytes": 122374,
+            "actual_sha256": "f423446c59cf54e88f1b15032dad4c092ea984ceb7dfc5ebce8cb45e185e04bb",
+            "read_limited": false,
+            "elapsed_seconds": 0.03153838899999073
+          }
+        }
+      },
+      "release_ready": false,
+      "live_ui_enabled": false
+    }
+  },
+  "device_read_errors": {},
+  "device_validation_errors": {},
+  "release_ready": false,
+  "live_ui_enabled": false,
+  "raw_receipts": {
+    "26": {
+      "bytes": 47300,
+      "sha256": "590869eaf50914a61e241c8799cd66982e00e10300e520aa7060ed9b342c34e8"
+    },
+    "34": {
+      "bytes": 47405,
+      "sha256": "ee53be2e368dd8c97003b2b02b550626493ad85299c5911794eddadf25ed0eca"
+    }
+  }
+}

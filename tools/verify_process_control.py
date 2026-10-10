@@ -1593,6 +1593,300 @@ def isolated_stop_runner(adb, serial, package, records, *, environment=None, tra
     return invoke
 
 
+def directory_server_observed(adb, serial, receipt, invoke):
+    """Two existing host-only snapshots, <=3s each, outside the original 40s.
+    No server start/reset, device retry, or command success inferred from logs.
+    The adapter already enforces the exact CI-only command before reaching here.
+    """
+    def snapshot(previous=None):
+        try:
+            return capture_existing_server_log(adb, serial, previous=previous)
+        except Exception as exc:
+            # Correlation/collection errors are diagnostics, not command errors.
+            # Never serialize arbitrary exception text or environment contents.
+            return dict(status="NOT_OBSERVED",
+                        scope="EXISTING_HOST_SERVER_LOG_NOT_DEVICE_OR_ROOT_CAUSE",
+                        release_ready=False, worker_budget_seconds=3,
+                        error_type=type(exc).__name__, reason="directory_snapshot_not_observed")
+    receipt["server_log_diagnostic_budget_seconds"] = 6
+    before = snapshot()
+    receipt["server_log_before"] = before
+    try:
+        return invoke()
+    finally:
+        receipt["server_log_after"] = snapshot(previous=before)
+
+
+def directory_server_contract(factory, observed, *, command_only=False):
+    """Actual directory adapter with injected tracer/log I/O, not Android proof."""
+    import copy
+    import io
+    from unittest.mock import patch
+    env = dict(GITHUB_ACTIONS="true", GITHUB_SHA="a" * 40, GITHUB_RUN_ID="12",
+               GITHUB_RUN_ATTEMPT="1", TEST_API="26")
+    binding = {k: env[k] for k in ("GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "TEST_API")}
+    identity = json.dumps(dict(binding=binding, scope="HOST_FIXTURE")).encode()
+    command = ["adb", "-s", "emulator-5554", "shell", "-n", "-T",
+               "run-as", "com.example.fixture", "ls", "databases"]
+    kwargs = dict(stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                  text=True, timeout=40, check=False)
+    modes = [("ok", "ok", "ok")] if command_only else [
+        (command_mode, before_mode, after_mode)
+        for command_mode in ("ok", "255", "timeout", "spawn")
+        for before_mode, after_mode in (
+            ("ok", "ok"), ("missing", "ok"), ("ok", "missing"),
+            ("raise", "ok"), ("ok", "raise"), ("raise", "raise"),
+            ("ok", "rotated"),
+        )
+    ]
+    for mode, before_mode, after_mode in modes:
+        calls, commands, logs, records = [], [], [], []
+        value = subprocess.CompletedProcess(command, 255 if mode == "255" else 0,
+                                            "original-output\n", "original-stderr\n")
+        original = (subprocess.TimeoutExpired(command, 40, b"original-output", b"original-stderr")
+                    if mode == "timeout" else FileNotFoundError("original spawn failure"))
+        def tracer(args, **kw):
+            calls.append("command"); commands.append((args, kw))
+            assert args == command and kw == dict(capture_output=True, text=True,
+                stdin=subprocess.DEVNULL, timeout=40, receipt=records[-1], environment=env,
+                tracer="strace", command_kind="database_directory"), "ORIGINAL_COMMAND_CHANGED"
+            kw["receipt"].update(attempts=1, timeout_seconds=40,
+                                 command_returncode=value.returncode, trace={"fixture": "original"})
+            if mode in ("timeout", "spawn"):
+                raise original
+            return value
+        def capture(adb, serial, *, previous=None):
+            calls.append("snapshot")
+            assert (adb, serial) == ("adb", "emulator-5554")
+            n = len(logs); assert n < 2, "DIAGNOSTIC_REPEATED"
+            stage = before_mode if n == 0 else after_mode
+            logs.append((previous, stage))
+            if stage == "raise":
+                raise OSError("PRIVATE_SENTINEL_DO_NOT_COPY")
+            return dict(status="NOT_OBSERVED" if stage == "missing" else "OBSERVED_NOT_ACCEPTANCE",
+                        scope="EXISTING_HOST_SERVER_LOG_NOT_DEVICE_OR_ROOT_CAUSE",
+                        release_ready=False, worker_budget_seconds=3,
+                        fixture_stage=n, fixture_identity="rotated" if stage == "rotated" else "same")
+        with patch.object(Path, "open", side_effect=lambda *a, **k: io.BytesIO(identity)), \
+                patch.dict(factory.__globals__, run_pidof_isolated=tracer,
+                           directory_server_observed=observed), \
+                patch.dict(observed.__globals__, capture_existing_server_log=capture):
+            runner = factory("adb", "emulator-5554", "com.example.fixture", records,
+                             environment=env)
+            try:
+                got = runner(command, **kwargs)
+            except Exception as exc:
+                assert mode in ("timeout", "spawn") and exc is original, "ORIGINAL_FAILURE_REPLACED"
+            else:
+                assert mode in ("ok", "255") and got is value, "ORIGINAL_RESULT_REPLACED"
+        assert len(commands) == 1 and len(records) == 1, "COMMAND_RETRIED"
+        assert records[0]["attempts"] == 1 and records[0]["timeout_seconds"] == 40
+        assert records[0]["trace"] == {"fixture": "original"}
+        assert records[0]["binding"]["setup_identity"] == json.loads(identity)
+        if command_only:
+            continue
+        assert calls == ["snapshot", "command", "snapshot"], "DIRECTORY_DIAGNOSTIC_ORDER"
+        record = records[0]
+        assert record["server_log_diagnostic_budget_seconds"] == 6, "DIAGNOSTIC_BUDGET"
+        assert logs[0][0] is None and logs[1][0] is record["server_log_before"], "CORRELATION_BASELINE"
+        assert record["server_log_before"]["status"] == (
+            "NOT_OBSERVED" if before_mode in ("missing", "raise") else "OBSERVED_NOT_ACCEPTANCE")
+        assert record["server_log_after"]["status"] == (
+            "NOT_OBSERVED" if after_mode in ("missing", "raise") else "OBSERVED_NOT_ACCEPTANCE")
+        for name in ("server_log_before", "server_log_after"):
+            assert record[name]["release_ready"] is False and record[name]["worker_budget_seconds"] == 3
+        assert "PRIVATE_SENTINEL_DO_NOT_COPY" not in json.dumps(record), "DIAGNOSTIC_EXCEPTION_LEAK"
+    if command_only:
+        return len(modes)
+    # Invalid adapter inputs must fail before either diagnostic or device I/O.
+    for args, kw in ((command[:-1] + ["files"], kwargs),
+                     (command, dict(kwargs, timeout=41)), (command, dict(kwargs, text=False))):
+        with patch.object(Path, "open", side_effect=lambda *a, **k: io.BytesIO(identity)), \
+                patch.dict(factory.__globals__, run_pidof_isolated=tracer,
+                           directory_server_observed=observed), \
+                patch.dict(observed.__globals__, capture_existing_server_log=capture):
+            records = []; calls = []
+            runner = factory("adb", "emulator-5554", "com.example.fixture", records, environment=env)
+            try:
+                runner(args, **kw)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("DIRECTORY_SCOPE_ACCEPTED")
+            assert not records and not calls, "INVALID_SCOPE_INVOKED_IO"
+    return len(modes) + 3
+
+
+def directory_server_selftest():
+    """Permanent caller behavior plus omission mutations; capture helper unchanged."""
+    import ast
+    import inspect
+    directory_mutation_scope_selftest()
+    source = inspect.getsource(directory_server_observed)
+    count = directory_server_contract(isolated_directory_runner, directory_server_observed)
+    mutants = [
+        ("before = snapshot()", 'before = {"status": "NOT_OBSERVED"}'),
+        ('receipt["server_log_after"] = snapshot(previous=before)', "pass"),
+        ("snapshot(previous=before)", "snapshot(previous=None)"),
+        ("except Exception as exc:", "except ValueError as exc:"),
+        ('receipt["server_log_diagnostic_budget_seconds"] = 6',
+         'receipt["server_log_diagnostic_budget_seconds"] = 3'),
+        ("return invoke()", "value = invoke()\n        if value.returncode:\n            return invoke()\n        return value"),
+    ]
+    for old, new in mutants:
+        assert source.count(old) == 1, "DIRECTORY_MUTATION_ANCHOR"
+        ns = dict(globals())
+        exec(compile(source.replace(old, new, 1), "<directory-server-mutant>", "exec"), ns)
+        changed = ns["directory_server_observed"]
+        assert directory_server_contract(isolated_directory_runner, changed, command_only=True) == 1
+        try:
+            directory_server_contract(isolated_directory_runner, changed)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("DIRECTORY_SERVER_MUTANT_SURVIVED")
+    # Execute an actual adapter with the wrapper bypassed: old command semantics
+    # remain valid, but the same diagnostic observer must reject the omission.
+    adapter = inspect.getsource(isolated_directory_runner)
+    old = "return directory_server_observed(adb, serial, receipt, original)"
+    assert adapter.count(old) == 1, "DIRECTORY_WIRING_ANCHOR"
+    ns = dict(globals())
+    exec(compile(adapter.replace(old, "return original()", 1), "<directory-bypass>", "exec"), ns)
+    changed = ns["isolated_directory_runner"]
+    assert directory_server_contract(changed, directory_server_observed, command_only=True) == 1
+    try:
+        directory_server_contract(changed, directory_server_observed)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("DIRECTORY_WRAPPER_OMISSION_SURVIVED")
+    # Reachability from the existing permanent gate, not a new optional command.
+    def wired(text):
+        tree = ast.parse(text)
+        fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "directory_trace_selftest")
+        direct = [ast.unparse(n.value) for n in fn.body if isinstance(n, ast.Expr)]
+        assert direct.count("directory_server_selftest()") == 1, "DIRECTORY_SELFTEST_NOT_WIRED"
+    text = inspect.getsource(directory_trace_selftest)
+    wired(text)
+    assert text.count("    directory_server_selftest()\n") == 1
+    try:
+        wired(text.replace("    directory_server_selftest()\n", "", 1))
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("DIRECTORY_SELFTEST_OMISSION_SURVIVED")
+    print("DIRECTORY_SERVER_HOST cases=" + str(count) +
+          " witnessed_behavior_mutants=7 gate_omission=1 PASS; HOST_IO_DOUBLES_NOT_ANDROID", flush=True)
+    return count
+
+
+def directory_adapter_mutant(implementation, kind):
+    """Change one actual tracer-return node, keeping assignments in its scope."""
+    import ast
+    import copy
+    if kind not in ("accept_255", "change_budget"):
+        raise ValueError("unknown directory mutation")
+    tree = ast.parse(implementation)
+    nodes = [n for n in ast.walk(tree) if isinstance(n, ast.Return)
+             and isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Name)
+             and n.value.func.id == "run_pidof_isolated"]
+    assert len(nodes) == 1, "DIRECTORY_MUTATION_RETURN_TARGET"
+    target = nodes[0]
+    if kind == "change_budget":
+        budgets = [k for k in target.value.keywords if k.arg == "timeout"]
+        assert len(budgets) == 1 and ast.literal_eval(budgets[0].value) == 40
+        budgets[0].value = ast.Constant(39)
+    else:
+        # Replace the Return in its own statement list, even inside a callback.
+        call = copy.deepcopy(target.value)
+        replacement = ast.parse(
+            "value = None\n"
+            "if value.returncode == 255: value.returncode = 0\n"
+            "return value\n").body
+        replacement[0].value = call
+        class Replace(ast.NodeTransformer):
+            def visit_Return(self, node):
+                return replacement if node is target else self.generic_visit(node)
+        tree = Replace().visit(tree)
+    tree = ast.fix_missing_locations(tree)
+    changed = ast.unparse(tree)
+    assert changed != implementation
+    compile(changed, "<directory-structural-mutant>", "exec")
+    return changed
+
+
+def directory_mutation_scope_selftest():
+    """Regression: the old text splice compiled but referenced an unbound value."""
+    import inspect
+    import io
+    from unittest.mock import patch
+    source = inspect.getsource(isolated_directory_runner)
+    old = "return run_pidof_isolated("
+    tail = 'command_kind="database_directory")'
+    assert source.count(old) == source.count(tail) == 1
+    broken = source.replace(old, "value = run_pidof_isolated(", 1).replace(
+        tail, tail + "\n        if value.returncode == 255: value.returncode = 0\n        return value", 1)
+    ns = dict(globals())
+    exec(compile(broken, "<legacy-directory-scope-regression>", "exec"), ns)
+    command = ["adb", "-s", "emulator-5554", "shell", "-n", "-T",
+               "run-as", "com.example.fixture", "ls", "databases"]
+    kwargs = dict(stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                  text=True, timeout=40, check=False)
+    def exercise(factory, code, expected_code, expected_budget):
+        calls, records = [], []
+        def tracer(args, **kw):
+            calls.append((args, kw))
+            assert args == command and kw["timeout"] == expected_budget, "MUTATION_BUDGET"
+            return subprocess.CompletedProcess(args, code, "unchanged stdout", "unchanged stderr")
+        def observed(adb, serial, receipt, invoke):
+            return invoke()
+        with patch.object(Path, "open", side_effect=lambda *a, **k: io.BytesIO(b"{}")), \
+                patch.dict(factory.__globals__, run_pidof_isolated=tracer,
+                           directory_server_observed=observed):
+            runner = factory("adb", "emulator-5554", "com.example.fixture", records,
+                             environment={"GITHUB_ACTIONS": "true"})
+            value = runner(command, **kwargs)
+        assert len(calls) == len(records) == 1
+        assert value.args == command and value.returncode == expected_code, "MUTATION_EXIT"
+        assert (value.stdout, value.stderr) == ("unchanged stdout", "unchanged stderr")
+    try:
+        exercise(ns["isolated_directory_runner"], 0, 0, 40)
+    except NameError as exc:
+        # Only this deliberately broken historical fixture may raise NameError.
+        assert exc.name == "value"
+    else:
+        raise AssertionError("LEGACY_SCOPE_FAILURE_NOT_REPRODUCED")
+    exercise(isolated_directory_runner, 0, 0, 40)
+    exercise(isolated_directory_runner, 255, 255, 40)
+    for kind, budget, reason in (
+        ("accept_255", 40, "MUTATION_EXIT"),
+        ("change_budget", 39, "MUTATION_BUDGET"),
+    ):
+        scope = dict(globals())
+        exec(compile(directory_adapter_mutant(source, kind),
+                     "<directory-mutant-scope-control>", "exec"), scope)
+        mutant = scope["isolated_directory_runner"]
+        # Each mutant executes successfully before the same checker rejects it.
+        exercise(mutant, 0, 0, budget)
+        try:
+            exercise(mutant, 255, 255, 40)
+        except AssertionError as exc:
+            assert str(exc) == reason, (kind, str(exc))
+        else:
+            raise AssertionError("STRUCTURAL_DIRECTORY_MUTANT_SURVIVED")
+    for invalid in ("def f():\n    return None\n",
+                    "def f():\n    return run_pidof_isolated(timeout=40)\n"
+                    "def g():\n    return run_pidof_isolated(timeout=40)\n"):
+        try:
+            directory_adapter_mutant(invalid, "accept_255")
+        except AssertionError as exc:
+            assert str(exc) == "DIRECTORY_MUTATION_RETURN_TARGET"
+        else:
+            raise AssertionError("AMBIGUOUS_MUTATION_TARGET_ACCEPTED")
+    print("DIRECTORY_MUTATION_SCOPE legacy_red=1 positive=2 witnessed_mutants=2 "
+          "target_negative=2 PASS; HOST_DOUBLES_NOT_FULL_REPOSITORY", flush=True)
+
+
 def isolated_directory_runner(adb, serial, package, records, *, environment=None, tracer="strace"):
     """Explicit directory-only adapter; original command, streams and 40s budget."""
     import os
@@ -1627,9 +1921,11 @@ def isolated_directory_runner(adb, serial, package, records, *, environment=None
         receipt = {"observation_number": sequence, "retention": "LATEST_8_DIRECTORY_TRACES",
                    "binding": dict(binding)}
         records.append(receipt)
-        return run_pidof_isolated(args, capture_output=True, text=True,
-            stdin=subprocess.DEVNULL, timeout=40, receipt=receipt,
-            environment=env, tracer=tracer, command_kind="database_directory")
+        def original():
+            return run_pidof_isolated(args, capture_output=True, text=True,
+                stdin=subprocess.DEVNULL, timeout=40, receipt=receipt,
+                environment=env, tracer=tracer, command_kind="database_directory")
+        return directory_server_observed(adb, serial, receipt, original)
     return invoke
 
 
@@ -1704,6 +2000,8 @@ def capture_runtime_identity(adb, emulator, image_properties, avd_config, *, env
 
 def directory_trace_selftest():
     """Real host fake-tracer/ADB; execute actual directory caller and reject bypass."""
+
+    directory_server_selftest()
     import ast
     import base64
     import inspect
@@ -1766,7 +2064,8 @@ def directory_trace_selftest():
     literals = {n.targets[0].id: ast.literal_eval(n.value) for n in fixtures.body
                 if isinstance(n, ast.Assign) and isinstance(n.targets[0], ast.Name)
                 and n.targets[0].id in ("fake_trace", "fake_adb")}
-    def exercise(factory, positive_only=False):
+    def exercise(factory, positive_only=False, witness_timeout=40):
+        assert positive_only or witness_timeout == 40, "FULL_DIRECTORY_BUDGET_WEAKENED"
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             trace, adb, log = root/"strace", root/"adb", root/"calls"
@@ -1800,7 +2099,7 @@ def directory_trace_selftest():
                     assert caught is None and value == out.decode()
                 assert log.read_text().splitlines() == [" ".join(command[1:])]
                 assert len(records) == 1 and records[0]["command_returncode"] == code
-                assert records[0]["timeout_seconds"] == 40, "directory budget changed"
+                assert records[0]["timeout_seconds"] == witness_timeout, "directory budget changed"
                 assert records[0]["command_kind"] == "database_directory"
                 assert len(base64.b64decode(records[0]["trace"]["tail_b64"])) == 65536
                 assert base64.b64decode(records[0]["tracer_stderr"]["tail_b64"]) == (
@@ -1878,21 +2177,23 @@ def directory_trace_selftest():
     print("DIRECTORY_IDENTITY_BINDING positive=1 diagnostic_negative=2 PASS; HOST_RECEIPT_ONLY", flush=True)
     implementation = inspect.getsource(isolated_directory_runner)
     for kind in ("accept_255", "change_budget"):
-        before = "return run_pidof_isolated(" if kind == "accept_255" else "timeout=40, receipt=receipt,"
-        if kind == "accept_255":
-            changed = implementation.replace(before, "value = run_pidof_isolated(", 1).replace(
-                'command_kind="database_directory")',
-                'command_kind="database_directory")\n        if value.returncode == 255: value.returncode = 0\n        return value', 1)
-        else:
-            changed = implementation.replace(before, "timeout=39, receipt=receipt,", 1)
-        assert implementation.count(before) == 1 and changed != implementation
+        changed = directory_adapter_mutant(implementation, kind)
         namespace = dict(globals())
         exec(compile(changed, "<directory-mutant>", "exec"), namespace)
-        # Valid original positive witness before every mutation rejection.
+        mutant = namespace["isolated_directory_runner"]
         exercise(isolated_directory_runner, positive_only=True)
-        try: exercise(namespace["isolated_directory_runner"])
-        except AssertionError: pass
-        else: raise AssertionError("directory compiled mutant survived")
+        # Budget-mutant witness isolates command behavior; the full checker below
+        # still demands 40s and must reject the intentional 39s mutation.
+        exercise(mutant, positive_only=True,
+                 witness_timeout=39 if kind == "change_budget" else 40)
+        expected_error = ("original directory failure accepted" if kind == "accept_255"
+                          else "directory budget changed")
+        try:
+            exercise(mutant)
+        except AssertionError as exc:
+            assert str(exc) == expected_error, (kind, str(exc))
+        else:
+            raise AssertionError("directory compiled mutant survived")
     print("DIRECTORY_TRACE_HOST actual_caller=6 setup_negative=2 scope_negative=4 timeout=2 compiled_witnessed_mutants=2 PASS; NOT_ANDROID", flush=True)
     print("DIRECTORY_TRACE_WIRING actual_source=1 negative=7 PASS; NOT_ANDROID", flush=True)
 

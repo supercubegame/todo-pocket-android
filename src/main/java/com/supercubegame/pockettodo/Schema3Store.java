@@ -53,7 +53,11 @@ public final class Schema3Store extends SQLiteOpenHelper {
     }
     private static void require(boolean value,String message){if(!value)throw new IllegalArgumentException(message);}
     @Override public void onConfigure(SQLiteDatabase db){db.setForeignKeyConstraintsEnabled(true);}
-    @Override public void onCreate(SQLiteDatabase db){
+    @Override public void onCreate(SQLiteDatabase db){createSchema3(db);}
+    /** Frozen schema3 factory, no helper/file/version/transaction ownership.
+     * New opt-in schemas may call this factory; old codec and live UI stay v3.
+     */
+    static void createSchema3(SQLiteDatabase db){
         // Explicit frozen factory, never a live helper callback. The outer helper
         // owns the same connection and the complete DDL/version transaction.
         AppDatabase.createSchema2(db);

@@ -1,110 +1,161 @@
-name: Bounded original directory transport experiment
+name: Pinned business bridge red preflight
 on:
   push:
     branches: [ci/shortcut-storage-preflight-4d8742]
 permissions:
   contents: read
+  actions: read
   checks: write
 jobs:
-  diagnostic:
+  bridge_red:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        api: [26, 34]
-    env:
-      TEST_API: ${{ matrix.api }}
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: 2b94a08c1f4ce9245d11971cd7a6993a10e4877a
           persist-credentials: false
-      - name: Materialize exact pinned experiment with tested remote quoting repair
-        run: |
-          python3 - <<'PY'
-          import ast,base64,hashlib,json,lzma,os,pathlib,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/a4166c54e9094ee5d03a484b66a2be8cfd0bd471/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as response:
-              original=response.read(11189)
-          assert len(original)==11188 and hashlib.sha256(original).hexdigest()=="59cf9a17e5b1b8eca7bea2152bfa9f0cd2194d27a704353cc0acf78a750ce9df"
-          lines=original.decode().splitlines()
-          line=next(x for x in lines if x.strip().startswith("raw=lzma.decompress("))
-          node=ast.parse(line.strip()).body[0].value
-          raw=lzma.decompress(base64.b64decode(ast.literal_eval(node.args[0].args[0])))
-          assert hashlib.sha256(raw).hexdigest()=="4f45d7eda0607a5e2a31eca1864c0b55bb16d2a04609045321ed65c01f5fea16"
-          bundle=json.loads(raw)
-          assert set(bundle)=={"reproduction.py","test_reproduction.py"}
-          a='shell("setprop","persist.adb.trace_mask","shell sockets transport")';b='shell("setprop","persist.adb.trace_mask","\'shell sockets transport\'")'
-          assert bundle["reproduction.py"].count(a)==1
-          bundle["reproduction.py"]=bundle["reproduction.py"].replace(a,b)
-          a='    value["command_count"]=len(value.pop("commands",[]))';b='    commands=value.pop("commands",[])\n    value["command_count"]=len(commands)\n    value["failed_commands"]=[]\n    for entry in commands:\n        if entry.get("returncode")==0 and not entry.get("timed_out"):continue\n        detail=dict(entry)\n        for name in ("stdout","stderr"):\n            info=entry.get(name)\n            if info:\n                raw=(path.parent/info["file"]).read_bytes()\n                assert ident(raw)=={k:info[k] for k in ("bytes","sha256")}\n                detail[name]=dict(info,tail=raw[-4000:].decode(errors="replace"),tail_truncated=len(raw)>4000)\n        value["failed_commands"].append(detail)'
-          assert bundle["reproduction.py"].count(a)==1
-          bundle["reproduction.py"]=bundle["reproduction.py"].replace(a,b)
-          bundle["test_reproduction.py"]+='import shlex\ncalls=[n for n in ast.walk(main) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name)\n       and n.func.id=="shell" and n.args and isinstance(n.args[0],ast.Constant) and n.args[0].value=="setprop"]\nassert len(calls)==1\nargs=[ast.literal_eval(a) for a in calls[0].args]\nassert shlex.split(" ".join(args))==["setprop","persist.adb.trace_mask","shell sockets transport"],"REMOTE_SHELL_VALUE_SPLIT"\nprint("REMOTE_SHELL_PROPERTY single-value wire model PASS; not Android proof")\ndef remote_arguments(arguments):\n    wire=" ".join(arguments)\n    # Real POSIX shell with a fake setprop, not Android execution.\n    capture=\'setprop() { printf "%s\\\\n" "$#" "$1" "$2"; }; \'\n    p=subprocess.run(["sh","-c",capture+wire],capture_output=True,text=True,check=True)\n    return p.stdout\nassert remote_arguments(args)=="2\\npersist.adb.trace_mask\\nshell sockets transport\\n"\nmutant=list(args);mutant[-1]=shlex.split(args[-1])[0]\nassert mutant!=args and remote_arguments(mutant)=="4\\npersist.adb.trace_mask\\nshell\\n"\nassert shlex.split(" ".join(mutant))!=["setprop","persist.adb.trace_mask","shell sockets transport"]\nexercise()\nprint("REMOTE_SHELL_PROPERTY actual POSIX shell PASS; quote-removal mutant rejected; Android untested")\nimport tempfile,os,json\nfrom unittest.mock import patch\nwith tempfile.TemporaryDirectory() as temp:\n    oldcwd=os.getcwd();os.chdir(temp)\n    try:\n        evidence=Path("directory-experiment");evidence.mkdir()\n        raw=b"original setup stderr\\n"+b"x"*4100\n        (evidence/"stderr.bin").write_bytes(raw)\n        receipt={"status":"SETUP_FAILED_NOT_TESTED","commands":[\n            {"returncode":1,"stderr":dict(file="stderr.bin",**m.ident(raw))}],\n            "observations":[]}\n        (evidence/"receipt.json").write_text(json.dumps(receipt))\n        sent=[]\n        def post(*a,**kw):\n            sent.append(json.loads(kw["input"]))\n            return subprocess.CompletedProcess(a,0,\'{"id":1}\',"")\n        def get(*a,**kw):\n            return json.dumps(dict(sent[-1],url="test-only"))\n        env={"JOB_STATUS":"failure","UPLOAD_STATUS":"success","TEST_API":"26",\n             "GITHUB_SHA":"test","GITHUB_RUN_ID":"1","GITHUB_RUN_ATTEMPT":"1"}\n        with patch.dict(os.environ,env),patch.object(m.subprocess,"run",post),patch.object(m.subprocess,"check_output",get):\n            m.publish()\n        view=json.loads(sent[-1]["output"]["text"][8:-4])\n        assert view["failed_commands"][0]["stderr"]["tail"]=="x"*4000\n        assert view["failed_commands"][0]["stderr"]["tail_truncated"] is True\n        assert view["command_count"]==1 and view["observations"]==[]\n        assert sent[-1]["conclusion"]=="failure"\n        assert (evidence/"stderr.bin").read_bytes()==raw\n    finally:os.chdir(oldcwd)\nprint("SETUP_FAILURE publication actual entry PASS; full original preserved; bounded tail readable")\n'
-          expected={'reproduction.py': '69418d1d9cd4894a02eb886eb5df9d4a2194051504785a791fb3ffc50ee015ca', 'test_reproduction.py': '8d4a7c11ac84d2c8ab6701e733ad026bef0d53b7fd421d2c82d4ebaa9313eddb'}
-          target=pathlib.Path(os.environ["RUNNER_TEMP"])/"directory-probe"
-          target.mkdir()
-          (target/"original-workflow.yml").write_bytes(original)
-          for name,body in bundle.items():
-              assert hashlib.sha256(body.encode()).hexdigest()==expected[name],"patched diagnostic bytes differ"
-              compile(body,name,"exec")
-              (target/name).write_text(body)
-          print("PINNED_QUOTE_REPAIR_EXACT_BYTES",expected)
-          PY
-          python3 "$RUNNER_TEMP/directory-probe/test_reproduction.py"
-      - name: Build prerequisites without signing credentials
+      - name: Select Java 17
         run: |
           set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/ci/shortcut-storage-preflight-4d8742"
+          test "$GITHUB_EVENT_NAME" = "push"
+          test "$GITHUB_RUN_ATTEMPT" = "1"
           echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
           echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
-          curl --fail --location https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
-          curl --fail --location https://services.gradle.org/distributions/gradle-8.9-bin.zip.sha256 -o /tmp/gradle.sha256
-          echo "$(cat /tmp/gradle.sha256)  /tmp/gradle.zip" | sha256sum -c -
-          unzip -q /tmp/gradle.zip -d /tmp
-          echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
-          sudo apt-get update
-          sudo apt-get install --yes strace
-      - name: Existing full host contracts before device work
+      - name: Execute old Java transformer on complete pinned source
+        id: red
         run: |
-          set -euo pipefail
-          python3 tools/verify_process_control.py selftest
-          python3 tools/verify_process_control.py server-log-selftest
-          python3 tools/verify_process_control.py isolated-selftest
-          python3 tools/verify_process_control.py isolated-real-selftest
-          python3 tools/verify_shortcuts.py selftest
-      - name: Build exact disposable source with original build guard
-        env:
-          BUILD_429_EXECUTE: "true"
-          BUILD_LOG: diagnostic-build.log
-        run: |
-          set -euo pipefail
-          python3 tools/verify_shortcuts.py build 2>&1 | tee diagnostic-build-driver.log
-      - name: Observe at most twenty original commands and stop on first failure
-        run: |
-          set -euo pipefail
-          python3 "$RUNNER_TEMP/directory-probe/reproduction.py" 2>&1 | tee diagnostic-experiment.log
+          python3 - <<'PY'
+          import hashlib,json,pathlib,subprocess,traceback
+          root=pathlib.Path('.');out=root/'bridge-red-evidence';out.mkdir()
+          receipt={'status':'NOT_EXECUTED','product_pushes':0,'device_execution':False,'source':'2b94a08c1f4ce9245d11971cd7a6993a10e4877a'}
+          def mask(s):
+              chars=list(s);i=0
+              while i<len(s):
+                  if s.startswith('//',i):
+                      e=s.find('\n',i);e=len(s) if e<0 else e
+                  elif s.startswith('/*',i):
+                      e=s.find('*/',i+2);assert e>=0;e+=2
+                  elif s[i] in '\"\'':
+                      q=s[i];e=i+1
+                      while e<len(s):
+                          if s[e]=='\\':e+=2
+                          elif s[e]==q:e+=1;break
+                          else:e+=1
+                      else:raise AssertionError('unterminated literal')
+                  else:i+=1;continue
+                  for n in range(i,e):
+                      if s[n]!='\n':chars[n]=' '
+                  i=e
+              return ''.join(chars)
+          def method(s,key):
+              m=mask(s);assert m.count(key)==1,key;a=m.index(key);b=m.index('{',a)+1;depth=1
+              while depth:
+                  assert b<len(m);depth+=(m[b]=='{')-(m[b]=='}');b+=1
+              return s[a:b]
+          try:
+              assert subprocess.check_output(['git','rev-parse','HEAD']).decode().strip()==receipt['source']
+              raw=(root/'src/main/java/com/supercubegame/pockettodo/AppDatabase.java').read_bytes()
+              sha=hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()
+              assert len(raw)==119092 and sha=='66d471173f255b50a795b5997e19960343f988a5'
+              source=raw.decode();body=method(source,'private static byte[] applicationRenameExpected(')
+              support='''import java.io.*;import java.nio.charset.*;import java.util.*;
+          public class BridgeRed {
+          static class Cursor {static final int FIELD_TYPE_NULL=0,FIELD_TYPE_INTEGER=1,FIELD_TYPE_STRING=3,FIELD_TYPE_BLOB=4;}
+          static final String[] SNAPSHOT_TABLES="revision categories applications activities paths tags batches ledger checkins media notes blocks fields field_options field_values field_notes todos legacy_imports".split(" ");
+          static class LimitedBytes extends ByteArrayOutputStream {}
+          static void require(boolean b,String s){if(!b)throw new IllegalArgumentException(s);}
+          static void utf8(DataOutputStream out,String s)throws IOException{blob(out,s.getBytes(StandardCharsets.UTF_8));}
+          static void blob(DataOutputStream out,byte[] b)throws IOException{out.writeInt(b.length);out.write(b);}
+          static byte[] readBlob(DataInputStream in)throws IOException{int n=in.readInt();require(n>=0&&n<=in.available(),"size");byte[] b=new byte[n];in.readFully(b);return b;}
+          static String readText(DataInputStream in)throws IOException{return new String(readBlob(in),StandardCharsets.UTF_8);}
+          BODY
+          static byte[] fixture(int version,boolean renamed)throws Exception{
+              ByteArrayOutputStream bytes=new ByteArrayOutputStream();DataOutputStream out=new DataOutputStream(bytes);
+              out.writeInt(0x4e444c31);out.writeInt(version);out.writeInt(version==4?19:18);
+              for(String table:SNAPSHOT_TABLES){
+                  utf8(out,table);
+                  if(table.equals("revision")){
+                      out.writeInt(3);for(String n:new String[]{"id","id","value"})utf8(out,n);out.writeInt(1);
+                      for(long v:new long[]{1,1,renamed?43:42}){out.writeByte(1);out.writeLong(v);}
+                  }else if(table.equals("applications")){
+                      out.writeInt(4);for(String n:new String[]{"id","id","name","package_name"})utf8(out,n);out.writeInt(1);
+                      out.writeByte(1);out.writeLong(10);out.writeByte(1);out.writeLong(10);
+                      out.writeByte(3);utf8(out,renamed?"new":"old");out.writeByte(3);utf8(out,"");
+                  }else{out.writeInt(1);utf8(out,"sentinel");out.writeInt(0);}
+              }
+              if(version==4){utf8(out,"category_shortcuts");out.writeInt(2);utf8(out,"category_id");utf8(out,"application_id");out.writeInt(1);out.writeByte(1);out.writeLong(7);out.writeByte(1);out.writeLong(10);}
+              out.flush();return bytes.toByteArray();
+          }
+          public static void main(String[] args)throws Exception{
+              for(int version:new int[]{2,3})if(!Arrays.equals(fixture(version,true),applicationRenameExpected(fixture(version,false),10,"new",43)))throw new AssertionError("LEGACY_CHANGED");
+              System.out.println("LEGACY_2_3_BEHAVIOR_WITNESS");
+              try{applicationRenameExpected(fixture(4,false),10,"new",43);}
+              catch(IllegalArgumentException e){throw new AssertionError("BRIDGE_SCHEMA4_REJECTED",e);}
+              throw new AssertionError("OLD_SOURCE_UNEXPECTEDLY_ACCEPTED_SCHEMA4");
+          }
+          }
+          '''.replace('BODY',body)
+              (out/'BridgeRed.java').write_text(support)
+              command=['java','-m','jdk.compiler/com.sun.tools.javac.Main','-encoding','UTF-8','-d',str(out),str(out/'BridgeRed.java')]
+              built=subprocess.run(command,capture_output=True,timeout=60)
+              (out/'compile.stdout').write_bytes(built.stdout);(out/'compile.stderr').write_bytes(built.stderr)
+              assert built.returncode==0,built.stderr.decode(errors='replace')
+              observed=subprocess.run(['java','-cp',str(out),'BridgeRed'],capture_output=True,timeout=60)
+              (out/'red.stdout').write_bytes(observed.stdout);(out/'red.stderr').write_bytes(observed.stderr)
+              receipt.update(returncode=observed.returncode,stdout=observed.stdout.decode(),stderr=observed.stderr.decode(),source_blob=sha)
+              assert observed.returncode!=0 and b'LEGACY_2_3_BEHAVIOR_WITNESS' in observed.stdout and b'BRIDGE_SCHEMA4_REJECTED' in observed.stderr
+              # Keep complete source, contracts and old compile/source-shape constraints.
+              for name in ['AppDatabase.java','Schema3Store.java']:(out/name).write_bytes((root/'src/main/java/com/supercubegame/pockettodo'/name).read_bytes())
+              constraints=[]
+              for name in ['verify_schema3.py','verify.py','verify_app_catalog.py','verify_note_management.py','verify_custom_fields.py']:
+                  data=(root/'tools'/name).read_text();lines=data.splitlines()
+                  for i,line in enumerate(lines):
+                      if any(key in line for key in ['AppDatabase.java','Schema3Store.java','javac','saveNote(', 'snapshot(db)']):
+                          constraints.append({'file':name,'line':i+1,'context':'\n'.join(lines[max(0,i-2):min(len(lines),i+3)])})
+              (out/'old-host-constraints.json').write_text(json.dumps(constraints,ensure_ascii=False,indent=2))
+              receipt['old_host_constraints']=constraints
+              receipt['status']='EXPECTED_RED_WITNESSED_PRODUCT_UNCHANGED'
+          except BaseException:
+              receipt['status']='PREFLIGHT_FAILED';receipt['error']=traceback.format_exc()
+          finally:
+              (out/'receipt.json').write_text(json.dumps(receipt,ensure_ascii=False,indent=2))
+              print(json.dumps(receipt,ensure_ascii=False,indent=2))
+          assert receipt['status']=='EXPECTED_RED_WITNESSED_PRODUCT_UNCHANGED'
+          PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        id: evidence
         if: always()
+        id: evidence
         with:
-          name: directory-experiment-api-${{ matrix.api }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            directory-experiment/
-            diagnostic-*.log
-            shortcut-build.json
-            shortcut-build.log
-            ci-runtime-identity.json
-            emulator.log
+          name: business-bridge-original-red-${{ github.run_id }}-${{ github.run_attempt }}
+          path: bridge-red-evidence/
           if-no-files-found: error
           retention-days: 14
-      - name: Publish bounded readable diagnostic receipt and verify exact readback
+      - name: Publish exact readable red witness and original failures
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-          JOB_STATUS: ${{ job.status }}
-          UPLOAD_STATUS: ${{ steps.evidence.outcome }}
+          RED_OUTCOME: ${{ steps.red.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.evidence.outcome }}
           ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
           ARTIFACT_DIGEST: ${{ steps.evidence.outputs.artifact-digest }}
-        run: python3 "$RUNNER_TEMP/directory-probe/reproduction.py" publish
+        run: |
+          python3 - <<'PY'
+          import json,os,pathlib,subprocess
+          p=pathlib.Path('bridge-red-evidence/receipt.json')
+          value=json.loads(p.read_text()) if p.exists() else {'status':'NOT_EXECUTED','product_pushes':0}
+          value.update(artifact_url=os.environ.get('ARTIFACT_URL'),artifact_digest=os.environ.get('ARTIFACT_DIGEST'))
+          body=json.dumps(value,ensure_ascii=False,indent=2)
+          assert len(body.encode())<60000,'receipt budget; full artifact preserved'
+          ok=value['status']=='EXPECTED_RED_WITNESSED_PRODUCT_UNCHANGED' and os.environ['RED_OUTCOME']=='success' and os.environ['UPLOAD_OUTCOME']=='success'
+          request={'name':'Shortcut business bridge original red witness','head_sha':os.environ['GITHUB_SHA'],'external_id':os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT'],'status':'completed','conclusion':'neutral' if ok else 'failure','output':{'title':value['status'],'summary':'Pinned original Java behavior only. No candidate integration, product submission, Android acceptance or release.','text':'```json\n'+body+'\n```'}}
+          endpoint='repos/'+os.environ['GITHUB_REPOSITORY']+'/check-runs'
+          result=subprocess.run(['gh','api','--method','POST',endpoint,'--input','-'],input=json.dumps(request),text=True,capture_output=True,timeout=60,check=True)
+          created=json.loads(result.stdout)
+          seen=json.loads(subprocess.check_output(['gh','api',endpoint+'/'+str(created['id'])],text=True,timeout=60))
+          assert seen['head_sha']==request['head_sha'] and seen['conclusion']==request['conclusion'] and seen['external_id']==request['external_id']
+          assert all(seen['output'][k]==v for k,v in request['output'].items())
+          print('RED_WITNESS_EXACT_READBACK',seen['html_url'])
+          if not ok:raise SystemExit(1)
+          PY

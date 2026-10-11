@@ -1,4 +1,4 @@
-name: Pinned business bridge red preflight
+name: Recover original business bridge red evidence
 on:
   push:
     branches: [ci/shortcut-storage-preflight-4d8742]
@@ -7,155 +7,90 @@ permissions:
   actions: read
   checks: write
 jobs:
-  bridge_red:
+  recover:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: 2b94a08c1f4ce9245d11971cd7a6993a10e4877a
-          persist-credentials: false
-      - name: Select Java 17
-        run: |
-          set -euo pipefail
-          test "$GITHUB_REF" = "refs/heads/ci/shortcut-storage-preflight-4d8742"
-          test "$GITHUB_EVENT_NAME" = "push"
-          test "$GITHUB_RUN_ATTEMPT" = "1"
-          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
-          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
-      - name: Execute old Java transformer on complete pinned source
-        id: red
+      - name: Verify original artifact and retain failure log
+        id: extract
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
-          import hashlib,json,pathlib,subprocess,traceback
-          root=pathlib.Path('.');out=root/'bridge-red-evidence';out.mkdir()
-          receipt={'status':'NOT_EXECUTED','product_pushes':0,'device_execution':False,'source':'2b94a08c1f4ce9245d11971cd7a6993a10e4877a'}
-          def mask(s):
-              chars=list(s);i=0
-              while i<len(s):
-                  if s.startswith('//',i):
-                      e=s.find('\n',i);e=len(s) if e<0 else e
-                  elif s.startswith('/*',i):
-                      e=s.find('*/',i+2);assert e>=0;e+=2
-                  elif s[i] in '\"\'':
-                      q=s[i];e=i+1
-                      while e<len(s):
-                          if s[e]=='\\':e+=2
-                          elif s[e]==q:e+=1;break
-                          else:e+=1
-                      else:raise AssertionError('unterminated literal')
-                  else:i+=1;continue
-                  for n in range(i,e):
-                      if s[n]!='\n':chars[n]=' '
-                  i=e
-              return ''.join(chars)
-          def method(s,key):
-              m=mask(s);assert m.count(key)==1,key;a=m.index(key);b=m.index('{',a)+1;depth=1
-              while depth:
-                  assert b<len(m);depth+=(m[b]=='{')-(m[b]=='}');b+=1
-              return s[a:b]
+          import base64,hashlib,io,json,os,pathlib,subprocess,traceback,zipfile
+          assert os.environ['GITHUB_REF']=='refs/heads/ci/shortcut-storage-preflight-4d8742'
+          assert os.environ['GITHUB_RUN_ATTEMPT']=='1'
+          out=pathlib.Path('bridge-recovered');out.mkdir()
+          def gh(path):
+              return subprocess.run(['gh','api',path],capture_output=True,timeout=60)
+          receipt={'status':'NOT_EXECUTED','product_pushes':0,'test_reruns':0}
           try:
-              assert subprocess.check_output(['git','rev-parse','HEAD']).decode().strip()==receipt['source']
-              raw=(root/'src/main/java/com/supercubegame/pockettodo/AppDatabase.java').read_bytes()
-              sha=hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()
-              assert len(raw)==119092 and sha=='66d471173f255b50a795b5997e19960343f988a5'
-              source=raw.decode();body=method(source,'private static byte[] applicationRenameExpected(')
-              support='''import java.io.*;import java.nio.charset.*;import java.util.*;
-          public class BridgeRed {
-          static class Cursor {static final int FIELD_TYPE_NULL=0,FIELD_TYPE_INTEGER=1,FIELD_TYPE_STRING=3,FIELD_TYPE_BLOB=4;}
-          static final String[] SNAPSHOT_TABLES="revision categories applications activities paths tags batches ledger checkins media notes blocks fields field_options field_values field_notes todos legacy_imports".split(" ");
-          static class LimitedBytes extends ByteArrayOutputStream {}
-          static void require(boolean b,String s){if(!b)throw new IllegalArgumentException(s);}
-          static void utf8(DataOutputStream out,String s)throws IOException{blob(out,s.getBytes(StandardCharsets.UTF_8));}
-          static void blob(DataOutputStream out,byte[] b)throws IOException{out.writeInt(b.length);out.write(b);}
-          static byte[] readBlob(DataInputStream in)throws IOException{int n=in.readInt();require(n>=0&&n<=in.available(),"size");byte[] b=new byte[n];in.readFully(b);return b;}
-          static String readText(DataInputStream in)throws IOException{return new String(readBlob(in),StandardCharsets.UTF_8);}
-          BODY
-          static byte[] fixture(int version,boolean renamed)throws Exception{
-              ByteArrayOutputStream bytes=new ByteArrayOutputStream();DataOutputStream out=new DataOutputStream(bytes);
-              out.writeInt(0x4e444c31);out.writeInt(version);out.writeInt(version==4?19:18);
-              for(String table:SNAPSHOT_TABLES){
-                  utf8(out,table);
-                  if(table.equals("revision")){
-                      out.writeInt(3);for(String n:new String[]{"id","id","value"})utf8(out,n);out.writeInt(1);
-                      for(long v:new long[]{1,1,renamed?43:42}){out.writeByte(1);out.writeLong(v);}
-                  }else if(table.equals("applications")){
-                      out.writeInt(4);for(String n:new String[]{"id","id","name","package_name"})utf8(out,n);out.writeInt(1);
-                      out.writeByte(1);out.writeLong(10);out.writeByte(1);out.writeLong(10);
-                      out.writeByte(3);utf8(out,renamed?"new":"old");out.writeByte(3);utf8(out,"");
-                  }else{out.writeInt(1);utf8(out,"sentinel");out.writeInt(0);}
-              }
-              if(version==4){utf8(out,"category_shortcuts");out.writeInt(2);utf8(out,"category_id");utf8(out,"application_id");out.writeInt(1);out.writeByte(1);out.writeLong(7);out.writeByte(1);out.writeLong(10);}
-              out.flush();return bytes.toByteArray();
-          }
-          public static void main(String[] args)throws Exception{
-              for(int version:new int[]{2,3})if(!Arrays.equals(fixture(version,true),applicationRenameExpected(fixture(version,false),10,"new",43)))throw new AssertionError("LEGACY_CHANGED");
-              System.out.println("LEGACY_2_3_BEHAVIOR_WITNESS");
-              try{applicationRenameExpected(fixture(4,false),10,"new",43);}
-              catch(IllegalArgumentException e){throw new AssertionError("BRIDGE_SCHEMA4_REJECTED",e);}
-              throw new AssertionError("OLD_SOURCE_UNEXPECTEDLY_ACCEPTED_SCHEMA4");
-          }
-          }
-          '''.replace('BODY',body)
-              (out/'BridgeRed.java').write_text(support)
-              command=['java','-m','jdk.compiler/com.sun.tools.javac.Main','-encoding','UTF-8','-d',str(out),str(out/'BridgeRed.java')]
-              built=subprocess.run(command,capture_output=True,timeout=60)
-              (out/'compile.stdout').write_bytes(built.stdout);(out/'compile.stderr').write_bytes(built.stderr)
-              assert built.returncode==0,built.stderr.decode(errors='replace')
-              observed=subprocess.run(['java','-cp',str(out),'BridgeRed'],capture_output=True,timeout=60)
-              (out/'red.stdout').write_bytes(observed.stdout);(out/'red.stderr').write_bytes(observed.stderr)
-              receipt.update(returncode=observed.returncode,stdout=observed.stdout.decode(),stderr=observed.stderr.decode(),source_blob=sha)
-              assert observed.returncode!=0 and b'LEGACY_2_3_BEHAVIOR_WITNESS' in observed.stdout and b'BRIDGE_SCHEMA4_REJECTED' in observed.stderr
-              # Keep complete source, contracts and old compile/source-shape constraints.
-              for name in ['AppDatabase.java','Schema3Store.java']:(out/name).write_bytes((root/'src/main/java/com/supercubegame/pockettodo'/name).read_bytes())
-              constraints=[]
-              for name in ['verify_schema3.py','verify.py','verify_app_catalog.py','verify_note_management.py','verify_custom_fields.py']:
-                  data=(root/'tools'/name).read_text();lines=data.splitlines()
-                  for i,line in enumerate(lines):
-                      if any(key in line for key in ['AppDatabase.java','Schema3Store.java','javac','saveNote(', 'snapshot(db)']):
-                          constraints.append({'file':name,'line':i+1,'context':'\n'.join(lines[max(0,i-2):min(len(lines),i+3)])})
-              (out/'old-host-constraints.json').write_text(json.dumps(constraints,ensure_ascii=False,indent=2))
-              receipt['old_host_constraints']=constraints
-              receipt['status']='EXPECTED_RED_WITNESSED_PRODUCT_UNCHANGED'
+              meta=gh('repos/supercubegame/todo-pocket-android/actions/artifacts/11692823592');meta.check_returncode();m=json.loads(meta.stdout)
+              assert m['id']==11692823592 and m['size_in_bytes']==63816 and m['digest']=='sha256:a35fa3eb375bf05d63461341509f9c149fe85825cb7869f8435efbfcc3128648'
+              assert m['workflow_run']['id']==38115514666 and m['workflow_run']['head_sha']=='abd36b0e9c5c1c4e6d0483f9fd8e29900d6e4c4b' and not m['expired']
+              archive=gh('repos/supercubegame/todo-pocket-android/actions/artifacts/11692823592/zip');archive.check_returncode();raw=archive.stdout
+              (out/'original.zip').write_bytes(raw)
+              assert len(raw)==63816 and hashlib.sha256(raw).hexdigest()=='a35fa3eb375bf05d63461341509f9c149fe85825cb7869f8435efbfcc3128648'
+              with zipfile.ZipFile(io.BytesIO(raw)) as z:
+                  names=z.namelist();assert len(names)==len(set(names)) and len(names)<30
+                  assert sum(x.file_size for x in z.infolist())<4000000
+                  assert all(not n.startswith('/') and '..' not in n.split('/') and '\\' not in n for n in names)
+                  original=z.read('receipt.json');(out/'original-receipt.json').write_bytes(original);value=json.loads(original)
+                  assert value['status']=='EXPECTED_RED_WITNESSED_PRODUCT_UNCHANGED' and value['product_pushes']==0 and value['device_execution'] is False
+                  assert value['source']=='2b94a08c1f4ce9245d11971cd7a6993a10e4877a' and value['source_blob']=='66d471173f255b50a795b5997e19960343f988a5'
+                  assert value['returncode']!=0 and 'LEGACY_2_3_BEHAVIOR_WITNESS' in value['stdout'] and 'BRIDGE_SCHEMA4_REJECTED' in value['stderr']
+                  constraints=value.pop('old_host_constraints');value['constraint_count']=len(constraints);value['constraint_preview']=[];budget=24000
+                  for item in constraints:
+                      entry=dict(file=item['file'],line=item['line'],context=item['context'][:1200],context_truncated=len(item['context'])>1200,full_context_sha256=hashlib.sha256(item['context'].encode()).hexdigest())
+                      size=len(json.dumps(entry,ensure_ascii=False).encode())
+                      if size>budget:break
+                      value['constraint_preview'].append(entry);budget-=size
+                  value['constraint_preview_omitted']=len(constraints)-len(value['constraint_preview'])
+                  value['presentation_bounded']=any(x['context_truncated'] for x in value['constraint_preview']) or value['constraint_preview_omitted']>0
+                  # Exact full source is retained in the original ZIP, not rebuilt from displayed excerpts.
+                  for name,expected in [('AppDatabase.java','66d471173f255b50a795b5997e19960343f988a5'),('Schema3Store.java','99d748cbc08fe2f122ec6cd16d2a36dac3f1edf3')]:
+                      b=z.read(name);assert hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()==expected
+                  value['archive_sha256']=hashlib.sha256(raw).hexdigest();value['original_receipt_bytes']=len(original)
+              logs=gh('repos/supercubegame/todo-pocket-android/actions/jobs/114399519684/logs')
+              (out/'original-job-log.stdout').write_bytes(logs.stdout);(out/'original-job-log.stderr').write_bytes(logs.stderr)
+              value['original_job_log']={'returncode':logs.returncode,'bytes':len(logs.stdout),'sha256':hashlib.sha256(logs.stdout).hexdigest(),'tail':logs.stdout[-8000:].decode(errors='replace'),'tail_truncated':len(logs.stdout)>8000,'stderr':logs.stderr[-2000:].decode(errors='replace')}
+              receipt.update(status='ORIGINAL_RED_RECOVERED_NOT_CANDIDATE_ACCEPTANCE',original=value)
           except BaseException:
-              receipt['status']='PREFLIGHT_FAILED';receipt['error']=traceback.format_exc()
+              receipt.update(status='EXTRACTION_FAILED',error=traceback.format_exc())
           finally:
               (out/'receipt.json').write_text(json.dumps(receipt,ensure_ascii=False,indent=2))
               print(json.dumps(receipt,ensure_ascii=False,indent=2))
-          assert receipt['status']=='EXPECTED_RED_WITNESSED_PRODUCT_UNCHANGED'
+          assert receipt['status']=='ORIGINAL_RED_RECOVERED_NOT_CANDIDATE_ACCEPTANCE'
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         id: evidence
         with:
-          name: business-bridge-original-red-${{ github.run_id }}-${{ github.run_attempt }}
-          path: bridge-red-evidence/
+          name: recovered-business-bridge-red-${{ github.run_id }}-${{ github.run_attempt }}
+          path: bridge-recovered/
           if-no-files-found: error
           retention-days: 14
-      - name: Publish exact readable red witness and original failures
+      - name: Publish bounded original evidence and verify exact readback
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-          RED_OUTCOME: ${{ steps.red.outcome }}
+          EXTRACT_OUTCOME: ${{ steps.extract.outcome }}
           UPLOAD_OUTCOME: ${{ steps.evidence.outcome }}
           ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
           ARTIFACT_DIGEST: ${{ steps.evidence.outputs.artifact-digest }}
         run: |
           python3 - <<'PY'
           import json,os,pathlib,subprocess
-          p=pathlib.Path('bridge-red-evidence/receipt.json')
-          value=json.loads(p.read_text()) if p.exists() else {'status':'NOT_EXECUTED','product_pushes':0}
+          p=pathlib.Path('bridge-recovered/receipt.json');value=json.loads(p.read_text()) if p.exists() else {'status':'NOT_EXECUTED'}
           value.update(artifact_url=os.environ.get('ARTIFACT_URL'),artifact_digest=os.environ.get('ARTIFACT_DIGEST'))
-          body=json.dumps(value,ensure_ascii=False,indent=2)
-          assert len(body.encode())<60000,'receipt budget; full artifact preserved'
-          ok=value['status']=='EXPECTED_RED_WITNESSED_PRODUCT_UNCHANGED' and os.environ['RED_OUTCOME']=='success' and os.environ['UPLOAD_OUTCOME']=='success'
-          request={'name':'Shortcut business bridge original red witness','head_sha':os.environ['GITHUB_SHA'],'external_id':os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT'],'status':'completed','conclusion':'neutral' if ok else 'failure','output':{'title':value['status'],'summary':'Pinned original Java behavior only. No candidate integration, product submission, Android acceptance or release.','text':'```json\n'+body+'\n```'}}
+          body=json.dumps(value,ensure_ascii=False,indent=2);assert len(body.encode())<60000
+          ok=value['status']=='ORIGINAL_RED_RECOVERED_NOT_CANDIDATE_ACCEPTANCE' and os.environ['EXTRACT_OUTCOME']=='success' and os.environ['UPLOAD_OUTCOME']=='success'
+          request={'name':'Recovered shortcut business bridge red evidence','head_sha':os.environ['GITHUB_SHA'],'external_id':os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT'],'status':'completed','conclusion':'neutral' if ok else 'failure','output':{'title':value['status'],'summary':'Read-only original evidence recovery. No product changes, candidate host acceptance, test reruns or Android execution.','text':'```json\n'+body+'\n```'}}
           endpoint='repos/'+os.environ['GITHUB_REPOSITORY']+'/check-runs'
-          result=subprocess.run(['gh','api','--method','POST',endpoint,'--input','-'],input=json.dumps(request),text=True,capture_output=True,timeout=60,check=True)
-          created=json.loads(result.stdout)
-          seen=json.loads(subprocess.check_output(['gh','api',endpoint+'/'+str(created['id'])],text=True,timeout=60))
-          assert seen['head_sha']==request['head_sha'] and seen['conclusion']==request['conclusion'] and seen['external_id']==request['external_id']
+          r=subprocess.run(['gh','api','--method','POST',endpoint,'--input','-'],input=json.dumps(request),text=True,capture_output=True,timeout=60,check=True)
+          made=json.loads(r.stdout);seen=json.loads(subprocess.check_output(['gh','api',endpoint+'/'+str(made['id'])],text=True,timeout=60))
+          assert seen['head_sha']==request['head_sha'] and seen['external_id']==request['external_id'] and seen['conclusion']==request['conclusion']
           assert all(seen['output'][k]==v for k,v in request['output'].items())
-          print('RED_WITNESS_EXACT_READBACK',seen['html_url'])
+          print('ORIGINAL_RED_RECOVERY_EXACT_READBACK',seen['html_url'])
           if not ok:raise SystemExit(1)
           PY

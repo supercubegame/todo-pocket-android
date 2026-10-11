@@ -16,7 +16,7 @@ JAVA = ROOT / "src/main/java/com/supercubegame/pockettodo/Schema4Store.java"
 DEVICE = ROOT / "src/androidTest/java/com/supercubegame/pockettodo/Schema4DeviceTest.java"
 PACKAGE = "com.supercubegame.pockettodo.v12.preview"
 SCOPE = "OPT_IN_SCHEMA4_STORAGE_NOT_LIVE_UI_NOT_RELEASE"
-LABELS = {'seed': ['all_18_tables_nonempty_before_migration', 'migration_preserves_all_old_cells', 'migration_only_adds_shortcut_table', 'stable_ids_and_multi_category_links', 'repeat_setting_is_exact_noop', 'same_name_targets_not_confused', 'invalid_targets_leave_exact_state', 'remove_relation_only_and_repeat_noop', 'navigation_read_is_pure_and_excludes_archived', 'missing_navigation_no_business_writes', 'late_sql_failure_rolls_back_link_and_revision', 'unknown_tables_never_silently_omitted', 'backup_preserves_source_and_original_media', 'restore_preview_is_read_only_and_counts_complete', 'restore_counts_immutable', 'cancel_and_replay_preserve_state', 'foreign_owner_refused_without_consuming_valid_plan', 'helper_close_invalidates_restore_session', 'same_revision_stale_restore_refused', 'new_backup_restore_exact_and_single_use', 'old_backup_replacement_clears_new_relationships', 'late_restore_failure_rolls_back_every_table', 'changed_staged_media_refused_without_live_damage', 'reviewed_source_frozen_against_file_replacement', 'staging_closed_and_original_media_exact', 'restore_suite_preserves_all_business_cells', 'v2_backup_normalizes_empty_shortcuts', 'v3_backup_normalizes_empty_shortcuts', 'malformed_and_new_to_old_backups_refused', 'migration_conflict_keeps_version_and_schema', 'future_schema_refused_without_damage', 'live_ui_database_never_opened', 'bridge_note_write_preserves_links_and_origins', 'bridge_field_and_field_note_operations', 'bridge_catalog_paths_archive_and_pure_navigation', 'bridge_todo_delete_undo_preserves_shortcuts', 'bridge_same_revision_relation_change_invalidates_plan', 'bridge_late_fault', 'bridge_late_business_failure_rolls_back_exactly', 'bridge_unrelated_relation_mutation_rolls_back', 'bridge_backup_preview_has_all_tables_and_no_writes', 'bridge_foreign_restore_does_not_consume_owner_plan', 'bridge_restore_detects_same_revision_link_edit', 'bridge_restore_late', 'bridge_restore_late_failure_preserves_every_table', 'bridge_close_invalidates_business_session', 'bridge_unknown_table_refused_without_partial_write', 'bridge_live_database_name_refused'], 'reopen': ['separate_process_exact_state', 'separate_process_all_business_cells', 'separate_process_relationships_and_read_only_targets', 'separate_process_original_media', 'separate_process_backup_restore_exact', 'separate_process_no_live_ui_database', 'bridge_separate_process_all_cells_and_wire_exact', 'bridge_separate_process_business_reads_are_pure']}
+LABELS = {'seed': ['all_18_tables_nonempty_before_migration', 'migration_preserves_all_old_cells', 'migration_only_adds_shortcut_table', 'stable_ids_and_multi_category_links', 'repeat_setting_is_exact_noop', 'same_name_targets_not_confused', 'invalid_targets_leave_exact_state', 'remove_relation_only_and_repeat_noop', 'navigation_read_is_pure_and_excludes_archived', 'missing_navigation_no_business_writes', 'late_sql_failure_rolls_back_link_and_revision', 'unknown_tables_never_silently_omitted', 'backup_preserves_source_and_original_media', 'restore_preview_is_read_only_and_counts_complete', 'restore_counts_immutable', 'cancel_and_replay_preserve_state', 'foreign_owner_refused_without_consuming_valid_plan', 'helper_close_invalidates_restore_session', 'same_revision_stale_restore_refused', 'new_backup_restore_exact_and_single_use', 'old_backup_replacement_clears_new_relationships', 'late_restore_failure_rolls_back_every_table', 'changed_staged_media_refused_without_live_damage', 'reviewed_source_frozen_against_file_replacement', 'staging_closed_and_original_media_exact', 'restore_suite_preserves_all_business_cells', 'v2_backup_normalizes_empty_shortcuts', 'v3_backup_normalizes_empty_shortcuts', 'malformed_and_new_to_old_backups_refused', 'migration_conflict_keeps_version_and_schema', 'future_schema_refused_without_damage', 'live_ui_database_never_opened', 'bridge_one_connection_and_schema4', 'bridge_note_write_preserves_links_and_origins', 'bridge_field_and_field_note_operations', 'bridge_catalog_paths_archive_and_pure_navigation', 'bridge_todo_delete_undo_preserves_shortcuts', 'bridge_same_revision_relation_change_invalidates_plan', 'bridge_late_business_failure_rolls_back_exactly', 'bridge_unrelated_relation_mutation_rolls_back', 'bridge_backup_preview_has_all_tables_and_no_writes', 'bridge_foreign_restore_does_not_consume_owner_plan', 'bridge_restore_detects_same_revision_link_edit', 'bridge_restore_late_failure_preserves_every_table', 'bridge_close_invalidates_business_session', 'bridge_unknown_table_refused_without_partial_write', 'bridge_live_database_name_refused'], 'reopen': ['separate_process_exact_state', 'separate_process_all_business_cells', 'separate_process_relationships_and_read_only_targets', 'separate_process_original_media', 'separate_process_backup_restore_exact', 'separate_process_no_live_ui_database', 'bridge_separate_process_all_cells_and_wire_exact', 'bridge_separate_process_business_reads_are_pure']}
 
 
 def need(ok, reason):
@@ -974,7 +974,173 @@ def bridge_receipt_selftest():
     print("BRIDGE_RECEIPT_OMISSION_CONTROLS_PASS",len(cases))
 
 
+"""Permanent host contract for actual Java need-call labels, not all strings."""
+BRIDGE_LABELS = {
+    "seed": [
+        "bridge_one_connection_and_schema4",
+        "bridge_note_write_preserves_links_and_origins",
+        "bridge_field_and_field_note_operations",
+        "bridge_catalog_paths_archive_and_pure_navigation",
+        "bridge_todo_delete_undo_preserves_shortcuts",
+        "bridge_same_revision_relation_change_invalidates_plan",
+        "bridge_late_business_failure_rolls_back_exactly",
+        "bridge_unrelated_relation_mutation_rolls_back",
+        "bridge_backup_preview_has_all_tables_and_no_writes",
+        "bridge_foreign_restore_does_not_consume_owner_plan",
+        "bridge_restore_detects_same_revision_link_edit",
+        "bridge_restore_late_failure_preserves_every_table",
+        "bridge_close_invalidates_business_session",
+        "bridge_unknown_table_refused_without_partial_write",
+        "bridge_live_database_name_refused",
+    ],
+    "reopen": [
+        "bridge_separate_process_all_cells_and_wire_exact",
+        "bridge_separate_process_business_reads_are_pure",
+    ],
+}
+
+LABEL_AST = r'''
+import java.nio.file.*;import java.util.*;import javax.tools.*;
+import com.sun.source.tree.*;import com.sun.source.util.*;
+public class WireTest {
+ public static void main(String[] args)throws Exception{
+  JavaCompiler compiler=ToolProvider.getSystemJavaCompiler();
+  if(compiler==null)throw new AssertionError("JDK_REQUIRED");
+  for(int index=0;index<args.length;index++){
+   final int file=index;
+   DiagnosticCollector<JavaFileObject> diagnostics=new DiagnosticCollector<>();
+   try(StandardJavaFileManager manager=compiler.getStandardFileManager(diagnostics,null,null)){
+    JavacTask task=(JavacTask)compiler.getTask(null,manager,diagnostics,List.of("-proc:none"),null,
+       manager.getJavaFileObjects(Path.of(args[index]).toFile()));
+    List<CompilationUnitTree> units=new ArrayList<>();
+    for(CompilationUnitTree unit:task.parse())units.add(unit);
+    if(diagnostics.getDiagnostics().stream().anyMatch(d->d.getKind()==Diagnostic.Kind.ERROR))
+      throw new AssertionError("JAVA_PARSE_ERROR "+diagnostics.getDiagnostics());
+    SourcePositions positions=Trees.instance(task).getSourcePositions();
+    Map<String,Integer> methods=new HashMap<>();
+    for(CompilationUnitTree unit:units)new TreeScanner<Void,Void>(){
+     @Override public Void visitMethod(MethodTree method,Void ignored){
+      String name=method.getName().toString();
+      if(!name.equals("bridgeSeed")&&!name.equals("bridgeReopen"))return null;
+      methods.merge(name,1,Integer::sum);
+      if(method.getBody()==null)throw new AssertionError("MISSING_METHOD_BODY");
+      new TreeScanner<Void,Void>(){
+       @Override public Void visitMethodInvocation(MethodInvocationTree call,Void unused){
+        ExpressionTree select=call.getMethodSelect();
+        boolean target=select instanceof IdentifierTree && ((IdentifierTree)select).getName().contentEquals("need");
+        if(select instanceof MemberSelectTree){
+         MemberSelectTree member=(MemberSelectTree)select;
+         target=member.getIdentifier().contentEquals("need")&&member.getExpression().toString().equals("this");
+        }
+        if(target){
+         if(call.getArguments().size()!=2)throw new AssertionError("LABEL_ARGUMENT_COUNT");
+         ExpressionTree label=call.getArguments().get(1);
+         if(!(label instanceof LiteralTree)||!(((LiteralTree)label).getValue() instanceof String))
+           throw new AssertionError("LITERAL_LABEL_REQUIRED");
+         String value=(String)((LiteralTree)label).getValue();
+         if(!value.matches("bridge_[a-z0-9_]+"))throw new AssertionError("LABEL_FORMAT");
+         System.out.println(file+"\t"+name+"\t"+value+"\t"+positions.getStartPosition(unit,call)+"\t"+positions.getEndPosition(unit,call));
+        }
+        return super.visitMethodInvocation(call,unused);
+       }
+      }.scan(method.getBody(),null);
+      return null;
+     }
+    }.scan(unit,null);
+    if(!methods.equals(Map.of("bridgeSeed",1,"bridgeReopen",1)))
+      throw new AssertionError("EXACT_BRIDGE_METHODS "+methods);
+   }
+  }
+ }
+}
+'''
+
+
+def java_label_calls(sources):
+    # Actual JDK parser, parse-only: Android names are deliberately not resolved.
+    # This proves call-site structure, not device execution or branch reachability.
+    with tempfile.TemporaryDirectory(prefix="shortcut-label-ast-") as temp:
+        paths=[]
+        for index, text in enumerate(sources):
+            path=Path(temp)/("Source"+str(index)+".java")
+            path.write_text(text)
+            paths.append(str(path))
+        result=java_run(LABEL_AST, paths)
+    need(result.returncode==0, "label AST failed:\n"+result.stdout+result.stderr)
+    rows=[[] for _ in sources]
+    for line in result.stdout.splitlines():
+        index,method,label,start,end=line.split("\t")
+        rows[int(index)].append((method,label,int(start),int(end)))
+    return rows
+
+
+def check_bridge_labels(rows, expected=BRIDGE_LABELS):
+    observed={p:[r[1] for r in rows if r[0]==m]
+              for p,m in (("seed","bridgeSeed"),("reopen","bridgeReopen"))}
+    need(observed==expected, "actual Java need-call label contract differs: "+repr(observed))
+
+
+def label_contract_selftest():
+    source=DEVICE.read_text()
+    # Independent hand-written oracle. Neither the runtime parser nor AST output
+    # generates this expected list. Comments/exception strings are not checks.
+    sample=r'''class Sample {
+      void bridgeSeed(){
+        // need(false,"bridge_comment");
+        String s="need(false,\"bridge_string\");";
+        refused(()->work(),"bridge_late_fault");
+        need(true,"bridge_sample4");
+        this.need(true,"bridge_sample_tail");
+      }
+      void bridgeReopen(){refused(()->work(),"bridge_restore_late");}
+    }'''
+    rows,sample_rows=java_label_calls([source,sample])
+    check_bridge_labels(rows)
+    check_bridge_labels(sample_rows,{"seed":["bridge_sample4","bridge_sample_tail"],"reopen":[]})
+    for phase, count in (("seed",32),("reopen",6)):
+        need(len(LABELS[phase])==count+len(BRIDGE_LABELS[phase]) and
+             LABELS[phase][count:]==BRIDGE_LABELS[phase], "fixed phase label population "+phase)
+    variants=[]
+    # AST positions refer to Java UTF-16 indices. Convert before Python slicing.
+    def offset(value):
+        return len(source.encode("utf-16-le")[:value*2].decode("utf-16-le"))
+    for row in rows:
+        a,b=offset(row[2]),offset(row[3])
+        call=source[a:b]
+        need(call.startswith(("need(","this.need(")), "AST source position witness")
+        variants.append(source[:a]+source[b:])
+    first,second=rows[:2]
+    a,b,c,d=map(offset,(first[2],first[3],second[2],second[3]))
+    variants.append(source[:a]+source[a:b]+";"+source[a:])
+    variants.append(source[:a]+source[c:d]+source[b:c]+source[a:b]+source[d:])
+    literal='"'+first[1]+'"'
+    call=source[a:b]
+    need(call.count(literal)==1,"literal rename witness")
+    variants.append(source[:a]+call.replace(literal,'"bridge_wrong4"',1)+source[b:])
+    killed=0
+    for actual in java_label_calls(variants):
+        try:check_bridge_labels(actual)
+        except AssertionError:killed+=1
+        else:raise AssertionError("Java label call-site mutant survived")
+    need(killed==len(rows)+3,"label mutant population")
+    # Runtime ordered-label controls also reject duplicate/reordered/foreign
+    # checks; the existing per-label omission controls remain unchanged.
+    for phase in LABELS:
+        for api in (26,34):
+            raw=fixture(phase,api);parse_phase(raw,phase,api)
+            lines=raw.splitlines(keepends=True)
+            bads=[b"".join([lines[1],lines[0],*lines[2:]]),
+                  lines[0]+raw,raw.replace(lines[0],b"SHORTCUT_PASS bridge_wrong4\n",1)]
+            for bad in bads:
+                try:parse_phase(bad,phase,api)
+                except AssertionError:pass
+                else:raise AssertionError("runtime ordered-label mutant survived")
+    print("SHORTCUT_LABEL_AST actual_checks=17 callsite_mutants="+str(killed)+
+          " runtime_controls=12 DIGIT_COMMENT_STRING_EXCEPTION_CONTROLS_PASS")
+
+
 def selftest():
+    label_contract_selftest()
     bridge_selftest()
     bridge_receipt_selftest()
     parser_selftest()

@@ -1,105 +1,63 @@
-name: Isolated shortcut business bridge delivery
+name: Read original business bridge device failures
 on:
   push:
     branches: [ci/shortcut-storage-preflight-4d8742]
 permissions:
-  contents: write
-  actions: write
+  contents: read
+  actions: read
   checks: write
-concurrency:
-  group: shortcut-business-bridge-delivery
-  cancel-in-progress: false
 jobs:
-  bridge_delivery:
+  read_original:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: 2b94a08c1f4ce9245d11971cd7a6993a10e4877a
-          path: source
-          persist-credentials: false
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: f2ea66f56d99061b7331514c3ff339615c004a9f
-          path: delivery-base
-          persist-credentials: false
-      - name: Select Java 17 and assert isolated one-attempt trigger
-        run: |
-          set -euo pipefail
-          test "$GITHUB_REPOSITORY" = "supercubegame/todo-pocket-android"
-          test "$GITHUB_REF" = "refs/heads/ci/shortcut-storage-preflight-4d8742"
-          test "$GITHUB_EVENT_NAME" = "push"
-          test "$GITHUB_RUN_ATTEMPT" = "1"
-          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
-          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
-      - name: Materialize hash-bound test-first integration payload
+      - name: Verify both original archives and publish exact seed streams
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
-          import ast,base64,hashlib,json,lzma,os,pathlib,re
-          prior=(pathlib.Path(os.environ["GITHUB_WORKSPACE"])/"delivery-base/.github/workflows/shortcut-storage.yml").read_bytes()
-          assert hashlib.sha256(prior).hexdigest()=="bd54f1cf61868a86cc685bf15f790be13d09c9bb69589b397f12cd6935955e82"
-          encoded=re.findall(r'raw=lzma.decompress\(base64.b64decode\("([^"]+)",validate=True\)\)',prior.decode())
-          assert len(encoded)==1
-          raw=lzma.decompress(base64.b64decode(encoded[0],validate=True))
-          assert hashlib.sha256(raw).hexdigest()=="8dd639a57f5e5b886ae3742d55bda4944c13b1a6dea9aa0b542eae03380d4a08"
-          bundle=json.loads(raw)
-          changes=[('assemble.py', '    "tools/verify_shortcuts.py":', '    "tools/verify_todo_management.py": "e0dd99912a1cae1106f5367a1775c2289d53610d",\n    "tools/verify_shortcuts.py":'), ('assemble.py', '    result.update(extend(old, payload))', "    result.update(extend(old, payload))\n    from todo_repair import repair\n    result['tools/verify_todo_management.py']=repair(old['tools/verify_todo_management.py'].decode()).encode()"), ('runner.py', 'len(diff["files"])==7', 'len(diff["files"])==8'), ('runner.py', 'one guarded seven-file submission', 'one guarded eight-file submission'), ('runner.py', '        result=gate.execute(candidates[assemble.MAIN+"AppDatabase.java"].decode())', '        # Preserve the original failure against these complete integrated sources.\n        import tempfile\n        with tempfile.TemporaryDirectory(prefix="todo-original-red-") as temp:\n            oldtest=Path(temp)/"original_todo.py"\n            oldtest.write_bytes(originals["tools/verify_todo_management.py"])\n            code="import importlib.util,sys;from pathlib import Path;s=importlib.util.spec_from_file_location(\'original_todo\',sys.argv[1]);m=importlib.util.module_from_spec(s);s.loader.exec_module(m);m.ROOT=Path(sys.argv[2]);m.backend_product_selftest()"\n            legacy=subprocess.run([sys.executable,"-c",code,str(oldtest),str(root)],capture_output=True,text=True,timeout=60)\n        (output/"todo-original-red.stdout").write_text(legacy.stdout)\n        (output/"todo-original-red.stderr").write_text(legacy.stderr)\n        receipt["todo_original_red"]=dict(returncode=legacy.returncode,stdout=legacy.stdout,stderr=legacy.stderr)\n        save()\n        assert legacy.returncode!=0 and "cannot find symbol" in legacy.stderr\n        assert all(name in legacy.stderr for name in ("comparisonTables","comparisonLayout","comparisonQuery"))\n        result=gate.execute(candidates[assemble.MAIN+"AppDatabase.java"].decode())')]
-          for name,old,new in changes:
-              assert bundle[name].count(old)==1,(name,old)
-              bundle[name]=bundle[name].replace(old,new,1)
-          bundle["todo_repair.py"]='"""Extend the existing todo member harness without weakening old behavior."""\nimport ast\n\n\ndef one(text, old, new):\n    assert text.count(old) == 1, (old[:100], text.count(old))\n    return text.replace(old, new, 1)\n\n\ndef repair(text):\n    original = ast.parse(text)\n    text = one(text, \'"confirmTodoDeletion","undoTodoDeletion"));\',\n               \'"confirmTodoDeletion","undoTodoDeletion","comparisonTables","comparisonLayout","comparisonQuery"));\')\n    text = one(text, \' Object restoreSession=new Object();\', \'\'\' // This legacy model does not implement schema4 SQLite validation.\n static void require(boolean value,String message){if(!value)throw new IllegalArgumentException(message);}\n static class Schema4Store {\n  static void checkBusinessLayout(SQLiteDatabase db){throw new UnsupportedOperationException("SCHEMA4_NOT_MODELED");}\n }\n Object restoreSession=new Object();\'\'\')\n    text = one(text, \'  int getVersion(){return 3;}\', \'  int version=3;\\n  int getVersion(){return version;}\')\n    text = one(text, \'        def run_model(code):\\n            source.write_text(BACKEND_MODEL_PREFIX\',\n               \'        def run_model(code, args=()):\\n            source.write_text(BACKEND_MODEL_PREFIX\')\n    old = \'return subprocess.run([java, str(source)], capture_output=True, text=True, timeout=30)\'\n    text = one(text, old, \'return subprocess.run([java, str(source), *args], capture_output=True, text=True, timeout=30)\')\n    text = one(text, \'  AppDatabase h=new AppDatabase();byte[] before=state(h);\', \'\'\'  if(args.length>0){\n   if(!args[0].equals("schema4-refusal"))throw new AssertionError("unknown model mode");\n   AppDatabase probe=new AppDatabase();probe.sql.version=4;\n   try{comparisonLayout(probe.sql);throw new AssertionError("schema4 model falsely accepted");}\n   catch(UnsupportedOperationException expected){\n    if(!"SCHEMA4_NOT_MODELED".equals(expected.getMessage()))throw expected;\n    System.out.println("SCHEMA4_MODEL_EXPLICITLY_NOT_ACCEPTANCE");return;\n   }\n  }\n  AppDatabase h=new AppDatabase();byte[] before=state(h);\'\'\')\n    anchor = \'        print(p.stdout, end="")\\n        rejected = []\\n        for name, label, old, new in BACKEND_MUTANTS:\'\n    text = one(text, anchor, \'\'\'        print(p.stdout, end="")\n        # Each helper really is required by the actual extracted methods.\n        # Rename its declaration only, leaving call sites unchanged.\n        for helper, declaration in (\n            ("comparisonTables", "String[] comparisonTables("),\n            ("comparisonLayout", "void comparisonLayout("),\n            ("comparisonQuery", "String comparisonQuery(")):\n            assert fragment.count(declaration)==1\n            missing=run_model(fragment.replace(declaration,declaration.replace(helper,helper+"Missing"),1))\n            assert missing.returncode!=0 and "cannot find symbol" in missing.stderr and helper in missing.stderr\n        boundary=run_model(fragment,("schema4-refusal",))\n        assert boundary.returncode==0 and boundary.stdout.splitlines()==["SCHEMA4_MODEL_EXPLICITLY_NOT_ACCEPTANCE"]\n        print("TODO_COMPARISON_DEPENDENCIES 3 omissions rejected; schema4 explicitly not modeled")\n        rejected = []\n        for name, label, old, new in BACKEND_MUTANTS:\'\'\')\n    # All other functions and all old labels/mutants/Android/report assertions are frozen.\n    before={n.name:ast.dump(n) for n in original.body if isinstance(n,ast.FunctionDef)}\n    after={n.name:ast.dump(n) for n in ast.parse(text).body if isinstance(n,ast.FunctionDef)}\n    assert set(before)==set(after)\n    assert all(before[n]==after[n] for n in before if n!="backend_product_selftest")\n    return text\n'
-          raw=json.dumps(bundle,ensure_ascii=False,separators=(",",":")).encode()
-          assert hashlib.sha256(raw).hexdigest()=="f58b665513c9b0dd92b0884fb4d815ef6225a06c89a926c140a9fa31b1087279"
-          assert set(bundle)=={"gate.py","assemble.py","extend_tests.py","bridge-device.java","verifier-additions.py","runner.py","host.py","todo_repair.py"}
-          folder=pathlib.Path(os.environ["RUNNER_TEMP"])/"shortcut-business-payload"
-          assert not folder.exists();folder.mkdir()
-          for name,text in bundle.items():
-              if name.endswith(".py"):ast.parse(text)
-              (folder/name).write_bytes(text.encode())
-          out=pathlib.Path(os.environ["GITHUB_WORKSPACE"])/"bridge-evidence"
-          out.mkdir(exist_ok=False)
-          (out/"payload.json").write_bytes(raw)
-          (out/"payload.sha256").write_text("f58b665513c9b0dd92b0884fb4d815ef6225a06c89a926c140a9fa31b1087279\n")
+          import hashlib,io,json,os,pathlib,subprocess,traceback,zipfile
+          assert os.environ['GITHUB_REF']=='refs/heads/ci/shortcut-storage-preflight-4d8742'
+          assert os.environ['GITHUB_RUN_ATTEMPT']=='1'
+          out=pathlib.Path('original-bridge-failures');out.mkdir()
+          receipt={'status':'NOT_EXECUTED','product_pushes':0,'test_reruns':0,'source':'159cfae1935f3e7cfef054a07d05a9a4aec17740','original_run':38121264711,'devices':{}}
+          endpoint='repos/'+os.environ['GITHUB_REPOSITORY']+'/'
+          def gh(path):
+              return subprocess.check_output(['gh','api',endpoint+path],timeout=60)
+          try:
+              for api,ident,size,digest in [(26,11695431757,18978,'342cc78f298b0b10daa17786826a8be6532a75474cca29765a655bfeb58ce92d'),(34,11695118310,20467,'4ffcf308c08772d2cf8b7cd6ee5933acb6d555a73fd1d2f1a74e070a69e9a533')]:
+                  meta=json.loads(gh('actions/artifacts/'+str(ident)))
+                  assert meta['workflow_run']['id']==receipt['original_run'] and meta['workflow_run']['head_sha']==receipt['source']
+                  assert meta['size_in_bytes']==size and meta['digest']=='sha256:'+digest and not meta['expired']
+                  raw=gh('actions/artifacts/'+str(ident)+'/zip');(out/(str(api)+'.zip')).write_bytes(raw)
+                  assert len(raw)==size and hashlib.sha256(raw).hexdigest()==digest
+                  with zipfile.ZipFile(io.BytesIO(raw)) as z:
+                      names=z.namelist();assert len(names)==len(set(names)) and len(names)<200
+                      assert sum(i.file_size for i in z.infolist())<8000000
+                      assert all(not n.startswith('/') and '..' not in n.split('/') and '\\' not in n for n in names)
+                      selected=[n for n in names if n.endswith('shortcut-device/seed.log')]
+                      assert len(selected)==1,names
+                      seed=z.read(selected[0]);assert len(seed)==2693
+                      expected='afe1ffafcc08a053ca084be43f521480023da4f5c72b2edecf51f42e07e0fb64' if api==26 else '6063f120780293d432bed6a2673f5af288426dc6089586dd0fc9b4eed4efd113'
+                      assert hashlib.sha256(seed).hexdigest()==expected
+                      (out/(str(api)+'-seed.log')).write_bytes(seed)
+                      receipt['devices'][str(api)]={'artifact':ident,'archive_sha256':digest,'seed_sha256':expected,'seed':seed.decode(),'members':names}
+              receipt['status']='ORIGINAL_FAILURES_READ_NOT_ACCEPTANCE'
+          except BaseException:
+              receipt.update(status='READ_FAILED',error=traceback.format_exc())
+          (out/'receipt.json').write_text(json.dumps(receipt,ensure_ascii=False,indent=2))
+          body=json.dumps(receipt,ensure_ascii=False,indent=2);assert len(body.encode())<60000
+          request={'name':'Original bridge device failure evidence','head_sha':os.environ['GITHUB_SHA'],'external_id':os.environ['GITHUB_RUN_ID']+'-1','status':'completed','conclusion':'neutral' if receipt['status']=='ORIGINAL_FAILURES_READ_NOT_ACCEPTANCE' else 'failure','output':{'title':receipt['status'],'summary':'Original attempt only. No product write, rerun, UI activation or release.','text':'```json\n'+body+'\n```'}}
+          made=json.loads(subprocess.check_output(['gh','api','--method','POST',endpoint+'check-runs','--input','-'],input=json.dumps(request).encode(),timeout=60))
+          seen=json.loads(gh('check-runs/'+str(made['id'])))
+          assert seen['head_sha']==request['head_sha'] and seen['conclusion']==request['conclusion'] and all(seen['output'][k]==v for k,v in request['output'].items())
+          print('ORIGINAL_DEVICE_FAILURE_EXACT_READBACK',seen['html_url'])
+          assert receipt['status']=='ORIGINAL_FAILURES_READ_NOT_ACCEPTANCE'
           PY
-      - name: Full-source RED GREEN all host gates and atomic guarded submission
-        id: integration
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          python3 "$RUNNER_TEMP/shortcut-business-payload/runner.py" "$GITHUB_WORKSPACE/source" "$RUNNER_TEMP/shortcut-business-payload" "$GITHUB_WORKSPACE/bridge-evidence"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        id: evidence
         if: always()
         with:
-          name: shortcut-business-bridge-${{ github.run_id }}-${{ github.run_attempt }}
-          path: bridge-evidence/
-          include-hidden-files: true
+          name: original-bridge-failures-${{ github.run_id }}-${{ github.run_attempt }}
+          path: original-bridge-failures/
           if-no-files-found: error
           retention-days: 14
-      - name: Publish exact readable evidence including original failures
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_OUTCOME: ${{ steps.integration.outcome }}
-          UPLOAD_OUTCOME: ${{ steps.evidence.outcome }}
-          ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
-          ARTIFACT_DIGEST: ${{ steps.evidence.outputs.artifact-digest }}
-        run: |
-          set -euo pipefail
-          if test -f "$RUNNER_TEMP/shortcut-business-payload/runner.py"; then
-            python3 "$RUNNER_TEMP/shortcut-business-payload/runner.py" publish "$GITHUB_WORKSPACE/bridge-evidence"
-          else
-            python3 - <<'PY'
-          import json,os,subprocess
-          request={"name":"Shortcut business bridge delivery evidence","head_sha":os.environ["GITHUB_SHA"],"status":"completed","conclusion":"failure","external_id":os.environ["GITHUB_RUN_ID"]+"-"+os.environ["GITHUB_RUN_ATTEMPT"],"output":{"title":"SETUP_FAILED_NOT_TESTED","summary":"No integration or product submission executed; inspect original setup logs."}}
-          endpoint="repos/"+os.environ["GITHUB_REPOSITORY"]+"/check-runs"
-          r=subprocess.run(["gh","api","--method","POST",endpoint,"--input","-"],input=json.dumps(request),text=True,capture_output=True,timeout=60,check=True)
-          made=json.loads(r.stdout)
-          seen=json.loads(subprocess.check_output(["gh","api",endpoint+"/"+str(made["id"])],text=True,timeout=60))
-          assert seen["conclusion"]=="failure" and seen["head_sha"]==request["head_sha"] and seen["output"]["summary"]==request["output"]["summary"]
-          print("SETUP_FAILURE_RECEIPT_EXACT_READBACK",seen["html_url"])
-          raise SystemExit(1)
-          PY
-          fi

@@ -1,63 +1,106 @@
-name: Read original business bridge device failures
+name: Isolated shortcut business bridge delivery
 on:
   push:
     branches: [ci/shortcut-storage-preflight-4d8742]
 permissions:
-  contents: read
-  actions: read
+  contents: write
+  actions: write
   checks: write
+concurrency:
+  group: shortcut-business-bridge-delivery
+  cancel-in-progress: false
 jobs:
-  read_original:
+  bridge_delivery:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 120
     steps:
-      - name: Verify both original archives and publish exact seed streams
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 159cfae1935f3e7cfef054a07d05a9a4aec17740
+          path: source
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: f2ea66f56d99061b7331514c3ff339615c004a9f
+          path: delivery-base
+          persist-credentials: false
+      - name: Select Java 17 and assert isolated one-attempt trigger
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "supercubegame/todo-pocket-android"
+          test "$GITHUB_REF" = "refs/heads/ci/shortcut-storage-preflight-4d8742"
+          test "$GITHUB_EVENT_NAME" = "push"
+          test "$GITHUB_RUN_ATTEMPT" = "1"
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+      - name: Materialize hash-bound test-first integration payload
+        run: |
+          python3 - <<'PY'
+          import ast,base64,hashlib,json,lzma,os,pathlib,re
+          prior=(pathlib.Path(os.environ["GITHUB_WORKSPACE"])/"delivery-base/.github/workflows/shortcut-storage.yml").read_bytes()
+          assert hashlib.sha256(prior).hexdigest()=="bd54f1cf61868a86cc685bf15f790be13d09c9bb69589b397f12cd6935955e82"
+          encoded=re.findall(r'raw=lzma.decompress\(base64.b64decode\("([^"]+)",validate=True\)\)',prior.decode())
+          assert len(encoded)==1
+          raw=lzma.decompress(base64.b64decode(encoded[0],validate=True))
+          assert hashlib.sha256(raw).hexdigest()=="8dd639a57f5e5b886ae3742d55bda4944c13b1a6dea9aa0b542eae03380d4a08"
+          bundle=json.loads(raw)
+          changes=[('len(diff["files"])==7', 'len(diff["files"])==len(candidates)'), ('feat: integrate opt-in shortcut business and guarded backup bridge', 'test: correct bridge labels and guard actual Java assertion call sites')]
+          for old,new in changes:
+              assert bundle["runner.py"].count(old)==1
+              bundle["runner.py"]=bundle["runner.py"].replace(old,new,1)
+          raw=lzma.decompress(base64.b64decode("/Td6WFoAAATm1rRGAgAhARYAAAB0L+Wj4ELJF65dAD2IiYZT0WGLp80h/QHmze24+QKL6ClDbKCSOeMIGqP+y9gQAJBqvQr6J4qMhlka6hl4hx1O7IHX1tPb6Ti+Gne1H3HKNSnCmpzPEf/rDfrg6z+37jwLsVRWRlAshXmtvvUHg514CSkZFMefmJMdYZSAvA97f1u9ffE6ke+RxyDLbcut1wLFWXDvn+CwoBcYVALfXpbPb0SBXeaj8meuR36NLsU2Fffr4edzBO2LQV4Fhaby5nEfFAdq6xxOzpGq89FcEeMKIWCtIKDLUGD5Gn1CZMqNbURZoASDOThXOUUBWEhhEPBbUGnR3MaC+zg+HzqdQxHjQ8Kcr+zsl8oVPKQ6PwgseViW9/QkJ9W08wNgv6zvD23Uq6GgJDfHlroVCCfrnDtrKGvu3FeZpjRddebcTeSruqlSo0CqNHpQoJLg/VTAdFMPepivr5X9/CFgkncoF1Gw6BC46jHOVN2U7413TVkWzNctn5gbWOPHPWT5w3IE0g1kGUpzXCb3WyU7Q40bqh3OCzuGUVKCuGvvhNlYWPESoyxCtfE0S8by7nDBCx4XnWmuKsGPNAY5RnhIcWJev9tmeq1tfcoSyQUVu6BNnmCeX3lfWI21NuB88KQPu3Fkmr95A0t68U4S8fu+zIed6Zl5TI5o+ewjPnkr429GB9cwlLS1eDISpxgfzAQX4lEh1Ywyyw625M713IAu4OrJ1WwTIVML/GBDQaCF1WiDNvduXigiWLd2JoQ3cUTXxRQNfQd2OsUpTP3OrapaL0oISrdZ7YIIpEk/iCWNZrI35I0s1l4ZHUrLKcfwnVEei8Y96f5wJt9642QrtNiM6r+LOsGYvjK1cyI8Vo7EwiN3iB2Pqz7wr6eOE+i1a5VqqS7DfvgZTiF5wWZBGGpOwz+xgAtTdplu7iZc5luWThLf/17P75P6+ENe1jy2aPzkruIZ4yfnzM/7uBNUfLpJqlFMmv/v6zx90UgKFCbYGyrRVF0gdXfSYVZ4H6v3Crs0VXw1qbMNj6VFY6QhL/l4QnIsQKGC8qwnOg5ARNzW3nik3UtXv/s7ExsE7scsJMR32vOMtK5d5BoZ+0zebD19fv4lmsLRpu8XR0JAiM7T7ii8MncZ5gnVeeyGtzAs0xQFl2pJ2lkB7EB4gZYb6JhuLB10+9bica2LzaafBycJJUYWdvmxGTjJ/zdsQ1OwYXDd4/D3oTdMHShSuLsRNGUVjNFwzTh1gtd+wk1uBgqd+A56q4Uz5M76HgTMXcEAPWMXFvXpGDF66fmaXEU7H/wpcdrDOZUAi8owzd/pPtQv/rHE0Rj209eJpMG3JKOrXliQ3a9fRmpR2/wt2AJeyp+QN/1yDJN3K6pFgKVVKaMapjbGA7cx0cpCkoacu2jX4QCqtk5JMt9onTwZAVm/D1I+UNYu334uhczJx6WMkqXCQof9FYp0GSqgFkR03kL05HfQ16bLXa53RXuGuqGSDu1nZtrdCzolHt4AuZ3ElSot5vakM+iVNM9yviOQXwh9rHkLppg1ty/oMFqmrvg92Bhhfq2OjFG8yQeNjUorCxOtFAoVel7zoONclQa9k761JVsjXahr7Xme7VBPEyAbX3P/VM/y1u6sng7eNwjuUnp9RqcrQAvYsKzfOr+cudjlZEckro/LTlNbA84tnf2evcPYQro30bAK0/yqIpExYVR8uVKMQT0XYMIt99hWZoxtpG4Y7lUKv3knp24UI4Y95snW7hGEdDkj3AHGpJMH6lLI6xb4XKp8SNhFH2Ee+NGtlFDfjXEbnawssP3nVZ655f/y47tfurtpHX481i6F/r1cRRRSvWJstq9NQholF1FKOsmVqeIpA2sPbkMEtmGTJdTG8Me5RSamB3ECDxV/aQi5DW6bCSbwYCQG8kQqPNqlv1Q55sahvAR4cSsS/zhqKtW7OP/+0xqhwJM2rUie6nQ/LW/KaUXXUSIbzkFYV4oDRtEryeUFC011lK5CxaaV678QbHt2pxcBqCb62z/hz56X4Axw/Z0PKh/kidKNqoi2rOdId1mHBSe8Kt2xHg3X70/amIvUQXvFTcQzRtMz/psZbLZsGRK0X4CrXNDP0KsuYaVG234OqhVPu3Gmdxb8CH0M2sYBKgSgW4srBnnWY0+QCJXwxOpoFlxeAGwF3QKWm4WULSo1EanxN5uhyQUsfQTmgTI5Lw/byuoPGubGO0XwWx3FQ5JuobUdfUxALAXdlwDbBZ+Wui7VBpb04QmiZ6ubaAeEa5Tos3pKj26LMoWnnW/Mt/UA5I5gxYoTFomZTkZu71yc0f/Pxoe1nOsikdt5e4gfNK+yWnVRjC9gBB04TF847w7pD8XaoO1pUM3B5K+VdHjQJEz1O/NKm36wuVR2B1V+Z1rlgvHZdZE2hfOa2IuaN3aeYkpxBWPj2FNHtSd1R38ykvwVJxY4mL+BV7mQ9P4fGYBl7JYQ+4AokJDGnhYJxW37R7h7erAhcdWx049+rS5iLEJoRTMeIOsIq2+PcmsHZof1ESZx0jFSjwA4jmTFGCjEZfPuABaNR6gEKVIpvm8+MhNr8ZAOvQrIaKFkVfxP4h0LrOHJ7+nxH0d0SvxdHHvFf1EA41Yz8t0v+qg2Du56tChZ6Wj0vVYg5EAWi0ZN9TU4vd9nKhrhuYTFHjkOTdh4TgJ7Q27M4+TFqTirHN4xD31sWF6JgmkaCDsMfV0cnZIdDpWJs6EY6OGk5eSCzwMGyAQJkzQyrljjWfj2OulV7eFzgvDLi8RO/0xGodYTTh+8BRSEOQQfAjj1yxUbI2XrgEWDAflMH1eZ6A1NcJLp8SnU7LP5zZ1Pi1w5HIG3wRQotatZAW5CIKOysUD+3kmnqn+/HtPGi5ITARwO+gQSfj9Mozyw1FB+juTka/TdHJWkH7z/LZxgBWquC9RQb/EoX2B6kuEgwBiGyJfJN4vZUx8m2qNkrc3AXk3+2LJHW6VO1ciSZImIS9ZkzF+13bT5TvDxUCuxUvEpHDj4rnujLI9UcnN6HQ3nNYNWIhhqS4LbwP47KW3QF0c4dXu7VlwSxgIPTIfSWCp/1S6K6np0gUUu35rIanEJ32f2f0egjaTyBBECej4p9hY5zMKpyjcopG/e+0eNCubFYui9bgXzkd4PmbXJc7oLm+fdHgNSC2z7NX7nxCrB5gq6rgltVZv/2+DfGto+CI2s5nydwWPgcT+4X+6ZLScV12Dy40KrMo2X+bW1gcAydEz0nZH++khdzlGGc5CIHIIoBtcZeWRKCZrIpiLwKolDcVQFSh3IXwwaTkznv8jNYydnUsrBWSYMolYL/iXQlbWCL6d5HR5nE1gZQbuU5BsMQcNz/cMi+kFbBoLa3MWTTiDE07fIqXLY/vjoSLRiT8mWzqQAcf1eWFviM53nAGzTCkR0OqMaMLCNLaDcIChNTLe+4dexdHcJatUGcyuM2U8dXSeflz5CYdIRBFXIB0GzfaL5SD2nLfS8jtnxzjakBoktfmFkPc9Mbi8YQOk4TCubR9XWd0EgqsUANAK30Yz2YHr+/V9s/kL1kpSq+tR+Tx/tOWtU7uZnQjfn8SXRreEUABlagEch4/S34i7VoZZZBvoaddqrDp+jn9jcbxhmxUalNyWGcIKsut5QDnRNv/m5YRm0WF3CHe1zKFDV0OtV5+CjSdPWm704OBrkdfYT9y6bUVdDux2qSlibgjRofuSgRB7cbw1G7gLMKdVkU9GZGSPAa7mp/2H7+jIjIqbCM7RSCm7MC6ddnRpJNcf7vD0zrBUtfdM81d7yt6Sr3yCC2xkxYGr3vrEuMg073i549En3JyeRkgIcwyKW6dercN+iW5lEMFGkB+iW5LTAmlFWD4hb8olrqhrU1Rim7RrC3bytkFFWG2IEYYHO/hi8Z56Nt4BNEB8WIgHaUc+Gvdjta1J1YumXRM75jm68Pm4exOF9g8Inq5ahQ9CE7jTaS5pZzj6YwSrNvtUnKySLqVKx44/55E7m9CAeUrjZ2M6Ea3+zZ8Z1yUeOoKxijKJnniU0hOPRauS+1He6J0z8bS3GQo6UiZquntgS8V1FzShNiRzUkGVOjbsXz7CsgQmD7Cfk9aqocQbWAiM/iljP8vYsK4gG2zECTudK7P+lxblz371EO7mn/cp3zudpd+oxF9COa+sna4XoodFVQx70FfLy1AsID6D9/v2+3BtY9TBdUhBXok3JTkLZDtJv/v+BAahfEKReOinf4RYhnaYNPCBMjYY71gIKXLWberIKxzSvEd2fvdmx4myCwx9gGtnI1nsbhtU2aMY7+UjPdLW2JO09IxaaGJVowbELMhSk6jQEASM7Qtp70bvk5RGapHuL7sI1qyaKlSWKcrlpV7j4P2qnuqtUQMw1Bgutv+JKdEHZphFNIuyEhCS4vwanFVnI+/p4LJi6ezuKb3nerxIHthqN1APwVbwkEX0j4YX62u4L5bumJWiR4mIxIcYBY0utUY5UiRy6HlBycuXcGzuc26OCeBFg+5kuUjDyW63gQfX3Y+MKgbVqKU3ZvZVQEY95wVz5H1FQTmCPvgfY59UdFWWJlqusU9xv33t5lgNabraCurZUbKD4L9sWJQ3KWT7/QpEJ82yOTi3dEWBJ61FSM9estYD0U6aDuIrRujipYcd1xlQANJlj4UU4cTXRqzJjrNPctQ9xYq/hSxoHO3PwZM8sgpszx2OY7KNVG9SHMFvU9Ud1sXq5pJZ7YGhAS30vLHUDfsV9tj7VNLZNAe6v4lVn3Pfxk1cqdhKmdoJuaarnNJ68tYuWS3Xu/LB0RZ57CdReqPgNFAb24kVyV8n0VWhOEyBSu5TKCl9YOv2MP0vUsVoqgnvP0j2x+eB/5DiFWiBXFNrCZpllcpsPxCyTIRDxI/dtBKvVK7s7oQDc0tXExaL9akUCer0GrF3XFCFzREUN2RiwxaD3YanJqaLES8S1Erfo3/so774mY6cUPIfMVhVYMtxWl16k/gDpHMT0GTSRs7iUdCrZk7yt2NcWYMQIuUBn5XdmYx98UDjxs36A2idkwu8IZAZYxNLp0Z72pYDSsgLcMVg5ThBZ948vslKmZuEZ1gj7OLzsDCIF5jOcqZ9FaOm7iRyvykWmZZmrTOD4Yjrgq31Fy3JigvHFbbRJ0onqPbEOmK90qN5gYy2uguv0LYXDb+YdvLTI6U53rGpCfG2Ym3akircCQbdUy5zTbkvzw8UdOul4ewFpSSGRGIcWEbU4Jk1tc4qlvcf9eQ9O4QW9bz+p/OqXQchsNkjs7EORlMgGIaX5YRnoBHm5rkHGITaleMpAZXwCazLH8whrju279vo4MSpH+NS8H7vsxr2LDUORh3ky1ZLfCQojA1C4Ra8VdjUz9vbDljxnfl+TBtjAdBgKbNE9g9xTVCI/FCU3O4giUIsFerPtzoX3VuixbRgy4Mmqp5yFYdF5i8kPguTJC/Dbuxz9rfj5/JK+JHaD7EpKqCd0fOgZqDDsNBC/jcjG9V0OBaLw3MAkeDTCtTqXKuVbHnqeadWMV23cO+e3WA45vBeuoKCpt2fiD3vHhbCANAPUVwkBenbcCVROb8FLCVde6X/vAI8/TOMD0qopqJ5EV/yIp/KYhx6zhNnuHadda/ptVWz//UkD1YoHyCJEDuBRvdkJvdvXs3I+gUCT8CFgCg+oB5AIc3/bE/F1KuL7cmlTNt+Rgfzx+7HNyTslia7cMLgFw+NWIRVKw7Aw8KFHD7mi7gDJc0W5YOaZ4jRBRmKUgWS2GZ1IcLhw1Z+f45fPVIXMyp6DqI0ohvZhedo/nkJYHVDqwreALbPTuO8kTJkkl4XhvHkCslj46+4IO0rCui47X4QsOBfvy9tt80oe0es2FayY0HgYxURiEszPXoMXWcliWTNtxl0qUAj+OAVKnIH4bBriWQHzLKUFo7R97K3sOngFJb/Mj50DxI6wL3kUzXgCaH98fD7xePq6CDo+qK2yOwgq9bBiJYR6eJeBoZphPx8HlV1nMtbtQMFxLcJXeZzzhtiNfKwqfDtWmB8W1vgQS1ohwfaJJre3ZjHLP1aDOHU8On2hmZOarageuyFspkj3ZRjd8Sm+ZqiTb5SuJH5G93MyipIA5P1D5L7wkxyf0sXwlbEo1cxKIXn2FlIQW22dyJR+IG/W8GhghNIWsTlFeoMBGCR7eGj8QVQOZOsjUGbfd3XrN/a1Dx76Fw+MT4clzDMpH1o7oI0FqRcUPrah48jyuWB3JC4b2hK8DkXkaAXbTvpJ18F2ucCWf4iejOCp0fMpXfjTuDuiVtEFm44diwWVN9bdORhlZHMwIpUBP1PscRCzi4+eqBZnCtaadPbLbsdwCkP/AKupR7k9jw6fjtHUc7naMMw1ckcpa3kaiW9ZTm3PF5Go93wPkhGJowpfpsHcFl1xTrc/Ix28JFL1BpeEdd4Qt9lMHuibKLWEA1J66OzgbN+sNkYfGRYJ6jer5zHFTpImrKcLCQSv7pgUAzFFjh61zM85t/uvHGEPZCN7IMUvSIREGDMae6u8bK24vdjNPCIuzX62n++BWYB232q7bgqCKpfjzs7KB7wBBdNu8096nIJfwUd42C5RqrCWJQBUtnXbuf6pV1QoGYexG0T/0X2SeqJOOS8RhGf3IMB1GQpQHjodf5fhnH58la1h8UmhFufa/NVxzpD+5502ZByuNfzU90N+Wg8qvm3DkPhMFu4AKWiDIUgSVotuIK+hFvDx+Dg2xxKCG/UXxwAHWDP3LMshzqytqo2ySQvFkGAEO1dtUQ52LolVLyAJgC0HXifnHYHUpXYCaodus4t8QF9J0ymCfe01gpH2MX1qqJPSIQzaIXfuA3PR09fzGoM7pyUSoJ/QToy5I+qUfbXtq/yTKXsn+SoRs3SUnF8mAgwpJl/fRJitv2q3GGGKBK8HBWZQG9FLztesPyIwqwanYNPokMiBP9dM9KtrS3Su5FR29umSbBIaFhMEvxZ8zoDAvs7y77pVx402TMyJbyytG4HAIqTG85cP3E/jW8yyFFDMnLddGo3gLy4MTjkCw9v8x0CRHe2bXwMSvcGDbesVu+r+pRbe5FNBtfv1x2D1jy6Osz1QqKMCuECCH/ao8kXJgwopqj7oE0WZ8Kfe6CydzG506YDv3F88b/TQteTcNL/PkPObtm6hvaUw5k6JaRUTUv8YHE/LgqAn9TzriWtSy4TOoRBJhNVPk/x9DQWD+MtguXgfdGBqXdFMmlNvyIApmdUv1D6P/fRRmioy6A6Y/uXgjwJyuNPXWoh0hJsZlBDXQsr3RcVGck7jloAGsk20E/iCbOEzsAPUTsk3/d3chGXOi4zPLY/NEcarJncz8m3si3bl6sIphjzFkH4/OJoPW+DDmENIeH5GdREylycOpU+6UwlDsrzQqNkGZ2lDQPo3I+pYiIGd4UUL2SFjs9OJxlHhUkHGcVUr4mmRp7NUCAV1+3VTVWUGErTAMCmSMmjSid4vSnukB4StRKDd4VgEw/dyOsLGpKk+QsSn8Ov/PxnCDHfU18mnB2qSiS1IBdkX3Gn+Niq8nm4tTy2en0K1nK4QU4480XKIBkGDYzvgUmSorrfwnjIOAyhGfmUdNgz8cw5vreYm/UchVLVfM9wYxNiigHVB9ao9Z7BuAy3TBPLL3dVUDgcznOUEYdLuwRRLxj9FpuJmOItw2eay1xSsvOK1a+I94Uj5lcRcL8iAiSj/0zjXr00J9ig6dWr2qIe1CvVAR2Fqjll6iV3uFzt3TREo8m+Llu2Fw5l0XdVrH+poOnvow9Fo2Mvwp3ixC98P3uuMStNLu+owRN4ZraUPmS+/Fmp96Fu36Haov80tLztaIPzYTXKrtUisnGHH5t+THRr2OS+rY/y4bZ2Yi5stwua0ubi7ySC49LtjzPtV3Ymod6NzqwwmJESf9naCxKWVwfErUvMo3uIrq5gbtIY8gvndHqbl29G3UVIeC3MqO3WHnT6W1sT8IKruzLwf46R09nizj5uQTLcDkPhQOKHGsmrCzn5z86Ti/Kj61noC1TwsHcT/G6epMXqqfcaxQz/qPbMUTi6rRbPuD93JRWTOo6xwwCnbZjaJaVEp56kuxcDpzVkGPQPz/H8a+ys+2vmlBsPwC46mAAAAdXxBlHbilqkAAcovyoUBAJK3otexxGf7AgAAAAAEWVo=",validate=True))
+          assert hashlib.sha256(raw).hexdigest()=="cca3b6424ff2e414cc550b59d77a651c4f5381f22b76806dc7be21b48a38c6f8"
+          bundle.update(json.loads(raw))
+          raw=json.dumps(bundle,ensure_ascii=False,separators=(",",":")).encode()
+          assert hashlib.sha256(raw).hexdigest()=="5b30ec059343dec971f7d9efa942b118337220fbfc7241766aa3fb642fa1ff30"
+          folder=pathlib.Path(os.environ["RUNNER_TEMP"])/"shortcut-business-payload"
+          assert not folder.exists();folder.mkdir()
+          for name,text in bundle.items():
+              assert pathlib.Path(name).name==name
+              if name.endswith(".py"):ast.parse(text)
+              (folder/name).write_bytes(text.encode())
+          out=pathlib.Path(os.environ["GITHUB_WORKSPACE"])/"bridge-evidence"
+          out.mkdir(exist_ok=False)
+          (out/"payload.json").write_bytes(raw)
+          PY
+      - name: Full-source RED GREEN all host gates and atomic guarded submission
+        id: integration
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 - <<'PY'
-          import hashlib,io,json,os,pathlib,subprocess,traceback,zipfile
-          assert os.environ['GITHUB_REF']=='refs/heads/ci/shortcut-storage-preflight-4d8742'
-          assert os.environ['GITHUB_RUN_ATTEMPT']=='1'
-          out=pathlib.Path('original-bridge-failures');out.mkdir()
-          receipt={'status':'NOT_EXECUTED','product_pushes':0,'test_reruns':0,'source':'159cfae1935f3e7cfef054a07d05a9a4aec17740','original_run':38121264711,'devices':{}}
-          endpoint='repos/'+os.environ['GITHUB_REPOSITORY']+'/'
-          def gh(path):
-              return subprocess.check_output(['gh','api',endpoint+path],timeout=60)
-          try:
-              for api,ident,size,digest in [(26,11695431757,18978,'342cc78f298b0b10daa17786826a8be6532a75474cca29765a655bfeb58ce92d'),(34,11695118310,20467,'4ffcf308c08772d2cf8b7cd6ee5933acb6d555a73fd1d2f1a74e070a69e9a533')]:
-                  meta=json.loads(gh('actions/artifacts/'+str(ident)))
-                  assert meta['workflow_run']['id']==receipt['original_run'] and meta['workflow_run']['head_sha']==receipt['source']
-                  assert meta['size_in_bytes']==size and meta['digest']=='sha256:'+digest and not meta['expired']
-                  raw=gh('actions/artifacts/'+str(ident)+'/zip');(out/(str(api)+'.zip')).write_bytes(raw)
-                  assert len(raw)==size and hashlib.sha256(raw).hexdigest()==digest
-                  with zipfile.ZipFile(io.BytesIO(raw)) as z:
-                      names=z.namelist();assert len(names)==len(set(names)) and len(names)<200
-                      assert sum(i.file_size for i in z.infolist())<8000000
-                      assert all(not n.startswith('/') and '..' not in n.split('/') and '\\' not in n for n in names)
-                      selected=[n for n in names if n.endswith('shortcut-device/seed.log')]
-                      assert len(selected)==1,names
-                      seed=z.read(selected[0]);assert len(seed)==2693
-                      expected='afe1ffafcc08a053ca084be43f521480023da4f5c72b2edecf51f42e07e0fb64' if api==26 else '6063f120780293d432bed6a2673f5af288426dc6089586dd0fc9b4eed4efd113'
-                      assert hashlib.sha256(seed).hexdigest()==expected
-                      (out/(str(api)+'-seed.log')).write_bytes(seed)
-                      receipt['devices'][str(api)]={'artifact':ident,'archive_sha256':digest,'seed_sha256':expected,'seed':seed.decode(),'members':names}
-              receipt['status']='ORIGINAL_FAILURES_READ_NOT_ACCEPTANCE'
-          except BaseException:
-              receipt.update(status='READ_FAILED',error=traceback.format_exc())
-          (out/'receipt.json').write_text(json.dumps(receipt,ensure_ascii=False,indent=2))
-          body=json.dumps(receipt,ensure_ascii=False,indent=2);assert len(body.encode())<60000
-          request={'name':'Original bridge device failure evidence','head_sha':os.environ['GITHUB_SHA'],'external_id':os.environ['GITHUB_RUN_ID']+'-1','status':'completed','conclusion':'neutral' if receipt['status']=='ORIGINAL_FAILURES_READ_NOT_ACCEPTANCE' else 'failure','output':{'title':receipt['status'],'summary':'Original attempt only. No product write, rerun, UI activation or release.','text':'```json\n'+body+'\n```'}}
-          made=json.loads(subprocess.check_output(['gh','api','--method','POST',endpoint+'check-runs','--input','-'],input=json.dumps(request).encode(),timeout=60))
-          seen=json.loads(gh('check-runs/'+str(made['id'])))
-          assert seen['head_sha']==request['head_sha'] and seen['conclusion']==request['conclusion'] and all(seen['output'][k]==v for k,v in request['output'].items())
-          print('ORIGINAL_DEVICE_FAILURE_EXACT_READBACK',seen['html_url'])
-          assert receipt['status']=='ORIGINAL_FAILURES_READ_NOT_ACCEPTANCE'
-          PY
+          set -euo pipefail
+          python3 "$RUNNER_TEMP/shortcut-business-payload/label_driver.py" "$GITHUB_WORKSPACE/source" "$RUNNER_TEMP/shortcut-business-payload" "$GITHUB_WORKSPACE/bridge-evidence"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: evidence
         if: always()
         with:
-          name: original-bridge-failures-${{ github.run_id }}-${{ github.run_attempt }}
-          path: original-bridge-failures/
+          name: shortcut-business-bridge-${{ github.run_id }}-${{ github.run_attempt }}
+          path: bridge-evidence/
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
+      - name: Publish exact readable evidence including original failures
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_OUTCOME: ${{ steps.integration.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.evidence.outcome }}
+          ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
+          ARTIFACT_DIGEST: ${{ steps.evidence.outputs.artifact-digest }}
+        run: |
+          set -euo pipefail
+          if test -f "$RUNNER_TEMP/shortcut-business-payload/label_driver.py"; then
+            python3 "$RUNNER_TEMP/shortcut-business-payload/label_driver.py" publish "$GITHUB_WORKSPACE/bridge-evidence"
+          else
+            python3 - <<'PY'
+          import json,os,subprocess
+          request={"name":"Shortcut business bridge delivery evidence","head_sha":os.environ["GITHUB_SHA"],"status":"completed","conclusion":"failure","external_id":os.environ["GITHUB_RUN_ID"]+"-"+os.environ["GITHUB_RUN_ATTEMPT"],"output":{"title":"SETUP_FAILED_NOT_TESTED","summary":"No integration or product submission executed; inspect original setup logs."}}
+          endpoint="repos/"+os.environ["GITHUB_REPOSITORY"]+"/check-runs"
+          r=subprocess.run(["gh","api","--method","POST",endpoint,"--input","-"],input=json.dumps(request),text=True,capture_output=True,timeout=60,check=True)
+          made=json.loads(r.stdout)
+          seen=json.loads(subprocess.check_output(["gh","api",endpoint+"/"+str(made["id"])],text=True,timeout=60))
+          assert seen["conclusion"]=="failure" and seen["head_sha"]==request["head_sha"] and seen["output"]["summary"]==request["output"]["summary"]
+          print("SETUP_FAILURE_RECEIPT_EXACT_READBACK",seen["html_url"])
+          raise SystemExit(1)
+          PY
+          fi

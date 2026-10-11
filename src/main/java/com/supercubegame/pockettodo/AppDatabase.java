@@ -21,20 +21,33 @@ public final class AppDatabase extends SQLiteOpenHelper {
     private interface Work<T> { T run(SQLiteDatabase db); }
     private Object restoreSession=new Object();
     private final Schema3Store schema3;
-    public AppDatabase(Context context,String name) {this(context,name,false);}
-    private AppDatabase(Context context,String name,boolean upgraded) {
+    private final Schema4Store schema4;
+    public AppDatabase(Context context,String name) {this(context,name,2);}
+    private AppDatabase(Context context,String name,int version) {
         super(context.getApplicationContext(),validName(name),null,2);
-        schema3=upgraded?new Schema3Store(context,name):null;
+        schema4=version==4?new Schema4Store(context,name):null;
+        schema3=version==3?new Schema3Store(context,name):version==4?schema4.businessAdapter(context,name):null;
         setWriteAheadLoggingEnabled(true);
     }
     /** Explicit compatibility bridge. The default constructor remains frozen at v2.
      * Every business read/write uses ONE delegate connection; the v2 superclass never
      * opens this file. Backup/restore and note origins use the verified v3 adapters.
      */
-    public static AppDatabase openSchema3(Context context,String name){return new AppDatabase(context,name,true);}
+    public static AppDatabase openSchema3(Context context,String name){return new AppDatabase(context,name,3);}
+    /** Isolated opt-in only; Schema4Store refuses the live UI database name. */
+    public static AppDatabase openSchema4(Context context,String name){return new AppDatabase(context,name,4);}
+    public synchronized boolean setShortcut(long category,long application,boolean enabled){
+        require(schema4!=null,"Shortcut bridge not enabled");return schema4.setShortcut(category,application,enabled);
+    }
+    public synchronized List<Long> shortcutApplications(long category){
+        require(schema4!=null,"Shortcut bridge not enabled");return schema4.shortcutApplications(category);
+    }
+    public synchronized List<Long> activityTargets(long category,long application){
+        require(schema4!=null,"Shortcut bridge not enabled");return schema4.activityTargets(category,application);
+    }
     @Override public synchronized SQLiteDatabase getWritableDatabase(){return schema3==null?super.getWritableDatabase():schema3.getWritableDatabase();}
     @Override public synchronized SQLiteDatabase getReadableDatabase(){return schema3==null?super.getReadableDatabase():schema3.getReadableDatabase();}
-    @Override public synchronized void close(){restoreSession=new Object();if(schema3!=null)schema3.close();super.close();}
+    @Override public synchronized void close(){restoreSession=new Object();if(schema3!=null)schema3.close();if(schema4!=null)schema4.close();super.close();}
     private static String validName(String name) {
         if(name==null||!name.matches("[A-Za-z0-9_-]+\\.db"))throw new IllegalArgumentException("无效数据库文件名");return name;
     }
@@ -93,7 +106,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
     @Override public void onDowngrade(SQLiteDatabase db,int oldVersion,int newVersion){throw new IllegalStateException("数据库来自更新版本，保留原数据");}
     private <T> T tx(Work<T> action) {
         SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
-        try{T result=action.run(db);if(schema3!=null)schema3.snapshot();db.setTransactionSuccessful();return result;}
+        try{byte[] links=schema4==null?null:schema4.relationshipState();T result=action.run(db);if(schema3!=null)schema3.snapshot();if(schema4!=null)require(Arrays.equals(links,schema4.relationshipState()),"Business operation changed shortcut relationships");db.setTransactionSuccessful();return result;}
         catch(SQLiteConstraintException e){throw new IllegalArgumentException("数据重复或关联不存在，本次修改已回滚",e);}
         finally{db.endTransaction();}
     }
@@ -287,10 +300,16 @@ public final class AppDatabase extends SQLiteOpenHelper {
             DataInputStream in=new DataInputStream(new ByteArrayInputStream(before));
             LimitedBytes bytes=new LimitedBytes();DataOutputStream out=new DataOutputStream(bytes);
             int magic=in.readInt(),version=in.readInt(),count=in.readInt();
-            require(magic==0x4e444c31&&count==SNAPSHOT_TABLES.length,"应用改名预览格式无效");
+            require(version==2||version==3||version==4,"Unsupported comparison version");
+            String[] tables=SNAPSHOT_TABLES;
+            if(version==4){
+                tables=Arrays.copyOf(SNAPSHOT_TABLES,SNAPSHOT_TABLES.length+1);
+                tables[SNAPSHOT_TABLES.length]="category_shortcuts";
+            }
+            require(magic==0x4e444c31&&count==tables.length,"应用改名预览格式无效");
             out.writeInt(magic);out.writeInt(version);out.writeInt(count);
             int matched=0,revisions=0;
-            for(String expectedTable:SNAPSHOT_TABLES){
+            for(String expectedTable:tables){
                 String table=readText(in);require(table.equals(expectedTable),"应用改名预览表顺序无效");
                 int columns=in.readInt();require(columns>0&&columns<=in.available()/4,"应用改名预览列无效");
                 List<String> names=new ArrayList<>();for(int i=0;i<columns;i++)names.add(readText(in));
@@ -391,10 +410,16 @@ public final class AppDatabase extends SQLiteOpenHelper {
             DataInputStream in=new DataInputStream(new ByteArrayInputStream(before));
             LimitedBytes bytes=new LimitedBytes();DataOutputStream out=new DataOutputStream(bytes);
             int magic=in.readInt(),version=in.readInt(),count=in.readInt();
-            require(magic==0x4e444c31&&count==SNAPSHOT_TABLES.length,"编辑预览格式无效");
+            require(version==2||version==3||version==4,"Unsupported comparison version");
+            String[] tables=SNAPSHOT_TABLES;
+            if(version==4){
+                tables=Arrays.copyOf(SNAPSHOT_TABLES,SNAPSHOT_TABLES.length+1);
+                tables[SNAPSHOT_TABLES.length]="category_shortcuts";
+            }
+            require(magic==0x4e444c31&&count==tables.length,"编辑预览格式无效");
             out.writeInt(magic);out.writeInt(version);out.writeInt(count);
             int targets=0,revisions=0;
-            for(String expected:SNAPSHOT_TABLES){
+            for(String expected:tables){
                 String table=readText(in);require(table.equals(expected),"预览表顺序无效");
                 int columns=in.readInt();require(columns>0&&columns<=in.available()/4,"预览列无效");
                 List<String> names=new ArrayList<>();for(int i=0;i<columns;i++)names.add(readText(in));
@@ -501,10 +526,16 @@ public final class AppDatabase extends SQLiteOpenHelper {
             DataInputStream in=new DataInputStream(new ByteArrayInputStream(before));
             LimitedBytes bytes=new LimitedBytes();DataOutputStream out=new DataOutputStream(bytes);
             int magic=in.readInt(),version=in.readInt(),count=in.readInt();
-            require(magic==0x4e444c31&&count==SNAPSHOT_TABLES.length,"归档预览格式无效");
+            require(version==2||version==3||version==4,"Unsupported comparison version");
+            String[] tables=SNAPSHOT_TABLES;
+            if(version==4){
+                tables=Arrays.copyOf(SNAPSHOT_TABLES,SNAPSHOT_TABLES.length+1);
+                tables[SNAPSHOT_TABLES.length]="category_shortcuts";
+            }
+            require(magic==0x4e444c31&&count==tables.length,"归档预览格式无效");
             out.writeInt(magic);out.writeInt(version);out.writeInt(count);
             int matched=0,revisions=0;
-            for(String expectedTable:SNAPSHOT_TABLES){
+            for(String expectedTable:tables){
                 String table=readText(in);require(table.equals(expectedTable),"归档预览表顺序无效");
                 int columns=in.readInt();require(columns>0&&columns<=in.available()/4,"归档预览列无效");
                 List<String> names=new ArrayList<>();for(int i=0;i<columns;i++)names.add(readText(in));
@@ -668,11 +699,11 @@ public final class AppDatabase extends SQLiteOpenHelper {
      * Registry rows are compared; immutable files are never opened or removed here.
      */
     private static byte[] noteDeletionState(SQLiteDatabase db){
-        tableSet(db);
+        comparisonLayout(db);
         try{
             LimitedBytes bytes=new LimitedBytes();DataOutputStream out=new DataOutputStream(bytes);
-            out.writeInt(0x4e444c31);out.writeInt(db.getVersion());out.writeInt(SNAPSHOT_TABLES.length);
-            for(String table:SNAPSHOT_TABLES)try(Cursor c=db.rawQuery("SELECT rowid,* FROM "+table+" ORDER BY rowid",null)){
+            out.writeInt(0x4e444c31);out.writeInt(db.getVersion());out.writeInt(comparisonTables(db.getVersion()).length);
+            for(String table:comparisonTables(db.getVersion()))try(Cursor c=db.rawQuery(comparisonQuery(table),null)){
                 utf8(out,table);out.writeInt(c.getColumnCount());for(String name:c.getColumnNames())utf8(out,name);out.writeInt(c.getCount());
                 while(c.moveToNext())for(int i=0;i<c.getColumnCount();i++){
                     Object value=cell(c,i);out.writeByte(c.getType(i));
@@ -811,11 +842,11 @@ public final class AppDatabase extends SQLiteOpenHelper {
      * overflow is refused instead of asking SQLite to choose a random rowid.
      */
     private static byte[] fieldEditExpected(SQLiteDatabase db,FieldEditPlan plan,List<String> values,String name,Boolean archived,long next){
-        tableSet(db);
+        comparisonLayout(db);
         try{
             LimitedBytes bytes=new LimitedBytes();DataOutputStream out=new DataOutputStream(bytes);
-            out.writeInt(0x4e444c31);out.writeInt(db.getVersion());out.writeInt(SNAPSHOT_TABLES.length);
-            for(String table:SNAPSHOT_TABLES)try(Cursor c=db.rawQuery("SELECT rowid,* FROM "+table+" ORDER BY rowid",null)){
+            out.writeInt(0x4e444c31);out.writeInt(db.getVersion());out.writeInt(comparisonTables(db.getVersion()).length);
+            for(String table:comparisonTables(db.getVersion()))try(Cursor c=db.rawQuery(comparisonQuery(table),null)){
                 List<Object[]> rows=new ArrayList<>();List<int[]> types=new ArrayList<>();
                 while(c.moveToNext()){
                     Object[] row=new Object[c.getColumnCount()];int[] tags=new int[row.length];
@@ -930,9 +961,15 @@ public final class AppDatabase extends SQLiteOpenHelper {
             DataInputStream in=new DataInputStream(new ByteArrayInputStream(before));
             LimitedBytes bytes=new LimitedBytes();DataOutputStream out=new DataOutputStream(bytes);
             int magic=in.readInt(),version=in.readInt(),count=in.readInt();
-            require(magic==0x4e444c31&&count==SNAPSHOT_TABLES.length,"字段笔记预览格式无效");
+            require(version==2||version==3||version==4,"Unsupported comparison version");
+            String[] tables=SNAPSHOT_TABLES;
+            if(version==4){
+                tables=Arrays.copyOf(SNAPSHOT_TABLES,SNAPSHOT_TABLES.length+1);
+                tables[SNAPSHOT_TABLES.length]="category_shortcuts";
+            }
+            require(magic==0x4e444c31&&count==tables.length,"字段笔记预览格式无效");
             out.writeInt(magic);out.writeInt(version);out.writeInt(count);
-            for(String expectedTable:SNAPSHOT_TABLES){
+            for(String expectedTable:tables){
                 String table=readText(in);require(table.equals(expectedTable),"字段笔记预览表顺序无效");
                 int columns=in.readInt();require(columns>0&&columns<=in.available()/4,"字段笔记预览列无效");
                 List<String> names=new ArrayList<>();for(int i=0;i<columns;i++)names.add(readText(in));
@@ -1100,11 +1137,11 @@ public final class AppDatabase extends SQLiteOpenHelper {
      * snapshot budget. Registry only: immutable media files are never touched.
      */
     private static byte[] todoDeletionState(SQLiteDatabase db,String omit,long revisionValue){
-        tableSet(db);
+        comparisonLayout(db);
         try{
             LimitedBytes bytes=new LimitedBytes();DataOutputStream out=new DataOutputStream(bytes);
-            out.writeInt(0x54444c31);out.writeInt(db.getVersion());out.writeInt(SNAPSHOT_TABLES.length);
-            for(String table:SNAPSHOT_TABLES)try(Cursor c=db.rawQuery("SELECT rowid,* FROM "+table+" ORDER BY rowid",null)){
+            out.writeInt(0x54444c31);out.writeInt(db.getVersion());out.writeInt(comparisonTables(db.getVersion()).length);
+            for(String table:comparisonTables(db.getVersion()))try(Cursor c=db.rawQuery(comparisonQuery(table),null)){
                 boolean deleting=omit!=null&&table.equals("todos");
                 int idColumn=deleting?c.getColumnIndexOrThrow("id"):-1;
                 int revisionColumn=table.equals("revision")?c.getColumnIndexOrThrow("value"):-1;
@@ -1198,6 +1235,24 @@ public final class AppDatabase extends SQLiteOpenHelper {
     // Fixed schema2 transport. No backup-provided SQL, identifiers or DDL are executed.
     // This order is topological for FKs; reverse order is used for transactional deletion.
     private static final String[] SNAPSHOT_TABLES={"revision","categories","applications","activities","paths","tags","batches","ledger","checkins","media","notes","blocks","fields","field_options","field_values","field_notes","todos","legacy_imports"};
+
+    /** Internal comparison only. Historical backup codecs remain frozen.
+     * The v4 relation has no rowid; preserve its two typed keys in key order. */
+    private static String[] comparisonTables(int version){
+        require(version==2||version==3||version==4,"Unsupported comparison version");
+        if(version!=4)return SNAPSHOT_TABLES;
+        String[] result=Arrays.copyOf(SNAPSHOT_TABLES,SNAPSHOT_TABLES.length+1);
+        result[SNAPSHOT_TABLES.length]="category_shortcuts";return result;
+    }
+    private static void comparisonLayout(SQLiteDatabase db){
+        if(db.getVersion()==4)Schema4Store.checkBusinessLayout(db);else tableSet(db);
+    }
+    private static String comparisonQuery(String table){
+        return table.equals("category_shortcuts")
+            ?"SELECT category_id,application_id FROM category_shortcuts ORDER BY category_id,application_id"
+            :"SELECT rowid,* FROM "+table+" ORDER BY rowid";
+    }
+
     private static final int STATE_LIMIT=8*1024*1024; // Coupled to BackupArchive metadata budget.
     private static void require(boolean condition,String message){if(!condition)throw new IllegalArgumentException(message);}
     private static void tableSet(SQLiteDatabase db){
@@ -1315,9 +1370,10 @@ public final class AppDatabase extends SQLiteOpenHelper {
         }catch(IOException|RuntimeException e){throw new IllegalArgumentException("备份状态校验失败",e);}finally{if(!success)stage.close();}
     }
     /** One consistent transaction, including revision/journals and insertion-based note order. */
-    public synchronized byte[] exportState(){if(schema3!=null)return schema3.exportState();return tx(db->{byte[] state=encodeState(db);try(SQLiteDatabase ignored=candidate(state)){return state;}});}
+    public synchronized byte[] exportState(){if(schema4!=null)return schema4.exportState();if(schema3!=null)return schema3.exportState();return tx(db->{byte[] state=encodeState(db);try(SQLiteDatabase ignored=candidate(state)){return state;}});}
     private static Map<String,Long> registeredMedia(SQLiteDatabase db){Map<String,Long> out=new LinkedHashMap<>();try(Cursor c=db.rawQuery("SELECT id,bytes FROM media ORDER BY id",null)){while(c.moveToNext())out.put(c.getString(0),c.getLong(1));}return out;}
     public synchronized void exportBackup(Path destination,MediaRepository media)throws IOException{
+        if(schema4!=null){schema4.exportBackup(destination,media);return;}
         if(schema3!=null){schema3.exportBackup(destination,media);return;}
         if(media==null)throw new IllegalArgumentException("媒体仓库不能为空");byte[] state=exportState();
         try(SQLiteDatabase staged=candidate(state)){
@@ -1338,7 +1394,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
      * This is logical atomicity, not power-loss durability or an undo-restore feature.
      */
     public synchronized void restoreBackup(Path archive,Path stagingRoot,long byteBudget,MediaRepository media)throws IOException{
-        if(schema3!=null){try(RestorePlan plan=prepareRestore(archive,stagingRoot,byteBudget)){confirmRestore(plan,media);}return;}
+        if(schema3!=null||schema4!=null){try(RestorePlan plan=prepareRestore(archive,stagingRoot,byteBudget)){confirmRestore(plan,media);}return;}
         if(media==null)throw new IllegalArgumentException("媒体仓库不能为空");
         try(BackupArchive.Snapshot snapshot=BackupArchive.read(archive,stagingRoot,byteBudget);SQLiteDatabase staged=candidate(snapshot.state())){
             // Bind commit equality to the validated candidate, not the transport bytes.
@@ -1368,20 +1424,27 @@ public final class AppDatabase extends SQLiteOpenHelper {
         private final Object session;
         private final BackupArchive.Snapshot snapshot;
         private final Schema3Store.RestorePlan upgraded;
+        private final Schema4Store.RestorePlan shortcuts;
         private final byte[] before,expected;
         private final Map<String,Long> current,incoming;
         private boolean terminal;
         private RestorePlan(AppDatabase owner,BackupArchive.Snapshot snapshot,byte[] before,byte[] expected,Map<String,Long> current,Map<String,Long> incoming){
-            this.owner=owner;this.session=owner.restoreSession;this.snapshot=snapshot;this.upgraded=null;
+            this.owner=owner;this.session=owner.restoreSession;this.snapshot=snapshot;this.upgraded=null;this.shortcuts=null;
             this.before=before.clone();this.expected=expected.clone();this.current=current;this.incoming=incoming;
         }
         private RestorePlan(AppDatabase owner,Schema3Store.RestorePlan upgraded){
-            this.owner=owner;this.session=owner.restoreSession;this.upgraded=upgraded;this.snapshot=null;
+            this.owner=owner;this.session=owner.restoreSession;this.upgraded=upgraded;this.shortcuts=null;this.snapshot=null;
             this.before=null;this.expected=null;this.current=upgraded.currentCounts();this.incoming=upgraded.incomingCounts();
+        }
+
+        private RestorePlan(AppDatabase owner,Schema4Store.RestorePlan shortcuts){
+            this.owner=owner;this.session=owner.restoreSession;this.shortcuts=shortcuts;
+            this.upgraded=null;this.snapshot=null;this.before=null;this.expected=null;
+            this.current=shortcuts.currentCounts();this.incoming=shortcuts.incomingCounts();
         }
         public Map<String,Long> currentCounts(){return current;}
         public Map<String,Long> incomingCounts(){return incoming;}
-        @Override public void close()throws IOException{synchronized(owner){terminal=true;if(upgraded!=null)upgraded.close();else snapshot.close();}}
+        @Override public void close()throws IOException{synchronized(owner){terminal=true;if(shortcuts!=null)shortcuts.close();else if(upgraded!=null)upgraded.close();else snapshot.close();}}
     }
     private static Map<String,Long> summary(SQLiteDatabase db){
         Map<String,Long> counts=new LinkedHashMap<>();for(String table:SNAPSHOT_TABLES)try(Cursor c=db.rawQuery("SELECT count(*) FROM "+table,null)){c.moveToFirst();counts.put(table,c.getLong(0));}
@@ -1398,6 +1461,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
      * Later source-file changes cannot substitute a different backup after consent.
      */
     public synchronized RestorePlan prepareRestore(Path archive,Path stagingRoot,long byteBudget)throws IOException{
+        if(schema4!=null)return new RestorePlan(this,schema4.prepareRestore(archive,stagingRoot,byteBudget));
         if(schema3!=null)return new RestorePlan(this,schema3.prepareRestore(archive,stagingRoot,byteBudget));
         BackupArchive.Snapshot snapshot=BackupArchive.read(archive,stagingRoot,byteBudget);boolean success=false;
         try{
@@ -1426,6 +1490,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
         if(plan==null||plan.owner!=this)throw new IllegalArgumentException("恢复预览不属于当前数据库");
         if(plan.terminal||plan.session!=restoreSession)throw new IllegalStateException("恢复预览已取消、使用或失效，请重新预览");
         plan.terminal=true;
+        if(plan.shortcuts!=null){try{schema4.confirmRestore(plan.shortcuts,media);}finally{plan.shortcuts.close();}return;}
         if(plan.upgraded!=null){try{schema3.confirmRestore(plan.upgraded,media);}finally{plan.upgraded.close();}return;}
         try(BackupArchive.Snapshot snapshot=plan.snapshot;SQLiteDatabase staged=candidate(plan.expected)){
             if(media==null)throw new IllegalArgumentException("媒体仓库不能为空");

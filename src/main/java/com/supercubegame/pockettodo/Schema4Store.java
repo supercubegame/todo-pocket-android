@@ -46,6 +46,36 @@ public final class Schema4Store extends SQLiteOpenHelper {
     @Override public void onDowngrade(SQLiteDatabase db,int from,int to){throw new IllegalStateException("Newer database; preserve data");}
     @Override public synchronized void close(){session=new Object();super.close();}
 
+
+    /** Exact layout validator for internal business comparisons, not old decoders. */
+    static void checkBusinessLayout(SQLiteDatabase db){require(db.getVersion()==4,"Business bridge requires schema4");validate(db);}
+    private static byte[] bridgeSnapshot(SQLiteDatabase db){
+        encodeState(db);
+        try{
+            Schema3Store.ComparisonBuffer bytes=new Schema3Store.ComparisonBuffer(Wire.LIMIT);
+            DataOutputStream out=new DataOutputStream(bytes);out.writeInt(0x53344350);
+            byte[] old=businessCells(db,true);out.writeInt(old.length);out.write(old);
+            for(Link link:links(db)){out.writeLong(link.category);out.writeLong(link.application);}
+            out.flush();return bytes.toByteArray();
+        }catch(IOException e){throw new IllegalStateException("Cannot compare schema4 business state",e);}
+    }
+    synchronized byte[] relationshipState(){
+        SQLiteDatabase db=getWritableDatabase();validate(db);
+        try{
+            Schema3Store.ComparisonBuffer bytes=new Schema3Store.ComparisonBuffer(Wire.LIMIT);
+            DataOutputStream out=new DataOutputStream(bytes);
+            for(Link link:links(db)){out.writeLong(link.category);out.writeLong(link.application);}
+            out.flush();return bytes.toByteArray();
+        }catch(IOException e){throw new IllegalStateException("Cannot compare shortcut state",e);}
+    }
+    Schema3Store businessAdapter(Context context,String name){
+        return new Schema3Store(context,name,new Schema3Store.BusinessConnection(){
+            public SQLiteDatabase database(){return Schema4Store.this.getWritableDatabase();}
+            public byte[] snapshot(SQLiteDatabase db){require(db==database(),"Foreign business connection");return bridgeSnapshot(db);}
+            public void validate(SQLiteDatabase db){require(db==database(),"Foreign business connection");encodeState(db);}
+        });
+    }
+
     // BEGIN_PURE_WIRE
     static final class Link {
         final long category,application;

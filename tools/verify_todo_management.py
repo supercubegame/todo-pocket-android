@@ -698,7 +698,7 @@ def backend_product_selftest():
     # Reuse the existing JDK AST parser, adding nested-class selection explicitly.
     start = UI_EXTRACTOR.index('   Set<String> required=')
     end = UI_EXTRACTOR.index('\n', start)
-    extractor = UI_EXTRACTOR[:start]+'''   Set<String> required=new LinkedHashSet<>(List.of("TodoDeletionPlan","TodoDeletionUndo","todoDeletionState","prepareTodoDeletion","confirmTodoDeletion","undoTodoDeletion"));'''+UI_EXTRACTOR[end:]
+    extractor = UI_EXTRACTOR[:start]+'''   Set<String> required=new LinkedHashSet<>(List.of("TodoDeletionPlan","TodoDeletionUndo","todoDeletionState","prepareTodoDeletion","confirmTodoDeletion","undoTodoDeletion","comparisonTables","comparisonLayout","comparisonQuery"));'''+UI_EXTRACTOR[end:]
     extractor = extractor.replace('contentEquals("TodayScreen")', 'contentEquals("AppDatabase")')
     old = 'String name=member instanceof MethodTree?'
     assert extractor.count(old) == 1
@@ -718,14 +718,26 @@ def backend_product_selftest():
         source.write_text("class AppDatabase {}", encoding="utf-8")
         p = extract()
         assert p.returncode != 0 and "Missing product members" in p.stderr
-        def run_model(code):
+        def run_model(code, args=()):
             source.write_text(BACKEND_MODEL_PREFIX+code+BACKEND_MODEL_SUFFIX, encoding="utf-8")
-            return subprocess.run([java, str(source)], capture_output=True, text=True, timeout=30)
+            return subprocess.run([java, str(source), *args], capture_output=True, text=True, timeout=30)
         p = run_model(fragment)
         assert p.returncode == 0, p.stdout+p.stderr
         labels = [line.removeprefix("BACKEND_PASS ") for line in p.stdout.splitlines() if line.startswith("BACKEND_PASS ")]
         assert labels == BACKEND_LABELS and p.stdout.splitlines()[-1] == "BACKEND_CHECKS 28 PASS MODEL_NOT_ANDROID"
         print(p.stdout, end="")
+        # Each helper really is required by the actual extracted methods.
+        # Rename its declaration only, leaving call sites unchanged.
+        for helper, declaration in (
+            ("comparisonTables", "String[] comparisonTables("),
+            ("comparisonLayout", "void comparisonLayout("),
+            ("comparisonQuery", "String comparisonQuery(")):
+            assert fragment.count(declaration)==1
+            missing=run_model(fragment.replace(declaration,declaration.replace(helper,helper+"Missing"),1))
+            assert missing.returncode!=0 and "cannot find symbol" in missing.stderr and helper in missing.stderr
+        boundary=run_model(fragment,("schema4-refusal",))
+        assert boundary.returncode==0 and boundary.stdout.splitlines()==["SCHEMA4_MODEL_EXPLICITLY_NOT_ACCEPTANCE"]
+        print("TODO_COMPARISON_DEPENDENCIES 3 omissions rejected; schema4 explicitly not modeled")
         rejected = []
         for name, label, old, new in BACKEND_MUTANTS:
             assert fragment.count(old) == 1, "Backend mutant anchor "+name
@@ -813,6 +825,11 @@ import java.io.*;
 import java.util.*;
 import java.nio.charset.StandardCharsets;
 public class AppDatabase {
+ // This legacy model does not implement schema4 SQLite validation.
+ static void require(boolean value,String message){if(!value)throw new IllegalArgumentException(message);}
+ static class Schema4Store {
+  static void checkBusinessLayout(SQLiteDatabase db){throw new UnsupportedOperationException("SCHEMA4_NOT_MODELED");}
+ }
  Object restoreSession=new Object();
  SQLiteDatabase sql=new SQLiteDatabase();
  static final String[] SNAPSHOT_TABLES={"revision","categories","applications","activities","paths","tags","batches","ledger","checkins","media","notes","blocks","fields","field_options","field_values","field_notes","todos","legacy_imports"};
@@ -866,7 +883,8 @@ public class AppDatabase {
   }
   boolean inTransaction(){return transaction;}
   boolean isOpen(){return open;}
-  int getVersion(){return 3;}
+  int version=3;
+  int getVersion(){return version;}
   void beginTransaction(){if(transaction||!open)throw new IllegalStateException("connection");transaction=true;success=false;saved=new LinkedHashMap<>();for(String t:tables.keySet()){List<Object[]> r=new ArrayList<>();for(Object[] row:tables.get(t))r.add(row.clone());saved.put(t,r);}}
   void setTransactionSuccessful(){success=true;}
   void endTransaction(){if(!success)tables=saved;transaction=false;}
@@ -918,6 +936,15 @@ BACKEND_MODEL_SUFFIX = r'''
  static void reject(Attempt a,String name){boolean bad=false;try{a.run();}catch(IllegalStateException|IllegalArgumentException e){bad=true;}ok(bad,name);}
  static byte[] state(AppDatabase h){return todoDeletionState(h.sql,null,-1);}
  public static void main(String[] args){
+  if(args.length>0){
+   if(!args[0].equals("schema4-refusal"))throw new AssertionError("unknown model mode");
+   AppDatabase probe=new AppDatabase();probe.sql.version=4;
+   try{comparisonLayout(probe.sql);throw new AssertionError("schema4 model falsely accepted");}
+   catch(UnsupportedOperationException expected){
+    if(!"SCHEMA4_NOT_MODELED".equals(expected.getMessage()))throw expected;
+    System.out.println("SCHEMA4_MODEL_EXPLICITLY_NOT_ACCEPTANCE");return;
+   }
+  }
   AppDatabase h=new AppDatabase();byte[] before=state(h);
   TodoDeletionPlan p=h.prepareTodoDeletion("target");
   ok(p.todoId().equals("target")&&p.title().equals("Same")&&p.done()&&p.position()==11,"preview_exact");

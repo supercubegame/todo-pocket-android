@@ -168,6 +168,7 @@ public final class Schema4DeviceTest extends Instrumentation {
         migrationFailureChecks();
         refused(()->{try(Schema4Store ignored=new Schema4Store(context,"pocket-v12.db")){};},"Live UI database not enabled");
         need(!context.getDatabasePath("pocket-v12.db").exists(),"live_ui_database_never_opened");
+        bridgeSeed();
     }
     private void restoreChecks(Schema4Store store,Path backup,Path oldZip,MediaRepository media)throws Exception{
         Path stage=getTargetContext().getCacheDir().toPath().resolve("schema4-stage");
@@ -258,8 +259,111 @@ public final class Schema4DeviceTest extends Instrumentation {
             store.confirmRestore(store.prepareRestore(root().resolve("schema4-full.zip"),getTargetContext().getCacheDir().toPath().resolve("schema4-stage"),1000000),media);
             need(Arrays.equals(exact,store.exportState()),"separate_process_backup_restore_exact");
             need(!getTargetContext().getDatabasePath("pocket-v12.db").exists(),"separate_process_no_live_ui_database");
+            bridgeReopen();
         }
     }
+    private static final String BUSINESS_DB="schema4-business.db";
+    private static byte[] bridgeCells(SQLiteDatabase db)throws Exception{
+        ByteArrayOutputStream bytes=new ByteArrayOutputStream();bytes.write(cells(db,true));
+        DataOutputStream out=new DataOutputStream(bytes);
+        try(Cursor c=db.rawQuery("SELECT category_id,application_id FROM category_shortcuts ORDER BY category_id,application_id",null)){
+            out.writeInt(c.getCount());
+            while(c.moveToNext()){assertThat(c.getType(0)==1&&c.getType(1)==1,"bridge typed keys");out.writeLong(c.getLong(0));out.writeLong(c.getLong(1));}
+        }
+        out.flush();return bytes.toByteArray();
+    }
+    private void bridgeSeed()throws Exception{
+        Context context=getTargetContext();context.deleteDatabase(BUSINESS_DB);
+        MediaRepository media=media();Path stage=context.getCacheDir().toPath().resolve("bridge-stage");
+        Path backup=root().resolve("schema4-business.zip");
+        try(AppDatabase app=AppDatabase.openSchema4(context,BUSINESS_DB)){
+            SQLiteDatabase db=app.getWritableDatabase();
+            need(db==app.getReadableDatabase()&&db.getVersion()==4,"bridge_one_connection_and_schema4");
+            app.addCategory(7,"一");app.addCategory(8,"二");app.addApplication(10,"应用","");
+            app.addActivity(20,7,10,"活动");app.setShortcut(7,10,true);app.setShortcut(8,10,true);
+            app.createNote("bn",20,"笔记");app.registerMedia(ASSET,"image/png",3);
+            app.saveNote("bn",List.of(NoteDocument.Block.text("text","私密正文",true),NoteDocument.Block.image("image",ASSET,"图片",true)));
+            need(app.noteBlocks("bn").size()==2&&number(db,"SELECT count(*) FROM blocks WHERE original_asset_id IS NULL")==2&&app.shortcutApplications(7).equals(List.of(10L)),"bridge_note_write_preserves_links_and_origins");
+            app.defineField("bf","字段","TEXT",List.of());
+            app.confirmFieldValue(app.prepareFieldEdit(20,"bf"),List.of("值"));
+            app.confirmFieldRename(app.prepareFieldEdit(20,"bf"),"字段新名");
+            app.confirmFieldNoteCreate(app.prepareFieldEdit(20,"bf"),"bfn","字段笔记");
+            app.saveNote("bfn",List.of(NoteDocument.Block.text("body","内容",false)));
+            need(app.fieldValue(20,"bf").equals(List.of("值"))&&app.fieldNoteIds(20,"bf").equals(List.of("bfn"))&&number(db,"SELECT count(*) FROM category_shortcuts")==2,"bridge_field_and_field_note_operations");
+            app.confirmApplicationRename(app.prepareApplicationRename(10),"新应用");
+            app.confirmActivityStrings(app.prepareActivityStrings(20,false),List.of("入口","终点"));
+            app.confirmActivityStrings(app.prepareActivityStrings(20,true),List.of("标签"));
+            app.confirmActivityArchive(app.prepareActivityArchive(20,true));
+            app.confirmActivityArchive(app.prepareActivityArchive(20,false));
+            byte[] readOnly=bridgeCells(db);
+            need(app.activityTargets(7,10).equals(List.of(20L))&&Arrays.equals(readOnly,bridgeCells(db)),"bridge_catalog_paths_archive_and_pure_navigation");
+            app.addTodo("bt","待办");
+            AppDatabase.TodoDeletionUndo undo=app.confirmTodoDeletion(app.prepareTodoDeletion("bt"));
+            app.undoTodoDeletion(undo);
+            need(app.todoIds().equals(List.of("bt"))&&number(db,"SELECT count(*) FROM category_shortcuts")==2,"bridge_todo_delete_undo_preserves_shortcuts");
+            AppDatabase.ApplicationRenamePlan stale=app.prepareApplicationRename(10);
+            long rev=number(db,"SELECT value FROM revision");
+            db.execSQL("DELETE FROM category_shortcuts WHERE category_id=8");
+            byte[] external=bridgeCells(db);
+            refused(()->app.confirmApplicationRename(stale,"过期"),"本机内容已变化");
+            need(Arrays.equals(external,bridgeCells(db))&&number(db,"SELECT value FROM revision")==rev,"bridge_same_revision_relation_change_invalidates_plan");
+            app.setShortcut(8,10,true);
+            byte[] before=bridgeCells(db);
+            db.execSQL("CREATE TEMP TRIGGER bridge_fault BEFORE UPDATE ON revision BEGIN SELECT RAISE(ABORT,'bridge_late_fault'); END");
+            refused(()->app.addTodo("late","不得残留"),"bridge_late_fault");
+            db.execSQL("DROP TRIGGER bridge_fault");
+            need(Arrays.equals(before,bridgeCells(db)),"bridge_late_business_failure_rolls_back_exactly");
+            db.execSQL("CREATE TEMP TRIGGER bridge_relation_fault AFTER UPDATE ON applications BEGIN DELETE FROM category_shortcuts WHERE category_id=8; END");
+            refused(()->app.confirmApplicationRename(app.prepareApplicationRename(10),"触发器污染"),"回读不一致");
+            db.execSQL("DROP TRIGGER bridge_relation_fault");
+            need(Arrays.equals(before,bridgeCells(db)),"bridge_unrelated_relation_mutation_rolls_back");
+            app.exportBackup(backup,media);byte[] wire=app.exportState();
+            AppDatabase.RestorePlan cancel=app.prepareRestore(backup,stage,1000000);
+            need(cancel.currentCounts().size()==19&&cancel.incomingCounts().get("category_shortcuts")==2L&&Arrays.equals(before,bridgeCells(db)),"bridge_backup_preview_has_all_tables_and_no_writes");
+            cancel.close();refused(()->app.confirmRestore(cancel,media),"恢复预览已取消");
+            AppDatabase.RestorePlan foreign=app.prepareRestore(backup,stage,1000000);
+            try(AppDatabase other=AppDatabase.openSchema4(context,BUSINESS_DB)){
+                refused(()->other.confirmRestore(foreign,media),"恢复预览不属于");
+            }
+            app.confirmRestore(foreign,media);
+            need(Arrays.equals(wire,app.exportState()),"bridge_foreign_restore_does_not_consume_owner_plan");
+            AppDatabase.RestorePlan old=app.prepareRestore(backup,stage,1000000);
+            db.execSQL("DELETE FROM category_shortcuts WHERE category_id=8");
+            byte[] changed=bridgeCells(db);
+            refused(()->app.confirmRestore(old,media),"Database changed");
+            need(Arrays.equals(changed,bridgeCells(db)),"bridge_restore_detects_same_revision_link_edit");
+            app.confirmRestore(app.prepareRestore(backup,stage,1000000),media);
+            AppDatabase.RestorePlan late=app.prepareRestore(backup,stage,1000000);
+            byte[] exact=bridgeCells(db);
+            db.execSQL("CREATE TEMP TRIGGER bridge_restore_fault BEFORE INSERT ON category_shortcuts BEGIN SELECT RAISE(ABORT,'bridge_restore_late'); END");
+            refused(()->app.confirmRestore(late,media),"bridge_restore_late");
+            db.execSQL("DROP TRIGGER bridge_restore_fault");
+            need(Arrays.equals(exact,bridgeCells(db)),"bridge_restore_late_failure_preserves_every_table");
+            AppDatabase.FieldEditPlan expired=app.prepareFieldEdit(20,"bf");
+            app.close();
+            refused(()->app.confirmFieldRename(expired,"失效"),"字段编辑已取消");
+            db=app.getWritableDatabase();
+            need(Arrays.equals(wire,app.exportState()),"bridge_close_invalidates_business_session");
+            db.execSQL("CREATE TABLE bridge_unknown(value TEXT)");
+            refused(()->app.addTodo("unknown","不能提交"),"Unknown or missing schema");
+            db.execSQL("DROP TABLE bridge_unknown");
+            need(Arrays.equals(wire,app.exportState()),"bridge_unknown_table_refused_without_partial_write");
+            Files.write(root().resolve("schema4-business-expected.bin"),bridgeCells(db));
+            Files.write(root().resolve("schema4-business-wire.bin"),app.exportState());
+        }
+        refused(()->{try(AppDatabase ignored=AppDatabase.openSchema4(context,"pocket-v12.db")){}},"Live UI database not enabled");
+        need(!context.getDatabasePath("pocket-v12.db").exists(),"bridge_live_database_name_refused");
+    }
+    private void bridgeReopen()throws Exception{
+        try(AppDatabase app=AppDatabase.openSchema4(getTargetContext(),BUSINESS_DB)){
+            need(Arrays.equals(Files.readAllBytes(root().resolve("schema4-business-expected.bin")),bridgeCells(app.getReadableDatabase()))&&
+                 Arrays.equals(Files.readAllBytes(root().resolve("schema4-business-wire.bin")),app.exportState()),"bridge_separate_process_all_cells_and_wire_exact");
+            byte[] before=bridgeCells(app.getReadableDatabase());
+            need(app.activityTargets(7,10).equals(List.of(20L))&&app.fieldValue(20,"bf").equals(List.of("值"))&&
+                 app.todoIds().equals(List.of("bt"))&&app.noteBlocks("bn").size()==2&&Arrays.equals(before,bridgeCells(app.getReadableDatabase())),"bridge_separate_process_business_reads_are_pure");
+        }
+    }
+
     @Override public void onStart(){
         Bundle result=new Bundle();
         try{

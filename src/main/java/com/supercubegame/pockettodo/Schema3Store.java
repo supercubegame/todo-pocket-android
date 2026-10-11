@@ -42,6 +42,27 @@ public final class Schema3Store extends SQLiteOpenHelper {
     }
     private static final String[] TABLES={"revision","categories","applications","activities","paths","tags","batches","ledger","checkins","media","notes","blocks","fields","field_options","field_values","field_notes","todos","legacy_imports"};
     private static final String[] OLD_BLOCKS={"note_id","id","position","kind","text","asset_id","caption","private"};
+
+    /** Same-connection note adapter. No file opening/closing or migration ownership.
+     * The owner supplies the complete schema4 comparison and validation contract. */
+    interface BusinessConnection {
+        SQLiteDatabase database();
+        byte[] snapshot(SQLiteDatabase db);
+        void validate(SQLiteDatabase db);
+    }
+    private BusinessConnection business;
+    Schema3Store(Context context,String name,BusinessConnection business){
+        this(context,name);this.business=Objects.requireNonNull(business);
+    }
+    @Override public synchronized SQLiteDatabase getWritableDatabase(){
+        return business==null?super.getWritableDatabase():business.database();
+    }
+    @Override public synchronized SQLiteDatabase getReadableDatabase(){
+        return business==null?super.getReadableDatabase():business.database();
+    }
+    private byte[] noteSnapshot(SQLiteDatabase db){return business==null?snapshot(db):business.snapshot(db);}
+    private void noteValidate(SQLiteDatabase db){if(business==null)validate(db);else business.validate(db);}
+
     private Object restoreSession=new Object();
     @Override public synchronized void close(){restoreSession=new Object();super.close();}
     public Schema3Store(Context context,String name){
@@ -401,7 +422,7 @@ public final class Schema3Store extends SQLiteOpenHelper {
     /** Internal comparison bytes, NOT a BackupArchive state or an import format. */
     public synchronized byte[] snapshot(){
         SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
-        try{byte[] bytes=snapshot(db);db.setTransactionSuccessful();return bytes;}finally{db.endTransaction();}
+        try{byte[] bytes=noteSnapshot(db);db.setTransactionSuccessful();return bytes;}finally{db.endTransaction();}
     }
     private static void bytes(DataOutputStream out,byte[] b)throws IOException{out.writeInt(b.length);out.write(b);}
     private static void text(DataOutputStream out,String s)throws IOException{bytes(out,s.getBytes(StandardCharsets.UTF_8));}
@@ -459,7 +480,7 @@ public final class Schema3Store extends SQLiteOpenHelper {
         for(NoteDocument.Block block:owned)validator.add(block);
         byte[] expected=before.clone();SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
         try{
-            require(Arrays.equals(expected,snapshot(db)),"Database changed; review again");requireNote(db,note);
+            require(Arrays.equals(expected,noteSnapshot(db)),"Database changed; review again");requireNote(db,note);
             Map<String,String> kinds=new HashMap<>(),assets=new HashMap<>(),origins=new HashMap<>();
             try(Cursor c=db.rawQuery("SELECT id,kind,asset_id,original_asset_id FROM blocks WHERE note_id=?",new String[]{note})){
                 while(c.moveToNext()){String id=c.getString(0);kinds.put(id,c.getString(1));assets.put(id,c.isNull(2)?null:c.getString(2));origins.put(id,c.isNull(3)?null:c.getString(3));}
@@ -483,7 +504,7 @@ public final class Schema3Store extends SQLiteOpenHelper {
                 db.execSQL("INSERT INTO blocks(note_id,id,position,kind,text,asset_id,caption,private,original_asset_id) VALUES(?,?,?,?,?,?,?,?,?)",
                     new Object[]{note,block.id,i,block.kind.name(),block.text,block.kind==NoteDocument.Kind.IMAGE?block.assetId:null,block.caption,block.privateContent?1:0,origin});
             }
-            long next=Math.incrementExact(revision(db));db.execSQL("UPDATE revision SET value=? WHERE id=1",new Object[]{next});validate(db);
+            long next=Math.incrementExact(revision(db));db.execSQL("UPDATE revision SET value=? WHERE id=1",new Object[]{next});noteValidate(db);
             try(Cursor c=db.rawQuery("SELECT id,kind,text,asset_id,caption,private,original_asset_id,position FROM blocks WHERE note_id=? ORDER BY position",new String[]{note})){
                 int position=0;
                 for(NoteDocument.Block block:owned){
@@ -494,7 +515,7 @@ public final class Schema3Store extends SQLiteOpenHelper {
             }
             // Reject an otherwise valid edit that would make future comparisons
             // impossible. Must run AFTER writes but BEFORE transaction success.
-            snapshot(db);
+            noteSnapshot(db);
             db.setTransactionSuccessful();
         }finally{db.endTransaction();}
     }
@@ -506,7 +527,7 @@ public final class Schema3Store extends SQLiteOpenHelper {
         require(edit!=null&&before!=null&&before.length>0&&before.length<=COMPARISON_LIMIT,"Missing reviewed state");
         byte[] expected=before.clone();SQLiteDatabase db=getWritableDatabase();db.beginTransaction();
         try{
-            require(Arrays.equals(expected,snapshot(db)),"Database changed; review again");
+            require(Arrays.equals(expected,noteSnapshot(db)),"Database changed; review again");
             NoteDocument.ImageEdit current=imageEdit(db,edit.noteId,edit.blockId);
             require(current.revision().originalAssetId.equals(edit.revision().originalAssetId),"Original image cannot be replaced");
             for(String id:edit.revision().backupAssets())try(Cursor c=db.rawQuery("SELECT bytes FROM media WHERE id=?",new String[]{id})){
@@ -515,10 +536,10 @@ public final class Schema3Store extends SQLiteOpenHelper {
             db.execSQL("UPDATE blocks SET asset_id=?,original_asset_id=?,caption=?,private=? WHERE note_id=? AND id=?",
                 new Object[]{edit.revision().assetId,edit.revision().originalAssetId,edit.caption,edit.privateContent?1:0,edit.noteId,edit.blockId});
             long next=Math.incrementExact(revision(db));db.execSQL("UPDATE revision SET value=? WHERE id=1",new Object[]{next});
-            validate(db);
+            noteValidate(db);
             NoteDocument.ImageEdit actual=imageEdit(db,edit.noteId,edit.blockId);
             require(actual.revision().assetId.equals(edit.revision().assetId)&&actual.revision().originalAssetId.equals(edit.revision().originalAssetId)&&actual.caption.equals(edit.caption)&&actual.privateContent==edit.privateContent,"Image write readback differs");
-            snapshot(db); // Include the new caption/origin bytes in the commit budget.
+            noteSnapshot(db); // Include the new caption/origin bytes in the commit budget.
             db.setTransactionSuccessful();
         }finally{db.endTransaction();}
     }

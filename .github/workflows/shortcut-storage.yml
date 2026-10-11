@@ -1,4 +1,4 @@
-name: Controlled activation candidate preflight
+name: Controlled activation resume preflight
 on:
   push:
     branches: [ci/shortcut-storage-preflight-4d8742]
@@ -27,72 +27,34 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import base64,hashlib,json,lzma,os,pathlib
-          assert os.environ["GITHUB_REPOSITORY"]=="supercubegame/todo-pocket-android"
-          assert os.environ["GITHUB_REF"]=="refs/heads/ci/shortcut-storage-preflight-4d8742"
-          assert os.environ["GITHUB_EVENT_NAME"]=="push" and os.environ["GITHUB_RUN_ATTEMPT"]=="1"
-          import ast,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/1ca2404a7b6d75c0645bd19ab07731205f2f6f63/.github/workflows/shortcut-storage.yml"
+          import ast,base64,hashlib,json,lzma,os,pathlib,urllib.request
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/2214ee4af8eadca66b9e3bf71caf0925c0432daa/.github/workflows/shortcut-storage.yml"
           with urllib.request.urlopen(url,timeout=60) as response:
-           source=response.read(26536)
-          assert len(source)==26535 and hashlib.sha256(source).hexdigest()=="1a571d49a33c79c46e934dc5b9ee7a8e44cfeca3055089be326f8f51a7d41ae0"
-          encoded_lines=[line.strip() for line in source.decode().splitlines() if line.startswith("          raw=lzma.decompress(")]
-          assert len(encoded_lines)==1
-          expression=ast.parse(encoded_lines[0]).body[0].value
-          encoded=ast.literal_eval(expression.args[0].args[0])
-          raw=lzma.decompress(base64.b64decode(encoded,validate=True))
-          assert hashlib.sha256(raw).hexdigest()=='89165abc5ff8d26db76c250c695db8d6d0ed7b54f76c6ed1c2abf34b47c46d41'
-          folder=pathlib.Path(os.environ["RUNNER_TEMP"])/"activation-payload"
-          folder.mkdir()
-          bundle=json.loads(raw)
-          assert set(bundle)=={'activation-app.java', 'activation-store.java', 'driver.py', 'consent-gate.py', 'integrate.py', 'activation-device.java', 'host.py'}
-          for name,text in bundle.items():
-           assert "/" not in name and ".." not in name
-           (folder/name).write_bytes(text.encode())
-          out=pathlib.Path(os.environ["RUNNER_TEMP"])/"activation-evidence";out.mkdir()
-          (out/"payload.json").write_bytes(raw)
-          import copy,subprocess,tempfile
-          # Execute the original driver's actual clean-worktree assertion, not a model.
-          tree=ast.parse(bundle["driver.py"])
-          guards=[n for n in ast.walk(tree) if isinstance(n,ast.Assert) and
-                  any(isinstance(c,ast.Constant) and c.value=="--porcelain" for c in ast.walk(n))]
-          assert len(guards)==1
-          guard=guards[0]
-          def check(root,node=guard):
-           try:
-            exec(compile(ast.fix_missing_locations(ast.Module(body=[node],type_ignores=[])),"original-clean-guard","exec"),{"subprocess":subprocess,"root":root})
-            return True
-           except AssertionError:return False
-          with tempfile.TemporaryDirectory() as directory:
-           base=pathlib.Path(directory);repo=base/"checkout";repo.mkdir()
-           def git(*args):return subprocess.run(["git",*args],cwd=repo,text=True,capture_output=True,check=True).stdout
-           git("init");git("config","user.name","Gate fixture");git("config","user.email","fixture@example.invalid")
-           tracked=repo/"source.txt";tracked.write_text("original")
-           git("add","source.txt");git("commit","-m","fixture")
-           assert check(repo)
-           inside=repo/"activation-evidence";inside.mkdir()
-           (inside/"payload.json").write_bytes(raw);(inside/"receipt.json").write_text("{}")
-           assert not check(repo),"original evidence-in-checkout failure must reproduce"
-           (inside/"payload.json").unlink();(inside/"receipt.json").unlink();inside.rmdir()
-           outside=base/"activation-evidence";outside.mkdir()
-           (outside/"payload.json").write_bytes(raw);(outside/"receipt.json").write_text("{}")
-           assert check(repo),"external evidence must preserve original clean guard"
-           tracked.write_text("changed")
-           assert not check(repo),"tracked drift must fail"
-           tracked.write_text("original")
-           extra=repo/"unexpected.txt";extra.write_text("untracked drift")
-           assert not check(repo),"untracked drift must fail"
-           mutant=copy.deepcopy(guard)
-           lists=[n for n in ast.walk(mutant) if isinstance(n,ast.List) and
-                  any(isinstance(e,ast.Constant) and e.value=="--porcelain" for e in n.elts)]
-           assert len(lists)==1;lists[0].elts.append(ast.Constant("--untracked-files=no"))
-           extra.unlink();assert check(repo,mutant),"mutant valid-input witness"
-           extra.write_text("untracked drift")
-           assert check(repo,mutant) and not check(repo),"original guard must distinguish dirty-input mutant"
-          result={"original_red":True,"external_evidence_green":True,"tracked_drift_rejected":True,"untracked_drift_rejected":True,"ignore_untracked_mutant_witnessed_and_distinguished":True,"scope":"ACTUAL_GIT_AND_ORIGINAL_DRIVER_GUARD_NOT_PRODUCT_OR_ANDROID"}
-          (out/"clean-guard-controls.json").write_text(json.dumps(result,indent=2)+"\n")
-          (out/"original-failed-workflow.yml").write_bytes(source)
-          print(json.dumps(result))
+           source=response.read(15950)
+          assert len(source)==15949 and hashlib.sha256(source).hexdigest()=="d3ccf20d029c5139cfe9e3c6332ed8944a894ceac0e90d9b0f3eecf5300eb27b"
+          text=source.decode()
+          begin=text.index("          import base64,")
+          end=text.index("          PY",begin)
+          program="\n".join(line[10:] for line in text[begin:end].splitlines())
+          exec(compile(program,"pinned-original-materializer","exec"),globals())
+          extension=lzma.decompress(base64.b64decode('/Td6WFoAAATm1rRGAgAhARYAAAB0L+Wj4EWSFG5dAD2IikaUXFu2ZXvVfVQfT3eXjvG+44WgDLPj6tYjLgKJ8r5PYjIg2swqRaTWrMDMx7J2xNe98EGaSHCr27R7VmzRgMih9OQn6bBtodfmR1lITzZXxu1Ue3wmBMw0a1flD0Z87zbso47chAe4cjooz68ay/DWjoXecqIP7OTkdkGlxWOTmyzSGyqQ3EpZm7xO3xq9gREhyjgH5SMohvwuSWdnpV249CjJbqjtp6IL/AOU2Xt9PvzHeyUdfQtVYFmysAj28oIbC9SiF0uMzg5NZc7gSb4/slQNeRxXCUHnX9kVfQQMK+zWsnCq/kCQtKxV/ZOmn45Vgn/zUykqbsAJ09g0O8Cf8OTT+YFqBnSgE+qfOWkfaV6zoFNi+216mgA8KjRaBYeh+I/np1PhtM1H0lBVlDrAKw0yDpDi5Q1eWAFKtjc3NaHO1AeqJp+9jhmcQ+1TL3Rr+3RB/PW0bhBaepNlYyujroyC5Lxs9lCt0qYkkc0dhMizU/E3yJ4pkUurICjH3HWM9JyZo5lSr+tGYXbYDicT8679oKl6VoytM/l5VNHY3J8Y/3hGPOcDtyGHZk7ionSIKphPNCzz7i+OWze6wObrShWE+WdzkPAHpCGxYFe+vj8EBO36Z0GxwjGcfvUdZ8QR247qG+jSTQkDAsndte9Ek58f04sU6l036+8XztUvSlCJRwNt/w0LRGtJI+rr6traxLWmdIomQQjZ/euGYUcXd7qv76dHi7dp9IDfasyUSShQckfgYcMVgO8LIgfOc5NJcA8qNd3IicYDADdkCp8OzqdhzQgG1Cc9e6z18PNU3DjNcwfWW+Hp+iAGKg6KEPWw5wDJvYuCLbrOOx7yRTQXvlqpM0hKL61618Z5ptMYc6K4bpgOAuUPIQY18BPHffuo46W/L+/zd5L8D1d9Or1VESS1bdZX/NQxqljFGRp8tMfAMfrnO7E8mmkhYUprwEnaI6PXbONa4/ZgIX+bycPQEh7j7lYQhOeBC91MaE8zOLxUxOPdg0mgYxk8jz+QItS+NpIGC/6VWMkNRmigPVxmMMiZS/bs8I+XqzclNVA06mm53EAgZoyCytbTDL6nfR4svQ0jAn/uZnwK3LLqyujAAbM2msvBSbprLZJ4UZL/Y4S4eSzjXA9spC64cyJXZi87PI5C+Z1LiagOeilDdMNl64jFbr4ROwVNb091XM0d+7UF1hEuxutqhELF8KtGcSCTksUTL60NaR2JGampw9FjXYmmOY5D+1n3ON395g1H6zkPhPlJND9ZK3fD/4HbjM+CzGY2MV7LUUeikoF7XAoNujlvgsmOKNuQfqqbWJi+iHFf1qgbcaU4iGSpJs8CMyDDfDtMhQs/wkJlqYRvRdXYS2obAWLv0lP51BftxUoJw6QuG0RpDoEpIRelOIReskKAp4VI402FX5wVho3unJmpqlKewe/BuU4Llu02KZr2yUKfdYD440zoBTi+9PvQBNmHgA7l6AwxpLGzrSroDSG1NoOF4fFbMFszea/2CBfAD/NiV5+GKRgXfztNdfNv9MVKg3n5btXgpFZ/h4XyoxKXsRQ6peQzv1lZIviEsSXdzRvez3szU4/AjNDM9Ji9DEkn76wPaR/IX/sBMsNxpFUSrCtbyrn2osj1zIm6bUJQVEj/6q2HMg3uVK3mOszATXp2GDBg/QthaNqDrGt9kJpbwYNgCtPoZ06QNWY7VVl4O4eznLPW1ukJqPWii5YfawspyI8YLE4r2uibL9vLsNoc8evIPCamrEk1ifdyu/d9yqfmeQbYxzba86El8jul75FFeYgE2WE9C6VMfWwQoeMdlNk+QljXJC/z96gVn21zlt4+FaGTkb4asOOD7BspKIgm+jFIhyCdat924Fc8qPPCC45/JzyKJfgkJn4+3N4rl6NRcQFPfBeAtCjDf2itf+b47SDNF9LZX3WDyDio0WFbXXOMveHuJMlfj8ENpk9cRMWRHc253zf0T72iZi25174XBJKLHyIL55rdBNV57aa5VMqwouYuB+v1SG5ZuOf5pOvsNR9J+/SSFa+jQewPivw/AtKdgwFNfVNOlOO7xpYQ7gsBo8lDOo9Sd3/FZxh4zYtcK8PA8GH9m/B/8yV4Ogl8RNJyOhrH6V8SAfCALZJ1EEHZ1iSIuooY2Jf2igvCH37DPs25h5ZrTW2K845Q9dMVobjFbXkmOxZCMtJUj286V88GBsU3iL7++wPMWVC4ZpC4i2m6WOW164PFSJPKz1HI5YRDptTp6f9BaltW3PNtUfNUDqbl1cPWD5Hg67vJtQkToZLT2gwvXck9YHq4ifasoJNkjTqRZypBIj2e1k2mMTrF1jjJh8uOmNTDwuFhzuPUTR22+DS9CiQk0egWJ4SkBI9iwCnrtfG5zx7kXz9U7z/4wuNGqvIMjmpNeOXXsU8TQBT8d/QMlTpzKSa499xubXwPJzvUo08xpyr3hStloxNNB0d1O50sL1vhXYZk0nwLIb3s+e146O5WaBMgGicOCw/wugaoRgKueHjpJ61LawjsZEc6I05+wZPlBdxbFILv+wJqTieRD9i1fjWj2wDYHo3kgbJSyXa/QD4DN3GAF9HO89LHiWgh5x4t8CO2NrZOOanfe4CeUTXrBxy+0tIKR4UuQSZu2fou0RQSme9NkiOP1kK+LzZYf2jtcPZ+5jqvYgK+iqELnKfmJnapVtLvKuI5FS2cVqtQ7txwYGih5u6ySyFWQjSOW/gUMLE+iX1JCic9CFT5+VQMd0g0YIvpKzg9aT8bAL+DMHlxIZck0rSuKNLyJFMiuanXc1QvNq4FXc4gdVLitN5QRRaz09UxaY11uETfW4SX/ccETbQz3FR3c/Oo5hx6eA1n61HOZuubbLZyVgwvxVbg4UNh1+5hMCghqy1NXvRb4GtOuDN8nVm5fEljcE9J6v+x41Q9aEhNxrspHbLcKHWkGSoxO2AGts0qYLMUTG5FipGG+rW1b+odjR5hoFL1KeCTgW15s6IRFAFy3EyKhKMUEp1HHtPm4SFo4cwMTNJXIK0nPNzHqbdiG11BT+HXkthRMuNgbFB2AicSYvFkvAyTVsVC1ShfZnGlVdKJR4BDr1UpyFxaAASsnDAPqtCqbVsu2ry8M9V1ZtaEuuTRYJrWT3CMYjuQYRlkfHa88BJS7Pnqw1ODM8DLWClcD2La85I3cskxwa/6qeU2ZSZe6htixf77t0l5InjqTO9Yqw0A1dHNaO3yPQIVmeeQXIYy1OB0F6w7oUia0dq5KjyQe1NsOjsecQofAdHMro1gdQnfX6JYlg7LbhlqqtRiMyU/RkhgUN8vT7iVQhu6T7yzdMOgDlf3776HIJ8J/Z2O2sCZLrVpdE6BJLIxn1W2Zc2DMURfEMjWMGfcw2zevZzF7sBUsZ+v7PDOUd/LVBvm+PX6eln6g1BRYtIR/C4woLUvOfbxq2twi7tLPXzOzo8eCHn6nrK3Bsp3xONeijG0RqHdMizfZbA2Ng3NqKPTWJH5Q7iequkGYjtFIVYtuvYl3mXJw95KW2iRq5pnbGDJxUagfQfzUPzfDvyQwan7Y/4LWaRA3PyV52pBMxjaHMKXkb20+Ztjy7IK1WkeSGfNJ+q3Kl+npmsYyZZUdvRcl+k6zEVYgaB3ia58RIxY32KiqOWf4KYKu0e1h7PNHcGAZN53A0IZVWMYXJ+6B6qTGa55T23oS3Fe3bmQRP0w+NHTyxoQ7rqLNxowK6S2JsaHMGYInSNdW7iexJjfnY0mv2xlqr8DXSVxzjx3KeUACQ2RmPw7m6f9jWwoX1gVGqU/dz1/YTW32lRleSCjtfsYzdlfgsF8LksoChJ6/BvIcr4svugxc1Zbb4QAQLXORYuubI4k0w0fc1onvRaFO6mp/0LDcHSpQMfUBbwHxe1pZFqkTs7WoaMCjc4uy1WYhJNbJ+pntvDm2ih1/npu01q8Y0u7FlkieIvTZ8g3GtO2bhhmVYw0a1Eh8l1V3VIWiYw4XIvlCTeLarhIEEYUAdtb5j58isnXGWqGSkj5c9zIEem2n4dor5pzyOYtvS7VSVDggXJS70yrciHB7uia7JR9r+d8smhQUdSeOspknCF5FtDzgQ2qMW+MjQv12XblggNWY0SvOKuRJ8GypVL9eiXFopgcBLrbP3aBvKfBaKYqp74fDWaACSaoqYLE0aKbRqupdiwPMynxNymQdxJHdQ9/OD4w6tR90/qrG57TFXZ7V9QdaC9sqn0ME/0h9BstQyKfli+pNDTvhZxd/DbmczpZldqFBqJadrdJdge5A3mmXcmLVJ/i637oZkAu0bpLrVKqwYYpruNaXKMyXUs2wmzfSENvsQS64FLSZcMgK/fImQoP5CZxVqfB43THnDbOzQTuCRHUMZHSozyVKUQuwxtuZMBLlXr7naBRVH9AzX1ri33oaxIObqXRwcr8GG1+Dido/a9Ycg5liKF//9aLsPnGZBInC60mZH6H6q6N85G42VXepvPU3sIXgT2eWZb3Gx+fFLGgejq2pfvmKzpigOihdm9tXq1qyIlxbaPI0chb0Iaa7iGkcuuK6uycI9jtGadh2IFPIV4cw5ZsNTCJZZGmY39jqJ7wTdbU0eHzDlgTj7f0KZzCz9orBPldHRfDYsUKIt9kpm9H+DVNAY9CYTY+bhokyXpBWwa1W3VOAvOXF2ik9oHJG/Doj54Rx7/fdyamOeDryw79GgbCiyzxDeofFYvVL57Kxkc3QL2sXqEXHzVqca8GuHz/VrNBpeQqJ7YkI4cmMiZWMGRvo//WsziyutUZ1GWFMkUIoyVJFGWz/wcwMIH8yFLYDT+e8NxMq3L4Y/7kNwI3jEYP+ayl81XBxn7JAvLjhF7jdkq7AKW42lhxLjogvzesHznQBhmOdpm6j5Paup+fCkfxJ/FqMngaXBBognufrQrPPGr3J1eL37hDDTUaozBISOfMRxnn86NSoUQKMG09vLSCOU8i2vIzKHgskwlSw8T9+IDL+yXnpeWCrTwLBNVuNzvmmtUvQ4nEo6brTndFl6vNubn2LYJzMoH269W1yD/D9Q8+q88A7aQx5cf85jZWurr6n4Nea8IRSFoBrRRsaKTEn/yaVq78MAuCnn3LO59e7/xuMRMaGAX++X78wUMGQYlAtr7x/2AotT0LY1X7SEyYS94z6QwO/gZieZkc+ic7N3h3cCoVLBwf6BJUDxGUjuR6ML1newWQZt3aJZKP0JirayBE1ia0PwM95vVUutycGWjXXkxU11SnizZv8bzAdmvHDLwSbFRzsk+HU/txwLmvRnEpPVux+YyG/XIRsXlbH7OUtLlmeQNQ1n/sz/Zk8s02Eoeeb2eYwttYZ76TFAKIZj6yv/VE/iyb+bwxToQHcGfeId4gPKMqRd8dzGOeVTOdrdaJo6ENVT9p6YRKGARwVJvbZ9/qLZw4Y5kVsstKYUG0u0u/7w4PcivqrMiPO5fvzx3UfEg5QwfY9TumKA6rEsuk9Ls5B6ZgzOkUKSw7NuSGqd4ELmrpiuP9ESYpyeqFROtmvSVYRwY1D8E4z1z1wKbtD2FM2f0QSzCagG0p+iuoBDG8loE2JLMphU1Koir1jnieTx5R75RPJ3ARghXYW9PCp3qdqQ8uopQILQZ8xYPFBTl6UZ46QArFDFV48E8INbwVnc6vjOpJvDsLU94meOmerwkRK9oFPJg8qDpYphi47TdzhCV0RRXiMEXqTARxrYIDqroXrbjeIV90mAE+GENkn2QgQ3Rd0KkJ++QroziZqYdgVwrRZx+YOxgz7yLVa8L+lpsvVU/x9cZCZ+6XzJQw4n5iLq1dG7BZBC7PsZDiIJG+i+Nk0adZkNjWBgZsz+9Wlt8dycgC3vZ/baOBxQYEpyzhEU2Vq4uVpUrt2Iz/rcNvs8C29lxbx/sGdagxLHh4nRUpF2g6EUZ6jjyvn1f+1buLRjbSdnjHbUbW6EAt2FGdWJVRmBXFou657KLTRVNrXpEF9FUnFQQPuZa1WbAadIVQNUE1fx44fGIBpIPPmIg4FbqKazrvhRdr1ly52DprsdRSbHy4a/DofR3EP/67KTPx3qzTf532XMoxkLVA35gp0UT9CvAB2IAUXjD+Nml93w5DqPmT87lzVRx/QykOAJFfKKwQnCho57gBvcBecRD05TQJVIt3HlYPPwVTGtSYPrDVPbBhpIe7K7nZk+TguAWB2I1E7yf+OqC3OKoQbfMxD52owraSXG7PWmgJ70oTUiNOnDX3myCKistdqZ+5Tt3COp9ifDh+7Lf0V49k9SLw3vVE6MlIraYw+EWaCHhtnYNVNQIpGPA+E5kwI0+NHzq77gjDep9r1dz7F49ywaeCoEe14MlqElTE/X9sWAgFKVqLNnWRP7KB2ozjxnFOPniPoAeNSVs1sHEeSg1WDRb6TEVZaX0QqVppLaFl1iHo4Pwp8omawjd11FvGui31VlOTK8Jj3hTlN8t4XuCHDyewZCyOZSVVTBKSN2oGzfG1jiPmQ4Hk+ZKB2zqIlO5vqNlft6ZHQsMqfZkw3s3y7Prn8IU0Riww7302MDoCd5KogHyKyX1BMUHXj7GzvjNDBUBpeskqmgsH28tbuiQZv7ljpeONyKriEkQTxmXGljhsTQUOsRUBHXTM2wnD2sD2ACR3bgr2LcHbxovpA23869icPvFSt+vxExguGGl9hxvUkgB25iCRnxllSwL2DyRhP+O/nE3VZfC5L4ofPvr0Bzq3BlYVnTUj9CGyAfUhHEOf4/XzBTEhjynlQU1Sb385NbRyB6LzhjFWtIuWO32L2IgveOcVusm0kp8qqR2uMipPGTI2pzLG97L4meG0EshUYb8Stf2+ATb5LDTl51FOKldUJCxrCHmY8uB1fYCOf4Ph4IUvrHfpq7bOg7BvgLeQ1tgpO0WK1A0qZlurWWQM6JJPC6cPwIy/vvh1fiFR0XDlsRt8Ikj7Kn8TM2Jt8SPLjYgp+nudjh7ean1iPGC7t4WJ4ZhERa4AAAAWO0JJ+H08kAABiimTiwEAfCUh67HEZ/sCAAAAAARZWg==',validate=True))
+          assert hashlib.sha256(extension).hexdigest()=='80f47cc43e1c9fd082d628d5741fbb59d2027647437c6a864256eb2ea62ff902'
+          extras=json.loads(extension)
+          assert set(extras)==set(['resume-app.java', 'resume-device.java', 'resume-files-gate.py', 'resume-integrate.py', 'resume-store.java'])
+          assert (folder/"integrate.py").read_text()==bundle["integrate.py"]
+          (folder/"activation_integrate.py").write_text(bundle["integrate.py"])
+          for name,content in extras.items():
+           assert name in ['resume-app.java', 'resume-device.java', 'resume-files-gate.py', 'resume-integrate.py', 'resume-store.java'] and "/" not in name
+           (folder/name).write_text(content)
+          (folder/"integrate.py").write_text(extras["resume-integrate.py"])
+          driver=(folder/"driver.py").read_text()
+          needle="  old,candidate=integrate(root,payload)"
+          assert driver.count(needle)==1
+          driver=driver.replace(needle,needle+'\n  receipt["resume_original_red"]=json.loads((payload/"resume-original-red.json").read_text())\n  (out/"resume-original-red.json").write_text(json.dumps(receipt["resume_original_red"],indent=2))',1)
+          (folder/"driver.py").write_text(driver)
+          (out/"resume-extension.json").write_bytes(extension)
+          (out/"complete-payload.json").write_text(json.dumps({p.name:p.read_text() for p in folder.iterdir() if p.is_file()},ensure_ascii=False))
+          print("RESUME_CANDIDATE_MATERIALIZED_NO_PRODUCT_PUSH")
           PY
       - name: Original API RED candidate GREEN and all 21 host commands
         id: integration

@@ -139,9 +139,10 @@ public final class TodayScreen {
     }
 
     public TodayScreen(Activity activity) {
-        this.activity=activity;
-        db=AppDatabase.openSchema3(activity,"pocket-v12.db");
-        activities=new ActivitiesScreen(this);
+        this(activity,AppDatabase.openSchema3(activity,"pocket-v12.db"));
+    }
+    TodayScreen(Activity activity,AppDatabase database){
+        this.activity=activity;db=database;activities=new ActivitiesScreen(this);
     }
     public void show(Bundle saved) {
         leaveTodoSession();
@@ -304,7 +305,7 @@ public final class TodayScreen {
     <T> void work(Callable<T> action,Consumer<T> success,Runnable failure){
         work(action,success,failure,ignored->{});
     }
-    private <T> void work(Callable<T> action,Consumer<T> success,Runnable failure,Consumer<T> abandoned){
+    <T> void work(Callable<T> action,Consumer<T> success,Runnable failure,Consumer<T> abandoned){
         if(closed||busy)return;
         busy=true;pause(root);message("正在读取或保存…",false);
         final Object noticeAtStart=notice;
@@ -326,6 +327,7 @@ public final class TodayScreen {
     Button button(String value,Runnable action){Button b=new Button(activity);b.setText(value);b.setTextSize(14);b.setAllCaps(false);b.setTextColor(ACCENT);b.setMinWidth(0);b.setMinimumWidth(0);b.setMinHeight(dp(48));b.setPadding(dp(5),0,dp(5),0);b.setBackgroundTintList(ColorStateList.valueOf(TINT));b.setOnClickListener(v->{if(!busy)action.run();});return b;}
     GradientDrawable shape(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
     int dp(int value){return Math.round(value*activity.getResources().getDisplayMetrics().density);}
+    boolean awaitShortcutClose()throws InterruptedException{return io.awaitTermination(10,java.util.concurrent.TimeUnit.SECONDS);}
     public void save(Bundle out){rememberDraft();out.putInt("page",page);out.putInt("filter",filter);out.putString("draft",draft);out.putLong("activity",activities.selected);}
     public boolean back(){if(busy)return true;if(page==1&&activities.selected!=0){activities.selected=0;activities.load();return true;}return false;}
     public void close(){if(closed)return;closed=true;leaveTodoSession();io.execute(db::close);io.shutdown();}

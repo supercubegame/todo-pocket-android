@@ -16,7 +16,7 @@ JAVA = ROOT / "src/main/java/com/supercubegame/pockettodo/Schema4Store.java"
 DEVICE = ROOT / "src/androidTest/java/com/supercubegame/pockettodo/Schema4DeviceTest.java"
 PACKAGE = "com.supercubegame.pockettodo.v12.preview"
 SCOPE = "OPT_IN_SCHEMA4_STORAGE_NOT_LIVE_UI_NOT_RELEASE"
-LABELS = {'seed': ['all_18_tables_nonempty_before_migration', 'migration_preserves_all_old_cells', 'migration_only_adds_shortcut_table', 'stable_ids_and_multi_category_links', 'repeat_setting_is_exact_noop', 'same_name_targets_not_confused', 'invalid_targets_leave_exact_state', 'remove_relation_only_and_repeat_noop', 'navigation_read_is_pure_and_excludes_archived', 'missing_navigation_no_business_writes', 'late_sql_failure_rolls_back_link_and_revision', 'unknown_tables_never_silently_omitted', 'backup_preserves_source_and_original_media', 'restore_preview_is_read_only_and_counts_complete', 'restore_counts_immutable', 'cancel_and_replay_preserve_state', 'foreign_owner_refused_without_consuming_valid_plan', 'helper_close_invalidates_restore_session', 'same_revision_stale_restore_refused', 'new_backup_restore_exact_and_single_use', 'old_backup_replacement_clears_new_relationships', 'late_restore_failure_rolls_back_every_table', 'changed_staged_media_refused_without_live_damage', 'reviewed_source_frozen_against_file_replacement', 'staging_closed_and_original_media_exact', 'restore_suite_preserves_all_business_cells', 'v2_backup_normalizes_empty_shortcuts', 'v3_backup_normalizes_empty_shortcuts', 'malformed_and_new_to_old_backups_refused', 'migration_conflict_keeps_version_and_schema', 'future_schema_refused_without_damage', 'live_ui_database_never_opened', 'bridge_one_connection_and_schema4', 'bridge_note_write_preserves_links_and_origins', 'bridge_field_and_field_note_operations', 'bridge_catalog_paths_archive_and_pure_navigation', 'bridge_todo_delete_undo_preserves_shortcuts', 'bridge_same_revision_relation_change_invalidates_plan', 'bridge_late_business_failure_rolls_back_exactly', 'bridge_unrelated_relation_mutation_rolls_back', 'bridge_backup_preview_has_all_tables_and_no_writes', 'bridge_foreign_restore_does_not_consume_owner_plan', 'bridge_restore_detects_same_revision_link_edit', 'bridge_restore_late_failure_preserves_every_table', 'bridge_close_invalidates_business_session', 'bridge_unknown_table_refused_without_partial_write', 'bridge_live_database_name_refused'], 'reopen': ['separate_process_exact_state', 'separate_process_all_business_cells', 'separate_process_relationships_and_read_only_targets', 'separate_process_original_media', 'separate_process_backup_restore_exact', 'separate_process_no_live_ui_database', 'bridge_separate_process_all_cells_and_wire_exact', 'bridge_separate_process_business_reads_are_pure']}
+LABELS = {'seed': ['all_18_tables_nonempty_before_migration', 'migration_preserves_all_old_cells', 'migration_only_adds_shortcut_table', 'stable_ids_and_multi_category_links', 'repeat_setting_is_exact_noop', 'same_name_targets_not_confused', 'invalid_targets_leave_exact_state', 'remove_relation_only_and_repeat_noop', 'navigation_read_is_pure_and_excludes_archived', 'missing_navigation_no_business_writes', 'late_sql_failure_rolls_back_link_and_revision', 'unknown_tables_never_silently_omitted', 'backup_preserves_source_and_original_media', 'restore_preview_is_read_only_and_counts_complete', 'restore_counts_immutable', 'cancel_and_replay_preserve_state', 'foreign_owner_refused_without_consuming_valid_plan', 'helper_close_invalidates_restore_session', 'same_revision_stale_restore_refused', 'new_backup_restore_exact_and_single_use', 'old_backup_replacement_clears_new_relationships', 'late_restore_failure_rolls_back_every_table', 'changed_staged_media_refused_without_live_damage', 'reviewed_source_frozen_against_file_replacement', 'staging_closed_and_original_media_exact', 'restore_suite_preserves_all_business_cells', 'v2_backup_normalizes_empty_shortcuts', 'v3_backup_normalizes_empty_shortcuts', 'malformed_and_new_to_old_backups_refused', 'migration_conflict_keeps_version_and_schema', 'future_schema_refused_without_damage', 'live_ui_database_never_opened', 'bridge_one_connection_and_schema4', 'bridge_note_write_preserves_links_and_origins', 'bridge_field_and_field_note_operations', 'bridge_catalog_paths_archive_and_pure_navigation', 'bridge_todo_delete_undo_preserves_shortcuts', 'bridge_same_revision_relation_change_invalidates_plan', 'bridge_late_business_failure_rolls_back_exactly', 'bridge_unrelated_relation_mutation_rolls_back', 'bridge_backup_preview_has_all_tables_and_no_writes', 'bridge_foreign_restore_does_not_consume_owner_plan', 'bridge_restore_detects_same_revision_link_edit', 'bridge_restore_late_failure_preserves_every_table', 'bridge_close_invalidates_business_session', 'bridge_unknown_table_refused_without_partial_write', 'bridge_live_database_name_refused', 'ui_preview_cancel_is_read_only', 'ui_closed_preview_cannot_write_after_relaunch', 'ui_add_exact_relation_no_business_copy', 'ui_targets_exclude_archived_and_do_not_write', 'ui_same_name_navigation_exact_and_pure', 'ui_detached_callback_cannot_replay', 'ui_removed_link_refuses_stale_navigation', 'ui_remove_retains_other_category_and_history', 'ui_api_repeat_setting_exact_noop', 'ui_api_same_revision_edit_refused', 'ui_api_foreign_attempt_preserves_owner_plan', 'ui_api_close_invalidates_plan', 'ui_api_late_failure_rolls_back_all_cells', 'ui_api_unrelated_write_rolls_back', 'ui_backup_restore_keeps_relations_and_history', 'ui_activity_relaunch_preserves_exact_state', 'ui_never_opens_phone_database'], 'reopen': ['separate_process_exact_state', 'separate_process_all_business_cells', 'separate_process_relationships_and_read_only_targets', 'separate_process_original_media', 'separate_process_backup_restore_exact', 'separate_process_no_live_ui_database', 'bridge_separate_process_all_cells_and_wire_exact', 'bridge_separate_process_business_reads_are_pure', 'ui_separate_process_exact_state', 'ui_separate_process_navigation_pure', 'ui_separate_process_live_database_absent']}
 
 
 def need(ok, reason):
@@ -232,6 +232,9 @@ def syntax_selftest():
 
 
 PROJECT_PATHS = (
+    'src/main/java/com/supercubegame/pockettodo/MainActivity.java',
+    'src/main/java/com/supercubegame/pockettodo/TodayScreen.java',
+    'src/main/java/com/supercubegame/pockettodo/ActivitiesScreen.java',
     "src/main/java/com/supercubegame/pockettodo/AppDatabase.java",
     "src/main/java/com/supercubegame/pockettodo/Schema3Store.java",
     "src/main/java/com/supercubegame/pockettodo/Schema4Store.java",
@@ -356,7 +359,7 @@ def android():
     out.mkdir(exist_ok=False)
     receipt = dict(status="FAIL", scope=SCOPE, **binding(), api=gate.API,
                    source_files=source_identity(), phases={}, commands=[], stops=[],
-                   snapshots={}, business_snapshots={}, installed={}, release_ready=False, live_ui_enabled=False)
+                   snapshots={}, business_snapshots={}, ui_snapshots={}, installed={}, release_ready=False, live_ui_enabled=False)
     completed = []
 
     def save():
@@ -455,6 +458,18 @@ def android():
                     need(0<len(data)<=8*1024*1024,"business database read budget")
                     (folder/name).write_bytes(data)
             receipt["business_snapshots"][phase]=bridge_database_snapshot(folder/"schema4-business.db")
+            need("schema4-ui.db" in names,"UI fixture absent")
+            for name in ("schema4-ui.db","schema4-ui.db-wal"):
+                if name in names:
+                    data=command(["exec-out","run-as",PACKAGE,"cat","databases/"+name])
+                    need(0<len(data)<=8*1024*1024,"UI database read budget")
+                    (folder/name).write_bytes(data)
+            receipt["ui_snapshots"][phase]=database_snapshot(folder/"schema4-ui.db")
+            if phase=="seed":
+                shot=command(["exec-out","run-as",PACKAGE,"cat","files/schema4-ui.png"])
+                need(shot.startswith(b"\x89PNG\r\n\x1a\n") and len(shot)<=8*1024*1024,"UI screenshot PNG budget")
+                (out/"schema4-ui.png").write_bytes(shot)
+
 
             media = command(["exec-out", "run-as", PACKAGE, "cat", "files/schema4-media/ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"])
             need(media == b"abc", "independent original media bytes")
@@ -485,6 +500,7 @@ def android():
 
 def validate_receipt(value, expected, api, sources):
     bridge_receipt(value)
+    ui_receipt(value)
     need(value["status"] == "PASS" and value["scope"] == SCOPE, "device status/scope")
     need(all(value[k] == expected[k] for k in ("commit", "run_id", "run_attempt")) and
          value["api"] == api, "device source/run/API binding")
@@ -521,6 +537,7 @@ def receipt_fixture(api=26):
                          for p,v in LABELS.items()},
                  snapshots={p:copy.deepcopy(snapshots) for p in LABELS},
                  business_snapshots={p:copy.deepcopy(snapshots) for p in LABELS},
+                 ui_snapshots={p:copy.deepcopy(snapshots) for p in LABELS},
                  installed={p:dict(sha256="b"*64,bytes=1) for p in ("product","test")},
                  stops=[{"fixture":"normal stopped"}],
                  commands=[dict(returncode=0,attempts=1)],
@@ -615,6 +632,7 @@ def report():
                      digest(raw) == receipt["phases"][phase]["sha256"], "raw phase evidence differs")
                 independently = database_snapshot(folder / phase / "schema4-contract.db")
                 need(independently == receipt["snapshots"][phase], "report independent database replay differs")
+                replay_shortcut_databases(folder,receipt,phase)
         except (OSError, ValueError, KeyError, TypeError, AssertionError, sqlite3.Error) as exc:
             value["device_validation_errors"][str(api)] = repr(exc)
     try:
@@ -642,14 +660,15 @@ def report():
     need(value["status"] == "PASS", "SHORTCUT_STORAGE_NOT_ACCEPTED: see original evidence")
 
 
-def report_selftest():
+def report_selftest(target=None):
+    if target is None:target=report
     """Actual report entry; scripted files/database/publisher, not real CI proof."""
     import contextlib
     import io
     import types
     from unittest.mock import patch
     modes=("valid","missing26","failed26","failed34","wrong_attempt",
-           "corrupt_log","missing_label","failed_job","snapshot_mismatch","publish_failure")
+           "corrupt_log","missing_label","failed_job","snapshot_mismatch","publish_failure","business_missing","business_mismatch","ui_missing","ui_mismatch")
     for mode in modes:
         with tempfile.TemporaryDirectory(prefix="shortcut-report-") as folder:
             root=Path(folder);value,expected,sources=receipt_fixture()
@@ -679,11 +698,21 @@ def report_selftest():
                     if mode=="publish_failure":raise OSError("original publisher failure")
                     return dict(html_url="https://example.invalid/evidence")
             def snapshot(path):
+                if path.name=="schema4-ui.db" and mode=="ui_missing":raise OSError("original missing UI DB")
                 data=copy.deepcopy(value["snapshots"]["seed"])
+                if path.name=="schema4-ui.db" and mode=="ui_mismatch":data["todos"]["rows"]=[]
                 if mode=="snapshot_mismatch":data["todos"]["rows"]=[]
                 return data
-            scope=dict(globals(),ROOT=root,source_identity=lambda:sources,database_snapshot=snapshot)
-            runner=types.FunctionType(report.__code__,scope)
+            def business_snapshot(path):
+                if mode=="business_missing":raise OSError("original missing business DB")
+                data=copy.deepcopy(value["business_snapshots"]["seed"])
+                if mode=="business_mismatch":data["todos"]["rows"]=[]
+                return data
+            scope=dict(globals(),ROOT=root,source_identity=lambda:sources,database_snapshot=snapshot,
+                       bridge_database_snapshot=business_snapshot)
+            # Rebind this helper too, so scripted readers cover the real report call.
+            scope["replay_shortcut_databases"]=types.FunctionType(replay_shortcut_databases.__code__,scope)
+            runner=types.FunctionType(target.__code__,scope)
             jobs={k:dict(result="success") for k in ("shortcut_host","shortcut_device")}
             if mode=="failed_job":jobs["shortcut_host"]["result"]="failure"
             env=dict(GITHUB_SHA=expected["commit"],GITHUB_RUN_ID="1",GITHUB_RUN_ATTEMPT="1",
@@ -695,7 +724,7 @@ def report_selftest():
             need(len(sent)==1,"report must publish even with missing/failed device")
             if mode=="valid":need(error is None and sent[0]["status"]=="PASS","valid actual report entry")
             elif mode=="publish_failure":need(type(error) is OSError and str(error)=="original publisher failure","publisher failure preserved")
-            else:need(type(error) is AssertionError and sent[0]["status"]=="FAIL","invalid report not rejected")
+            else:need(type(error) is AssertionError and sent[0]["status"]=="FAIL","invalid report not rejected: "+mode)
             if mode in ("missing26","failed26"):
                 need("34" in sent[0]["devices"] and sent[0]["devices"]["34"]["status"]=="PASS","first device failure hides second")
             if mode.startswith("failed") and mode[-2:] in ("26","34"):
@@ -1098,8 +1127,8 @@ def label_contract_selftest():
     check_bridge_labels(rows)
     check_bridge_labels(sample_rows,{"seed":["bridge_sample4","bridge_sample_tail"],"reopen":[]})
     for phase, count in (("seed",32),("reopen",6)):
-        need(len(LABELS[phase])==count+len(BRIDGE_LABELS[phase]) and
-             LABELS[phase][count:]==BRIDGE_LABELS[phase], "fixed phase label population "+phase)
+        need(len(LABELS[phase])==count+len(BRIDGE_LABELS[phase])+len(UI_LABELS[phase]) and
+             LABELS[phase][count:count+len(BRIDGE_LABELS[phase])]==BRIDGE_LABELS[phase], "fixed phase label population "+phase)
     variants=[]
     # AST positions refer to Java UTF-16 indices. Convert before Python slicing.
     def offset(value):
@@ -1139,7 +1168,236 @@ def label_contract_selftest():
           " runtime_controls=12 DIGIT_COMMENT_STRING_EXCEPTION_CONTROLS_PASS")
 
 
+UI_LABELS = {
+    "seed": [
+        "ui_preview_cancel_is_read_only",
+        "ui_closed_preview_cannot_write_after_relaunch",
+        "ui_add_exact_relation_no_business_copy",
+        "ui_targets_exclude_archived_and_do_not_write",
+        "ui_same_name_navigation_exact_and_pure",
+        "ui_detached_callback_cannot_replay",
+        "ui_removed_link_refuses_stale_navigation",
+        "ui_remove_retains_other_category_and_history",
+        "ui_api_repeat_setting_exact_noop",
+        "ui_api_same_revision_edit_refused",
+        "ui_api_foreign_attempt_preserves_owner_plan",
+        "ui_api_close_invalidates_plan",
+        "ui_api_late_failure_rolls_back_all_cells",
+        "ui_api_unrelated_write_rolls_back",
+        "ui_backup_restore_keeps_relations_and_history",
+        "ui_activity_relaunch_preserves_exact_state",
+        "ui_never_opens_phone_database",
+    ],
+    "reopen": [
+        "ui_separate_process_exact_state",
+        "ui_separate_process_navigation_pure",
+        "ui_separate_process_live_database_absent",
+    ],
+}
+
+
+def ui_receipt(value):
+    need(set(value["ui_snapshots"])=={"seed","reopen"},"UI phase population")
+    for phase in ("seed","reopen"):
+        snapshot=value["ui_snapshots"][phase]
+        need(set(snapshot)==set(OLD_TABLES+["category_shortcuts"]),"UI complete table set")
+        need(all(row["rows"] for row in snapshot.values()),"UI all-table nonempty fixture")
+    need(value["ui_snapshots"]["seed"]==value["ui_snapshots"]["reopen"],"UI restart exact cells")
+
+
+def replay_shortcut_databases(folder,receipt,phase):
+    need(bridge_database_snapshot(folder/phase/"schema4-business.db")==receipt["business_snapshots"][phase],
+         "report independent business replay differs")
+    need(database_snapshot(folder/phase/"schema4-ui.db")==receipt["ui_snapshots"][phase],
+         "report independent UI replay differs")
+
+
+def ui_host_selftest():
+    ui_shape_dependency_selftest()
+    """Actual Java guard plus actual Java call sites, not Android acceptance."""
+    import types
+    source=(ROOT/"src/main/java/com/supercubegame/pockettodo/ActivitiesScreen.java").read_text()
+    actual=extract(source,"static boolean shortcutCanAct(")
+    controls=r'''
+class ShortcutGuard {
+__METHOD__
+public static void main(String[] args){
+ if(!shortcutCanAct(true,false,true,true,false,false))throw new AssertionError("positive");
+ if(args.length>0)return;
+ boolean[][] cases={{false,false,true,true,false,false},{true,true,true,true,false,false},
+   {true,false,false,true,false,false},{true,false,true,false,false,false},
+   {true,false,true,true,true,false},{true,false,true,true,false,true}};
+ for(int i=0;i<cases.length;i++){
+  boolean[] c=cases[i];
+  if(shortcutCanAct(c[0],c[1],c[2],c[3],c[4],c[5]))throw new AssertionError("GUARD_NEGATIVE_"+i);
+ }
+ System.out.println("SHORTCUT_GUARD_REAL_JAVA_PASS");
+}}
+'''
+    def execute_guard(method,args=()):
+        with tempfile.TemporaryDirectory(prefix="shortcut-guard-") as temp:
+            p=Path(temp)/"ShortcutGuard.java";p.write_text(controls.replace("__METHOD__",method))
+            c=subprocess.run(["java","-m","jdk.compiler/com.sun.tools.javac.Main","-encoding","UTF-8",str(p)],capture_output=True,text=True,timeout=30)
+            need(c.returncode==0,"UI guard compile "+c.stderr)
+            return subprocess.run(["java","-cp",temp,"ShortcutGuard",*args],capture_output=True,text=True,timeout=30)
+    good=execute_guard(actual);need(good.returncode==0,good.stdout+good.stderr)
+    for index,(old,new) in enumerate((("return alive","return true"),("!submitted","true"),
+            ("&&attached","&&true"),("&&enabled","&&true"),("!finishing","true"),("!destroyed","true"))):
+        need(actual.count(old)==1,"UI mutation anchor")
+        mutant=actual.replace(old,new,1)
+        need(execute_guard(mutant,("positive",)).returncode==0,"UI mutant positive witness")
+        result=execute_guard(mutant)
+        need(result.returncode!=0 and "GUARD_NEGATIVE_"+str(index) in result.stderr,"UI guard mutant survived")
+    test=DEVICE.read_text()
+    ast_source=LABEL_AST.replace("bridgeSeed","uiSeed").replace("bridgeReopen","uiReopen").replace("bridge_[a-z0-9_]+","ui_[a-z0-9_]+")
+    parse=types.FunctionType(java_label_calls.__code__,dict(globals(),LABEL_AST=ast_source))
+    rows=parse([test])[0]
+    def check(rows):
+        observed={p:[r[1] for r in rows if r[0]==m] for p,m in (("seed","uiSeed"),("reopen","uiReopen"))}
+        need(observed==UI_LABELS,"UI actual Java need-call label contract")
+    check(rows)
+    for phase in UI_LABELS:
+        need(LABELS[phase][-len(UI_LABELS[phase]):]==UI_LABELS[phase],"UI ordered runtime labels")
+    mutants=[]
+    for row in rows:
+        a=len(test.encode("utf-16-le")[:row[2]*2].decode("utf-16-le"))
+        b=len(test.encode("utf-16-le")[:row[3]*2].decode("utf-16-le"))
+        mutants.append(test[:a]+test[b:])
+    for parsed in parse(mutants):
+        try:check(parsed)
+        except AssertionError:pass
+        else:raise AssertionError("UI omitted check survived")
+    value,expected,sources=receipt_fixture()
+    ui_receipt(value)
+    bad=copy.deepcopy(value);bad["ui_snapshots"]["reopen"]["todos"]["rows"]=[]
+    try:validate_receipt(bad,expected,26,sources)
+    except AssertionError:pass
+    else:raise AssertionError("UI missing snapshot accepted")
+    import ast,inspect
+    tree=ast.parse(inspect.getsource(report))
+    removed=[]
+    class OmitReplay(ast.NodeTransformer):
+        def visit_Expr(self,node):
+            if isinstance(node.value,ast.Call) and isinstance(node.value.func,ast.Name) and node.value.func.id=="replay_shortcut_databases":
+                removed.append(node);return None
+            return self.generic_visit(node)
+    changed=OmitReplay().visit(tree);need(len(removed)==1,"report replay mutation applied")
+    scope=dict(globals());exec(compile(ast.fix_missing_locations(changed),"<omitted-db-replay>","exec"),scope)
+    try:report_selftest(scope["report"])
+    except AssertionError as exc:need(str(exc)=="invalid report not rejected: business_missing","wrong replay mutant witness")
+    else:raise AssertionError("omitted business DB replay survived")
+    print("SHORTCUT_UI_HOST guard_positive=1 guard_negatives=6 witnessed_guard_mutants=6 omitted_call_mutants="+str(len(mutants))+" PASS_NOT_ANDROID")
+
+
+"""API shapes only. No modeled UI behavior and no Android acceptance claim."""
+SHAPE_BASELINE_STUBS = dict(STUBS)
+_app = "com/supercubegame/pockettodo/AppDatabase.java"
+need(STUBS[_app].endswith("\n}"), "AppDatabase shape anchor")
+STUBS[_app] = STUBS[_app][:-2] + """
+public static class ShortcutPlan implements AutoCloseable{public void close(){}}
+public ShortcutPlan prepareShortcut(long c,long a){return null;}
+public boolean confirmShortcut(ShortcutPlan p,boolean enabled){return false;}
+}
+"""
+_instrumentation = "android/app/Instrumentation.java"
+need(STUBS[_instrumentation].endswith("\n}"), "Instrumentation shape anchor")
+STUBS[_instrumentation] = STUBS[_instrumentation][:-2] + """
+public void runOnMainSync(Runnable r){}
+public void waitForIdleSync(){}
+public void sendPointerSync(android.view.MotionEvent event){}
+public Activity startActivitySync(android.content.Intent intent){return null;}
+public UiAutomation getUiAutomation(){return null;}
+}
+"""
+STUBS.update({
+    "android/content/Intent.java": """package android.content;public class Intent{
+public static final int FLAG_ACTIVITY_NEW_TASK=0x10000000;
+public Intent(Context context,Class<?> cls){}public Intent addFlags(int flags){return this;}
+}""",
+    "android/view/View.java": """package android.view;public class View{
+public CharSequence getContentDescription(){return null;}
+public boolean isAttachedToWindow(){return false;}public boolean isEnabled(){return false;}
+public int getWidth(){return 0;}public int getHeight(){return 0;}
+public boolean requestRectangleOnScreen(android.graphics.Rect r,boolean immediate){return false;}
+public boolean getGlobalVisibleRect(android.graphics.Rect r){return false;}
+public boolean performClick(){return false;}
+}""",
+    "android/view/ViewGroup.java": """package android.view;public class ViewGroup extends View{
+public int getChildCount(){return 0;}public View getChildAt(int index){return null;}
+}""",
+    "android/view/Window.java": """package android.view;public class Window{
+public View getDecorView(){return null;}
+}""",
+    "android/graphics/Rect.java": """package android.graphics;public class Rect{
+public Rect(){}public Rect(int l,int t,int r,int b){}
+public int width(){return 0;}public int height(){return 0;}
+public float exactCenterX(){return 0;}public float exactCenterY(){return 0;}
+}""",
+    "android/view/MotionEvent.java": """package android.view;public class MotionEvent{
+public static final int ACTION_DOWN=0,ACTION_UP=1;
+public static MotionEvent obtain(long down,long event,int action,float x,float y,int meta){return null;}
+public void recycle(){}
+}""",
+    "android/os/SystemClock.java": """package android.os;public class SystemClock{
+public static long uptimeMillis(){return 0;}
+}""",
+    "android/widget/TextView.java": """package android.widget;public class TextView extends android.view.View{
+public CharSequence getText(){return null;}
+}""",
+    "android/graphics/Bitmap.java": """package android.graphics;public class Bitmap{
+public enum CompressFormat{PNG}
+public boolean compress(CompressFormat format,int quality,java.io.OutputStream out){return false;}
+public void recycle(){}
+}""",
+    "android/app/UiAutomation.java": """package android.app;public class UiAutomation{
+public android.graphics.Bitmap takeScreenshot(){return null;}
+}""",
+    "com/supercubegame/pockettodo/MainActivity.java": """package com.supercubegame.pockettodo;
+public class MainActivity extends android.app.Activity{
+static boolean isolatedShortcutTest;
+TodayScreen shortcutTestScreen(){return null;}
+public android.view.Window getWindow(){return null;}public void finish(){}
+}""",
+    "com/supercubegame/pockettodo/TodayScreen.java": """package com.supercubegame.pockettodo;
+public class TodayScreen{boolean awaitShortcutClose()throws InterruptedException{return false;}}
+""",
+})
+
+
+def ui_shape_dependency_selftest():
+    """Same whole-source compiler for GREEN, original RED and omitted declarations."""
+    import contextlib,io,types
+    def compile_with(stubs):
+        scope=dict(globals(),STUBS=stubs)
+        runner=types.FunctionType(syntax_selftest.__code__,scope)
+        with contextlib.redirect_stdout(io.StringIO()):
+            runner()
+    # The complete candidate is the input in every case. Nothing is sliced out.
+    compile_with(STUBS)
+    cases=[("original",SHAPE_BASELINE_STUBS,"ShortcutPlan")]
+    for path,old,new,witness in (
+        (_app,"public ShortcutPlan prepareShortcut(","public ShortcutPlan omittedPrepareShortcut(","prepareShortcut"),
+        (_instrumentation,"public void sendPointerSync(","public void omittedSendPointerSync(","sendPointerSync"),
+        ("com/supercubegame/pockettodo/TodayScreen.java","boolean awaitShortcutClose(","boolean omittedAwaitShortcutClose(","awaitShortcutClose"),
+    ):
+        mutant=dict(STUBS)
+        need(mutant[path].count(old)==1,"shape omission declaration anchor")
+        mutant[path]=mutant[path].replace(old,new,1)
+        need(mutant[path]!=STUBS[path],"shape omission did not occur")
+        cases.append((witness,mutant,witness))
+    for name,stubs,witness in cases:
+        try:compile_with(stubs)
+        except AssertionError as exc:
+            message=str(exc)
+            need("new-class Java syntax failed:" in message and
+                 "cannot find symbol" in message and witness in message,
+                 "shape RED for wrong reason: "+name+"\n"+message)
+        else:raise AssertionError("shape declaration omission survived: "+name)
+    print("SHORTCUT_UI_API_SHAPE original RED / full-source GREEN / 3 omission controls PASS; NOT_ANDROID")
+
+
 def selftest():
+    ui_host_selftest()
     label_contract_selftest()
     bridge_selftest()
     bridge_receipt_selftest()

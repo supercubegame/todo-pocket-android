@@ -45,6 +45,108 @@ public final class AppDatabase extends SQLiteOpenHelper {
     public synchronized List<Long> activityTargets(long category,long application){
         require(schema4!=null,"Shortcut bridge not enabled");return schema4.activityTargets(category,application);
     }
+    /** Isolated UI capability. Default schema3 callers cannot expose this UI. */
+    boolean shortcutsEnabled(){return schema4!=null;}
+    public static final class ShortcutPlan implements AutoCloseable {
+        private final AppDatabase owner;
+        private final Object session;
+        private final SQLiteDatabase connection;
+        final long category,application;
+        final String categoryName,applicationName;
+        final boolean enabled;
+        private byte[] before;
+        private boolean terminal;
+        private ShortcutPlan(AppDatabase owner,SQLiteDatabase db,long category,long application,
+                             String categoryName,String applicationName,boolean enabled,byte[] before){
+            this.owner=owner;session=owner.restoreSession;connection=db;this.category=category;
+            this.application=application;this.categoryName=categoryName;this.applicationName=applicationName;
+            this.enabled=enabled;this.before=before;
+        }
+        @Override public void close(){synchronized(owner){terminal=true;before=null;}}
+    }
+    public synchronized ShortcutPlan prepareShortcut(long category,long application){
+        require(schema4!=null,"Shortcut bridge not enabled");
+        Ledger.positive(category);Ledger.positive(application);
+        SQLiteDatabase db=getReadableDatabase();noteDeletionNoOuterTransaction(db);db.beginTransaction();
+        try{
+            String cat=categoryName(category),app;
+            try(Cursor c=db.rawQuery("SELECT name FROM applications WHERE id=?",new String[]{Long.toString(application)})){
+                require(c.moveToFirst(),"Shortcut application missing");app=c.getString(0);
+            }
+            ShortcutPlan plan=new ShortcutPlan(this,db,category,application,cat,app,
+                shortcutApplications(category).contains(application),noteDeletionState(db));
+            db.setTransactionSuccessful();return plan;
+        }finally{db.endTransaction();}
+    }
+    /** Excludes only the two fields this operation is allowed to change:
+     * revision and shortcut links. All old typed cells/rowids remain exact. */
+    private static byte[] shortcutUntouched(SQLiteDatabase db){
+        try{
+            LimitedBytes bytes=new LimitedBytes();DataOutputStream out=new DataOutputStream(bytes);
+            for(String table:SNAPSHOT_TABLES){
+                if(table.equals("revision"))continue;
+                try(Cursor c=db.rawQuery(comparisonQuery(table),null)){
+                    utf8(out,table);out.writeInt(c.getColumnCount());out.writeInt(c.getCount());
+                    for(String name:c.getColumnNames())utf8(out,name);
+                    while(c.moveToNext())for(int i=0;i<c.getColumnCount();i++){
+                        Object v=cell(c,i);out.writeByte(c.getType(i));
+                        if(v instanceof Long)out.writeLong((Long)v);
+                        else if(v instanceof String)utf8(out,(String)v);
+                        else if(v instanceof byte[])blob(out,(byte[])v);
+                    }
+                }
+            }
+            out.flush();return bytes.toByteArray();
+        }catch(IOException e){throw new IllegalStateException("Shortcut comparison failed",e);}
+    }
+    public synchronized boolean confirmShortcut(ShortcutPlan plan,boolean enabled){
+        if(plan==null||plan.owner!=this)throw new IllegalArgumentException("Foreign shortcut plan");
+        if(plan.terminal||plan.session!=restoreSession){plan.close();throw new IllegalStateException("Shortcut plan expired");}
+        plan.terminal=true;
+        try{
+            SQLiteDatabase db=getWritableDatabase();noteDeletionNoOuterTransaction(db);
+            require(db==plan.connection&&db.isOpen(),"Shortcut connection changed");
+            db.beginTransaction();
+            try{
+                require(Arrays.equals(plan.before,noteDeletionState(db)),"Shortcut state changed");
+                if(plan.enabled==enabled){db.setTransactionSuccessful();return false;}
+                byte[] untouched=shortcutUntouched(db);long next=Math.incrementExact(revision(db));
+                List<Schema4Store.Link> expected=new ArrayList<>(Schema4Store.Wire.read(exportState()).links);
+                Schema4Store.Link target=new Schema4Store.Link(plan.category,plan.application);
+                if(enabled){
+                    require(!expected.contains(target),"Shortcut already exists");
+                    expected.add(target);expected.sort((a,b)->{int c=Long.compare(a.category,b.category);return c!=0?c:Long.compare(a.application,b.application);});
+                    db.execSQL("INSERT INTO category_shortcuts VALUES(?,?)",new Object[]{plan.category,plan.application});
+                }else{
+                    require(expected.remove(target),"Shortcut disappeared");
+                    require(db.delete("category_shortcuts","category_id=? AND application_id=?",
+                        new String[]{Long.toString(plan.category),Long.toString(plan.application)})==1,"Shortcut deletion count");
+                }
+                require(bump(db)==next&&revision(db)==next,"Shortcut revision differs");
+                require(expected.equals(Schema4Store.Wire.read(exportState()).links)&&Arrays.equals(untouched,shortcutUntouched(db)),
+                    "Shortcut unrelated state changed");
+                db.setTransactionSuccessful();return true;
+            }finally{db.endTransaction();}
+        }finally{plan.close();}
+    }
+    /** Read-only final selection; a stale full-state plan refuses navigation. */
+    public synchronized long navigateShortcut(ShortcutPlan plan,long target){
+        if(plan==null||plan.owner!=this)throw new IllegalArgumentException("Foreign shortcut plan");
+        if(plan.terminal||plan.session!=restoreSession){plan.close();throw new IllegalStateException("Shortcut plan expired");}
+        plan.terminal=true;
+        try{
+            SQLiteDatabase db=getReadableDatabase();noteDeletionNoOuterTransaction(db);
+            require(db==plan.connection&&db.isOpen(),"Shortcut connection changed");
+            db.beginTransaction();
+            try{
+                require(Arrays.equals(plan.before,noteDeletionState(db)),"Shortcut state changed");
+                require(plan.enabled&&activityTargets(plan.category,plan.application).contains(target),"Shortcut target unavailable");
+                require(Arrays.equals(plan.before,noteDeletionState(db)),"Shortcut navigation wrote data");
+                db.setTransactionSuccessful();return target;
+            }finally{db.endTransaction();}
+        }finally{plan.close();}
+    }
+
     @Override public synchronized SQLiteDatabase getWritableDatabase(){return schema3==null?super.getWritableDatabase():schema3.getWritableDatabase();}
     @Override public synchronized SQLiteDatabase getReadableDatabase(){return schema3==null?super.getReadableDatabase():schema3.getReadableDatabase();}
     @Override public synchronized void close(){restoreSession=new Object();if(schema3!=null)schema3.close();if(schema4!=null)schema4.close();super.close();}

@@ -169,6 +169,7 @@ public final class Schema4DeviceTest extends Instrumentation {
         refused(()->{try(Schema4Store ignored=new Schema4Store(context,"pocket-v12.db")){};},"Live UI database not enabled");
         need(!context.getDatabasePath("pocket-v12.db").exists(),"live_ui_database_never_opened");
         bridgeSeed();
+        uiSeed();
     }
     private void restoreChecks(Schema4Store store,Path backup,Path oldZip,MediaRepository media)throws Exception{
         Path stage=getTargetContext().getCacheDir().toPath().resolve("schema4-stage");
@@ -260,6 +261,7 @@ public final class Schema4DeviceTest extends Instrumentation {
             need(Arrays.equals(exact,store.exportState()),"separate_process_backup_restore_exact");
             need(!getTargetContext().getDatabasePath("pocket-v12.db").exists(),"separate_process_no_live_ui_database");
             bridgeReopen();
+        uiReopen();
         }
     }
     private static final String BUSINESS_DB="schema4-business.db";
@@ -362,6 +364,178 @@ public final class Schema4DeviceTest extends Instrumentation {
             need(app.activityTargets(7,10).equals(List.of(20L))&&app.fieldValue(20,"bf").equals(List.of("值"))&&
                  app.todoIds().equals(List.of("bt"))&&app.noteBlocks("bn").size()==2&&Arrays.equals(before,bridgeCells(app.getReadableDatabase())),"bridge_separate_process_business_reads_are_pure");
         }
+    }
+
+    private static final String UI_DB="schema4-ui.db";
+    private MainActivity uiActivity;
+    private android.view.View findUi(android.view.View view,String id){
+        if(id.contentEquals(view.getContentDescription()==null?"":view.getContentDescription()))return view;
+        if(view instanceof android.view.ViewGroup){
+            android.view.ViewGroup group=(android.view.ViewGroup)view;
+            for(int i=0;i<group.getChildCount();i++){android.view.View v=findUi(group.getChildAt(i),id);if(v!=null)return v;}
+        }
+        return null;
+    }
+    private android.view.View awaitUi(String id)throws Exception{
+        long end=android.os.SystemClock.uptimeMillis()+10000;
+        while(android.os.SystemClock.uptimeMillis()<end){
+            android.view.View[] found={null};
+            runOnMainSync(()->{
+                android.view.View v=findUi(uiActivity.getWindow().getDecorView(),id);
+                if(v!=null&&v.isAttachedToWindow()&&v.isEnabled())found[0]=v;
+            });
+            if(found[0]!=null)return found[0];
+            Thread.sleep(25);
+        }
+        throw new AssertionError("UI observation deadline: "+id);
+    }
+    /** One physical DOWN/UP pair, never an action retry or guessed screen coordinate. */
+    private android.view.View touchUi(String id)throws Exception{
+        android.view.View view=awaitUi(id);
+        runOnMainSync(()->view.requestRectangleOnScreen(new android.graphics.Rect(0,0,view.getWidth(),view.getHeight()),true));
+        waitForIdleSync();
+        android.graphics.Rect rect=new android.graphics.Rect();
+        runOnMainSync(()->assertThat(view.isEnabled()&&view.isAttachedToWindow()&&view.getGlobalVisibleRect(rect)
+            &&rect.width()>0&&rect.height()>0,"UI visible control: "+id));
+        long now=android.os.SystemClock.uptimeMillis();
+        android.view.MotionEvent down=android.view.MotionEvent.obtain(now,now,android.view.MotionEvent.ACTION_DOWN,rect.exactCenterX(),rect.exactCenterY(),0);
+        android.view.MotionEvent up=android.view.MotionEvent.obtain(now,now+50,android.view.MotionEvent.ACTION_UP,rect.exactCenterX(),rect.exactCenterY(),0);
+        try{sendPointerSync(down);sendPointerSync(up);}finally{down.recycle();up.recycle();}
+        waitForIdleSync();return view;
+    }
+    private void launchShortcutUi()throws Exception{
+        MainActivity.isolatedShortcutTest=true;
+        uiActivity=(MainActivity)startActivitySync(new android.content.Intent(getTargetContext(),MainActivity.class)
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+        awaitUi("shortcut-manage-7");
+    }
+    private void closeShortcutUi()throws Exception{
+        if(uiActivity!=null){
+            MainActivity old=uiActivity;runOnMainSync(old::finish);waitForIdleSync();
+            // Wait for the existing serial executor's close, without reopening it.
+            assertThat(old.shortcutTestScreen().awaitShortcutClose(),"UI close executor deadline");
+            uiActivity=null;
+        }
+        MainActivity.isolatedShortcutTest=false;
+    }
+    private byte[] uiCells()throws Exception{
+        try(AppDatabase db=AppDatabase.openSchema4(getTargetContext(),UI_DB)){return bridgeCells(db.getReadableDatabase());}
+    }
+    private void uiSeed()throws Exception{
+        Context context=getTargetContext();context.deleteDatabase(UI_DB);
+        try(SQLiteDatabase db=context.openOrCreateDatabase(UI_DB,0,null)){frozen(db);}
+        try(Schema3Store old=new Schema3Store(context,UI_DB)){old.getWritableDatabase();}
+        byte[] oldCells;
+        try(AppDatabase app=AppDatabase.openSchema4(context,UI_DB)){oldCells=cells(app.getReadableDatabase(),false);}
+        try{
+            launchShortcutUi();
+            touchUi("shortcut-manage-7");awaitUi("shortcut-change-7-10");
+            byte[] baseline=uiCells();
+            touchUi("shortcut-change-7-10");awaitUi("shortcut-confirm");touchUi("shortcut-back");awaitUi("shortcut-manage-7");
+            need(Arrays.equals(baseline,uiCells()),"ui_preview_cancel_is_read_only");
+            touchUi("shortcut-manage-7");touchUi("shortcut-change-7-10");
+            android.view.View abandonedConfirm=awaitUi("shortcut-confirm");
+            closeShortcutUi();launchShortcutUi();
+            runOnMainSync(()->abandonedConfirm.performClick());waitForIdleSync();
+            need(Arrays.equals(baseline,uiCells()),"ui_closed_preview_cannot_write_after_relaunch");
+            touchUi("shortcut-manage-7");touchUi("shortcut-change-7-10");touchUi("shortcut-confirm");awaitUi("shortcut-manage-7");
+            try(AppDatabase app=AppDatabase.openSchema4(context,UI_DB)){
+                need(app.shortcutApplications(7).equals(List.of(10L))&&Arrays.equals(oldCells,cells(app.getReadableDatabase(),false)),
+                    "ui_add_exact_relation_no_business_copy");
+            }
+            touchUi("shortcut-manage-8");touchUi("shortcut-change-8-10");touchUi("shortcut-confirm");awaitUi("shortcut-manage-8");
+            baseline=uiCells();
+            touchUi("shortcut-manage-7");touchUi("shortcut-open-7-10");awaitUi("shortcut-target-20");
+            android.view.View[] absent={null};
+            runOnMainSync(()->absent[0]=findUi(uiActivity.getWindow().getDecorView(),"shortcut-target-23"));
+            need(absent[0]==null&&awaitUi("shortcut-target-21")!=null&&Arrays.equals(baseline,uiCells()),"ui_targets_exclude_archived_and_do_not_write");
+            android.view.View oldTarget=touchUi("shortcut-target-21");awaitUi("activity-fields-21");
+            need(Arrays.equals(baseline,uiCells()),"ui_same_name_navigation_exact_and_pure");
+            runOnMainSync(()->oldTarget.performClick());waitForIdleSync();
+            need(Arrays.equals(baseline,uiCells()),"ui_detached_callback_cannot_replay");
+            closeShortcutUi();launchShortcutUi();
+            touchUi("shortcut-manage-7");touchUi("shortcut-open-7-10");awaitUi("shortcut-target-20");
+            try(AppDatabase app=AppDatabase.openSchema4(context,UI_DB)){app.setShortcut(7,10,false);}
+            byte[] removed=uiCells();
+            touchUi("shortcut-target-20");awaitUi("shortcut-back");
+            // Await the explicit asynchronous rejection, not merely the old back button.
+            awaitUiText("v12-status","目标已变化");
+            need(Arrays.equals(removed,uiCells()),"ui_removed_link_refuses_stale_navigation");
+            touchUi("shortcut-back");touchUi("shortcut-manage-7");touchUi("shortcut-change-7-10");touchUi("shortcut-confirm");awaitUi("shortcut-manage-7");
+            touchUi("shortcut-manage-7");touchUi("shortcut-change-7-10");touchUi("shortcut-confirm");awaitUi("shortcut-manage-7");
+            try(AppDatabase app=AppDatabase.openSchema4(context,UI_DB)){
+                need(app.shortcutApplications(7).isEmpty()&&app.shortcutApplications(8).equals(List.of(10L))&&
+                    Arrays.equals(oldCells,cells(app.getReadableDatabase(),false)),"ui_remove_retains_other_category_and_history");
+            }
+            touchUi("shortcut-manage-7");touchUi("shortcut-change-7-10");touchUi("shortcut-confirm");awaitUi("shortcut-manage-7");
+            closeShortcutUi();
+            try(AppDatabase app=AppDatabase.openSchema4(context,UI_DB)){
+                byte[] before=bridgeCells(app.getReadableDatabase());
+                need(!app.confirmShortcut(app.prepareShortcut(7,10),true)&&Arrays.equals(before,bridgeCells(app.getReadableDatabase())),
+                    "ui_api_repeat_setting_exact_noop");
+                AppDatabase.ShortcutPlan stale=app.prepareShortcut(7,10);
+                app.getWritableDatabase().execSQL("UPDATE applications SET name='changed' WHERE id=10");
+                byte[] changed=bridgeCells(app.getReadableDatabase());
+                refused(()->app.confirmShortcut(stale,false),"Shortcut state changed");
+                need(Arrays.equals(changed,bridgeCells(app.getReadableDatabase())),"ui_api_same_revision_edit_refused");
+                app.getWritableDatabase().execSQL("UPDATE applications SET name='应用同名' WHERE id=10");
+                AppDatabase.ShortcutPlan foreign=app.prepareShortcut(7,10);
+                try(AppDatabase other=AppDatabase.openSchema4(context,UI_DB)){
+                    refused(()->other.confirmShortcut(foreign,false),"Foreign shortcut plan");
+                }
+                need(!app.confirmShortcut(foreign,true),"ui_api_foreign_attempt_preserves_owner_plan");
+                AppDatabase.ShortcutPlan expired=app.prepareShortcut(7,10);app.close();
+                refused(()->app.confirmShortcut(expired,false),"Shortcut plan expired");
+                need(app.shortcutApplications(7).equals(List.of(10L)),"ui_api_close_invalidates_plan");
+                before=bridgeCells(app.getReadableDatabase());
+                AppDatabase.ShortcutPlan fault=app.prepareShortcut(7,10);
+                app.getWritableDatabase().execSQL("CREATE TEMP TRIGGER ui_fault BEFORE UPDATE ON revision BEGIN SELECT RAISE(ABORT,'ui_late_fault'); END");
+                refused(()->app.confirmShortcut(fault,false),"ui_late_fault");
+                app.getWritableDatabase().execSQL("DROP TRIGGER ui_fault");
+                need(Arrays.equals(before,bridgeCells(app.getReadableDatabase())),"ui_api_late_failure_rolls_back_all_cells");
+                AppDatabase.ShortcutPlan unrelated=app.prepareShortcut(7,10);
+                app.getWritableDatabase().execSQL("CREATE TEMP TRIGGER ui_unrelated AFTER DELETE ON category_shortcuts BEGIN UPDATE todos SET title='wrong'; END");
+                refused(()->app.confirmShortcut(unrelated,false),"Shortcut unrelated state changed");
+                app.getWritableDatabase().execSQL("DROP TRIGGER ui_unrelated");
+                need(Arrays.equals(before,bridgeCells(app.getReadableDatabase())),"ui_api_unrelated_write_rolls_back");
+                Path backup=root().resolve("schema4-ui-full.zip");app.exportBackup(backup,media());
+                app.setShortcut(7,10,false);
+                AppDatabase.RestorePlan restore=app.prepareRestore(backup,getTargetContext().getCacheDir().toPath().resolve("schema4-ui-stage"),1000000);
+                app.confirmRestore(restore,media());
+                need(Arrays.equals(before,bridgeCells(app.getReadableDatabase())),"ui_backup_restore_keeps_relations_and_history");
+                Files.write(root().resolve("schema4-ui-expected.bin"),before);
+            }
+            launchShortcutUi();touchUi("shortcut-manage-7");awaitUi("shortcut-open-7-10");
+            android.graphics.Bitmap shot=getUiAutomation().takeScreenshot();
+            assertThat(shot!=null,"UI screenshot absent");
+            try(OutputStream out=Files.newOutputStream(root().resolve("schema4-ui.png"))){
+                assertThat(shot.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out),"UI screenshot encode");
+            }finally{shot.recycle();}
+            need(Arrays.equals(Files.readAllBytes(root().resolve("schema4-ui-expected.bin")),uiCells()),"ui_activity_relaunch_preserves_exact_state");
+        }finally{closeShortcutUi();}
+        need(!context.getDatabasePath("pocket-v12.db").exists(),"ui_never_opens_phone_database");
+    }
+    private void awaitUiText(String id,String prefix)throws Exception{
+        long end=android.os.SystemClock.uptimeMillis()+10000;
+        while(android.os.SystemClock.uptimeMillis()<end){
+            boolean[] ok={false};
+            runOnMainSync(()->{
+                android.view.View v=findUi(uiActivity.getWindow().getDecorView(),id);
+                ok[0]=v instanceof android.widget.TextView&&((android.widget.TextView)v).getText().toString().startsWith(prefix);
+            });
+            if(ok[0])return;
+            Thread.sleep(25);
+        }
+        throw new AssertionError("UI feedback deadline: "+id+" "+prefix);
+    }
+    private void uiReopen()throws Exception{
+        byte[] expected=Files.readAllBytes(root().resolve("schema4-ui-expected.bin"));
+        need(Arrays.equals(expected,uiCells()),"ui_separate_process_exact_state");
+        try{
+            launchShortcutUi();touchUi("shortcut-manage-8");touchUi("shortcut-open-8-10");touchUi("shortcut-target-20");awaitUi("activity-fields-20");
+            need(Arrays.equals(expected,uiCells()),"ui_separate_process_navigation_pure");
+        }finally{closeShortcutUi();}
+        need(!getTargetContext().getDatabasePath("pocket-v12.db").exists(),"ui_separate_process_live_database_absent");
     }
 
     @Override public void onStart(){

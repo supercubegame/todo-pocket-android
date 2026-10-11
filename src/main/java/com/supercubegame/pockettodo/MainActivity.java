@@ -14,13 +14,20 @@ import java.nio.file.StandardCopyOption;
 public final class MainActivity extends Activity {
     static final int EXPORT_BACKUP=41, IMPORT_BACKUP=42, PICK_NOTE_IMAGE=43, EXPORT_NOTES=44;
     private TodayScreen screen;
+    // In-process instrumentation hook only: no intent, exported component, file flag
+    // or persisted preference can enable this. It accepts no caller-selected path.
+    static boolean isolatedShortcutTest;
+    TodayScreen shortcutTestScreen(){return screen;}
     private java.util.function.Consumer<Uri> pendingImage;
     private ShareTicket pendingShare;
     private int pendingShareFormat;
     private static final String[] SHARE_FORMATS={"Markdown图片包","PDF","分段PNG图片包"};
     private final java.util.List<android.app.AlertDialog> shareDialogs=new java.util.ArrayList<>();
     private boolean sharing;
-    @Override public void onCreate(Bundle saved){super.onCreate(saved);screen=new TodayScreen(this);screen.show(saved);}
+    @Override public void onCreate(Bundle saved){super.onCreate(saved);if(isolatedShortcutTest){
+        screen=new TodayScreen(this,AppDatabase.openSchema4(this,"schema4-ui.db"));
+        Bundle isolated=new Bundle();isolated.putInt("page",1);screen.show(isolated);
+    }else{screen=new TodayScreen(this);screen.show(saved);}}
     @Override protected void onSaveInstanceState(Bundle out){if(screen!=null)screen.save(out);super.onSaveInstanceState(out);}
     @Override public void onBackPressed(){if(screen==null||!screen.back())super.onBackPressed();}
     @Override protected void onDestroy(){

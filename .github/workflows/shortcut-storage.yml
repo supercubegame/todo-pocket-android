@@ -1,4 +1,4 @@
-name: Explicit activation UI parser layer repair
+name: Explicit activation UI full-source declaration repair
 'on':
   push:
     branches:
@@ -20,7 +20,8 @@ jobs:
         with:
           ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
           persist-credentials: false
-      - name: Verify exact original source and repair two transport escapes
+      - &ref_0
+        name: Verify exact original source and repair two transport escapes
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -62,26 +63,38 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-
-          import ast,base64,lzma,os,pathlib
-          hook=lzma.decompress(base64.b64decode('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',validate=True)).decode()
+          import hashlib,urllib.request
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/e8c31fddb720e120fbf1a14cc1044183fab8425e/.github/workflows/shortcut-storage.yml"
+          with urllib.request.urlopen(url,timeout=60) as r: raw=r.read(12592)
+          assert len(raw)==12591 and hashlib.sha1(b"blob "+str(len(raw)).encode()+bytes([0])+raw).hexdigest()=="ad52d74c2552d0da988dfd11d0a81475f017de6f"
+          text=raw.decode();start=text.index("          import ast,base64,lzma,os,pathlib")
+          end=text.index("\n          PY\n",start)
+          program="\n".join(line[10:] for line in text[start:end].splitlines())
+          exec(compile(program,"immutable-parser-layer-repair","exec"),{})
+          PY
+      - name: Add missing activation Android declarations with original RED and four omission controls
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import ast,base64,hashlib,lzma,os,pathlib
+          extension=lzma.decompress(base64.b64decode('/Td6WFoAAATm1rRGAgAhARYAAAB0L+Wj4A05BINdABFoDQymM3akZSF4lygYIYUSrD2Df71m2sk8OI9Mgq73/FBgM5AnBZ+/uNZyCznlHGvm9bPZWHDnswGuQLQEnqAGT/FzDGB5ANQdXrEryu1lD1JlUv0TKIBm2ZR0/NYvzNXSNmD0p4Bd3G5bjaIrB4a5/cmZSlgl73LXvq2jX3x/kzD7YXgS1SvoGg3b94zzZoDw9KazJj2lIdm8Kxwxu1nHjbwnTuBG0aPxCY0HQwRc6tFpG6Pk4Xv9FrvVBsRunvZBwMcbx/Du3tmUC0kssDtB0hX6xz4Xu8ep/dNFomQXTMWAbHDwa28SezZcQs1DRAxDqfXX/Lc+ctHvICtl+6NqG8VRDydvHqr0uwgkx/ojlVtqb9SttaSJ8Ouc29VrgAml+c1wZPrTDInX28NLpiXdL0xVfT9kyq1eMXVIrjCMVpND0DlC79DP6VoV4Zwrj6Xugy1OTNFnbRp2sj8OJOJSB02ZE9Nxr2MF6n8yrefCtn/R3FL66qqVpP1TrKIzBogrztjQbv9PmssmucsuKPkLpp8n9ldfhWhmumMS375fyOHQg9ZCtMoUVItXX1buaMemgTDqq8LATUkM+zTSrTN0kGYGPpzW27R3T4XQD/iXoBwjUp6vRFEx5ihyUmje02SBniav/7wulf4X2bBiPJvwjXq2LWCHjztK4gAgsd5mkl8CiNqZU6/ocZPjjTWG1iDVY024SRc7IZwLgK9Ml9+GZnYA6J2i6kZCXH1llDjrk2lwnXZjTeShx2Ce9kfuABn6PFnJvpRXrn3RlBApx2a02w5eVF1C5bBxDOn51NMCpraVh+z35aaP/olAvkUoHcwyFoe+Y5JWNv+crkD28m5POyEN68KY8fbfEb9fy11fENIpcvu+t8i/OWW8JcGeSyKQefjtgfGLvC22oLay+7NyvS8wd00HfcRb4kezkCSqJNOSCwajRXBi4j/uEIXS40+5uaUaVXFEe8rtKhbRnKedLzIDRdb53/sSTgRAv8ZcsV2tspsC4ZhjcpV4RDx9YUjR6/GeQ056eecMoHHJx2gIl9oKlll40IGwCyZUFUG5k5/slMn/oZllOeINgoFai8azkMI92u933QAIHYKxVwu4fTH5cGVbhTUWNAVMzj8Gtb+TFyYO5kPJ2assdyOpct3nSd5ZgRbPIIMfODiGVJv5J44v9aWfl93MPQPjfqoZxW/zyGpnR8UwOpyTqtuEBE7zy0XBu5mIVkOXZb0eSWjrfx6GALLVWqccwu/+lkCPoY3zjBHIrJk17LwX2Z+2LX3OrLcnOfetehvK1ngy2WigPS9KV0RQAmK1hybCYBqq7psTNCLOHjL0hBqt2F4GezAeC9efZpqeAZ+wvs9Rdj9tLDOPHxodrQI4lWouTGhfij68/1O/qqsl6sdvQVhOEhe1ysHm0t+H6yW3T9/L3+ONVnqXP6uqkJLeIGWJvbyODuUkqcBiT55LogHn/6tjEG7qHh5swSY3TWRyTzvbPnuOUZyIPA3p3xl+twZSa3+Mi7/1BaFvUKEH7fhzFRaz2RH4AAAAviGc/ep25dQAAZ8JuhoAAGKaC0GxxGf7AgAAAAAEWVo=',validate=True)).decode()
+          assert hashlib.sha256(extension.encode()).hexdigest()=='28bdd5001e394e631a7d3abe84cf1e2daa13089defbea0a41bbb676413d37157'
           path=pathlib.Path(os.environ["RUNNER_TEMP"])/"exact-activation-scripts/3.sh"
-          script=path.read_text()
-          head,body=script.split("import ast",1)
-          code="import ast"+body.rsplit("\nPY",1)[0]
-          tree=ast.parse(code)
+          script=path.read_text();head,body=script.split("import ast",1)
+          tree=ast.parse("import ast"+body.rsplit("\nPY",1)[0])
           class Patch(ast.NodeTransformer):
               count=0
               def visit_Constant(self,node):
                   if isinstance(node.value,str) and node.value.startswith("import base64,json,lzma,importlib.util"):
                       anchor="for name,content in activation_files.items(): (folder/name).write_text(content)"
                       assert node.value.count(anchor)==1
+                      hook='activation_files["activation-parser.py"] += '+repr("\n"+extension)
                       self.count+=1
                       value=node.value.replace(anchor,hook+"\n"+anchor,1)
                       ast.parse(value)
                       return ast.copy_location(ast.Constant(value=value),node)
                   return node
-          patch=Patch();tree=patch.visit(tree);assert patch.count==1
+          change=Patch();tree=change.visit(tree);assert change.count==1
           path.write_text(head+ast.unparse(tree)+"\nPY\n")
 
           PY
@@ -130,19 +143,7 @@ jobs:
         with:
           name: activation-host
           path: activation-evidence
-      - name: Verify exact original source and repair two transport escapes
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import hashlib,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/a37a972bd31bd0ad4fa0b82005f26a91bc07b9fc/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as r: raw=r.read(11571)
-          assert len(raw)==11570 and hashlib.sha1(b"blob "+str(len(raw)).encode()+bytes([0])+raw).hexdigest()=="cb33818dafc911ec79e490491ff58fb8734741cd"
-          text=raw.decode();start=text.index("          import hashlib,os,pathlib,subprocess,urllib.request")
-          end=text.index("\n          PY\n",start)
-          program="\n".join(line[10:] for line in text[start:end].splitlines())
-          exec(compile(program,"exact-transfer-bootstrap","exec"),{})
-          PY
+      - *ref_0
       - name: Restore exact six-file host-verified candidate
         run: |
           set -euo pipefail
@@ -195,19 +196,7 @@ jobs:
         with:
           name: activation-host
           path: activation-evidence
-      - name: Verify exact original source and repair two transport escapes
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import hashlib,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/a37a972bd31bd0ad4fa0b82005f26a91bc07b9fc/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as r: raw=r.read(11571)
-          assert len(raw)==11570 and hashlib.sha1(b"blob "+str(len(raw)).encode()+bytes([0])+raw).hexdigest()=="cb33818dafc911ec79e490491ff58fb8734741cd"
-          text=raw.decode();start=text.index("          import hashlib,os,pathlib,subprocess,urllib.request")
-          end=text.index("\n          PY\n",start)
-          program="\n".join(line[10:] for line in text[start:end].splitlines())
-          exec(compile(program,"exact-transfer-bootstrap","exec"),{})
-          PY
+      - *ref_0
       - name: Restore exact six-file host-verified candidate
         run: |
           set -euo pipefail

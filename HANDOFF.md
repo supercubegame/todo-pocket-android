@@ -1,155 +1,86 @@
-# Pocket Todo: cross-account continuation checkpoint
+# 口袋待办：跨账号接续入口
 
-Snapshot: 2026-10-14, Asia/Shanghai. This is an engineering handoff, NOT an APK, product release, full-source backup, or assertion that all remaining work is complete. Re-read branch heads and CI before writing. Keep one writer per branch.
+2026-10-14 检查点。先重新读取分支与 CI；这是工程交接，不是 APK、完整源码备份或商业发布。单分支只允许一个写入者。
 
-## Resume prompt
+## 给接手助手的第一条消息
 
-Continue supercubegame/todo-pocket-android. First verify the product branch, isolated candidate workflow and pinned CI/report below. Continue the already approved controlled shortcut activation scope. Do not restart the project or ask the user to upload source or run scripts by default. Complete integration and original host gates, submit atomically without force, verify exact remote content, then verify API26/API34 against that final product commit. Documentation and old green commits do not replace code delivery. No automatic merge, release, credentials changes, external app launch, or phone-data operation.
+继续开发 supercubegame/todo-pocket-android。先读本文件及下方不可变历史交接，核对产品分支与候选工作流，再读最新运行的原始失败或成功回执。沿用已经批准的十一文件受控激活范围，不重建项目，不重复询问同一授权，不默认让我上传文件或运行脚本。按完整集成与原主机验证、实际提交并精确核对远端、同最终产品提交 API26/API34 验收推进。不能用文档或旧绿灯替代交付；不自动合并、发布、换密钥、启动外部应用或操作手机数据。
 
-## Keep three versions separate
+## 当前三个版本
 
-- Product branch: `feature/v1.2-activity-notes-ledger`.
-- Product head independently rechecked on this handoff: `3a5a17e1fdc570c73804007cd9a4d2ef36c0966b`.
-- Existing PR: https://github.com/supercubegame/todo-pocket-android/pull/4 ; historical base `feature/v1.1-edit-backup`. Recheck current PR metadata before changing it.
-- Candidate workflow branch: `ci/shortcut-storage-preflight-4d8742`.
-- Candidate workflow head: `56e57bb43453540fa2912c9518a1b5ab71254234`.
-- The candidate is materialized into a disposable checkout pinned at product 3a5a. Product pushes remain ZERO. Default startup/activation UI is not integrated.
-- Last delivered phone APK: `PocketTodo-v1.2-preview-4d8742d5671f.apk`, 9376689 bytes, SHA256 `e098732d6d420acc750a7a3d2833f533e5e5c1e127df9f2de7f3c109684c0962`.
-- Certificate SHA256: `c0f2373329a622978b9f22d7f2212ac0e131c14839af85b277ecf5fe728bf86d`.
-- Package: `com.supercubegame.pockettodo.v12.preview`, version 1.2/code3.
-- Historical APK artifact: https://github.com/supercubegame/todo-pocket-android/actions/runs/38012763048/artifacts/11656547355 . Availability was not rechecked this turn.
-- Phone feedback was apparent successful restore/open/navigation, not exact full-restoration or commercial acceptance. Never recommend clearing app data or uninstalling valuable data.
+- 产品分支 `feature/v1.2-activity-notes-ledger`：最近核验仍是 `3a5a17e1fdc570c73804007cd9a4d2ef36c0966b`。本轮没有产品推送。PR：https://github.com/supercubegame/todo-pocket-android/pull/4 。
+- 候选分支 `ci/shortcut-storage-preflight-4d8742`：最新提交 `f763cbf133c2eb6d8eb877a9836b852c56b178c9`，只更新现有 `.github/workflows/shortcut-storage.yml`。文件 20883 字节，blob `decd15df701220640e05e207fce4d7b907931935`，SHA256 `3285e5ae6a109f804af1d7e6d586abbb3ec99498a15f89e39f38d5eaa5c3b770`；本地摘要、写入响应、独立不可变提交目录回读一致。
+- 最新已交付手机包仍是 `PocketTodo-v1.2-preview-4d8742d5671f.apk`，不是上述两个版本。不要清除应用数据或卸载；私有备份不能抵御清数据/卸载。
 
-## Latest newly verified acceptance
+## 第一件事：读新运行
 
-Run: https://github.com/supercubegame/todo-pocket-android/actions/runs/38147585377
+https://github.com/supercubegame/todo-pocket-android/actions/runs/38533872559
 
-Exact workflow head 56e57, push, attempt 1. All five jobs succeeded: host, readable receipt, API26, API34, aggregate. Both Android builds and actual device execution steps succeeded, not skipped.
+来源必须为完整 f763cbf 提交，push，attempt 1。本检查点只确认运行已启动，尚未读取最终主机、构建、设备或汇总结果。不能把上一轮成功挪给本轮。若失败，保留首个原始输出，最小修复后新提交；不无改动重跑或放宽预算。
 
-Full host receipt was read: https://github.com/supercubegame/todo-pocket-android/runs/114494720068
+## 本轮真正新增的代码
 
-All original 21 commands passed, each attempt 1 / budget 300 seconds / exit 0 / not timed out. Product pushes 0, live_ui_enabled=false, release_ready=false.
+工作流在固定产品 3a5a 的临时检出上重建完整候选，不直接覆盖产品分支。继承已通过的后台数据库读取、加载/错误页、单次连接移交、销毁清理与保存状态。
 
-Complete candidate artifact: https://github.com/supercubegame/todo-pocket-android/actions/runs/38147585377/artifacts/11705194025
+新增差异落在现有 MainActivity.java、Schema4DeviceTest.java、tools/verify_shortcuts.py：
 
-Immutable report: https://github.com/supercubegame/todo-pocket-android/blob/3b14b36e87e32652fb0966ef538544cfc27a7214/reports/shortcuts-56e57bb43453540fa2912c9518a1b5ab71254234-38147585377-1.json
+1. MainActivity 增加仅进程内的布尔测试入口，固定使用 `schema4-startup-ui.db`，仍走真实默认后台启动方法；没有 Intent、偏好设置、文件开关或调用方选择路径。数据库名在 UI 线程捕获，后续重置标志不会把排队任务导向手机数据库。
+2. 设备测试启动真实 Activity，等待真实待办控件或错误页；检查新文件只建 schema3、旧 schema3 全部历史类型化单元格不变、损坏文件字节保留、schema4 历史和关联不变、重新打开及独立进程重启一致、手机数据库始终不存在。
+3. 新设备证据为 `STARTUP_NATIVE_PASS`：seed 6 项、reopen 2 项，另外保留原 97+16=113 项 SHORTCUT 标签契约。新增八项尚未设备验收，不能提前报成 121 项通过。
+4. 同一个 parse_phase 被实际设备入口及独立汇总调用，要求新标签完整、唯一、有序。旧完整成功日志若漏掉新检查必须拒绝。原有设备日志摘要、来源绑定、APK读回、停止进程与数据库回放保留。
 
-Report blob `74ebb2ca952ab7150ae83132d4b783fc7a585d1e`, top-level PASS, scope `ACTIVATION_BACKEND_CANDIDATE_NOT_PRODUCT_NOT_LIVE_UI_NOT_RELEASE`. Expected device contract is 97 seed + 16 reopen = 113/API. API26 labels/source binding were read; the response truncated later in snapshots. Full API34 labels, all snapshots and raw ZIPs were not personally audited this turn. Do not call this a complete byte audit.
+限制：新增启动夹具当前由设备中的独立 SQLite 读回比较，不另外收集该新数据库进行报告侧回放；原四类数据库回放仍保留。没有新增默认启动旋转/快速退出设备用例，相关后台所有权仍主要由 Java 替身测试覆盖。没有完成显式激活确认界面或覆盖升级。
 
-## Exact candidate recovery pins
+## 本地已跑的检查，不冒充设备证明
 
-The activation-host artifact contains `receipt.json`, `candidate/` and payload extensions. Its 14-day retention is NOT permanent backup. Restore only into a disposable checkout and verify exact identities before use.
+- 新回执解析：4 个正向、32 个负向通过；原旧解析器能接受缺少新检查的日志，新解析器拒绝该日志。
+- 真实 JDK AST：八个实际 Java 检查调用匹配；逐个移除的八个变异体均被同一检查器拒绝。仅解析，不是 Android 编译。
+- 修改后实际启动成员：14 项 Java 检查、5 个有正向见证的实现变异对照通过；Android/数据库使用明确替身。
+- YAML、11 个 shell 区块、外层与嵌套生成 Python 驱动语法通过。完整仓库主机和双 API 只以新运行结果为准。
 
-| Candidate path | Bytes | Git blob | SHA256 |
-| --- | ---: | --- | --- |
-| src/main/java/com/supercubegame/pockettodo/AppDatabase.java | 139068 | 0aaa2875c9c445800f25a7a0caa594541a24bec3 | f3be495c2d4ca175b10b446eacab69d46d2588c8fdc74eecb34c0c84f8ac886c |
-| src/main/java/com/supercubegame/pockettodo/Schema4Store.java | 39699 | 1b88780386f99597bfc34dd40457a5730f2f4cd6 | 7c1e1beddbcca686ed04049d7082991d2a9ca022f8235b320edf771d6f83e574 |
-| src/androidTest/java/com/supercubegame/pockettodo/Schema4DeviceTest.java | 57152 | 251155aa169c681beac01a3849eb2dd8a37d99fc | a138d877f7f7fcff2ef59cd8d25d7b99da8dc33132885185becad71647c65a27 |
-| tools/verify_shortcuts.py | 111849 | 73c556d39736115e624153c398e064f171ec6c0c | 2e6e5dfdf0b4d3a4ad1c73f1f36015ab9b2c44fcc7c0b14821c9a9a0102efe1b |
+## 上一轮已核验的成功
 
-Permanent recovery sources are immutable versions of `.github/workflows/shortcut-storage.yml`, with hash-bound compressed payloads. Inspect the full source, not an excerpt; preserve the original failure and all guards.
+候选 `af4abf74661bc8c73c2e82d69a65e6035b928a0d`：
+https://github.com/supercubegame/todo-pocket-android/actions/runs/38531511482
 
-| Workflow commit | Bytes | SHA256 |
-| --- | ---: | --- |
-| 1ca2404a7b6d75c0645bd19ab07731205f2f6f63 | 26535 | 1a571d49a33c79c46e934dc5b9ee7a8e44cfeca3055089be326f8f51a7d41ae0 |
-| 2214ee4af8eadca66b9e3bf71caf0925c0432daa | 15949 | d3ccf20d029c5139cfe9e3c6332ed8944a894ceac0e90d9b0f3eecf5300eb27b |
-| 04bb1c5fd574bd8e1666634bf8b22269d2819b6c | 20444 | 6cca32c572e738f86ab8a65472c54a14b6f9fd22054997bebb3fbef83e810d1e |
-| 56e57bb43453540fa2912c9518a1b5ab71254234 | 21962 | 4786a65ce08f30c787536adfad91599dcfb9ee58e9c2ea7ca41ae049435c0d83 |
+主机、可读回执、API26、API34、汇总五个作业全部 success；两档 Android 构建与既有回归实际成功，未跳过。完整新 UI 集成主机回执已读，原21命令均一次、300秒预算、退出0、无超时：
+https://github.com/supercubegame/todo-pocket-android/runs/115747172492
 
-Order: original activation payload in 1ca, evidence-path repair in 2214, resume extension in 04bb, startup extension in 56e57. Preserve materializer transformations and aliases. Do not directly rerun 1ca: it has the known checkout-cleanliness fixture defect.
+候选归档：https://github.com/supercubegame/todo-pocket-android/actions/runs/38531511482/artifacts/11877649219
 
-The prior sandbox development directory was absent on October 14. Historical local paths are NOT portable deliverables. Full local source reconstruction has not been completed. The handoff download contains a read-only candidate validator, not the candidate files or full repository. Its synthetic tests passed: 1 positive, 23 negatives, 2 hash known answers and 4 implementation mutations with valid witnesses. These tests are not Android acceptance.
+这证明 af4abf 编译与旧回归，不证明它已覆盖真实默认启动流程；因此才有 f763cbf。af4abf 的完整设备原始 ZIP 和全部汇总快照本轮未独立逐项审计。
 
-## Implemented candidate behavior
+恢复 af4abf 的五文件：AppDatabase 139068 字节/blob 0aaa2875c9c445800f25a7a0caa594541a24bec3；Schema4Store 39699/blob 1b88780386f99597bfc34dd40457a5730f2f4cd6；Schema4DeviceTest 57152/blob 251155aa169c681beac01a3849eb2dd8a37d99fc；verify_shortcuts 111849/blob 73c556d39736115e624153c398e064f171ec6c0c；MainActivity 38264/blob 3e0cfb326ad17d1638b805518187cae91f118218。这不是 f763cbf 的最终五文件身份，新身份必须读新回执。
 
-Verified private backup before explicit single-use activation; consent bound to owner/session/connection/full cells/archive digest; preparation/cancel do not migrate. Transactional migration rechecks source, media and backup, preserves historical typed cells/rowids and starts empty shortcut links. Old facade retires after success.
+## 永久恢复与历史
 
-Non-creating schema4 resume refuses missing, empty, corrupt, symlink and future-version files without deleting/resetting them. `AppDatabase.openForStartup(Context,String)` initializes schema3 only for genuinely missing files, migrates validated schema2 through the frozen old schema3 path, keeps existing schema3 unchanged, and resumes validated schema4. Other versions, including schema1, currently fail closed. Do not silently broaden policy.
+完整上一版交接、十一文件精确授权、21条命令、APK摘要、历史失败和待办范围均保留在不可变版本：
+https://github.com/supercubegame/todo-pocket-android/blob/9a6c72f8c67e2ae3520398833dc1ace7bcfcddf4/HANDOFF.md
 
-## Next actual delivery work
+工作流永久源包含哈希绑定的完整代码片段及集成驱动：
+https://github.com/supercubegame/todo-pocket-android/blob/f763cbf133c2eb6d8eb877a9836b852c56b178c9/.github/workflows/shortcut-storage.yml
 
-1. Recover the exact candidate and full current source. Do not manually replace full files with snippets.
-2. Wire default MainActivity startup to openForStartup off the UI thread, with loading/error UI, lifecycle-safe ownership and cleanup of late results. Preserve the isolated UI test path and no-live-database guard.
-3. Add explicit TodayScreen activation entry/dialog. Cancel/replay/stale/foreign/closed/double-tap/recreation must be safe. Close abandoned plans, retire the old facade, replace the screen, invalidate old callbacks.
-4. If migration committed but reopening the UI fails, do NOT report that the original data was unchanged and do NOT use the old backupFailed message.
-5. Add stable-signature old-APK-to-new-APK overwrite acceptance. Direct database tests are not proof of overwrite upgrade.
-6. Update AGENTS.md and CLAUDE.md identically, and integrate the product workflow.
-7. Run all 21 original hosts, atomically non-force submit the complete approved integration, independently verify exact remote bytes, then accept API26/API34 against that final PRODUCT commit.
+它钉住 af4abf（20440 字节，SHA256 c921773dd62a5245e3d97af44c11ab8a52d20801e8ec9c31782e5d978ebbda38）的 UI 材料与 56e57 的后端材料，再按既有依赖链重建。必须验证每个不可变源摘要；不要猜路径或跳过旧检查。Actions 归档保留14天，不是永久备份。沙箱目录不会跨账号继承，完整产品源码应从 GitHub 读取。
 
-No new default UI code, product commit, APK, merge or release was produced in this handoff turn.
+## 接下来按依赖推进
 
-## Active approved scope
+1. 读取 f763cbf 原始主机回执、全部五文件身份、实际 Android 构建、两档原生启动日志及最终汇总；修首个失败。
+2. 收口真实默认启动设备覆盖；补旋转/快速退出及原生错误恢复边界，不让局部测试冒充全链路。
+3. 接通 TodayScreen 的明确激活入口、备份完成后的确认/取消；处理重复点击、过期状态、销毁、旧回调与成功后整屏替换。提交后重新打开失败不能宣称数据未变。
+4. 实现稳定签名旧 APK 覆盖到新 APK 的验收。直接打开数据库不是覆盖升级证明。
+5. 同步 AGENTS.md/CLAUDE.md 与产品工作流，完成原21主机、原子非强制产品提交、精确远端核验、同最终产品提交 API26/API34，才交付新 APK。
+6. 再收口剩余功能、UI易用性、真实图片/大字体/输入法、性能、存储失败与商业签名分发等。历史十一父任务未重新统计，不报整体完成百分比。
 
-October 11, 18:34 explicit approval remains valid for these eleven existing targets. Do not ask again for the same scope:
+## 权限与账户边界
 
-1. src/main/java/com/supercubegame/pockettodo/AppDatabase.java
-2. src/main/java/com/supercubegame/pockettodo/Schema4Store.java
-3. src/main/java/com/supercubegame/pockettodo/TodayScreen.java
-4. src/main/java/com/supercubegame/pockettodo/MainActivity.java
-5. src/androidTest/java/com/supercubegame/pockettodo/Schema4DeviceTest.java
-6. tools/verify_shortcuts.py
-7. tools/verify_upgrade.py
-8. AGENTS.md
-9. CLAUDE.md
-10. Product branch .github/workflows/shortcut-storage.yml
-11. Existing isolated branch .github/workflows/shortcut-storage.yml
+10月11日18:34十一文件授权继续有效，详见历史交接，不需重复确认同范围。必须明确选择激活，不得普通启动自动迁到 schema4；备份先校验、失败关闭、不清数据，保留原断言、输出、预算与失败。现有授权连接即可，不新增令牌，不合并、不发布、不操作手机。
 
-Explicit opt-in only; no automatic schema3-to4 activation. Verified backup before migration, fail closed, no data clearing. Preserve original commands, assertions, budgets, output and first failure. Original RED, minimal GREEN, meaningful negative/mutation controls. Existing authorized credentials only. No phone operation, external launch, new credential, merge or release. The October 14 request additionally authorizes preparing this cross-account handoff, not expanding product permissions.
+换 ClickUp 账号不需要 fork、迁移 owner 或改变仓库公开性；新账号要有自己的授权 GitHub 连接，不能假定继承旧账号的技能、记忆、文档、聊天、Agent或沙箱。先只读核对本文件、源码和报告，再在真正授权的下一次提交上核对写入与报告送达。禁止两个账号同时写同一分支。不要复制任何密钥值。
 
-## Original host commands
+此前查到的 ClickUp 支持说明：Brain用量限制按Workspace计算，同一Workspace换用户不会重置；实际套餐/余额未读取。没有配置新的自动进度通知或后台开发者；对话结束不代表助手继续开发。
 
-Each original budget 300 seconds, one attempt; save original output and stop on failure.
+## 优化建议与未解决风险
 
-```sh
-python3 tools/verify_app_catalog.py selftest
-python3 tools/verify.py v12
-python3 tools/verify_process_control.py selftest
-python3 tools/verify_ui_observer.py selftest
-python3 tools/verify_adb_transfer.py
-python3 tools/verify_evidence.py
-python3 tools/verify_schema3.py selftest
-python3 tools/verify_note_drafts.py selftest
-python3 tools/verify_todo_management.py selftest
-python3 tools/verify_custom_fields.py selftest
-python3 tools/verify_category_drag.py selftest
-python3 -c 'import sys;sys.path.insert(0,"tools");import emulator_gate;emulator_gate.parser_selftest()'
-python3 tools/verify_batch_exports.py selftest
-python3 tools/verify_upgrade.py selftest
-python3 tools/verify_upgrade.py workflow-selftest
-python3 tools/verify_process_control.py server-log-selftest
-python3 tools/verify_process_control.py isolated-selftest
-python3 tools/verify_process_control.py absence-selftest
-python3 tools/verify_paged_exports.py selftest
-python3 tools/verify_note_management.py selftest
-python3 tools/verify_shortcuts.py selftest
-```
+优先完成默认界面、激活、覆盖升级这一条交付链，别继续积累无法安装的新后端候选。保留快检查在前、双API并行和首错停止；交接只更新当前状态与不可变证据链接，不每轮重写全部聊天。
 
-## Outstanding limitations
-
-- 2b94 API26 directory ADB255: run38024836899, after103 checks, 0.111276seconds against original40seconds, attempt1. EOF before shell-v2 exit packet; root cause not proven.
-- b212 run38000599082: after164 checks, 0.154196seconds. Similar symptoms do not prove a common cause.
-- Diagnostic run38105137754:20/20 per API on synthetic filenames, NOT_REPRODUCED_NOT_FIXED.
-- Separate API34 export ANR in run37918657686 remains unexplained.
-- Original1ca run38133227698 failed before hosts because evidence dirtied the checkout.2214 moved only evidence to RUNNER_TEMP, preserving payload/guards and actual Git RED/GREEN/negative controls. Zero product pushes in the failure.
-- Activation media fixture is three-byte abc, not real photo/EXIF/performance coverage.
-- Private backups disappear on app-data clearing/uninstall. Off-device recovery, power-loss durability, persistent ABA and malicious same-UID races are not proven.
-- Historical eleven open parent areas: image derivation, three-format sharing, notes/drafts, catalog/shortcuts, custom fields/field notes, calendar/ledger undo, todos/category drag, schedules/search/templates/archive, restore undo/cleanup/legacy import, lifecycle/storage/large font, full acceptance/stable delivery. Re-query task status before reporting counts. Open status is not proof that features are entirely unimplemented.
-- Full UI consistency, real media/IME/large-font testing, performance/storage failure, recipient-app sharing, commercial signing/distribution/privacy/license acceptance remain incomplete.
-
-## Switching ClickUp accounts safely
-
-Keep this GitHub repository and owner. Merely changing ClickUp account does not require fork, transfer, public visibility changes, new Secrets, or a new product branch.
-
-Personal MCP connections are scoped to their creator and Workspace. The new account needs its own authorized GitHub connection. Do not copy tokens, signing keys, one-time codes or secret values. ClickUp memory, chat, Docs, installed skills, Super Agents and sandbox files must not be assumed to transfer automatically.
-
-First perform a read-only delivery check: read this handoff, the pinned report, product source and CI results. This project has readable reports on its evidence branch; do not invent a dependency on another shared reporting repository. A ClickUp-account switch alone does not require rewriting the publisher or rerunning unchanged devices. A future GitHub-owner/CI migration needs a separate permission/reference/report-delivery audit.
-
-Read access does not prove write access. Verify exact remote content and report delivery on the first genuinely authorized new submission. Never launch two branch writers from different accounts.
-
-Current ClickUp support states Brain usage limits apply at Workspace level: switching users within the same Workspace does not reset that allowance. Actual plan, billing and credit balance were not read. Do not promise that another account solves the limit.
-
-Check skill availability in the new account; consult current support before prescribing skill import. No new background developer or automatic progress notifications were configured. The historical hourly read-only Casey agent was not reverified this turn.
-
-## Execution optimization
-
-Stop multiplying backend-only candidates without closing the integrated default-UI and same-commit overwrite-upgrade milestone. Keep fast local gates before expensive Android CI, retain all original regression gates, and parallelize API26/API34 rather than branch writers. Update a short checkpoint after a real submission, final CI outcome or actual blocker. Keep immutable links instead of replaying the entire chat history each turn.
+历史 API26 ADB255 和独立 API34 导出系统 ANR 的根因仍未证明。后续绿灯、合成文件非复现均不能宣称修复。三字节媒体夹具不代表真实照片兼容性；私有备份不代表卸载安全、断电持久化或异机恢复。商业交付仍未完成。

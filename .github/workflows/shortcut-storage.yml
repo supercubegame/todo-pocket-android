@@ -1,7 +1,8 @@
-name: Explicit activation UI acceptance preflight
-on:
+name: Explicit activation UI exact transfer repair
+'on':
   push:
-    branches: [ci/shortcut-storage-preflight-4d8742]
+    branches:
+      - ci/shortcut-storage-preflight-4d8742
 permissions:
   contents: read
 concurrency:
@@ -19,59 +20,59 @@ jobs:
         with:
           ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
           persist-credentials: false
-      - name: Use Java 17
-        run: |
-          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
-          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
-      - name: Restore exact pinned backend materializer
+      - name: Verify exact original source and repair two transport escapes
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import hashlib,pathlib,os,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/56e57bb43453540fa2912c9518a1b5ab71254234/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as response: source=response.read(21963)
-          assert len(source)==21962 and hashlib.sha256(source).hexdigest()=="4786a65ce08f30c787536adfad91599dcfb9ee58e9c2ea7ca41ae049435c0d83"
-          text=source.decode();begin=text.index("          import ast,");end=text.index("\n          PY\n",begin)
-          program="\n".join(line[10:] for line in text[begin:end].splitlines())
-          exec(compile(program,"pinned-startup-materializer","exec"),{})
+          import hashlib,os,pathlib,subprocess,urllib.request
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/cbbc66ec225157ace12dc56402445390beb1df66/.github/workflows/shortcut-storage.yml"
+          with urllib.request.urlopen(url,timeout=60) as r: data=r.read(29381)
+          blob=lambda b:hashlib.sha1(b"blob "+str(len(b)).encode()+bytes([0])+b).hexdigest()
+          assert len(data)==29380 and blob(data)=="b72879364d180397e06857650fd246c3644ff357"
+          text=data.decode()
+          pairs=[
+           ('driver=driver.replace(anchor,anchor+"'+chr(92)+'n"+insert,1)', 'driver=driver.replace(anchor,anchor+"'+chr(92)*2+'n"+insert,1)'),
+           ('static boolean isolatedActivationTest;")'+chr(92)+"n"+chr(92)+"'+anchor,1)", 'static boolean isolatedActivationTest;")'+chr(92)*2+"n"+chr(92)+"'+anchor,1)")
+          ]
+          for old,new in pairs:
+           assert text.count(old)==1
+           text=text.replace(old,new,1)
+          fixed=text.encode()
+          assert len(fixed)==29382 and blob(fixed)=="7ded9ebe7dca9e669e6dd4f6b906191f1ef957a0"
+          assert hashlib.sha256(fixed).hexdigest()=="8ba546250800b9d2f752cf70446f11de83bdebd137acde6cf771621b5f576d2d"
+          folder=pathlib.Path(os.environ["RUNNER_TEMP"])/"exact-activation-scripts"
+          folder.mkdir()
+          lines=text.splitlines();scripts=[]
+          for i,line in enumerate(lines):
+           if line=="        run: |":
+            body=[]
+            for tail in lines[i+1:]:
+             if tail and not tail.startswith("          "):break
+             body.append(tail[10:] if tail else "")
+            scripts.append("\n".join(body)+"\n")
+          assert len(scripts)==11
+          for i,script in enumerate(scripts):
+           path=folder/(str(i)+".sh");path.write_text(script)
+           subprocess.run(["bash","-n",str(path)],check=True)
+          print("EXACT_REPAIRED_ORIGINAL_11_SHELL_BLOCKS_VERIFIED")
           PY
+      - name: Use Java 17
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/exact-activation-scripts/0.sh"
+      - name: Restore exact pinned backend materializer
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/exact-activation-scripts/1.sh"
       - name: Preserve original RED and backend host gates
         run: |
           set -euo pipefail
-          python3 "$RUNNER_TEMP/activation-payload/driver.py" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/activation-payload" "$RUNNER_TEMP/activation-evidence"
+          bash "$RUNNER_TEMP/exact-activation-scripts/2.sh"
       - name: Integrate default startup UI and rerun all 21 original hosts
         id: integration
         run: |
           set -euo pipefail
-          python3 - <<'PY' 2>&1 | tee "$RUNNER_TEMP/activation-evidence/startup-integration.log"
-          import ast,hashlib,os,pathlib,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/ab5162f847db4a2b88229b156c3702c31707a4ac/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as response: source=response.read(20888)
-          assert len(source)==20887 and hashlib.sha256(source).hexdigest()=="892892019cd20e7e911b595269fcb306d87358cba83d8636ff71fdb46abf4176"
-          text=source.decode();start=text.index("          import ast,base64,hashlib,json,lzma,os,pathlib,subprocess,urllib.request")
-          end=text.index("\n          PY\n",start)
-          program="\n".join(line[10:] for line in text[start:end].splitlines())
-          anchor='folder=pathlib.Path(os.environ["RUNNER_TEMP"])/"startup-ui-extension"'
-          assert program.count(anchor)==1
-          patch = '''
-          gate_path=pathlib.Path(os.environ["RUNNER_TEMP"])/"startup-ui-extension/gate.py"
-          old_gate=gate_path.read_text()
-          old='a.stopStartup();ok(AppDatabase.last.closes==0,"transfer_not_reclaimed");'
-          new='a.stopStartup();if(!a.startupIo.awaitTermination(5,TimeUnit.SECONDS))throw new AssertionError("startup stop timeout");ok(AppDatabase.last.closes==0,"transfer_not_reclaimed");'
-          assert old_gate.count(old)==1
-          fixed=old_gate.replace(old,new,1)
-          assert fixed.replace(new,old,1)==old_gate
-          ast.parse(fixed)
-          gate_path.write_text(fixed)
-          '''
-          program=program.replace(anchor,patch+"\n"+anchor,1)
-          ast.parse(program)
-          target='subprocess.run(["python3",str(folder/"integrate.py"),os.environ["GITHUB_WORKSPACE"],str(folder),str(pathlib.Path(os.environ["RUNNER_TEMP"])/"activation-evidence")],check=True)'
-          assert program.count(target)==1
-          program=program.replace(target,'import base64,json,lzma,importlib.util\npayload=lzma.decompress(base64.b64decode(\'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\',validate=True))\nassert hashlib.sha256(payload).hexdigest()==\'cad11aea656fd2e440ced86b57ac78f16a01675fbb1cb32633bde8a68e427ae9\'\nactivation_files=json.loads(payload)\nassert set(activation_files)=={"activation-ui.java","activation-main.java","activation-device.java","activation-parser.py","activation-host.py","integrate-activation-ui.py"}\nfor name,content in activation_files.items(): (folder/name).write_text(content)\nspec=importlib.util.spec_from_file_location("activation_host",folder/"activation-host.py")\nhost=importlib.util.module_from_spec(spec);spec.loader.exec_module(host)\nc,r=host.run("")\nassert c.returncode!=0 and "cannot find symbol" in c.stderr\n(pathlib.Path(os.environ["RUNNER_TEMP"])/"activation-evidence/activation-ui-original-red.txt").write_text(c.stderr)\ndriver=(folder/"integrate.py").read_text()\nanchor="    native.extend(root,folder)"\nassert driver.count(anchor)==1\ninsert="""    spec=importlib.util.spec_from_file_location("activation_extension",folder/"integrate-activation-ui.py")\n    extension=importlib.util.module_from_spec(spec);spec.loader.exec_module(extension)\n    extension.integrate(root,folder)\n    today="src/main/java/com/supercubegame/pockettodo/TodayScreen.java"\n    receipt["candidate_files"][today]=identity((root/today).read_bytes())\n    (out/"activation-ui-extension.json").write_text(json.dumps({n:(folder/n).read_text() for n in ("activation-ui.java","activation-main.java","activation-device.java","activation-parser.py","activation-host.py","integrate-activation-ui.py")}))\n"""\ndriver=driver.replace(anchor,anchor+"\n"+insert,1)\nanchor="    gate.check_members(emitted)"\nassert driver.count(anchor)==1\ndriver=driver.replace(anchor,\'    gate.HARNESS=gate.HARNESS.replace("static boolean isolatedStartupTest;", "static boolean isolatedStartupTest; static boolean isolatedActivationTest;")\n\'+anchor,1)\ndriver=driver.replace("NATIVE_STARTUP_CANDIDATE_NOT_ACTIVATION_UI_NOT_PRODUCT_NOT_UPGRADE","EXPLICIT_ACTIVATION_UI_CANDIDATE_NOT_PRODUCT_NOT_UPGRADE")\nast.parse(driver);(folder/"integrate.py").write_text(driver)\n'+"\n"+target,1)
-          ast.parse(program)
-          exec(compile(program,"ab5162-gate-race-repair","exec"),{})
-          PY
+          bash "$RUNNER_TEMP/exact-activation-scripts/3.sh"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: evidence
         if: always()
@@ -89,38 +90,7 @@ jobs:
           ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import json,os,pathlib,subprocess
-          p=pathlib.Path(os.environ["RUNNER_TEMP"])/"activation-evidence/receipt.json"
-          value=json.loads(p.read_text()) if p.exists() else {"status":"SETUP_FAILED","host_commands":[]}
-          value["artifact_url"]=os.environ.get("ARTIFACT_URL")
-          value["integration_outcome"]=os.environ["HOST_OUTCOME"]
-          value["upload_outcome"]=os.environ["UPLOAD_OUTCOME"]
-          ok=value["status"]=="HOST_PASS_CANDIDATE_DEVICE_PENDING" and "startup_ui_host" in value and os.environ["HOST_OUTCOME"]==os.environ["UPLOAD_OUTCOME"]=="success"
-          if not ok:
-              log=p.parent/"startup-integration.log"
-              data=log.read_bytes() if log.exists() else b""
-              value["failure_log"]={"bytes":len(data),"tail":data[-12000:].decode(errors="replace"),
-                  "tail_is_partial":len(data)>12000,"complete_log_in_artifact":log.exists()}
-          body=json.dumps(value,ensure_ascii=False,indent=2)
-          parts=[body[i:i+12000] for i in range(0,len(body),12000)]
-          assert "".join(parts)==body and 0<len(parts)<=100
-          endpoint="repos/"+os.environ["GITHUB_REPOSITORY"]+"/check-runs"
-          for index,part in enumerate(parts,1):
-              request={"name":f"Startup UI preflight evidence {index}/{len(parts)}","head_sha":os.environ["GITHUB_SHA"],
-                  "status":"completed","conclusion":"success" if ok else "failure","output":{
-                  "title":value["status"] if ok else "INTEGRATION_OR_UPLOAD_FAILED",
-                  "summary":f"Part {index}/{len(parts)} of complete receipt. Candidate only; product pushes=0. Explicit activation UI candidate; overwrite upgrade pending.",
-                  "text":"```json\n"+part+"\n```"}}
-              assert len(request["output"]["text"].encode())<60000
-              r=subprocess.run(["gh","api","--method","POST",endpoint,"--input","-"],input=json.dumps(request),text=True,capture_output=True,timeout=60,check=True)
-              made=json.loads(r.stdout)
-              seen=json.loads(subprocess.check_output(["gh","api",endpoint+"/"+str(made["id"])],text=True,timeout=60))
-              assert seen["head_sha"]==request["head_sha"] and seen["conclusion"]==request["conclusion"]
-              assert all(seen["output"][k]==v for k,v in request["output"].items())
-              print("STARTUP_UI_RECEIPT",seen["html_url"])
-          raise SystemExit(0 if ok else 1)
-          PY
+          bash "$RUNNER_TEMP/exact-activation-scripts/4.sh"
   shortcut_device:
     needs: shortcut_host
     if: github.event_name != 'pull_request'
@@ -129,7 +99,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api: [26, 34]
+        api:
+          - 26
+          - 34
     env:
       TEST_API: ${{ matrix.api }}
     steps:
@@ -141,54 +113,61 @@ jobs:
         with:
           name: activation-host
           path: activation-evidence
-      - name: Restore exact six-file host-verified candidate
+      - name: Verify exact original source and repair two transport escapes
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import hashlib,json,pathlib,subprocess,os
-          root=pathlib.Path(".")
-          assert subprocess.check_output(["git","rev-parse","HEAD"]).decode().strip()=="3a5a17e1fdc570c73804007cd9a4d2ef36c0966b"
-          expected={"src/main/java/com/supercubegame/pockettodo/AppDatabase.java":"f3ae4d9d9bb59670e9634714640ac6fbdf478a09","src/main/java/com/supercubegame/pockettodo/Schema4Store.java":"cfc8c36a0681467150d5cd84ecfbcc76c184cb92","src/androidTest/java/com/supercubegame/pockettodo/Schema4DeviceTest.java":"0e63fc3448dae47d289533181be1f726eca1c15e","tools/verify_shortcuts.py":"af4e02026ca601f6a5cfb3d03c369fec675e4515","src/main/java/com/supercubegame/pockettodo/MainActivity.java":"404ed33a43182cf1c016ffc3326c2fd539cc4184","src/main/java/com/supercubegame/pockettodo/TodayScreen.java":"d1def935dc07744e23927a06c0630a66d1f4a710"}
-          receipt=json.loads((root/"activation-evidence/receipt.json").read_text())
-          assert receipt["status"]=="HOST_PASS_CANDIDATE_DEVICE_PENDING"
-          assert receipt["baseline"]=="3a5a17e1fdc570c73804007cd9a4d2ef36c0966b" and receipt["product_pushes"]==0
-          assert receipt["workflow_commit"]==os.environ["GITHUB_SHA"] and str(receipt["run_id"])==os.environ["GITHUB_RUN_ID"] and str(receipt["run_attempt"])==os.environ["GITHUB_RUN_ATTEMPT"]
-          assert len(receipt["host_commands"])==21 and all(r["returncode"]==0 and not r["timed_out"] and r["attempts"]==1 and r["budget_seconds"]==300 for r in receipt["host_commands"])
-          assert receipt["startup_ui_host"]=={"checks":14,"witnessed_mutants":5,"scope":"REAL_JAVA_ANDROID_DOUBLES"}
-          assert set(receipt["candidate_files"])==set(expected)
-          for p,blob in expected.items():
-           old=(root/p).read_bytes()
-           assert hashlib.sha1(b"blob "+str(len(old)).encode()+b"\0"+old).hexdigest()==blob
-           data=(root/"activation-evidence/candidate"/p).read_bytes();identity=receipt["candidate_files"][p]
-           assert len(data)==identity["bytes"] and hashlib.sha256(data).hexdigest()==identity["sha256"]
-           assert hashlib.sha1(b"blob "+str(len(data)).encode()+b"\0"+data).hexdigest()==identity["blob"]
-           (root/p).write_bytes(data)
+          import hashlib,os,pathlib,subprocess,urllib.request
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/cbbc66ec225157ace12dc56402445390beb1df66/.github/workflows/shortcut-storage.yml"
+          with urllib.request.urlopen(url,timeout=60) as r: data=r.read(29381)
+          blob=lambda b:hashlib.sha1(b"blob "+str(len(b)).encode()+bytes([0])+b).hexdigest()
+          assert len(data)==29380 and blob(data)=="b72879364d180397e06857650fd246c3644ff357"
+          text=data.decode()
+          pairs=[
+           ('driver=driver.replace(anchor,anchor+"'+chr(92)+'n"+insert,1)', 'driver=driver.replace(anchor,anchor+"'+chr(92)*2+'n"+insert,1)'),
+           ('static boolean isolatedActivationTest;")'+chr(92)+"n"+chr(92)+"'+anchor,1)", 'static boolean isolatedActivationTest;")'+chr(92)*2+"n"+chr(92)+"'+anchor,1)")
+          ]
+          for old,new in pairs:
+           assert text.count(old)==1
+           text=text.replace(old,new,1)
+          fixed=text.encode()
+          assert len(fixed)==29382 and blob(fixed)=="7ded9ebe7dca9e669e6dd4f6b906191f1ef957a0"
+          assert hashlib.sha256(fixed).hexdigest()=="8ba546250800b9d2f752cf70446f11de83bdebd137acde6cf771621b5f576d2d"
+          folder=pathlib.Path(os.environ["RUNNER_TEMP"])/"exact-activation-scripts"
+          folder.mkdir()
+          lines=text.splitlines();scripts=[]
+          for i,line in enumerate(lines):
+           if line=="        run: |":
+            body=[]
+            for tail in lines[i+1:]:
+             if tail and not tail.startswith("          "):break
+             body.append(tail[10:] if tail else "")
+            scripts.append("\n".join(body)+"\n")
+          assert len(scripts)==11
+          for i,script in enumerate(scripts):
+           path=folder/(str(i)+".sh");path.write_text(script)
+           subprocess.run(["bash","-n",str(path)],check=True)
+          print("EXACT_REPAIRED_ORIGINAL_11_SHELL_BLOCKS_VERIFIED")
           PY
+      - name: Restore exact six-file host-verified candidate
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/exact-activation-scripts/5.sh"
       - name: Fixed disposable Android setup
         run: |
           set -euo pipefail
-          exec > >(tee shortcut-setup.log) 2>&1
-          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
-          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
-          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
-          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip.sha256 -o /tmp/gradle.sha256
-          echo "$(cat /tmp/gradle.sha256)  /tmp/gradle.zip" | sha256sum -c -
-          unzip -q /tmp/gradle.zip -d /tmp
-          echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
-          sudo apt-get update
-          sudo apt-get install --yes strace
+          bash "$RUNNER_TEMP/exact-activation-scripts/6.sh"
       - name: Build isolated runner and restore original Gradle source
         env:
-          BUILD_429_EXECUTE: "true"
-          BUILD_LOG: "shortcut-build.log"
+          BUILD_429_EXECUTE: 'true'
+          BUILD_LOG: shortcut-build.log
         run: |
           set -euo pipefail
-          python3 tools/verify_shortcuts.py build 2>&1 | tee shortcut-build-driver.log
+          bash "$RUNNER_TEMP/exact-activation-scripts/7.sh"
       - name: Original regressions plus actual native default startup
         run: |
           set -euo pipefail
-          python3 tools/verify_shortcuts.py android 2>&1 | tee shortcut-android.log
+          bash "$RUNNER_TEMP/exact-activation-scripts/8.sh"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -204,7 +183,9 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   shortcut_report:
-    needs: [shortcut_host, shortcut_device]
+    needs:
+      - shortcut_host
+      - shortcut_device
     if: always() && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -220,29 +201,46 @@ jobs:
         with:
           name: activation-host
           path: activation-evidence
-      - name: Restore exact six-file host-verified candidate
+      - name: Verify exact original source and repair two transport escapes
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import hashlib,json,pathlib,subprocess,os
-          root=pathlib.Path(".")
-          assert subprocess.check_output(["git","rev-parse","HEAD"]).decode().strip()=="3a5a17e1fdc570c73804007cd9a4d2ef36c0966b"
-          expected={"src/main/java/com/supercubegame/pockettodo/AppDatabase.java":"f3ae4d9d9bb59670e9634714640ac6fbdf478a09","src/main/java/com/supercubegame/pockettodo/Schema4Store.java":"cfc8c36a0681467150d5cd84ecfbcc76c184cb92","src/androidTest/java/com/supercubegame/pockettodo/Schema4DeviceTest.java":"0e63fc3448dae47d289533181be1f726eca1c15e","tools/verify_shortcuts.py":"af4e02026ca601f6a5cfb3d03c369fec675e4515","src/main/java/com/supercubegame/pockettodo/MainActivity.java":"404ed33a43182cf1c016ffc3326c2fd539cc4184","src/main/java/com/supercubegame/pockettodo/TodayScreen.java":"d1def935dc07744e23927a06c0630a66d1f4a710"}
-          receipt=json.loads((root/"activation-evidence/receipt.json").read_text())
-          assert receipt["status"]=="HOST_PASS_CANDIDATE_DEVICE_PENDING"
-          assert receipt["baseline"]=="3a5a17e1fdc570c73804007cd9a4d2ef36c0966b" and receipt["product_pushes"]==0
-          assert receipt["workflow_commit"]==os.environ["GITHUB_SHA"] and str(receipt["run_id"])==os.environ["GITHUB_RUN_ID"] and str(receipt["run_attempt"])==os.environ["GITHUB_RUN_ATTEMPT"]
-          assert len(receipt["host_commands"])==21 and all(r["returncode"]==0 and not r["timed_out"] and r["attempts"]==1 and r["budget_seconds"]==300 for r in receipt["host_commands"])
-          assert receipt["startup_ui_host"]=={"checks":14,"witnessed_mutants":5,"scope":"REAL_JAVA_ANDROID_DOUBLES"}
-          assert set(receipt["candidate_files"])==set(expected)
-          for p,blob in expected.items():
-           old=(root/p).read_bytes()
-           assert hashlib.sha1(b"blob "+str(len(old)).encode()+b"\0"+old).hexdigest()==blob
-           data=(root/"activation-evidence/candidate"/p).read_bytes();identity=receipt["candidate_files"][p]
-           assert len(data)==identity["bytes"] and hashlib.sha256(data).hexdigest()==identity["sha256"]
-           assert hashlib.sha1(b"blob "+str(len(data)).encode()+b"\0"+data).hexdigest()==identity["blob"]
-           (root/p).write_bytes(data)
+          import hashlib,os,pathlib,subprocess,urllib.request
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/cbbc66ec225157ace12dc56402445390beb1df66/.github/workflows/shortcut-storage.yml"
+          with urllib.request.urlopen(url,timeout=60) as r: data=r.read(29381)
+          blob=lambda b:hashlib.sha1(b"blob "+str(len(b)).encode()+bytes([0])+b).hexdigest()
+          assert len(data)==29380 and blob(data)=="b72879364d180397e06857650fd246c3644ff357"
+          text=data.decode()
+          pairs=[
+           ('driver=driver.replace(anchor,anchor+"'+chr(92)+'n"+insert,1)', 'driver=driver.replace(anchor,anchor+"'+chr(92)*2+'n"+insert,1)'),
+           ('static boolean isolatedActivationTest;")'+chr(92)+"n"+chr(92)+"'+anchor,1)", 'static boolean isolatedActivationTest;")'+chr(92)*2+"n"+chr(92)+"'+anchor,1)")
+          ]
+          for old,new in pairs:
+           assert text.count(old)==1
+           text=text.replace(old,new,1)
+          fixed=text.encode()
+          assert len(fixed)==29382 and blob(fixed)=="7ded9ebe7dca9e669e6dd4f6b906191f1ef957a0"
+          assert hashlib.sha256(fixed).hexdigest()=="8ba546250800b9d2f752cf70446f11de83bdebd137acde6cf771621b5f576d2d"
+          folder=pathlib.Path(os.environ["RUNNER_TEMP"])/"exact-activation-scripts"
+          folder.mkdir()
+          lines=text.splitlines();scripts=[]
+          for i,line in enumerate(lines):
+           if line=="        run: |":
+            body=[]
+            for tail in lines[i+1:]:
+             if tail and not tail.startswith("          "):break
+             body.append(tail[10:] if tail else "")
+            scripts.append("\n".join(body)+"\n")
+          assert len(scripts)==11
+          for i,script in enumerate(scripts):
+           path=folder/(str(i)+".sh");path.write_text(script)
+           subprocess.run(["bash","-n",str(path)],check=True)
+          print("EXACT_REPAIRED_ORIGINAL_11_SHELL_BLOCKS_VERIFIED")
           PY
+      - name: Restore exact six-file host-verified candidate
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/exact-activation-scripts/9.sh"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: shortcut-*
@@ -254,7 +252,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          python3 tools/verify_shortcuts.py report 2>&1 | tee shortcut-report.log
+          bash "$RUNNER_TEMP/exact-activation-scripts/10.sh"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -264,3 +262,4 @@ jobs:
             shortcut-report.log
           if-no-files-found: error
           retention-days: 14
+

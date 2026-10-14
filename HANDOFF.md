@@ -1,45 +1,45 @@
 # 口袋待办：当前接续入口
 
-2026-10-14继续轮，已核验至a727双API成功、b060新CI启动。单分支一个写入者；新账号独立授权GitHub，不假定继承技能、记忆或沙箱。不是完整交付、新APK或发布声明。
+2026-10-15继续轮。单分支一个写入者；新账号独立授权GitHub，不假定继承技能、记忆或沙箱。不是完整交付、新APK或发布声明。
 
 ## 第一件事
 
-读取[b060055f新运行38563332551](https://github.com/supercubegame/todo-pocket-android/actions/runs/38563332551)的原21主机回执及双API设备结果。此候选是新增实际源码生命周期验证，不是产品功能改动。最后观察in_progress，尚无它自己的完整主机或设备结论，不得套用a727绿灯。
+读取[61e4dd53新运行38600355606](https://github.com/supercubegame/todo-pocket-android/actions/runs/38600355606)的首个结果。最后观察主机前置集成进行中，尚无本候选完整主机、设备、回写验收结论，不能沿用b060绿灯。
 
-[b060提交](https://github.com/supercubegame/todo-pocket-android/commit/b060055fdda76b408ba7023ba2014279651ef86d)只更新现有分支ci/shortcut-storage-preflight-4d8742的.github/workflows/shortcut-storage.yml。16281字节，blob 1a79175fddaed4c68329672b9ff1912bd29a9dc0，SHA256 e6fe424d64dc2cf055e20f46d1a0a25602fcf148510fdb296a4e0a6dd097114c。本地、写入返回和独立不可变目录读回一致。push、attempt1，未取消原运行。
+[新提交61e4dd53](https://github.com/supercubegame/todo-pocket-android/commit/61e4dd53c0127c3eb4fc27180048a5951fba04dc)仅修改现有隔离分支ci/shortcut-storage-preflight-4d8742的.github/workflows/shortcut-storage.yml，materialize时扩展现有tools/verify_shortcuts.py，并给原report增加紧凑证据回写。工作流18439字节，blob f7f43cd8ab1bfbf6bfcd9a785e71043f11c54867，SHA256 b9ba6b656b87588c51c3b6d735faeb30753d6251bc641aee3f16fc14028629e1。本地、写入返回、独立不可变目录读回相符。push，attempt1；没有取消或重跑旧失败。
 
 产品最近核验仍3a5a17e1fdc570c73804007cd9a4d2ef36c0966b，产品推送0；手机仍4d8742阶段预览。没有新APK、合并、发布、新凭据或手机操作。
 
-## 已确认：a727坐标修复候选通过双API
+## b060已通过，不再pending
 
-[a727运行38561435393](https://github.com/supercubegame/todo-pocket-android/actions/runs/38561435393)六作业全部成功。原21主机命令均一次、300秒预算、退出0，无超时；[回执1/2](https://github.com/supercubegame/todo-pocket-android/runs/115847133618)、[回执2/2](https://github.com/supercubegame/todo-pocket-android/runs/115847142175)均已完整读取。host21耗时66.715321366秒，stdout7664字节，stderr空。
+[b060运行38563332551](https://github.com/supercubegame/todo-pocket-android/actions/runs/38563332551)本轮新读六个作业全部成功：主机115849662681，完整回执115854369965/115854375716，API26 115854394573，API34 115854394829，汇总115856483490。两端真实Android编译、设备seed/reopen步骤和汇总均通过，非跳过。
 
-API26作业115847166776、API34作业115847166919实际Android编译和设备步骤均成功；汇总115849194052成功。API26完成12:20:46Z，API34完成12:21:35Z，汇总完成12:21:48Z。不是设备被跳过。
+[回执1/2](https://github.com/supercubegame/todo-pocket-android/runs/115854369965)、[回执2/2](https://github.com/supercubegame/todo-pocket-android/runs/115854375716)完整读回：原21命令一次、300秒预算、退出0、无超时。host21耗时83.12915068799998秒，stdout7757字节，SHA256 4feca37d22d1eefa4038e46f53e35ea592e40178fb40c2f04a0816913e91ed91，stderr空。原归档11894060345。本轮未独立下载stdout全文，不能声称逐字读过新增8场景/4变异那一行；此前本地真实JDK8/4通过，新CI已执行包含它的完整selftest。
 
-[不可变汇总报告](https://github.com/supercubegame/todo-pocket-android/blob/44969bb3b99a212345e528bbb3fbc8e84ad10605/reports/shortcuts-a72753a2ac0d175ae1ee357baa471369eb8e1676-38561435393-1.json)，blob e0d8e7c346847ac474a8419940409f9184f27be8。工具读取大报告被截断，不能称本轮逐字审计了全部快照或双API原始流。报告保留旧scope文字；新parser严格要求额外8个native启动及10个activation UI标签，但返回旧parser结果，汇总没有直接列出新增标签。这是可读性缺口，不应编出已读到的标签。下一步补紧凑原始seed/reopen回写，并把新标签保存到报告。
+候选verifier151259字节，blob8af5f29a58e7cc9673075c512b0412b35c3324e9，SHA25608e15c0fa6e5d0bfe560e559e86a7d8ab07c1be6dc77a0e0b6b7707f63c14718。其余五个Java文件身份与a727一致。生命周期检查从实际候选Java AST提取work/close，Android、widgets、DB仍是明确替身，不是真实旋转证明。
 
-主机候选AppDatabase/Schema4Store/TodayScreen/MainActivity身份沿用be26；DeviceTest71664字节/blob d1faa66b1b273b5cc9df3bb908f33dd2eaad0f7b/SHA256 59f765e24e7dda831f2f0059f4670419dc66e922fad572ef2e1aa6099528ff2f；verifier139518字节/blob9016ee5d18005275d38cbef1c6d786e2ee483925/SHA2568254916c99ca1e974421444a3d62291761abb712bbebc3684a498568bf67850b。原归档11892327610。
+## 本轮实改：新UI验收不再藏在旧报告后面
 
-## 原失败和修复边界
+旧parse_phase严格验证新增8个native启动及10个activation UI标签，却仍只返回旧SHORTCUT结果。61e4保留所有旧parser、返回类型、命令和预算，新增ui_phase_evidence独立序列化旧标签、新启动标签、新激活标签及原始流字节数/SHA256。
 
-be26运行38558758574原21主机与双API编译成功，但两端都在activation_ui_unchecked_cannot_commit断言失败，不再pending。12de只读提取按原ZIP和seed哈希校验并回读：[原26流](https://github.com/supercubegame/todo-pocket-android/runs/115841687631)、[原34流](https://github.com/supercubegame/todo-pocket-android/runs/115841698565)。没有重跑原失败。旧复合断言不能区分提示文字和旧单元格哪个条件失败。
+新增永久selftest：原旧报告缺字段RED；四个phase/API组合GREEN；56个字段遗漏、错误标签、错phase/API、错长度/摘要对照命中精确失败。原组合解析4正例、36遗漏、3变异也本地通过。回写器本地1正例/7反例验证缺reopen、串commit/run/attempt、失败receipt、漏activation标签、读回被篡改；使用真实扩展组合、明确legacy与GitHub transport替身，不能算远端验收。
 
-a727仅改新测试的弹窗触点：原先误把根视图坐标当屏幕坐标，现以getLocalVisibleRect加getLocationOnScreen偏移计算一次DOWN/UP，没有重试或预算放宽。同时拆分提示、schema、旧单元格诊断，保留原十标签和断言。真实双API现在通过；没有为迁就测试改产品行为。
+report作业在原发布步骤之后always执行新增回写，按当前commit/run/attempt/API绑定result.json，重新解析原seed/reopen，生成两个完整小JSON及GitHub Checks，并逐字读回。超出传输预算会明确失败并保留文件，不截断冒充完整。现有原大报告保留，新增文件随independent-shortcut-report上传。源数据/设备失败仍为失败，不靠发布成功掩盖。此次没有修改产品运行时行为。
 
-## 本轮新提交：不再验证work/close抄本
+待新CI完成，要实际读取两个Exact UI device evidence检查的原始流，核对十个激活标签和八个启动标签；若失败，先读首个完整输出，再最小修复，不无改动重跑。
 
-b060把activation-lifecycle-gate接进现有tools/verify_shortcuts.py selftest。Java编译器AST从实际候选TodayScreen提取两个work重载与close，而非硬编码抄本；激活成员取自同一候选。Android、widgets、DB仍明确是替身，不可称Android并发验收。
+## 独立数据库回放接线已定位，尚未实现
 
-CountDownLatch确定性验证8种时序：prepare前关闭、prepare完成回调前关闭、finishing、destroyed、可见同意失效、确认排队时关闭、提交后回调前关闭、失败后回调前关闭。4个变异分别删除弃用计划清理、尝试计划失效、finishing守卫、close中的清理；每个必须先有正常见证，再命中精确断言，编译或超时不算击杀。本地真实JDK通过8场景/4变异，AST注释/嵌套诱饵及遗漏成员对照通过；不是完整仓库本地主机或Android证明。CI首次对完整候选执行仍在进行。
+只读审计确认：android()每phase先instrument，再stop，再列databases及采集。旧receipt["ui_snapshots"][phase]=database_snapshot(folder/"schema4-ui.db")之后是新增activation采集的接线点，继续使用原command封装，一次尝试、40秒默认预算、完整stdout/stderr保留。
 
-所有原命令、失败、预算、6文件身份与设备流程保留；工作流变换已验证反向移除新增hook后逐字恢复旧集成程序，前序不可变脚本内容精确一致。
+需每phase采集schema4-activation-ui.db、存在时的同名-wal，以及files/activation-ui-expected.bin；增加独立receipt字段和产物摘要，不覆盖旧ui_snapshots。replay_shortcut_databases(folder,receipt,phase)追加专用activation回放，不能直接复用要求非空快捷关系的旧database_snapshot。源码身份已含MainActivity/TodayScreen/DeviceTest，expected.bin是运行产物，需要单独绑定。
 
-## 剩余承重工作
+SQLite mode=ro可能自动读取相邻WAL；未显式checkpoint不代表WAL未验证。下一步需实际WAL对照，不能沿用错误推断。现有activation-snapshot-reader.py/test原型本地Java编码器对照真实SQLite，1正例16反例通过，但未接设备采集或报告，仍欠真实原始产物回放。native启动UI库也需独立回放。
 
-先读b060首个原始结果。随后完成真实旋转/快速退出/确认中销毁，以及报告侧独立UI数据库回放。现有activation-snapshot-reader.py/test原型本地Java编码器对照真实SQLite，1正例16反例通过，但尚未接入设备采集或汇总。每phase需收schema4-activation-ui.db、可选WAL、activation-ui-expected.bin，独立比对全部旧类型、schema4、空快捷关系，并补采集/回放整体遗漏对照。native启动UI库也需同样回放。
+## 剩余承重工作与约束
 
-再做稳定签名旧APK覆盖升级、AGENTS/CLAUDE同文且不超过200行、产品工作流集成、原子非强制产品提交与精确读回，绑定同一最终产品提交双API及升级验收，之后才给新APK。后续还有剩余功能、真实照片/EXIF/输入法/大字体、性能、存储失败、易用性、商业签名分发；没有可靠总完成百分比。三字节媒体不证明真实照片兼容，ADB255/ANR根因仍未证实。
+继续真实旋转/快速退出/确认中销毁、UI数据库独立回放，再做稳定签名旧APK覆盖升级、AGENTS/CLAUDE同文且不超过200行、产品工作流集成、原子非强制产品提交与精确读回，绑定同一最终产品提交双API及升级验收，之后才给新APK。后续还有剩余功能、真实照片/EXIF/输入法/大字体、性能、存储失败、易用性、商业签名分发；没有可靠总完成百分比。ADB255/ANR根因仍未证实。
 
-[上一交接及旧源码包入口](https://github.com/supercubegame/todo-pocket-android/blob/b9218c031d1c4a5478728703c0c6abd0ca769d83/HANDOFF.md)保留be26、e8、de8、cbbc历史。原应用UI片段缺IOException，由已提交不可变修复补齐，不能直接覆盖产品文件。完整重建依赖不可变工作流，不依赖短期Actions归档或某账号沙箱。
+[上一不可变交接](https://github.com/supercubegame/todo-pocket-android/blob/55631c00fe5577c5c83a441577b040260ae9b5e9/HANDOFF.md)保留a727、be26、12de原失败与源码身份。原应用UI片段缺IOException，由已提交不可变修复补齐，不能直接覆盖产品文件。完整重建依赖不可变工作流，不依赖短期Actions归档或某账号沙箱。
 
 沿用10月11日18:34原十一文件授权，[授权及21命令](https://github.com/supercubegame/todo-pocket-android/blob/9a6c72f8c67e2ae3520398833dc1ace7bcfcddf4/HANDOFF.md)。只用现有凭据；显式同意、先验证备份、普通启动不自动迁移、失败关闭。不清数据、不卸载、不启动外部应用、不操作手机、不合并发布。对话结束不代表助手继续开发。

@@ -1,60 +1,237 @@
-name: Read original be26 device failures without rerun
-on:
+name: Explicit activation dialog screen-coordinate acceptance
+'on':
   push:
-    branches: [ci/shortcut-storage-preflight-4d8742]
+    branches:
+      - ci/shortcut-storage-preflight-4d8742
 permissions:
   contents: read
-  actions: read
-  checks: write
 concurrency:
   group: shortcut-business-bridge-delivery
   cancel-in-progress: false
 jobs:
-  original_device_evidence:
+  shortcut_host:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      checks: write
     steps:
-      - name: Verify original archives and publish complete seed streams
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
+          persist-credentials: false
+      - &ref_0
+        name: Verify exact original source and repair two transport escapes
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import hashlib,io,json,os,pathlib,subprocess,zipfile
-          out=pathlib.Path(os.environ["RUNNER_TEMP"])/"original-device";out.mkdir()
-          repo="repos/"+os.environ["GITHUB_REPOSITORY"]
-          def api(path):
-              return subprocess.run(["gh","api",repo+path],capture_output=True,check=True,timeout=60).stdout
-          cases=[(26,11891608213,"5eb87567a0cae5b9e195e55c8001d7acde256a998320d58e91b68d43e73b3213","ceb7dda2d63402df40f7d25f87a48c5a53b9d3def74e78ef8f6b079f728704d9"),(34,11891138869,"bd8fb46f7dcfe2470d278bbf92b13102b54fb91f4959a75f300721a0004d4811","6462dd7ef97b05897094043ecff5f24cae2050fb0d9d644ff939fc3014c8f16b")]
-          for api_level,artifact,archive_sha,seed_sha in cases:
-              meta=json.loads(api("/actions/artifacts/"+str(artifact)))
-              assert meta["workflow_run"]["id"]==38558758574 and meta["workflow_run"]["head_sha"]=="be26b10321ce46d6d9808b9e8fb9f7b6cbfde860"
-              raw=api("/actions/artifacts/"+str(artifact)+"/zip")
-              assert len(raw)==meta["size_in_bytes"] and hashlib.sha256(raw).hexdigest()==archive_sha
-              (out/f"original-api{api_level}.zip").write_bytes(raw)
-              with zipfile.ZipFile(io.BytesIO(raw)) as archive:
-                  assert len(archive.namelist())==len(set(archive.namelist()))
-                  seed=archive.read("shortcut-device/seed.log")
-                  assert len(seed)==6288 and hashlib.sha256(seed).hexdigest()==seed_sha
-                  result=json.loads(archive.read("shortcut-device/result.json"))
-                  assert result["api"]==api_level and result["commit"]=="be26b10321ce46d6d9808b9e8fb9f7b6cbfde860"
-                  assert result["run_id"]=="38558758574" and result["run_attempt"]=="1"
-                  stderr=archive.read("shortcut-device/command-5-stderr.bin")
-                  manifest={n:{"bytes":archive.getinfo(n).file_size,"sha256":hashlib.sha256(archive.read(n)).hexdigest()} for n in archive.namelist() if not n.endswith("/")}
-              (out/f"api{api_level}-seed.log").write_bytes(seed)
-              (out/f"api{api_level}-manifest.json").write_text(json.dumps(manifest,indent=2))
-              text="Complete original seed stream:\n"+seed.decode("utf-8","strict")+"\nComplete original command stderr:\n"+stderr.decode("utf-8","strict")
-              body={"name":f"Original be26 API{api_level} seed","head_sha":os.environ["GITHUB_SHA"],"status":"completed","conclusion":"success","output":{"title":"Verified original failure retrieval, NOT device acceptance","summary":json.dumps({"source_run":38558758574,"artifact":artifact,"archive_sha256":archive_sha,"seed_sha256":seed_sha,"source_status":result["status"],"reruns":0,"product_pushes":0}),"text":"```text\n"+text+"\n```"}}
-              assert len(body["output"]["text"].encode())<60000
-              sent=subprocess.run(["gh","api","--method","POST",repo+"/check-runs","--input","-"],input=json.dumps(body),text=True,capture_output=True,check=True,timeout=60)
-              seen=json.loads(api("/check-runs/"+str(json.loads(sent.stdout)["id"])))
-              assert seen["head_sha"]==body["head_sha"] and all(seen["output"][k]==v for k,v in body["output"].items())
-              print(seen["html_url"])
+          import hashlib,urllib.request
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/a37a972bd31bd0ad4fa0b82005f26a91bc07b9fc/.github/workflows/shortcut-storage.yml"
+          with urllib.request.urlopen(url,timeout=60) as r: raw=r.read(11571)
+          assert len(raw)==11570 and hashlib.sha1(b"blob "+str(len(raw)).encode()+bytes([0])+raw).hexdigest()=="cb33818dafc911ec79e490491ff58fb8734741cd"
+          text=raw.decode();start=text.index("          import hashlib,os,pathlib,subprocess,urllib.request")
+          end=text.index("\n          PY\n",start)
+          program="\n".join(line[10:] for line in text[start:end].splitlines())
+          exec(compile(program,"exact-transfer-bootstrap","exec"),{})
           PY
+      - name: Use Java 17
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/exact-activation-scripts/0.sh"
+      - name: Restore exact pinned backend materializer
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/exact-activation-scripts/1.sh"
+      - name: Preserve original RED and backend host gates
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/exact-activation-scripts/2.sh"
+      - name: Prove and repair actual media checked-exception signature
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,urllib.request
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/de8cbb1cc75cd81770b46422aa1a291010a6c71a/.github/workflows/shortcut-storage.yml"
+          with urllib.request.urlopen(url,timeout=60) as r: raw=r.read(11181)
+          assert len(raw)==11180 and hashlib.sha1(b"blob "+str(len(raw)).encode()+bytes([0])+raw).hexdigest()=="b84dac06fa4b71bba9c8c7277115e437cda5bbea"
+          text=raw.decode();start=text.index('          """Repair the new UI')
+          end=text.index("\n          PY\n",start)
+          program="\n".join(line[10:] for line in text[start:end].splitlines())
+          exec(compile(program,"immutable-media-signature-repair","exec"),{"__name__":"__main__"})
+          PY
+      - name: Preserve exact parser RED and bind layered selftest witnesses
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,urllib.request
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/e8c31fddb720e120fbf1a14cc1044183fab8425e/.github/workflows/shortcut-storage.yml"
+          with urllib.request.urlopen(url,timeout=60) as r: raw=r.read(12592)
+          assert len(raw)==12591 and hashlib.sha1(b"blob "+str(len(raw)).encode()+bytes([0])+raw).hexdigest()=="ad52d74c2552d0da988dfd11d0a81475f017de6f"
+          text=raw.decode();start=text.index("          import ast,base64,lzma,os,pathlib")
+          end=text.index("\n          PY\n",start)
+          program="\n".join(line[10:] for line in text[start:end].splitlines())
+          exec(compile(program,"immutable-parser-layer-repair","exec"),{})
+          PY
+      - name: Add missing activation Android declarations with original RED and four omission controls
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,urllib.request
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/be26b10321ce46d6d9808b9e8fb9f7b6cbfde860/.github/workflows/shortcut-storage.yml"
+          with urllib.request.urlopen(url,timeout=60) as r: raw=r.read(11196)
+          assert len(raw)==11195 and hashlib.sha1(b"blob "+str(len(raw)).encode()+bytes([0])+raw).hexdigest()=="a1847d0f255df5089593c897634fb298537325e7"
+          text=raw.decode();start=text.index("          import ast,base64,hashlib,lzma,os,pathlib")
+          end=text.index("\n          PY\n",start)
+          program="\n".join(line[10:] for line in text[start:end].splitlines())
+          exec(compile(program,"immutable-shape-repair","exec"),{})
+          PY
+      - name: Use screen-space dialog touch and preserve explicit unchecked witnesses
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import ast,base64,hashlib,lzma,os,pathlib
+          hook=lzma.decompress(base64.b64decode('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',validate=True)).decode()
+          assert hashlib.sha256(hook.encode()).hexdigest()=='363bb59c9bf1c3131a0a7936f625cfbd6470c00e94bc06c942abcdc64781a509'
+          path=pathlib.Path(os.environ["RUNNER_TEMP"])/"exact-activation-scripts/3.sh"
+          script=path.read_text();head,body=script.split("import ast",1)
+          tree=ast.parse("import ast"+body.rsplit("\nPY",1)[0])
+          class Patch(ast.NodeTransformer):
+              count=0
+              def visit_Constant(self,node):
+                  if isinstance(node.value,str) and node.value.startswith("import base64,json,lzma,importlib.util"):
+                      anchor="for name,content in activation_files.items(): (folder/name).write_text(content)"
+                      assert node.value.count(anchor)==1
+                      self.count+=1
+                      value=node.value.replace(anchor,hook+"\n"+anchor,1)
+                      ast.parse(value)
+                      return ast.copy_location(ast.Constant(value=value),node)
+                  return node
+          change=Patch();tree=change.visit(tree);assert change.count==1
+          path.write_text(head+ast.unparse(tree)+"\nPY\n")
+
+          PY
+      - name: Integrate default startup UI and rerun all 21 original hosts
+        id: integration
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/exact-activation-scripts/3.sh"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: evidence
+        if: always()
+        with:
+          name: activation-host
+          path: ${{ runner.temp }}/activation-evidence/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish exact host outcome
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HOST_OUTCOME: ${{ steps.integration.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.evidence.outcome }}
+          ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/exact-activation-scripts/4.sh"
+  shortcut_device:
+    needs: shortcut_host
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        api:
+          - 26
+          - 34
+    env:
+      TEST_API: ${{ matrix.api }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: activation-host
+          path: activation-evidence
+      - *ref_0
+      - name: Restore exact six-file host-verified candidate
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/exact-activation-scripts/5.sh"
+      - name: Fixed disposable Android setup
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/exact-activation-scripts/6.sh"
+      - name: Build isolated runner and restore original Gradle source
+        env:
+          BUILD_429_EXECUTE: 'true'
+          BUILD_LOG: shortcut-build.log
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/exact-activation-scripts/7.sh"
+      - name: Original regressions plus actual native default startup
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/exact-activation-scripts/8.sh"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: original-be26-device-evidence
-          path: ${{ runner.temp }}/original-device/
+          name: shortcut-device-api-${{ matrix.api }}
+          path: |
+            shortcut-device/
+            shortcut-build.json
+            shortcut-build.log
+            shortcut-build-driver.log
+            shortcut-android.log
+            shortcut-setup.log
+            emulator.log
           if-no-files-found: error
           retention-days: 14
+  shortcut_report:
+    needs:
+      - shortcut_host
+      - shortcut_device
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: activation-host
+          path: activation-evidence
+      - *ref_0
+      - name: Restore exact six-file host-verified candidate
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/exact-activation-scripts/9.sh"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: shortcut-*
+          path: collected-shortcuts
+      - name: Publish both original device receipts including failures
+        if: always()
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/exact-activation-scripts/10.sh"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: independent-shortcut-report
+          path: |
+            shortcut-report.json
+            shortcut-report.log
+          if-no-files-found: error
+          retention-days: 14
+

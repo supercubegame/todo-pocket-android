@@ -21,50 +21,72 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/original-failure"
           python3 - <<'PY'
-          import hashlib,json,os,pathlib,subprocess
-          out=pathlib.Path(os.environ["RUNNER_TEMP"])/"original-failure"
-          repo="repos/"+os.environ["GITHUB_REPOSITORY"]
-          def api(path):
-              return subprocess.check_output(["gh","api",repo+path],timeout=60)
-          run=json.loads(api("/actions/runs/38535075337"))
-          assert run["head_sha"]=="ab5162f847db4a2b88229b156c3702c31707a4ac" and run["run_attempt"]==1
-          job=json.loads(api("/actions/jobs/115757274638"))
-          assert job["run_id"]==38535075337 and job["conclusion"]=="failure"
-          raw=api("/actions/jobs/115757274638/logs")
-          assert 0<len(raw)<=10485760,"original log empty or exceeds explicit 10MiB recovery bound"
-          (out/"original-host.log").write_bytes(raw)
-          (out/"original-run.json").write_text(json.dumps(run))
-          (out/"original-job.json").write_text(json.dumps(job))
-          text=raw.decode("utf-8","strict")
-          # Keep the complete original log in the artifact. Publish the complete
-          # integration-to-end suffix, including its first failure and publisher.
-          marker="##[group]Run set -euo pipefail"
-          starts=[i for i in range(len(text)) if text.startswith(marker,i)]
-          chosen=[i for i in starts if "import ast,base64,hashlib,json,lzma,os,pathlib,subprocess,urllib.request" in text[i:i+2000]]
-          assert len(chosen)==1,("integration log boundary",len(chosen))
-          suffix=text[chosen[0]:]
-          parts=[];part=""
-          for char in suffix:
-              if len((part+char).encode())>40000:
-                  parts.append(part);part=""
-              part+=char
-          if part: parts.append(part)
-          assert "".join(parts)==suffix and 0<len(parts)<=20,"incomplete recovery split"
-          meta={"source_commit":run["head_sha"],"source_run":run["id"],"source_attempt":1,
-                "source_job":job["id"],"original_conclusion":"failure","bytes":len(raw),
-                "sha256":hashlib.sha256(raw).hexdigest(),"suffix_bytes":len(suffix.encode()),
-                "published_parts":len(parts),"scope":"READ_ONLY_RECOVERY_NOT_TEST_PASS_NO_RERUN_NO_PRODUCT_PUSH"}
-          (out/"recovery.json").write_text(json.dumps(meta,indent=2))
-          for index,part in enumerate(parts,1):
-              body={"name":f"Original ab5162 failure {index}/{len(parts)}","head_sha":os.environ["GITHUB_SHA"],
-                    "status":"completed","conclusion":"success","output":{"title":"Recovered original failure, not test acceptance",
-                    "summary":json.dumps(meta),"text":"```text\n"+part+"\n```"}}
-              sent=subprocess.run(["gh","api","--method","POST",repo+"/check-runs","--input","-"],
+          import json,os,pathlib,subprocess,traceback
+          try:
+              import hashlib,json,os,pathlib,subprocess
+              out=pathlib.Path(os.environ["RUNNER_TEMP"])/"original-failure"
+              repo="repos/"+os.environ["GITHUB_REPOSITORY"]
+              def api(path):
+                  r=subprocess.run(["gh","api",repo+path],capture_output=True,timeout=60)
+                  if r.returncode: raise RuntimeError("read failed "+path+" rc="+str(r.returncode)+" "+r.stderr.decode(errors="replace")[-4000:])
+                  return r.stdout
+              run=json.loads(api("/actions/runs/38535075337"))
+              assert run["head_sha"]=="ab5162f847db4a2b88229b156c3702c31707a4ac" and run["run_attempt"]==1
+              job=json.loads(api("/actions/jobs/115757274638"))
+              assert job["run_id"]==38535075337 and job["conclusion"]=="failure"
+              raw=api("/actions/jobs/115757274638/logs")
+              assert 0<len(raw)<=10485760,"original log empty or exceeds explicit 10MiB recovery bound"
+              (out/"original-host.log").write_bytes(raw)
+              (out/"original-run.json").write_text(json.dumps(run))
+              (out/"original-job.json").write_text(json.dumps(job))
+              text=raw.decode("utf-8","strict")
+              (out/"log-head.txt").write_text(text[:16000])
+              # Keep the complete original log in the artifact. Publish the complete
+              # integration-to-end suffix, including its first failure and publisher.
+              marker="##[group]Run set -euo pipefail"
+              starts=[i for i in range(len(text)) if text.startswith(marker,i)]
+              chosen=[i for i in starts if "import ast,base64,hashlib,json,lzma,os,pathlib,subprocess,urllib.request" in text[i:i+2000]]
+              assert len(chosen)==1,("integration log boundary",len(chosen),text[:16000])
+              suffix=text[chosen[0]:]
+              parts=[];part=""
+              for char in suffix:
+                  if len((part+char).encode())>40000:
+                      parts.append(part);part=""
+                  part+=char
+              if part: parts.append(part)
+              assert "".join(parts)==suffix and 0<len(parts)<=20,"incomplete recovery split"
+              meta={"source_commit":run["head_sha"],"source_run":run["id"],"source_attempt":1,
+                    "source_job":job["id"],"original_conclusion":"failure","bytes":len(raw),
+                    "sha256":hashlib.sha256(raw).hexdigest(),"suffix_bytes":len(suffix.encode()),
+                    "published_parts":len(parts),"scope":"READ_ONLY_RECOVERY_NOT_TEST_PASS_NO_RERUN_NO_PRODUCT_PUSH"}
+              (out/"recovery.json").write_text(json.dumps(meta,indent=2))
+              for index,part in enumerate(parts,1):
+                  body={"name":f"Original ab5162 failure {index}/{len(parts)}","head_sha":os.environ["GITHUB_SHA"],
+                        "status":"completed","conclusion":"success","output":{"title":"Recovered original failure, not test acceptance",
+                        "summary":json.dumps(meta),"text":"```text\n"+part+"\n```"}}
+                  sent=subprocess.run(["gh","api","--method","POST",repo+"/check-runs","--input","-"],
+                      input=json.dumps(body),text=True,capture_output=True,timeout=60,check=True)
+                  made=json.loads(sent.stdout)
+                  seen=json.loads(api("/check-runs/"+str(made["id"])))
+                  assert seen["head_sha"]==body["head_sha"] and seen["output"]==dict(body["output"],annotations_count=0,annotations_url=seen["output"]["annotations_url"])
+                  print(seen["html_url"])
+          except Exception:
+              failure=traceback.format_exc().replace(os.environ["GH_TOKEN"],"[REDACTED]")
+              out=pathlib.Path(os.environ["RUNNER_TEMP"])/"original-failure"
+              out.mkdir(parents=True,exist_ok=True)
+              (out/"recovery-error.txt").write_text(failure)
+              body={"name":"Original failure recovery diagnostic","head_sha":os.environ["GITHUB_SHA"],
+                    "status":"completed","conclusion":"failure","output":{"title":"Recovery failed, no test acceptance",
+                    "summary":"Read-only recovery. No rerun, product push or device acceptance.",
+                    "text":"```text\n"+failure+"\n```"}}
+              assert len(body["output"]["text"].encode())<60000
+              r=subprocess.run(["gh","api","--method","POST","repos/"+os.environ["GITHUB_REPOSITORY"]+"/check-runs","--input","-"],
                   input=json.dumps(body),text=True,capture_output=True,timeout=60,check=True)
-              made=json.loads(sent.stdout)
-              seen=json.loads(api("/check-runs/"+str(made["id"])))
-              assert seen["head_sha"]==body["head_sha"] and seen["output"]==dict(body["output"],annotations_count=0,annotations_url=seen["output"]["annotations_url"])
+              made=json.loads(r.stdout)
+              seen=json.loads(subprocess.check_output(["gh","api",made["url"]],text=True,timeout=60))
+              assert all(seen["output"][k]==v for k,v in body["output"].items())
               print(seen["html_url"])
+              raise
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()

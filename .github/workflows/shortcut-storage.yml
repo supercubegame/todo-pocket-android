@@ -27,7 +27,8 @@ jobs:
               out=pathlib.Path(os.environ["RUNNER_TEMP"])/"original-failure"
               repo="repos/"+os.environ["GITHUB_REPOSITORY"]
               def api(path):
-                  r=subprocess.run(["gh","api",repo+path],capture_output=True,timeout=60)
+                  flags=["--allow-escape-sequences"] if path.endswith("/logs") else []
+                  r=subprocess.run(["gh","api",repo+path]+flags,capture_output=True,timeout=60)
                   if r.returncode: raise RuntimeError("read failed "+path+" rc="+str(r.returncode)+" "+r.stderr.decode(errors="replace")[-4000:])
                   return r.stdout
               run=json.loads(api("/actions/runs/38535075337"))
@@ -39,7 +40,7 @@ jobs:
               (out/"original-host.log").write_bytes(raw)
               (out/"original-run.json").write_text(json.dumps(run))
               (out/"original-job.json").write_text(json.dumps(job))
-              text=raw.decode("utf-8","strict")
+              text="".join(c if ord(c)>=32 or c in "\n\t" else "\\x%02x"%ord(c) for c in raw.decode("utf-8","strict"))
               (out/"log-head.txt").write_text(text[:16000])
               # Keep the complete original log in the artifact. Publish the complete
               # integration-to-end suffix, including its first failure and publisher.

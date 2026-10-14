@@ -1,262 +1,75 @@
-name: Native startup acceptance preflight
+name: Read accepted activation integration inputs
 on:
   push:
     branches: [ci/shortcut-storage-preflight-4d8742]
 permissions:
   contents: read
+  actions: read
+  checks: write
 concurrency:
   group: shortcut-business-bridge-delivery
   cancel-in-progress: false
 jobs:
-  shortcut_host:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 120
-    permissions:
-      contents: read
-      checks: write
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
-          persist-credentials: false
-      - name: Use Java 17
-        run: |
-          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
-          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
-      - name: Restore exact pinned backend materializer
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import hashlib,pathlib,os,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/56e57bb43453540fa2912c9518a1b5ab71254234/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as response: source=response.read(21963)
-          assert len(source)==21962 and hashlib.sha256(source).hexdigest()=="4786a65ce08f30c787536adfad91599dcfb9ee58e9c2ea7ca41ae049435c0d83"
-          text=source.decode();begin=text.index("          import ast,");end=text.index("\n          PY\n",begin)
-          program="\n".join(line[10:] for line in text[begin:end].splitlines())
-          exec(compile(program,"pinned-startup-materializer","exec"),{})
-          PY
-      - name: Preserve original RED and backend host gates
-        run: |
-          set -euo pipefail
-          python3 "$RUNNER_TEMP/activation-payload/driver.py" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/activation-payload" "$RUNNER_TEMP/activation-evidence"
-      - name: Integrate default startup UI and rerun all 21 original hosts
-        id: integration
-        run: |
-          set -euo pipefail
-          python3 - <<'PY' 2>&1 | tee "$RUNNER_TEMP/activation-evidence/startup-integration.log"
-          import ast,hashlib,os,pathlib,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/ab5162f847db4a2b88229b156c3702c31707a4ac/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as response: source=response.read(20888)
-          assert len(source)==20887 and hashlib.sha256(source).hexdigest()=="892892019cd20e7e911b595269fcb306d87358cba83d8636ff71fdb46abf4176"
-          text=source.decode();start=text.index("          import ast,base64,hashlib,json,lzma,os,pathlib,subprocess,urllib.request")
-          end=text.index("\n          PY\n",start)
-          program="\n".join(line[10:] for line in text[start:end].splitlines())
-          anchor='folder=pathlib.Path(os.environ["RUNNER_TEMP"])/"startup-ui-extension"'
-          assert program.count(anchor)==1
-          patch = '''
-          gate_path=pathlib.Path(os.environ["RUNNER_TEMP"])/"startup-ui-extension/gate.py"
-          old_gate=gate_path.read_text()
-          old='a.stopStartup();ok(AppDatabase.last.closes==0,"transfer_not_reclaimed");'
-          new='a.stopStartup();if(!a.startupIo.awaitTermination(5,TimeUnit.SECONDS))throw new AssertionError("startup stop timeout");ok(AppDatabase.last.closes==0,"transfer_not_reclaimed");'
-          assert old_gate.count(old)==1
-          fixed=old_gate.replace(old,new,1)
-          assert fixed.replace(new,old,1)==old_gate
-          ast.parse(fixed)
-          gate_path.write_text(fixed)
-          '''
-          program=program.replace(anchor,patch+"\n"+anchor,1)
-          ast.parse(program)
-          exec(compile(program,"ab5162-gate-race-repair","exec"),{})
-          PY
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        id: evidence
-        if: always()
-        with:
-          name: activation-host
-          path: ${{ runner.temp }}/activation-evidence/
-          if-no-files-found: error
-          retention-days: 14
-      - name: Publish exact host outcome
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HOST_OUTCOME: ${{ steps.integration.outcome }}
-          UPLOAD_OUTCOME: ${{ steps.evidence.outcome }}
-          ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json,os,pathlib,subprocess
-          p=pathlib.Path(os.environ["RUNNER_TEMP"])/"activation-evidence/receipt.json"
-          value=json.loads(p.read_text()) if p.exists() else {"status":"SETUP_FAILED","host_commands":[]}
-          value["artifact_url"]=os.environ.get("ARTIFACT_URL")
-          value["integration_outcome"]=os.environ["HOST_OUTCOME"]
-          value["upload_outcome"]=os.environ["UPLOAD_OUTCOME"]
-          ok=value["status"]=="HOST_PASS_CANDIDATE_DEVICE_PENDING" and "startup_ui_host" in value and os.environ["HOST_OUTCOME"]==os.environ["UPLOAD_OUTCOME"]=="success"
-          if not ok:
-              log=p.parent/"startup-integration.log"
-              data=log.read_bytes() if log.exists() else b""
-              value["failure_log"]={"bytes":len(data),"tail":data[-12000:].decode(errors="replace"),
-                  "tail_is_partial":len(data)>12000,"complete_log_in_artifact":log.exists()}
-          body=json.dumps(value,ensure_ascii=False,indent=2)
-          parts=[body[i:i+12000] for i in range(0,len(body),12000)]
-          assert "".join(parts)==body and 0<len(parts)<=100
-          endpoint="repos/"+os.environ["GITHUB_REPOSITORY"]+"/check-runs"
-          for index,part in enumerate(parts,1):
-              request={"name":f"Startup UI preflight evidence {index}/{len(parts)}","head_sha":os.environ["GITHUB_SHA"],
-                  "status":"completed","conclusion":"success" if ok else "failure","output":{
-                  "title":value["status"] if ok else "INTEGRATION_OR_UPLOAD_FAILED",
-                  "summary":f"Part {index}/{len(parts)} of complete receipt. Candidate only; product pushes=0. Activation UI and overwrite upgrade pending.",
-                  "text":"```json\n"+part+"\n```"}}
-              assert len(request["output"]["text"].encode())<60000
-              r=subprocess.run(["gh","api","--method","POST",endpoint,"--input","-"],input=json.dumps(request),text=True,capture_output=True,timeout=60,check=True)
-              made=json.loads(r.stdout)
-              seen=json.loads(subprocess.check_output(["gh","api",endpoint+"/"+str(made["id"])],text=True,timeout=60))
-              assert seen["head_sha"]==request["head_sha"] and seen["conclusion"]==request["conclusion"]
-              assert all(seen["output"][k]==v for k,v in request["output"].items())
-              print("STARTUP_UI_RECEIPT",seen["html_url"])
-          raise SystemExit(0 if ok else 1)
-          PY
-  shortcut_device:
-    needs: shortcut_host
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 35
-    strategy:
-      fail-fast: false
-      matrix:
-        api: [26, 34]
-    env:
-      TEST_API: ${{ matrix.api }}
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
-          persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: activation-host
-          path: activation-evidence
-      - name: Restore exact five-file host-verified candidate
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import hashlib,json,pathlib,subprocess,os
-          root=pathlib.Path(".")
-          assert subprocess.check_output(["git","rev-parse","HEAD"]).decode().strip()=="3a5a17e1fdc570c73804007cd9a4d2ef36c0966b"
-          expected={"src/main/java/com/supercubegame/pockettodo/AppDatabase.java":"f3ae4d9d9bb59670e9634714640ac6fbdf478a09","src/main/java/com/supercubegame/pockettodo/Schema4Store.java":"cfc8c36a0681467150d5cd84ecfbcc76c184cb92","src/androidTest/java/com/supercubegame/pockettodo/Schema4DeviceTest.java":"0e63fc3448dae47d289533181be1f726eca1c15e","tools/verify_shortcuts.py":"af4e02026ca601f6a5cfb3d03c369fec675e4515","src/main/java/com/supercubegame/pockettodo/MainActivity.java":"404ed33a43182cf1c016ffc3326c2fd539cc4184"}
-          receipt=json.loads((root/"activation-evidence/receipt.json").read_text())
-          assert receipt["status"]=="HOST_PASS_CANDIDATE_DEVICE_PENDING"
-          assert receipt["baseline"]=="3a5a17e1fdc570c73804007cd9a4d2ef36c0966b" and receipt["product_pushes"]==0
-          assert receipt["workflow_commit"]==os.environ["GITHUB_SHA"] and str(receipt["run_id"])==os.environ["GITHUB_RUN_ID"] and str(receipt["run_attempt"])==os.environ["GITHUB_RUN_ATTEMPT"]
-          assert len(receipt["host_commands"])==21 and all(r["returncode"]==0 and not r["timed_out"] and r["attempts"]==1 and r["budget_seconds"]==300 for r in receipt["host_commands"])
-          assert receipt["startup_ui_host"]=={"checks":14,"witnessed_mutants":5,"scope":"REAL_JAVA_ANDROID_DOUBLES"}
-          assert set(receipt["candidate_files"])==set(expected)
-          for p,blob in expected.items():
-           old=(root/p).read_bytes()
-           assert hashlib.sha1(b"blob "+str(len(old)).encode()+b"\0"+old).hexdigest()==blob
-           data=(root/"activation-evidence/candidate"/p).read_bytes();identity=receipt["candidate_files"][p]
-           assert len(data)==identity["bytes"] and hashlib.sha256(data).hexdigest()==identity["sha256"]
-           assert hashlib.sha1(b"blob "+str(len(data)).encode()+b"\0"+data).hexdigest()==identity["blob"]
-           (root/p).write_bytes(data)
-          PY
-      - name: Fixed disposable Android setup
-        run: |
-          set -euo pipefail
-          exec > >(tee shortcut-setup.log) 2>&1
-          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
-          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
-          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
-          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip.sha256 -o /tmp/gradle.sha256
-          echo "$(cat /tmp/gradle.sha256)  /tmp/gradle.zip" | sha256sum -c -
-          unzip -q /tmp/gradle.zip -d /tmp
-          echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
-          sudo apt-get update
-          sudo apt-get install --yes strace
-      - name: Build isolated runner and restore original Gradle source
-        env:
-          BUILD_429_EXECUTE: "true"
-          BUILD_LOG: "shortcut-build.log"
-        run: |
-          set -euo pipefail
-          python3 tools/verify_shortcuts.py build 2>&1 | tee shortcut-build-driver.log
-      - name: Original regressions plus actual native default startup
-        run: |
-          set -euo pipefail
-          python3 tools/verify_shortcuts.py android 2>&1 | tee shortcut-android.log
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: shortcut-device-api-${{ matrix.api }}
-          path: |
-            shortcut-device/
-            shortcut-build.json
-            shortcut-build.log
-            shortcut-build-driver.log
-            shortcut-android.log
-            shortcut-setup.log
-            emulator.log
-          if-no-files-found: error
-          retention-days: 14
-  shortcut_report:
-    needs: [shortcut_host, shortcut_device]
-    if: always() && github.event_name != 'pull_request'
+  inputs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    permissions:
-      contents: write
-      actions: read
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
-          persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
+          run-id: 38539002887
+          github-token: ${{ github.token }}
           name: activation-host
-          path: activation-evidence
-      - name: Restore exact five-file host-verified candidate
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import hashlib,json,pathlib,subprocess,os
-          root=pathlib.Path(".")
-          assert subprocess.check_output(["git","rev-parse","HEAD"]).decode().strip()=="3a5a17e1fdc570c73804007cd9a4d2ef36c0966b"
-          expected={"src/main/java/com/supercubegame/pockettodo/AppDatabase.java":"f3ae4d9d9bb59670e9634714640ac6fbdf478a09","src/main/java/com/supercubegame/pockettodo/Schema4Store.java":"cfc8c36a0681467150d5cd84ecfbcc76c184cb92","src/androidTest/java/com/supercubegame/pockettodo/Schema4DeviceTest.java":"0e63fc3448dae47d289533181be1f726eca1c15e","tools/verify_shortcuts.py":"af4e02026ca601f6a5cfb3d03c369fec675e4515","src/main/java/com/supercubegame/pockettodo/MainActivity.java":"404ed33a43182cf1c016ffc3326c2fd539cc4184"}
-          receipt=json.loads((root/"activation-evidence/receipt.json").read_text())
-          assert receipt["status"]=="HOST_PASS_CANDIDATE_DEVICE_PENDING"
-          assert receipt["baseline"]=="3a5a17e1fdc570c73804007cd9a4d2ef36c0966b" and receipt["product_pushes"]==0
-          assert receipt["workflow_commit"]==os.environ["GITHUB_SHA"] and str(receipt["run_id"])==os.environ["GITHUB_RUN_ID"] and str(receipt["run_attempt"])==os.environ["GITHUB_RUN_ATTEMPT"]
-          assert len(receipt["host_commands"])==21 and all(r["returncode"]==0 and not r["timed_out"] and r["attempts"]==1 and r["budget_seconds"]==300 for r in receipt["host_commands"])
-          assert receipt["startup_ui_host"]=={"checks":14,"witnessed_mutants":5,"scope":"REAL_JAVA_ANDROID_DOUBLES"}
-          assert set(receipt["candidate_files"])==set(expected)
-          for p,blob in expected.items():
-           old=(root/p).read_bytes()
-           assert hashlib.sha1(b"blob "+str(len(old)).encode()+b"\0"+old).hexdigest()==blob
-           data=(root/"activation-evidence/candidate"/p).read_bytes();identity=receipt["candidate_files"][p]
-           assert len(data)==identity["bytes"] and hashlib.sha256(data).hexdigest()==identity["sha256"]
-           assert hashlib.sha1(b"blob "+str(len(data)).encode()+b"\0"+data).hexdigest()==identity["blob"]
-           (root/p).write_bytes(data)
-          PY
+          path: host
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          pattern: shortcut-*
-          path: collected-shortcuts
-      - name: Publish both original device receipts including failures
-        if: always()
+          run-id: 38539002887
+          github-token: ${{ github.token }}
+          pattern: shortcut-device-api-*
+          path: devices
+      - name: Verify bindings and publish source plus actual phase labels
         env:
-          NEEDS_JSON: ${{ toJSON(needs) }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          python3 tools/verify_shortcuts.py report 2>&1 | tee shortcut-report.log
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: independent-shortcut-report
-          path: |
-            shortcut-report.json
-            shortcut-report.log
-          if-no-files-found: error
-          retention-days: 14
+          python3 - <<'PY'
+          import ast,base64,hashlib,json,lzma,os,pathlib,re,subprocess,urllib.request
+          def publish(name,text):
+              parts=[text[i:i+10000] for i in range(0,len(text),10000)]
+              assert ''.join(parts)==text
+              for i,part in enumerate(parts,1):
+                  body={'name':f'{name} {i}/{len(parts)}','head_sha':os.environ['GITHUB_SHA'],'status':'completed','conclusion':'success','output':{'title':'Verified accepted input, not new product acceptance','summary':'Source run38539002887 / commit87d3cfd2 / attempt1. Read-only, no device rerun or product push.','text':'```text\n'+part+'\n```'}}
+                  ep='repos/'+os.environ['GITHUB_REPOSITORY']+'/check-runs'
+                  r=subprocess.run(['gh','api','--method','POST',ep,'--input','-'],input=json.dumps(body),text=True,capture_output=True,timeout=60,check=True)
+                  seen=json.loads(subprocess.check_output(['gh','api',ep+'/'+str(json.loads(r.stdout)['id'])],text=True,timeout=60))
+                  assert seen['head_sha']==body['head_sha'] and all(seen['output'][k]==v for k,v in body['output'].items())
+          root=pathlib.Path('host');receipt=json.loads((root/'receipt.json').read_text())
+          assert receipt['workflow_commit']=='87d3cfd2a9b8c8728919013d081682cf9ee5394e' and str(receipt['run_id'])=='38539002887' and str(receipt['run_attempt'])=='1'
+          assert receipt['status']=='HOST_PASS_CANDIDATE_DEVICE_PENDING' and receipt['product_pushes']==0
+          assert len(receipt['host_commands'])==21 and all(x['returncode']==0 and not x['timed_out'] and x['attempts']==1 and x['budget_seconds']==300 for x in receipt['host_commands'])
+          for name,identity in receipt['candidate_files'].items():
+              data=(root/'candidate'/name).read_bytes()
+              assert len(data)==identity['bytes'] and hashlib.sha256(data).hexdigest()==identity['sha256']
+          url='https://raw.githubusercontent.com/supercubegame/todo-pocket-android/1ca2404a7b6d75c0645bd19ab07731205f2f6f63/.github/workflows/shortcut-storage.yml'
+          with urllib.request.urlopen(url,timeout=60) as r: text=r.read(26536)
+          assert len(text)==26535 and hashlib.sha256(text).hexdigest()=='1a571d49a33c79c46e934dc5b9ee7a8e44cfeca3055089be326f8f51a7d41ae0'
+          match=re.search(r"base64.b64decode\('([^']+)'\)",text.decode());assert match
+          raw=lzma.decompress(base64.b64decode(match.group(1),validate=True))
+          assert hashlib.sha256(raw).hexdigest()=='89165abc5ff8d26db76c250c695db8d6d0ed7b54f76c6ed1c2abf34b47c46d41'
+          bundle=json.loads(raw)
+          for name in ('activation-app.java','activation-store.java'):
+              src=bundle[name]
+              candidate=(root/'candidate/src/main/java/com/supercubegame/pockettodo'/('AppDatabase.java' if name=='activation-app.java' else 'Schema4Store.java')).read_text()
+              assert src.strip() in candidate,'activation source differs from accepted candidate'
+              publish(name,src)
+          publish('accepted host receipt',json.dumps(receipt,indent=2))
+          for api in (26,34):
+              folder=pathlib.Path('devices')/f'shortcut-device-api-{api}'
+              rows=[]
+              for path in folder.rglob('*'):
+                  if path.is_file() and path.stat().st_size<20000:
+                      data=path.read_bytes()
+                      if b'STARTUP_NATIVE_PASS ' in data and b'SHORTCUT_RESULT ' in data:
+                          rows.append({'file':str(path.relative_to(folder)),'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest(),'raw':data.decode('utf-8','strict')})
+              assert rows,'missing original phase output'
+              publish('native raw API'+str(api),json.dumps(rows,ensure_ascii=False,indent=2))
+          PY

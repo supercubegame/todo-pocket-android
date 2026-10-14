@@ -1,4 +1,4 @@
-name: Explicit activation actual-source lifecycle acceptance
+name: Explicit activation readable device evidence
 'on':
   push:
     branches:
@@ -104,9 +104,25 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
+          import hashlib,urllib.request
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/b060055fdda76b408ba7023ba2014279651ef86d/.github/workflows/shortcut-storage.yml"
+          with urllib.request.urlopen(url,timeout=60) as r: raw=r.read(16282)
+          assert len(raw)==16281 and hashlib.sha1(b"blob 16281"+bytes([0])+raw).hexdigest()=="1a79175fddaed4c68329672b9ff1912bd29a9dc0"
+          text=raw.decode()
+          marker="    - name: Bind deterministic lifecycle checks to actual candidate Java members"
+          assert text.count(marker)==1
+          start=text.index("          import ast,base64,hashlib,lzma,os,pathlib",text.index(marker))
+          end=text.index("\n          PY\n",start)
+          program="\n".join(line[10:] for line in text[start:end].splitlines())
+          exec(compile(program,"immutable-actual-lifecycle","exec"),{})
+          PY
+      - name: Persist all UI label families with raw-stream identity
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
           import ast,base64,hashlib,lzma,os,pathlib
-          extension=lzma.decompress(base64.b64decode('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',validate=True)).decode()
-          assert hashlib.sha256(extension.encode()).hexdigest()=='4cc7b66862734272750e83a1ad34e8b1123875ee02e5a19c3f5dc05d3b8856a5'
+          extension=lzma.decompress(base64.b64decode('/Td6WFoAAATm1rRGAgAhARYAAAB0L+Wj4A61BHddAAUJjABsz1zlodV+FRfzgwPsIqHynSX6LKyhyYYqR7UNrwW9eT48DIPdEzNuMof5umxEV9Y7xgurnWxHoBTIRelQxQh/C5idegenKY1pYTZDfoDu5GIQ8BLo34HxgnHi5WS+max4CrpKpUf1exZOiSHhq77a2kBrjEFOf8AgU1w4Pp2vQrw0cblTPMhIsIhxDvmlgFLl+vo3ssngOcR5EQezGw+zBS0M6YkaGUx8Y7wp6fzOm53xB8d6mPyOK3pvSoLiwOwdk0kbpBrVvb5NMgLpgWBajSncZBvJa0eQ5K/tqJBUk3o94Nvdch/TLdc8a7LKfY2RP7QAYCbR270id+GxT4U5w5tO9n2J+yKIYsWKf5Ila0vGytwyKRKeIJLwR7DA4rphFj2nA1JyETkEMiy9uTKrJcoIiLfoJRtzlpzTVE2TAd5w3YVMb7xX/qa+4CYIxTcxs95oupn8z15NEQWwYw3tREUdJMudDDUE+Xl10Jv0PySWt56k/evbmgS4fXjCIyYhS0cj5NHDY4vawdOjZHNVMVl+FPSw4HCmQ2mGrWsohLh3agJkmmxJO5AQPxgGKNxOPBxoMVA+XePlXxsavtp52+yMs1FCraC1bGGnJYU9CDo4ff3htbf2as7XftejB/Clge9fxYy+kbwn6B3n1HugSQvA8K9pFvJvMq8O5cGExq0XT+68oS5JjvsvJ8H3ouBmDTvQAjpyFbR56oJwrKJ/LivXWkvIBhDepc4T2CuFbWkODQfM4hEOXQ6e/iZ5PRtWsXfkUMmoS/fQqourjz1D5UayPXl8dSVKVlDyFL4EU/0Ld4xPQjGW7aBFtlu1lamXRSnfsn4w8wlu2YBQVgCLt2JykHr8IAfUtHxXXemkeNqWyRYr21eerUaXySahhOU0WXxx7HQPSbLE6DvfFK1ZrWSlae8xVMu1Il6T+0oWetvSzVwU7CCLwm4Rpat5DiCKm9GlKiL0GUiebKIrKvEMs1UWyo2TDpu2S6SYlscJZPBBiO5vZKWp+AboR/JVZvYiDwJiKqdKE3EkZvX1AdlK60dpCrPQbQOQYdfCercYcy25m/i3m6TU7a4FpH+xLmeVlGt+yhCXl5ybE0PdFHze1A03JNAAoBPuwv5ArvPGhDjmSd61rOd4IaAgqqlmYmyDNqlNlBprc0Ckr+7hKMbWAjMNx74tymWupuVz7n/SwWwPuzoM9fI2M4+cL/KIukNYn4kP3zEkDVBJHz+02sOvt+MivZBDZimrC9JwJk3+5tl9p3zp9c8loyUsvPqSf3cwbSyc7bFm3WQBzQy8Xm94pjws8lK/RXl0OhZvUZTD+Ox5Rsjx6/84aOz1sEZALNA9wAElCWS+7ENgIJiUygBdw1TJEQx28P4pfoY/sqkcIPm9hW2ZZ5fIZXxOqk/uGPNeje8Wb1takWqUsVBzoCII3wj+f/BrQZ7PE62JgpzYJmSuHT1hI7+lpIa2MoC+6th9jz6pNtSDy1h2b554epKJmysdEldHFPr7yuoI0miDUtZ8sAAAd9Bg4SMssAEAAZMJth0AACTzUHmxxGf7AgAAAAAEWVo=',validate=True)).decode()
+          assert hashlib.sha256(extension.encode()).hexdigest()=='889d6b066820f80fe63aa759e3e50c01d21d4448c9daeeb25aa1050e0bfb90b5'
           path=pathlib.Path(os.environ["RUNNER_TEMP"])/"exact-activation-scripts/3.sh"
           script=path.read_text();head,body=script.split("import ast",1)
           tree=ast.parse("import ast"+body.rsplit("\nPY",1)[0])
@@ -215,6 +231,7 @@ jobs:
     permissions:
       contents: write
       actions: read
+      checks: write
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -241,6 +258,76 @@ jobs:
         run: |
           set -euo pipefail
           bash "$RUNNER_TEMP/exact-activation-scripts/10.sh"
+      - name: Publish exact new UI checks and original seed reopen streams
+        id: ui_evidence
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          """Readable exact device streams; never substitutes for upgrade acceptance."""
+          import hashlib
+          import importlib.util
+          import json
+          import os
+          import pathlib
+          import subprocess
+          import sys
+
+          sys.path.insert(0, "tools")
+          spec = importlib.util.spec_from_file_location("ui_verifier", "tools/verify_shortcuts.py")
+          verifier = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(verifier)
+          repo = "repos/" + os.environ["GITHUB_REPOSITORY"]
+          failed = False
+          for api in (26, 34):
+              root = pathlib.Path(f"collected-shortcuts/shortcut-device-api-{api}/shortcut-device")
+              value = dict(commit=os.environ["GITHUB_SHA"], run_id=os.environ["GITHUB_RUN_ID"],
+                           run_attempt=os.environ["GITHUB_RUN_ATTEMPT"], api=api,
+                           status="NOT_VERIFIED", product_pushes=0, release_ready=False,
+                           scope="ORIGINAL_DEVICE_STREAMS_NOT_PRODUCT_NOT_UPGRADE",
+                           verifier_sha256=hashlib.sha256(pathlib.Path("tools/verify_shortcuts.py").read_bytes()).hexdigest())
+              streams = {}
+              try:
+                  result = json.loads((root/"result.json").read_text())
+                  for key in ("commit", "run_id", "run_attempt", "api"):
+                      assert result[key] == value[key], "device receipt identity " + key
+                  value["source_status"] = result["status"]
+                  value["phases"] = {}
+                  for phase in ("seed", "reopen"):
+                      raw = (root/(phase+".log")).read_bytes()
+                      streams[phase] = raw.decode("utf-8", "strict")
+                      evidence = verifier.ui_phase_evidence(raw, phase, api)
+                      verifier.require_ui_evidence(evidence, raw, phase, api)
+                      value["phases"][phase] = evidence
+                  assert result["status"] == "PASS", "original device receipt failed"
+                  value["status"] = "PASS"
+              except Exception as exc:
+                  failed = True
+                  value["error"] = type(exc).__name__ + ": " + str(exc)
+              text = json.dumps(dict(evidence=value, original_streams=streams), ensure_ascii=False, indent=2)
+              pathlib.Path(f"ui-compact-api{api}.json").write_text(text)
+              # Existing raw streams are about 8 KB total. This is a transport ceiling,
+              # not a truncation policy: overflow fails while the full file is uploaded.
+              assert len(text.encode("utf-8")) < 55000, "UI evidence exceeds check transport, full file retained"
+              body = dict(name=f"Exact UI device evidence API{api}", head_sha=os.environ["GITHUB_SHA"],
+                          status="completed", conclusion="success" if value["status"] == "PASS" else "failure",
+                          output=dict(title=value["status"]+" original UI streams, NOT upgrade",
+                                      summary=f"Run {value['run_id']} attempt {value['run_attempt']}; product pushes=0",
+                                      text="```json\n"+text+"\n```"))
+              sent = subprocess.run(["gh","api","--method","POST",repo+"/check-runs","--input","-"],
+                                    input=json.dumps(body),text=True,capture_output=True,check=True,timeout=60)
+              check = json.loads(sent.stdout)
+              seen = json.loads(subprocess.run(["gh","api",repo+"/check-runs/"+str(check["id"])],
+                                capture_output=True,check=True,timeout=60).stdout)
+              assert seen["head_sha"] == body["head_sha"] and seen["conclusion"] == body["conclusion"]
+              assert seen["output"]["text"] == body["output"]["text"], "exact UI evidence readback"
+              print(seen["html_url"])
+          if failed:
+              raise SystemExit(1)
+
+          PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -248,6 +335,7 @@ jobs:
           path: |
             shortcut-report.json
             shortcut-report.log
+            ui-compact-api*.json
           if-no-files-found: error
           retention-days: 14
 

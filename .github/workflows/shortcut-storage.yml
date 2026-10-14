@@ -1,4 +1,4 @@
-name: Explicit activation UI exact transfer repair
+name: Explicit activation UI checked exception repair
 'on':
   push:
     branches:
@@ -24,37 +24,14 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import hashlib,os,pathlib,subprocess,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/cbbc66ec225157ace12dc56402445390beb1df66/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as r: data=r.read(29381)
-          blob=lambda b:hashlib.sha1(b"blob "+str(len(b)).encode()+bytes([0])+b).hexdigest()
-          assert len(data)==29380 and blob(data)=="b72879364d180397e06857650fd246c3644ff357"
-          text=data.decode()
-          pairs=[
-           ('driver=driver.replace(anchor,anchor+"'+chr(92)+'n"+insert,1)', 'driver=driver.replace(anchor,anchor+"'+chr(92)*2+'n"+insert,1)'),
-           ('static boolean isolatedActivationTest;")'+chr(92)+"n"+chr(92)+"'+anchor,1)", 'static boolean isolatedActivationTest;")'+chr(92)*2+"n"+chr(92)+"'+anchor,1)")
-          ]
-          for old,new in pairs:
-           assert text.count(old)==1
-           text=text.replace(old,new,1)
-          fixed=text.encode()
-          assert len(fixed)==29382 and blob(fixed)=="7ded9ebe7dca9e669e6dd4f6b906191f1ef957a0"
-          assert hashlib.sha256(fixed).hexdigest()=="8ba546250800b9d2f752cf70446f11de83bdebd137acde6cf771621b5f576d2d"
-          folder=pathlib.Path(os.environ["RUNNER_TEMP"])/"exact-activation-scripts"
-          folder.mkdir()
-          lines=text.splitlines();scripts=[]
-          for i,line in enumerate(lines):
-           if line=="        run: |":
-            body=[]
-            for tail in lines[i+1:]:
-             if tail and not tail.startswith("          "):break
-             body.append(tail[10:] if tail else "")
-            scripts.append("\n".join(body)+"\n")
-          assert len(scripts)==11
-          for i,script in enumerate(scripts):
-           path=folder/(str(i)+".sh");path.write_text(script)
-           subprocess.run(["bash","-n",str(path)],check=True)
-          print("EXACT_REPAIRED_ORIGINAL_11_SHELL_BLOCKS_VERIFIED")
+          import hashlib,urllib.request
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/a37a972bd31bd0ad4fa0b82005f26a91bc07b9fc/.github/workflows/shortcut-storage.yml"
+          with urllib.request.urlopen(url,timeout=60) as r: raw=r.read(11571)
+          assert len(raw)==11570 and hashlib.sha1(b"blob "+str(len(raw)).encode()+bytes([0])+raw).hexdigest()=="cb33818dafc911ec79e490491ff58fb8734741cd"
+          text=raw.decode();start=text.index("          import hashlib,os,pathlib,subprocess,urllib.request")
+          end=text.index("\n          PY\n",start)
+          program="\n".join(line[10:] for line in text[start:end].splitlines())
+          exec(compile(program,"exact-transfer-bootstrap","exec"),{})
           PY
       - name: Use Java 17
         run: |
@@ -68,6 +45,58 @@ jobs:
         run: |
           set -euo pipefail
           bash "$RUNNER_TEMP/exact-activation-scripts/2.sh"
+      - name: Prove and repair actual media checked-exception signature
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          """Repair the new UI's checked exception contract, without suppressing failure."""
+          import ast,os,pathlib
+
+          INSERT=r'''
+          media_path=pathlib.Path(os.environ["GITHUB_WORKSPACE"])/"src/main/java/com/supercubegame/pockettodo/MediaRepository.java"
+          media_bytes=media_path.read_bytes()
+          assert hashlib.sha1(b"blob "+str(len(media_bytes)).encode()+bytes([0])+media_bytes).hexdigest()=="2d662b14780fffef816652a93d4bae5af80fba02"
+          assert "public MediaRepository(Path directory, long maxBytes) throws IOException" in media_bytes.decode()
+          old="private MediaRepository activationMedia(){"
+          new="private MediaRepository activationMedia()throws java.io.IOException{"
+          stub_old="MediaRepository(Path p,long b){}"
+          stub_new="MediaRepository(Path p,long b)throws java.io.IOException{}"
+          for name in ("activation-host.py","activation-parser.py"):
+           assert activation_files[name].count(stub_old)==1
+           activation_files[name]=activation_files[name].replace(stub_old,stub_new,1)
+          scope={"__name__":"checked_exception_red"}
+          exec(compile(activation_files["activation-host.py"],"checked_exception_red","exec"),scope)
+          c,r=scope["run"](activation_files["activation-ui.java"])
+          assert c.returncode!=0 and "unreported exception IOException" in c.stderr
+          (pathlib.Path(os.environ["RUNNER_TEMP"])/"activation-evidence/activation-ui-checked-exception-red.txt").write_text(c.stderr)
+          assert activation_files["activation-ui.java"].count(old)==1
+          activation_files["activation-ui.java"]=activation_files["activation-ui.java"].replace(old,new,1)
+          scope["check"](activation_files["activation-ui.java"])
+          '''
+
+          def repair(script):
+              head,body=script.split("import ast,hashlib,os,pathlib,urllib.request\n",1)
+              code="import ast,hashlib,os,pathlib,urllib.request\n"+body.rsplit("\nPY",1)[0]
+              tree=ast.parse(code)
+              class Replace(ast.NodeTransformer):
+                  count=0
+                  def visit_Constant(self,node):
+                      if isinstance(node.value,str) and node.value.startswith("import base64,json,lzma,importlib.util"):
+                          anchor="for name,content in activation_files.items(): (folder/name).write_text(content)"
+                          assert node.value.count(anchor)==1
+                          self.count+=1
+                          value=node.value.replace(anchor,INSERT+"\n"+anchor,1)
+                          ast.parse(value)
+                          return ast.copy_location(ast.Constant(value=value),node)
+                      return node
+              update=Replace();tree=update.visit(tree);assert update.count==1
+              return head+ast.unparse(tree)+"\nPY\n"
+
+          if __name__=="__main__":
+              path=pathlib.Path(os.environ["RUNNER_TEMP"])/"exact-activation-scripts/3.sh"
+              path.write_text(repair(path.read_text()))
+
+          PY
       - name: Integrate default startup UI and rerun all 21 original hosts
         id: integration
         run: |
@@ -117,37 +146,14 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import hashlib,os,pathlib,subprocess,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/cbbc66ec225157ace12dc56402445390beb1df66/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as r: data=r.read(29381)
-          blob=lambda b:hashlib.sha1(b"blob "+str(len(b)).encode()+bytes([0])+b).hexdigest()
-          assert len(data)==29380 and blob(data)=="b72879364d180397e06857650fd246c3644ff357"
-          text=data.decode()
-          pairs=[
-           ('driver=driver.replace(anchor,anchor+"'+chr(92)+'n"+insert,1)', 'driver=driver.replace(anchor,anchor+"'+chr(92)*2+'n"+insert,1)'),
-           ('static boolean isolatedActivationTest;")'+chr(92)+"n"+chr(92)+"'+anchor,1)", 'static boolean isolatedActivationTest;")'+chr(92)*2+"n"+chr(92)+"'+anchor,1)")
-          ]
-          for old,new in pairs:
-           assert text.count(old)==1
-           text=text.replace(old,new,1)
-          fixed=text.encode()
-          assert len(fixed)==29382 and blob(fixed)=="7ded9ebe7dca9e669e6dd4f6b906191f1ef957a0"
-          assert hashlib.sha256(fixed).hexdigest()=="8ba546250800b9d2f752cf70446f11de83bdebd137acde6cf771621b5f576d2d"
-          folder=pathlib.Path(os.environ["RUNNER_TEMP"])/"exact-activation-scripts"
-          folder.mkdir()
-          lines=text.splitlines();scripts=[]
-          for i,line in enumerate(lines):
-           if line=="        run: |":
-            body=[]
-            for tail in lines[i+1:]:
-             if tail and not tail.startswith("          "):break
-             body.append(tail[10:] if tail else "")
-            scripts.append("\n".join(body)+"\n")
-          assert len(scripts)==11
-          for i,script in enumerate(scripts):
-           path=folder/(str(i)+".sh");path.write_text(script)
-           subprocess.run(["bash","-n",str(path)],check=True)
-          print("EXACT_REPAIRED_ORIGINAL_11_SHELL_BLOCKS_VERIFIED")
+          import hashlib,urllib.request
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/a37a972bd31bd0ad4fa0b82005f26a91bc07b9fc/.github/workflows/shortcut-storage.yml"
+          with urllib.request.urlopen(url,timeout=60) as r: raw=r.read(11571)
+          assert len(raw)==11570 and hashlib.sha1(b"blob "+str(len(raw)).encode()+bytes([0])+raw).hexdigest()=="cb33818dafc911ec79e490491ff58fb8734741cd"
+          text=raw.decode();start=text.index("          import hashlib,os,pathlib,subprocess,urllib.request")
+          end=text.index("\n          PY\n",start)
+          program="\n".join(line[10:] for line in text[start:end].splitlines())
+          exec(compile(program,"exact-transfer-bootstrap","exec"),{})
           PY
       - name: Restore exact six-file host-verified candidate
         run: |
@@ -205,37 +211,14 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import hashlib,os,pathlib,subprocess,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/cbbc66ec225157ace12dc56402445390beb1df66/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as r: data=r.read(29381)
-          blob=lambda b:hashlib.sha1(b"blob "+str(len(b)).encode()+bytes([0])+b).hexdigest()
-          assert len(data)==29380 and blob(data)=="b72879364d180397e06857650fd246c3644ff357"
-          text=data.decode()
-          pairs=[
-           ('driver=driver.replace(anchor,anchor+"'+chr(92)+'n"+insert,1)', 'driver=driver.replace(anchor,anchor+"'+chr(92)*2+'n"+insert,1)'),
-           ('static boolean isolatedActivationTest;")'+chr(92)+"n"+chr(92)+"'+anchor,1)", 'static boolean isolatedActivationTest;")'+chr(92)*2+"n"+chr(92)+"'+anchor,1)")
-          ]
-          for old,new in pairs:
-           assert text.count(old)==1
-           text=text.replace(old,new,1)
-          fixed=text.encode()
-          assert len(fixed)==29382 and blob(fixed)=="7ded9ebe7dca9e669e6dd4f6b906191f1ef957a0"
-          assert hashlib.sha256(fixed).hexdigest()=="8ba546250800b9d2f752cf70446f11de83bdebd137acde6cf771621b5f576d2d"
-          folder=pathlib.Path(os.environ["RUNNER_TEMP"])/"exact-activation-scripts"
-          folder.mkdir()
-          lines=text.splitlines();scripts=[]
-          for i,line in enumerate(lines):
-           if line=="        run: |":
-            body=[]
-            for tail in lines[i+1:]:
-             if tail and not tail.startswith("          "):break
-             body.append(tail[10:] if tail else "")
-            scripts.append("\n".join(body)+"\n")
-          assert len(scripts)==11
-          for i,script in enumerate(scripts):
-           path=folder/(str(i)+".sh");path.write_text(script)
-           subprocess.run(["bash","-n",str(path)],check=True)
-          print("EXACT_REPAIRED_ORIGINAL_11_SHELL_BLOCKS_VERIFIED")
+          import hashlib,urllib.request
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/a37a972bd31bd0ad4fa0b82005f26a91bc07b9fc/.github/workflows/shortcut-storage.yml"
+          with urllib.request.urlopen(url,timeout=60) as r: raw=r.read(11571)
+          assert len(raw)==11570 and hashlib.sha1(b"blob "+str(len(raw)).encode()+bytes([0])+raw).hexdigest()=="cb33818dafc911ec79e490491ff58fb8734741cd"
+          text=raw.decode();start=text.index("          import hashlib,os,pathlib,subprocess,urllib.request")
+          end=text.index("\n          PY\n",start)
+          program="\n".join(line[10:] for line in text[start:end].splitlines())
+          exec(compile(program,"exact-transfer-bootstrap","exec"),{})
           PY
       - name: Restore exact six-file host-verified candidate
         run: |

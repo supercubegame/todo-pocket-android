@@ -1,266 +1,75 @@
-name: Native startup acceptance preflight
+name: Recover original native startup failure
 on:
   push:
     branches: [ci/shortcut-storage-preflight-4d8742]
 permissions:
   contents: read
+  actions: read
+  checks: write
 concurrency:
   group: shortcut-business-bridge-delivery
   cancel-in-progress: false
 jobs:
-  shortcut_host:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 120
-    permissions:
-      contents: read
-      checks: write
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
-          persist-credentials: false
-      - name: Use Java 17
-        run: |
-          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
-          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
-      - name: Restore exact pinned backend materializer
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import hashlib,pathlib,os,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/56e57bb43453540fa2912c9518a1b5ab71254234/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as response: source=response.read(21963)
-          assert len(source)==21962 and hashlib.sha256(source).hexdigest()=="4786a65ce08f30c787536adfad91599dcfb9ee58e9c2ea7ca41ae049435c0d83"
-          text=source.decode();begin=text.index("          import ast,");end=text.index("\n          PY\n",begin)
-          program="\n".join(line[10:] for line in text[begin:end].splitlines())
-          exec(compile(program,"pinned-startup-materializer","exec"),{})
-          PY
-      - name: Preserve original RED and backend host gates
-        run: |
-          set -euo pipefail
-          python3 "$RUNNER_TEMP/activation-payload/driver.py" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/activation-payload" "$RUNNER_TEMP/activation-evidence"
-      - name: Integrate default startup UI and rerun all 21 original hosts
-        id: integration
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import ast,base64,hashlib,json,lzma,os,pathlib,subprocess,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/af4abf74661bc8c73c2e82d69a65e6035b928a0d/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as response: prior=response.read(20441)
-          assert len(prior)==20440 and hashlib.sha256(prior).hexdigest()=="c921773dd62a5245e3d97af44c11ab8a52d20801e8ec9c31782e5d978ebbda38"
-          text=prior.decode()
-          start=text.index("          import base64,hashlib,json,lzma,os,pathlib,subprocess")
-          end=text.index("\n          PY\n",start)
-          program="\n".join(line[10:] for line in text[start:end].splitlines())
-          tree=ast.parse(program)
-          last=tree.body[-1]
-          assert isinstance(last,ast.Expr) and isinstance(last.value,ast.Call) and ast.unparse(last.value.func)=="subprocess.run"
-          assert ast.literal_eval(last.value.keywords[0].value) is True and last.value.keywords[0].arg=="check"
-          tree.body.pop()
-          scope={}
-          exec(compile(tree,"exact-af4abf-unpack-only","exec"),scope)
-          folder=pathlib.Path(os.environ["RUNNER_TEMP"])/"startup-ui-extension"
-          raw=lzma.decompress(base64.b64decode('/Td6WFoAAATm1rRGAgAhARYAAAB0L+Wj4DJADjBdAD2IicZUdNsUEGEBgp2WFwYvce2w/+mrbGFzUpQrMAPnCiC9OVHgZyktApg0RwwlGrc//NaP83SiQAjaCw5rb1OQG1+cDen4Pj9i1nwq31eoisF0xiabTOcH2K+4WZqITTu6MXMTNKsNnF3zuK3sraPSB6fGug2NJYSleyjVbdL0Mw5RQtU20inMNyYvmhC0LnTDZWuCoKsgNaU1GFn3kdh+pZ6+PRH7QiLMGK8L7XyDs6WA1vtZ4CGWcWmlSiWFTNGo6hpze4Mn+zXZuQkDWeEfgSCqA1gIT0dJCLKe4PWt8wsparV5JpbBW/qN23jnOT+nmOwiE86WhS7QDVJSl5lmFC8Sm8bE5HAugyd3ppGs/PIOAtcccIHQqCduFxRcYwDohKDUzrI55FjY78RVqRIs8gki2EiKV9q6ozuhOKQR2ZR/4nYMO2etWpYl9ADfxnxrE9Es0EDdhx+9QDbAn36XfY8nkZlvDvd1EJNanGkkwqxUXqH3tGBItnt6sT+H9HeBzFo8RT5Z1GnyS2Th62vHbHsgcLby/XpM1Cu8mtuGo/ptOEW/EEd2nmlh05Y6L9GePYVS0LGVmnWHlxOt94CpFl6AdWsn/5gw8AamaDhGEvAykTyCA7gspOW0helRv1iZDSB11g6xajXLqXKDXEKz3t7iw6crmTkb6p44yUt8DoSiqL9b/STPULXU+yKwUjTtEX3KJOd3SorvYaYZ/hOuY7Cb2YwVy5kh3uAhbpa/nEG120Hz7KrMPiCwyf/GbzYefpVdl0Xto6Yf1Q2bjPJrggtMGd3PXuY8aZNBEK3DTpyI9fhEFqDwKGypww6i4kxoCUykMSTJU//UNC2nj3PaD4QWkVuHIK0LBkLYOxR40bR0tumvYjmGrIWljhWTP0HEsiEqcx53x7sjFee4H3MAepEhNPzgf7Yo/wG1CadnHma/91Ikibmmd+1UnLb47z5W/IYSazjEhe/dMIouvNlPJFrObLjd1bX96aioihb8jrny2YlU7mcNaHLtnAO5VyGz+msR9bE45fAARMdKq+mgDgcv9OkSKfccL8sw8B4k18VoYcJSjP3Kg8Jxw0IXOsVS6+3hQYDDpiMD89bEdtoKBI0X4ifQIsaAiT1xbY+eLk6KYblTAjhQq8DRq7tQojlC3qj5Gf3e1AK0rYbkafMoBzPxPyYPjXUJ7RSieP7gzCjP43/jV+BQSL5Iop1SH8Y3j0hqWKn8UgJajdSO1p6B3E6iFWEDBLduHAmP9XUDuXYWPisXTejI3inVYY6R1IWM1B6h7a3/ncLEqqwBHC1rl7tbPoMpF6sPNwpdqMBKAullQXThUarg8unL42j6FFabb14TDf//z79fAsMgL4Ip+O4J7AZ/jCI06fPkymz+l6Hm9vlOeddvA6DPfpHOsOdtZizSh8a1BWJR/i5pXSx9AITPC5+mqRzVsSNA8cfc0I5MJVfoONeqm8V565YPpLOkDluVae3fpwESx26XM9v2eyl1q8A43WUuUuqemd+MqfacmdaYw1QEQgccCbf4BmeHGFYXSUjYb/Nh55bTsIKHNG3LDXdl3iaq8TJoL7ZN56NA0qEYu8CDOoMmlA9BhWRA7XA0/cUq18L5Zc2+CCkCsZ0mt8V0dXBgvaJz6yUeDeVD+Vcj+z9FUtc4TQVAMl9ocqKR9RjFC7lHnMeaXGmBXMbUZ8vbmTSmWdYqzgvnEyZ9OReW93n7McfErA7Hx2B2tCbrii/N8X1wLqotC3TBFRERt9CmKCP76us3dVA8K7xElQ+DP2b0l0ccYCs+3+5yT6vt+BTxqe3YgWsq+ncp5LoAqq/zgD4FFUbKhJRV7XEcsKKHbcYOZbvcIEFjdGK89Yb8/q67tOxIl15K6yC350IJtkJ9Hn+zhoyb7C/nFXUSxMH5F51LIBzKgEqpBVqyuuzCzu6x02KVSRPZ0yzBlfnFE00J+9p6X0ARfl3sW0VrtAg+Zq8OI837dY97VAJA/IQGswZOrVniGeODgXR9drOkIru5oNhb2mqHp2AtsoCOh/fcQ48+lrjThy0U2RFhxpOFHl7DRQ1zYX/cshdhMSmXOmxT0h1MmlSJRidhufbxR9QUnsbhiawbBTnPLdLoN8ZVtgovYbKgdqIzyCaW37qvPelfLALB0Ia3dVrhsra3wrdtVdMmuB7IBwJXRB3HT0huTIMEiqfMb2Ifmi30TQ6fcNqvjYvPAWQhlhqlqIiHbanjBaDxd4TPEDVw0EJtdtTy8J1D79h+716m+7xAyTe4zTs0PK/sbHsY9kb7LmrYvI8Z98WkDA9BbJRDh3EEz4BxxyJFtxNxVe06ZXILz+VyfmMY6pDHrEWJix+ZbLagja2gC5g2YvOYRy6rtvFYYXvLBMgBlGTqXPDd7QQehWlGhoplq4jz94CgaPJWgJXyM/YmpKB0C7TOnZGIsQWuf5VGYrbaC6Kt0uUXpxpME4RRKe0uCbidJ+es5L6aKmoIc1Ffx4FFDUhkudURjumNhzNp9+xcGu9q95yJC3IwwrUituf1L30HeUZZvxzI9vZssslfFpDttYdVaQZNdHhrc6tcB91kpyTMdQTIpUTFZF/LzQ9oARieyk0mwBVacP5X7kEItuUe5y6LHNWtrxcu1XotQFBUBq1/LCASqnve40Ug2tZUExhyjJrJaTQcJfXb3hqdxGbRUlLw/6OSlbuzOD7i+jRj6eqJvbHjPQ/9MNel71GcY0p2IK8KTNLo2fHU7epsdzE9VySxfk1dFau1Xt4yHPFhthTWri8Elg3OA/G3KKkOHMhGuR07upyUPIpRxg+Qgm0AgLmt0Z6cuQIpIeKjKSlZBvIpANtL6SRhr68R1eCEzwCImwbp+XbUf5tuyFFnf4yi2UCoqYsmtg83u3XEdCEjchmZBi8J3sijr6QMfTObYjo/7qGKfLgJvP6Pnk465vSQvVsEakZe1S6o6Qz8t1ba3kTemSUOhm19Bq1aXzmpkVFamtYGqEGXjmYLw4VUeImd8yTPPkizkPGUuDLICQZg7JiYtZCnNyQWbKAGiOaH5X6AyQc9qnoqKkUE3RIlh04p+ha/iMnCm/rn6c/uAZf17MdnDc8DigvFzV7wjhePskFUIgB6tZoU1KMTYjM7anS4bYfaAnrJ3yvILbRuTnqg/68sLcpSbaxJMLo6//VkmoKaout0VrncnU/oUra8W3VgbN9g6j0hsIy2mKjfHznE+Bf+lmqdDMCVNCGM0BEAtOvOBdcvDjnkZCbCfwL1Bbaf9Xk8MdYPsUKtLasrtBkCKlY/PwSAd+tO9/epTfOui0qJ77xSH6oHpk5+mCxz/D4IC0AIIoQg1up2ZSfY+fXoKuDHM/OvdCNdsNyiM/bnzJKM/0xMS1W7x1CaeiUc8X9hmrjxsGfcd4cICatr2Nxc8HAOO48BLsmz5lCSi4XUZJlrOxHCJXFT3ND28jqrX376VpaKbR9WEkJAJ18O8TZvkRnNUjsY2KzCQHZ56WvtqiAyqpp//X1eGdJkjy+CVYziHffUgTSCjkZa5KCagx5DFQIeS4WsKymS6zVWKvkCoaRgfLM+cugoJFhS7IrHqSQRdZxM14bWkXlLbSDG1mEzyzUUKApNirmHuGQN3Z4ryEZXKIfcCuSlD/JcIGY3uP6NjawCLMhaBOM6a2DXJHXhlADZiNyUofihDX1r01JjFo0nxj4vV0SKs6Zrg39aTfcWA66nzQNvRX3wuN+zVMh6l6Mdfvdvq5BhjY0G/jbSEKQDmQX6FVJgoN5wU3B3aX6VKUCl8Y5sVkXIQZSqMnl73KFCmfgDXk3zeo9JD3JyyAZHOMFaaGqotxotYb5slkeDaYYxJC9mHiphGX/SeR8Kb22ms2yEj6uTx2KgdQfzAo0RvxAkp6oM+qVi+5WOcNC2AeEAruT2iXOPgHLsVaVP5+JEqj75bxfKF8YIQTxmp96UKKwLPVYRh4YXumDphuyWIFKD4X69Oy9yPheOvfbC5MquUlyn3Uu4qVMbLRvk5HLvAxeL21gMMpFcaWuGdCS7EgR/Xb/qEW3h9qeFcGRsvwOlnFN7vbp8lKk1KH6jTMrtTD1NeSkOWGxlGAibdHPmlLYgsbcg6EASIkLefLLHH6axlhzYQdTR2WP/acyNJV8ZOuN+5KKTKR0oOeJ6Qy/ARJP/27RaH9GzK/sTIdQgxMDd54rLnnPyEXEvbjoyIdC/wTPjf3RHMcAaQe4tBFSbC6mCFBWqVO65784x0exJLS9O6oYy0FvofGo8QiNgiuxIpW5o3r95dl4QczAJLG7MZ+SjKidM5gak95d2iw44Ed+tjpJZNNSMaxKNQZWBFIcN4RV38DqAcfnscr9sa27TrJDe0hWNUqBUy58Qp+hFgsoHmzsBTEj3poaHZKLGc1MfOJhSrWh8Ota3EsjGjehBf9knB8WWgURlOuWYUFGVNdt4gbIGqB+0l4y4i2SQ3Y1tdFAtWMZOjv5ZRcUXjtCjAn0LNi8o6i6DrD2txD5fL6F+IVSmCAydZq2mBRQynrLkDCT/1jn6ZgF48FneC7ntMpTfsN0use5wWFF2V4EmltKQaiLqh0fHei/xRIY1CngkNiFFOgpsmP0jOjS7yDmlG8eBUvI8npWtJClaUeb/htWtnznef2BeEHS8BR0QMzdXJDzlNr2QwUF6wc5ekYPGsd5KzAwiNEKQ8jK8NBgUuZII3cjlUnpfnYn7JIe4yWxjaOQCR9FC3hdNS6N+EQXxXTj0Hd2dl96SaPqiNRBiPDfPCTyAZDKWGT8Frr+4lDD6thou/0/PBlFheu7I67Fn7esG7XrfvVoCK0Le9XTpZ2pP3Plw+QB7ZuNmBrxmo1H131n++rx7AMH7PcLSwYbeAAHMHMFkAAAOmkCBscRn+wIAAAAABFla',validate=True))
-          assert hashlib.sha256(raw).hexdigest()=='23fdb39708af369ac7cd23761f6f7ddc44508445e965073b2d428cbae94ab8e0'
-          files=json.loads(raw)
-          assert set(files)=={"native-parser.py","native-device.java","native-integrate.py"}
-          for name,content in files.items(): (folder/name).write_text(content)
-          driver=(folder/"integrate.py").read_text()
-          old='    receipt["status"]="STARTUP_UI_HOST_PENDING"'
-          assert driver.count(old)==1
-          insertion = """    spec=importlib.util.spec_from_file_location("native_extension",folder/"native-integrate.py")
-              native=importlib.util.module_from_spec(spec);spec.loader.exec_module(native)
-              native.extend(root,folder)
-              emitted=p.read_text().split("    // BEGIN_STARTUP_DELIVERY\\n",1)[1].split("    // END_STARTUP_DELIVERY",1)[0]
-              gate.HARNESS=gate.HARNESS.replace("TodayScreen screen; boolean destroyed,finishing;", "static boolean isolatedStartupTest; TodayScreen screen; boolean destroyed,finishing;")
-              gate.check_members(emitted)
-              for name in receipt["candidate_files"]:
-                  data=(root/name).read_bytes()
-                  target=out/"candidate"/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(data)
-                  receipt["candidate_files"][name]=identity(data)
-              (out/"native-startup-extension.json").write_text(json.dumps({n:(folder/n).read_text() for n in ("native-parser.py","native-device.java","native-integrate.py")}))
-          """
-          driver=driver.replace(old,insertion+old)
-          driver=driver.replace("STARTUP_UI_CANDIDATE_NOT_ACTIVATION_UI_NOT_PRODUCT_NOT_UPGRADE","NATIVE_STARTUP_CANDIDATE_NOT_ACTIVATION_UI_NOT_PRODUCT_NOT_UPGRADE")
-          ast.parse(driver)
-          (folder/"integrate.py").write_text(driver)
-          subprocess.run(["python3",str(folder/"integrate.py"),os.environ["GITHUB_WORKSPACE"],str(folder),str(pathlib.Path(os.environ["RUNNER_TEMP"])/"activation-evidence")],check=True)
-          PY
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        id: evidence
-        if: always()
-        with:
-          name: activation-host
-          path: ${{ runner.temp }}/activation-evidence/
-          if-no-files-found: error
-          retention-days: 14
-      - name: Publish exact host outcome
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HOST_OUTCOME: ${{ steps.integration.outcome }}
-          UPLOAD_OUTCOME: ${{ steps.evidence.outcome }}
-          ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json,os,pathlib,subprocess
-          p=pathlib.Path(os.environ["RUNNER_TEMP"])/"activation-evidence/receipt.json"
-          value=json.loads(p.read_text()) if p.exists() else {"status":"SETUP_FAILED","host_commands":[]}
-          value["artifact_url"]=os.environ.get("ARTIFACT_URL")
-          body=json.dumps(value,ensure_ascii=False,indent=2)
-          assert len(body.encode())<60000
-          ok=value["status"]=="HOST_PASS_CANDIDATE_DEVICE_PENDING" and "startup_ui_host" in value and os.environ["HOST_OUTCOME"]==os.environ["UPLOAD_OUTCOME"]=="success"
-          request={"name":"Startup UI preflight evidence","head_sha":os.environ["GITHUB_SHA"],"status":"completed","conclusion":"success" if ok else "failure","output":{"title":value["status"],"summary":"Candidate only; product pushes=0. Actual native startup checks required in both raw device phase logs; original regression labels retained. Activation UI and overwrite upgrade still pending.","text":"```json\n"+body+"\n```"}}
-          endpoint="repos/"+os.environ["GITHUB_REPOSITORY"]+"/check-runs"
-          r=subprocess.run(["gh","api","--method","POST",endpoint,"--input","-"],input=json.dumps(request),text=True,capture_output=True,timeout=60,check=True)
-          made=json.loads(r.stdout)
-          seen=json.loads(subprocess.check_output(["gh","api",endpoint+"/"+str(made["id"])],text=True,timeout=60))
-          assert seen["head_sha"]==request["head_sha"] and seen["conclusion"]==request["conclusion"]
-          assert all(seen["output"][k]==v for k,v in request["output"].items())
-          print("STARTUP_UI_RECEIPT",seen["html_url"])
-          raise SystemExit(0 if ok else 1)
-          PY
-  shortcut_device:
-    needs: shortcut_host
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 35
-    strategy:
-      fail-fast: false
-      matrix:
-        api: [26, 34]
-    env:
-      TEST_API: ${{ matrix.api }}
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
-          persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: activation-host
-          path: activation-evidence
-      - name: Restore exact five-file host-verified candidate
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import hashlib,json,pathlib,subprocess,os
-          root=pathlib.Path(".")
-          assert subprocess.check_output(["git","rev-parse","HEAD"]).decode().strip()=="3a5a17e1fdc570c73804007cd9a4d2ef36c0966b"
-          expected={"src/main/java/com/supercubegame/pockettodo/AppDatabase.java":"f3ae4d9d9bb59670e9634714640ac6fbdf478a09","src/main/java/com/supercubegame/pockettodo/Schema4Store.java":"cfc8c36a0681467150d5cd84ecfbcc76c184cb92","src/androidTest/java/com/supercubegame/pockettodo/Schema4DeviceTest.java":"0e63fc3448dae47d289533181be1f726eca1c15e","tools/verify_shortcuts.py":"af4e02026ca601f6a5cfb3d03c369fec675e4515","src/main/java/com/supercubegame/pockettodo/MainActivity.java":"404ed33a43182cf1c016ffc3326c2fd539cc4184"}
-          receipt=json.loads((root/"activation-evidence/receipt.json").read_text())
-          assert receipt["status"]=="HOST_PASS_CANDIDATE_DEVICE_PENDING"
-          assert receipt["baseline"]=="3a5a17e1fdc570c73804007cd9a4d2ef36c0966b" and receipt["product_pushes"]==0
-          assert receipt["workflow_commit"]==os.environ["GITHUB_SHA"] and str(receipt["run_id"])==os.environ["GITHUB_RUN_ID"] and str(receipt["run_attempt"])==os.environ["GITHUB_RUN_ATTEMPT"]
-          assert len(receipt["host_commands"])==21 and all(r["returncode"]==0 and not r["timed_out"] and r["attempts"]==1 and r["budget_seconds"]==300 for r in receipt["host_commands"])
-          assert receipt["startup_ui_host"]=={"checks":14,"witnessed_mutants":5,"scope":"REAL_JAVA_ANDROID_DOUBLES"}
-          assert set(receipt["candidate_files"])==set(expected)
-          for p,blob in expected.items():
-           old=(root/p).read_bytes()
-           assert hashlib.sha1(b"blob "+str(len(old)).encode()+b"\0"+old).hexdigest()==blob
-           data=(root/"activation-evidence/candidate"/p).read_bytes();identity=receipt["candidate_files"][p]
-           assert len(data)==identity["bytes"] and hashlib.sha256(data).hexdigest()==identity["sha256"]
-           assert hashlib.sha1(b"blob "+str(len(data)).encode()+b"\0"+data).hexdigest()==identity["blob"]
-           (root/p).write_bytes(data)
-          PY
-      - name: Fixed disposable Android setup
-        run: |
-          set -euo pipefail
-          exec > >(tee shortcut-setup.log) 2>&1
-          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
-          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
-          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
-          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip.sha256 -o /tmp/gradle.sha256
-          echo "$(cat /tmp/gradle.sha256)  /tmp/gradle.zip" | sha256sum -c -
-          unzip -q /tmp/gradle.zip -d /tmp
-          echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
-          sudo apt-get update
-          sudo apt-get install --yes strace
-      - name: Build isolated runner and restore original Gradle source
-        env:
-          BUILD_429_EXECUTE: "true"
-          BUILD_LOG: "shortcut-build.log"
-        run: |
-          set -euo pipefail
-          python3 tools/verify_shortcuts.py build 2>&1 | tee shortcut-build-driver.log
-      - name: Original regressions plus actual native default startup
-        run: |
-          set -euo pipefail
-          python3 tools/verify_shortcuts.py android 2>&1 | tee shortcut-android.log
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: shortcut-device-api-${{ matrix.api }}
-          path: |
-            shortcut-device/
-            shortcut-build.json
-            shortcut-build.log
-            shortcut-build-driver.log
-            shortcut-android.log
-            shortcut-setup.log
-            emulator.log
-          if-no-files-found: error
-          retention-days: 14
-  shortcut_report:
-    needs: [shortcut_host, shortcut_device]
-    if: always() && github.event_name != 'pull_request'
+  original_failure:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    permissions:
-      contents: write
-      actions: read
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
-          persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: activation-host
-          path: activation-evidence
-      - name: Restore exact five-file host-verified candidate
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import hashlib,json,pathlib,subprocess,os
-          root=pathlib.Path(".")
-          assert subprocess.check_output(["git","rev-parse","HEAD"]).decode().strip()=="3a5a17e1fdc570c73804007cd9a4d2ef36c0966b"
-          expected={"src/main/java/com/supercubegame/pockettodo/AppDatabase.java":"f3ae4d9d9bb59670e9634714640ac6fbdf478a09","src/main/java/com/supercubegame/pockettodo/Schema4Store.java":"cfc8c36a0681467150d5cd84ecfbcc76c184cb92","src/androidTest/java/com/supercubegame/pockettodo/Schema4DeviceTest.java":"0e63fc3448dae47d289533181be1f726eca1c15e","tools/verify_shortcuts.py":"af4e02026ca601f6a5cfb3d03c369fec675e4515","src/main/java/com/supercubegame/pockettodo/MainActivity.java":"404ed33a43182cf1c016ffc3326c2fd539cc4184"}
-          receipt=json.loads((root/"activation-evidence/receipt.json").read_text())
-          assert receipt["status"]=="HOST_PASS_CANDIDATE_DEVICE_PENDING"
-          assert receipt["baseline"]=="3a5a17e1fdc570c73804007cd9a4d2ef36c0966b" and receipt["product_pushes"]==0
-          assert receipt["workflow_commit"]==os.environ["GITHUB_SHA"] and str(receipt["run_id"])==os.environ["GITHUB_RUN_ID"] and str(receipt["run_attempt"])==os.environ["GITHUB_RUN_ATTEMPT"]
-          assert len(receipt["host_commands"])==21 and all(r["returncode"]==0 and not r["timed_out"] and r["attempts"]==1 and r["budget_seconds"]==300 for r in receipt["host_commands"])
-          assert receipt["startup_ui_host"]=={"checks":14,"witnessed_mutants":5,"scope":"REAL_JAVA_ANDROID_DOUBLES"}
-          assert set(receipt["candidate_files"])==set(expected)
-          for p,blob in expected.items():
-           old=(root/p).read_bytes()
-           assert hashlib.sha1(b"blob "+str(len(old)).encode()+b"\0"+old).hexdigest()==blob
-           data=(root/"activation-evidence/candidate"/p).read_bytes();identity=receipt["candidate_files"][p]
-           assert len(data)==identity["bytes"] and hashlib.sha256(data).hexdigest()==identity["sha256"]
-           assert hashlib.sha1(b"blob "+str(len(data)).encode()+b"\0"+data).hexdigest()==identity["blob"]
-           (root/p).write_bytes(data)
-          PY
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          pattern: shortcut-*
-          path: collected-shortcuts
-      - name: Publish both original device receipts including failures
-        if: always()
+      - name: Read original failed job once without rerun
         env:
-          NEEDS_JSON: ${{ toJSON(needs) }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          python3 tools/verify_shortcuts.py report 2>&1 | tee shortcut-report.log
+          mkdir -p "$RUNNER_TEMP/original-failure"
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,subprocess
+          out=pathlib.Path(os.environ["RUNNER_TEMP"])/"original-failure"
+          repo="repos/"+os.environ["GITHUB_REPOSITORY"]
+          def api(path):
+              return subprocess.check_output(["gh","api",repo+path],timeout=60)
+          run=json.loads(api("/actions/runs/38535075337"))
+          assert run["head_sha"]=="ab5162f847db4a2b88229b156c3702c31707a4ac" and run["run_attempt"]==1
+          job=json.loads(api("/actions/jobs/115757274638"))
+          assert job["run_id"]==38535075337 and job["conclusion"]=="failure"
+          raw=api("/actions/jobs/115757274638/logs")
+          assert 0<len(raw)<=10485760,"original log empty or exceeds explicit 10MiB recovery bound"
+          (out/"original-host.log").write_bytes(raw)
+          (out/"original-run.json").write_text(json.dumps(run))
+          (out/"original-job.json").write_text(json.dumps(job))
+          text=raw.decode("utf-8","strict")
+          # Keep the complete original log in the artifact. Publish the complete
+          # integration-to-end suffix, including its first failure and publisher.
+          marker="##[group]Run set -euo pipefail"
+          starts=[i for i in range(len(text)) if text.startswith(marker,i)]
+          chosen=[i for i in starts if "import ast,base64,hashlib,json,lzma,os,pathlib,subprocess,urllib.request" in text[i:i+2000]]
+          assert len(chosen)==1,("integration log boundary",len(chosen))
+          suffix=text[chosen[0]:]
+          parts=[];part=""
+          for char in suffix:
+              if len((part+char).encode())>40000:
+                  parts.append(part);part=""
+              part+=char
+          if part: parts.append(part)
+          assert "".join(parts)==suffix and 0<len(parts)<=20,"incomplete recovery split"
+          meta={"source_commit":run["head_sha"],"source_run":run["id"],"source_attempt":1,
+                "source_job":job["id"],"original_conclusion":"failure","bytes":len(raw),
+                "sha256":hashlib.sha256(raw).hexdigest(),"suffix_bytes":len(suffix.encode()),
+                "published_parts":len(parts),"scope":"READ_ONLY_RECOVERY_NOT_TEST_PASS_NO_RERUN_NO_PRODUCT_PUSH"}
+          (out/"recovery.json").write_text(json.dumps(meta,indent=2))
+          for index,part in enumerate(parts,1):
+              body={"name":f"Original ab5162 failure {index}/{len(parts)}","head_sha":os.environ["GITHUB_SHA"],
+                    "status":"completed","conclusion":"success","output":{"title":"Recovered original failure, not test acceptance",
+                    "summary":json.dumps(meta),"text":"```text\n"+part+"\n```"}}
+              sent=subprocess.run(["gh","api","--method","POST",repo+"/check-runs","--input","-"],
+                  input=json.dumps(body),text=True,capture_output=True,timeout=60,check=True)
+              made=json.loads(sent.stdout)
+              seen=json.loads(api("/check-runs/"+str(made["id"])))
+              assert seen["head_sha"]==body["head_sha"] and seen["output"]==dict(body["output"],annotations_count=0,annotations_url=seen["output"]["annotations_url"])
+              print(seen["html_url"])
+          PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: independent-shortcut-report
-          path: |
-            shortcut-report.json
-            shortcut-report.log
+          name: original-ab5162-failure
+          path: ${{ runner.temp }}/original-failure/
           if-no-files-found: error
           retention-days: 14

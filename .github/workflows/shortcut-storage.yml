@@ -1,380 +1,44 @@
-name: Callback finishing declaration repair
-'on':
-  push:
-    branches:
-      - ci/shortcut-storage-preflight-4d8742
-permissions:
-  contents: read
-concurrency:
-  group: shortcut-business-bridge-delivery
-  cancel-in-progress: false
-jobs:
-  shortcut_host:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 120
-    permissions:
-      contents: read
-      checks: write
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
-          persist-credentials: false
-      - &ref_0
-        name: Restore exact 5f9dab scripts and preserve first failure
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import hashlib,os,pathlib,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/5f9dab662a363cf4b10285ee5f4024873261f4ac/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as r:raw=r.read(22673)
-          assert len(raw)==22672 and hashlib.sha1(b"blob 22672"+bytes([0])+raw).hexdigest()=="e1699c740913a897c4d9109ded615edba82b46e2"
-          text=raw.decode();out=pathlib.Path(os.environ["RUNNER_TEMP"])/"callback-shape-predecessor";out.mkdir()
-          shared=None
-          for job,count in {'shortcut_host': 28, 'shortcut_device': 11, 'shortcut_report': 11}.items():
-              rest=text.split("  "+job+":\n",1)[1];lines=[]
-              for line in rest.splitlines(keepends=True):
-                  if line.startswith("  shortcut_"):break
-                  lines.append(line)
-              scripts=[]
-              for i,line in enumerate(lines):
-                  if line=="        run: |\n":
-                      body=[]
-                      for item in lines[i+1:]:
-                          if item.strip() and not item.startswith("          "):break
-                          body.append(item[10:] if item.startswith("          ") else item)
-                      scripts.append("".join(body))
-              if job=="shortcut_host":
-                  assert "      - &ref_0\n" in rest
-                  shared=scripts[0]
-              else:
-                  assert "".join(lines).count("      - *ref_0\n")==1
-                  scripts.insert(0,shared)
-              assert len(scripts)==count,(job,len(scripts))
-              for i,script in enumerate(scripts):
-                  assert script.startswith("set -euo pipefail\n")
-                  (out/(job+"-"+str(i)+".sh")).write_text(script)
-          PY
-      - name: Restore exact e44b83 scripts and unchanged command budgets
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-0.sh"
-      - name: Restore exact bfb230 scripts and retain original report failure
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-1.sh"
-      - name: Restore exact accepted 512263 scripts and original budgets
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-2.sh"
-      - name: Restore exact 05fc scripts with first failure retained
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-3.sh"
-      - name: Restore exact e9bf scripts without combining steps
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-4.sh"
-      - name: Restore exact accepted predecessor scripts
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-5.sh"
-      - name: Restore hash-bound original c91 host steps
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-6.sh"
-      - name: Verify exact original source and repair two transport escapes
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-7.sh"
-      - name: Use Java 17
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-8.sh"
-      - name: Restore exact pinned backend materializer
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-9.sh"
-      - name: Preserve original RED and backend host gates
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-10.sh"
-      - name: Prove and repair actual media checked-exception signature
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-11.sh"
-      - name: Preserve exact parser RED and bind layered selftest witnesses
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-12.sh"
-      - name: Add missing activation Android declarations with original RED and four omission controls
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-13.sh"
-      - name: Use screen-space dialog touch and preserve explicit unchecked witnesses
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-14.sh"
-      - name: Bind deterministic lifecycle checks to actual candidate Java members
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-15.sh"
-      - name: Persist all UI label families with raw-stream identity
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-16.sh"
-      - name: Collect activation database and independently replay exact history
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-17.sh"
-      - name: Isolate old scripted report fixtures and verify actual report SQLite rejection
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-18.sh"
-      - name: Add native startup database collection and independent replay
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-19.sh"
-      - name: Capture device screen ownership on the Android main thread
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-20.sh"
-      - name: Verify actual Android rotation recreation and finish with consent pending
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-21.sh"
-      - name: Repair lifecycle host declarations and execute actual assertion members
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-22.sh"
-      - name: Exercise real queued activation destruction with original failure controls
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-23.sh"
-      - name: Repair exact report schema with original RED and negative controls
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-24.sh"
-      - name: Exercise completed prepare callback pending finish with original failure controls
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-25.sh"
-      - name: Repair missing finishing declaration with full candidate RED GREEN first
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import ast,base64,hashlib,lzma,os,pathlib
-          hook=lzma.decompress(base64.b64decode('/Td6WFoAAATm1rRGAgAhARYAAAB0L+Wj4AifA3xdADCYyu8/Ykb6S0ZS7StLb/xqxTCFUemXuT0BrlXPuJbiX9Pr9o8I7FtTgpS2aVmHqi4iJ7akVWIAlobmq1C83XpdfFcdALaeLj/UI9U6jeXiMGR9Mt3Pz37YeWdM3fzsT1ie2xQQrSjyNphpNubHBsBRJum4rI7PJU7og7UimsJasCY1wu6VrcJUWYCOUH67uj0fZ6fXbSxrqfJo5xYpKCmRF5rzcblpUqTU7XD6oUiFwDUI8IX4DOmTV7Nhsvz5N+Cl24ZaxKSLiWmzqXAojqPs3DMIDjqWwcRyX6pISOKNgcjFsTzwsGgr/jwEsOWmoReaehQ6hrbzN7KIMOCNZL5fvEX5Ib9p/a1i38Pr31JwLwW+xwBGtlemPPS5Jsf/YpKBU3kqSA2LS4ztDCLHYJhvtBljnZUAFv8WOr2gG2UmAEUno2oQOQl6M9B1xF6D7CWl/UbUYcKQEYqX6iRBrP+WFaS1DBheiELDIavpIvRwGz/TZzkGLIHdVVsYPDNyGOmDkPvsIqhdtARupEj++ILK4oHlgIWAzGhrpRTuVX/hGzsz522NfaNc8/mswsLSb9FO3gWY5kyhER6ygI/TDUr1LHMzp3iGmTindhhshnOLnHT0v2bEwDw44yZPNgF+IfUY8uDeuDv4EbCB0EOaWCZ4UNh4Pus7RpLlSW64ZuNI66MRtiXS5CTjAXw53zjP46NaX3vYEMc66hY/+55ZR6am5h+Dn1T+UjMo23vzCXsnL6W7Ngh39U7iP9UuExNNYEZRKS4Td/Qc2gl9daDgAf2cTdtk2AkAtYJTqlgZhqDn8ej6W5adEXN5nfYaMzMsRO837BlLyp2BtG+pTHgcfsoXa0PceH1VNs0kVEJcMAAxfdVNozpCamqPkIMRpVsAV88YCacN0PAXJSxKkVCeAxTde0GxvlVPm6jZA5A/BaP9+9ria5kloGz/3+ZDtmuRL8Cs/zXgCNz+vGNgVC63qG+HOO9u364QCd8tkPaZPvDz3mGKQ2sdbdh4eLOJfYQrBiX+qwZr+/G3+o6ExVwKceijFOsOdqxARrTJMabBcTl/CxzTweVabUsfpnL+cgTEQzM2ra5ODcrA5+hdvvE3VImKAyjxNau4Ni6BahiQby7RPqdnJ7FflEQ5XP/ZqnaZsJgm2Nws8HM1ozCarqp0tdN01OlMR7lwXXzBJAAAZkzb8l5jW+oAAZgHoBEAAKFMz9CxxGf7AgAAAAAEWVo=',validate=True)).decode()
-          assert hashlib.sha256(hook.encode()).hexdigest()=='6a611db79e123b9b47e65bba40e104c1c8c40420b9431f1b62900b3f3f91a1e2'
-          path=pathlib.Path(os.environ["RUNNER_TEMP"])/"exact-activation-scripts/3.sh"
-          script=path.read_text();head,body=script.split("import ast",1)
-          tree=ast.parse("import ast"+body.rsplit("\nPY",1)[0])
-          class Patch(ast.NodeTransformer):
-              count=0
-              def visit_Constant(self,node):
-                  if isinstance(node.value,str) and node.value.startswith("import base64,json,lzma,importlib.util"):
-                      anchor="for name,content in activation_files.items(): (folder/name).write_text(content)"
-                      assert node.value.count(anchor)==1
-                      self.count+=1
-                      value=node.value.replace(anchor,hook+"\n"+anchor,1)
-                      ast.parse(value)
-                      return ast.copy_location(ast.Constant(value=value),node)
-                  return node
-          change=Patch();tree=change.visit(tree);assert change.count==1
-          path.write_text(head+ast.unparse(tree)+"\nPY\n")
-          PY
-      - name: Integrate default startup UI and rerun all 21 original hosts
-        id: integration
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-26.sh"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        id: evidence
-        if: always()
-        with:
-          name: activation-host
-          path: ${{ runner.temp }}/activation-evidence/
-          if-no-files-found: error
-          retention-days: 14
-      - name: Publish exact host outcome
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HOST_OUTCOME: ${{ steps.integration.outcome }}
-          UPLOAD_OUTCOME: ${{ steps.evidence.outcome }}
-          ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_host-27.sh"
-  shortcut_device:
-    needs: shortcut_host
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 35
-    strategy:
-      fail-fast: false
-      matrix:
-        api:
-          - 26
-          - 34
-    env:
-      TEST_API: ${{ matrix.api }}
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
-          persist-credentials: false
-      - *ref_0
-      - name: Restore exact e44b83 scripts and unchanged command budgets
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_device-0.sh"
-      - name: Restore exact bfb230 scripts and retain original report failure
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_device-1.sh"
-      - name: Restore exact accepted 512263 scripts and original budgets
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_device-2.sh"
-      - name: Restore exact 05fc scripts with first failure retained
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_device-3.sh"
-      - name: Restore exact e9bf scripts without combining steps
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_device-4.sh"
-      - name: Restore exact accepted predecessor scripts
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_device-5.sh"
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: activation-host
-          path: activation-evidence
-      - name: Verify exact original source and repair two transport escapes
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_device-6.sh"
-      - name: Restore exact six-file host-verified candidate
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_device-7.sh"
-      - name: Fixed disposable Android setup
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_device-8.sh"
-      - name: Build isolated runner and restore original Gradle source
-        env:
-          BUILD_429_EXECUTE: 'true'
-          BUILD_LOG: shortcut-build.log
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_device-9.sh"
-      - name: Original regressions plus actual native default startup
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_device-10.sh"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: shortcut-device-api-${{ matrix.api }}
-          path: |
-            shortcut-device/
-            shortcut-build.json
-            shortcut-build.log
-            shortcut-build-driver.log
-            shortcut-android.log
-            shortcut-setup.log
-            emulator.log
-          if-no-files-found: error
-          retention-days: 14
-  shortcut_report:
-    needs:
-      - shortcut_host
-      - shortcut_device
-    if: always() && github.event_name != 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: write
-      actions: read
-      checks: write
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
-          persist-credentials: false
-      - *ref_0
-      - name: Restore exact e44b83 scripts and unchanged command budgets
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_report-0.sh"
-      - name: Restore exact bfb230 scripts and retain original report failure
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_report-1.sh"
-      - name: Restore exact accepted 512263 scripts and original budgets
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_report-2.sh"
-      - name: Restore exact 05fc scripts with first failure retained
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_report-3.sh"
-      - name: Restore exact e9bf scripts without combining steps
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_report-4.sh"
-      - name: Restore exact accepted predecessor scripts
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_report-5.sh"
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: activation-host
-          path: activation-evidence
-      - name: Verify exact original source and repair two transport escapes
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_report-6.sh"
-      - name: Restore exact six-file host-verified candidate
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_report-7.sh"
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          pattern: shortcut-*
-          path: collected-shortcuts
-      - name: Publish both original device receipts including failures
-        if: always()
-        env:
-          NEEDS_JSON: ${{ toJSON(needs) }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_report-8.sh"
-      - name: Include native database evidence without truncation
-        if: always()
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_report-9.sh"
-      - name: Publish exact new UI checks and original seed reopen streams
-        id: ui_evidence
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/callback-shape-predecessor/shortcut_report-10.sh"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: independent-shortcut-report
-          path: |
-            shortcut-report.json
-            shortcut-report.log
-            ui-compact-api*.json
-          if-no-files-found: error
-          retention-days: 14
+{
+  "name": "Read-only original callback failure recovery",
+  "on": {
+    "push": {
+      "branches": [
+        "ci/shortcut-storage-preflight-4d8742"
+      ]
+    }
+  },
+  "permissions": {
+    "contents": "read",
+    "actions": "read",
+    "checks": "write"
+  },
+  "concurrency": {
+    "group": "shortcut-business-bridge-delivery",
+    "cancel-in-progress": false
+  },
+  "jobs": {
+    "recover_original_failure": {
+      "runs-on": "ubuntu-24.04",
+      "timeout-minutes": 10,
+      "steps": [
+        {
+          "name": "Recover pinned original archives without rerunning devices",
+          "env": {
+            "GH_TOKEN": "${{ github.token }}"
+          },
+          "run": "set -euo pipefail\npython3 - <<'PY'\nimport hashlib,io,json,os,pathlib,subprocess,zipfile\n\nREPO=\"supercubegame/todo-pocket-android\"\nRUN=38725988182\nHEAD=\"5df73a51e744646adda4a161d929a97a2c1c3109\"\nARTIFACTS=[\n (11967699343,\"activation-host\",\"76c5de26d962b7e10e73b9be0424903036e21b26f7bd4da6fba8bd9bd7413f27\"),\n (11967814777,\"shortcut-device-api-26\",\"1e08f21e3560fdfc764d07a7c08fdc2741d1109967ab0a7d19771919688844c4\"),\n (11967869612,\"shortcut-device-api-34\",\"f77f6c73e9aae2d90de54155593c67e5a51df4bb6471bcd980ea375c9c8ebecf\")]\n\ndef api(path,value=None):\n    command=[\"gh\",\"api\",\"repos/\"+REPO+\"/\"+path]\n    if value is not None:command+=[\"--method\",\"POST\",\"--input\",\"-\"]\n    result=subprocess.run(command,input=None if value is None else json.dumps(value).encode(),\n                          capture_output=True,timeout=60,check=True)\n    return result.stdout\n\ndef checked_zip(raw,digest):\n    assert hashlib.sha256(raw).hexdigest()==digest,\"original artifact digest\"\n    z=zipfile.ZipFile(io.BytesIO(raw));names=z.namelist()\n    assert len(names)==len(set(names)) and len(names)<=300,\"archive member identity\"\n    assert sum(i.file_size for i in z.infolist())<=16*1024*1024,\"archive expanded budget\"\n    assert all(not n.startswith(\"/\") and \"..\" not in pathlib.PurePosixPath(n).parts for n in names),\"archive member path\"\n    assert z.testzip() is None,\"archive CRC\"\n    return z\n\ndef selftest():\n    def fixture(names):\n        out=io.BytesIO()\n        with zipfile.ZipFile(out,\"w\") as z:\n            for name in names:z.writestr(name,b\"fixture\")\n        return out.getvalue()\n    good=fixture([\"safe.txt\"]);digest=hashlib.sha256(good).hexdigest()\n    assert checked_zip(good,digest).read(\"safe.txt\")==b\"fixture\"\n    cases=[(good,\"0\"*64,\"digest\"),(fixture([\"../escape\"] ),None,\"path\"),\n           (fixture([\"/absolute\"]),None,\"path\"),(fixture([\"same\",\"same\"]),None,\"identity\")]\n    for raw,expected,reason in cases:\n        try:checked_zip(raw,expected or hashlib.sha256(raw).hexdigest())\n        except AssertionError as error:assert reason in str(error)\n        else:raise AssertionError(\"accepted bad archive \"+reason)\n    print(\"RECOVERY_ARCHIVE_GATE positive=1 negative=4\")\n\ndef publish(name,text):\n    assert len(text.encode())<55000,\"publication byte budget\"\n    value={\"name\":name,\"head_sha\":os.environ[\"GITHUB_SHA\"],\"status\":\"completed\",\n           \"conclusion\":\"success\",\"output\":{\"title\":\"ORIGINAL_EVIDENCE_RECOVERED_NOT_DEVICE_ACCEPTANCE\",\n           \"summary\":\"Read-only extraction from failed 5df73a run. Product pushes=0; device reruns=0; no repair accepted.\",\n           \"text\":text}}\n    made=json.loads(api(\"check-runs\",value))\n    seen=json.loads(api(\"check-runs/\"+str(made[\"id\"])))\n    assert seen[\"head_sha\"]==value[\"head_sha\"] and seen[\"conclusion\"]==value[\"conclusion\"]\n    assert all(seen[\"output\"][k]==v for k,v in value[\"output\"].items()),\"exact publication readback\"\n\ndef main():\n    selftest()\n    assert os.environ[\"GITHUB_REPOSITORY\"]==REPO and os.environ[\"GITHUB_RUN_ATTEMPT\"]==\"1\"\n    run=json.loads(api(\"actions/runs/\"+str(RUN)))\n    assert run[\"head_sha\"]==HEAD and run[\"run_attempt\"]==1 and run[\"conclusion\"]==\"failure\"\n    folder=pathlib.Path(\"original-callback-evidence\");folder.mkdir()\n    manifest={\"source_run\":RUN,\"source_head\":HEAD,\"device_reruns\":0,\"product_pushes\":0,\"artifacts\":[]}\n    for aid,name,digest in ARTIFACTS:\n        meta=json.loads(api(\"actions/artifacts/\"+str(aid)))\n        assert meta[\"name\"]==name and not meta[\"expired\"] and meta[\"digest\"]==\"sha256:\"+digest\n        assert meta[\"workflow_run\"][\"id\"]==RUN and meta[\"workflow_run\"][\"head_sha\"]==HEAD\n        raw=api(\"actions/artifacts/\"+str(aid)+\"/zip\")\n        assert len(raw)==meta[\"size_in_bytes\"]\n        z=checked_zip(raw,digest);(folder/(name+\".zip\")).write_bytes(raw)\n        members=[{\"name\":n,\"bytes\":z.getinfo(n).file_size,\"sha256\":hashlib.sha256(z.read(n)).hexdigest()} for n in z.namelist()]\n        manifest[\"artifacts\"].append({\"id\":aid,\"name\":name,\"sha256\":digest,\"members\":members})\n        if name==\"activation-host\":\n            receipts=[n for n in z.namelist() if n==\"receipt.json\"]\n            assert len(receipts)==1,\"original host receipt\"\n            receipt=json.loads(z.read(receipts[0]))\n            assert len(receipt[\"host_commands\"])==21\n            assert all(r[\"returncode\"]==0 and not r[\"timed_out\"] and r[\"attempts\"]==1 for r in receipt[\"host_commands\"])\n            compact={k:v for k,v in receipt.items() if k!=\"host_commands\"}\n            compact[\"host_commands\"]=[{k:v for k,v in r.items() if k not in (\"stdout_tail\",\"stderr_tail\")} for r in receipt[\"host_commands\"]]\n            publish(\"Original 5df host identity and 21 receipts\",\"```json\\n\"+json.dumps(compact,ensure_ascii=False,indent=2)+\"\\n```\")\n            for base in (\"Schema4Store.java\",\"AppDatabase.java\",\"TodayScreen.java\"):\n                matches=[n for n in z.namelist() if n==\"candidate/src/main/java/com/supercubegame/pockettodo/\"+base]\n                assert len(matches)==1,(\"exact candidate member\",base,matches)\n                data=z.read(matches[0]);identity=receipt[\"candidate_files\"][\"src/main/java/com/supercubegame/pockettodo/\"+base]\n                assert len(data)==identity[\"bytes\"] and hashlib.sha256(data).hexdigest()==identity[\"sha256\"]\n                assert hashlib.sha1(b\"blob \"+str(len(data)).encode()+b\"\\0\"+data).hexdigest()==identity[\"blob\"]\n                lines=data.decode().splitlines();selected=set()\n                for i,line in enumerate(lines):\n                    if any(term in line for term in (\"ActivationPlan\",\"prepareShortcutActivation\",\"prepareActivation\",\"activation-backups\")):\n                        selected.update(range(max(0,i-12),min(len(lines),i+100)))\n                assert selected,\"actual activation source\"\n                text=\"\\n\".join(str(i+1)+\": \"+lines[i] for i in sorted(selected))\n                publish(\"Original 5df activation source \"+base,\"Source identity: \"+json.dumps(identity)+\"\\nNumbered source windows, not full file.\\n```java\\n\"+text+\"\\n```\")\n        else:\n            selected=[]\n            for n in z.namelist():\n                if n.endswith((\".txt\",\".json\",\".log\")) and z.getinfo(n).file_size<30000:\n                    data=z.read(n)\n                    if b\"activation callback exactly one completed backup\" in data:\n                        selected.append({\"name\":n,\"text\":data.decode(errors=\"strict\")})\n            assert selected,\"original callback first failure\"\n            publish(\"Original 5df callback failure \"+name,\"```json\\n\"+json.dumps(selected,ensure_ascii=False,indent=2)+\"\\n```\")\n    (folder/\"manifest.json\").write_text(json.dumps(manifest,indent=2))\n    publish(\"Original 5df recovery archive identities\",\"```json\\n\"+json.dumps(manifest,indent=2)+\"\\n```\")\n\nif __name__==\"__main__\":main()\nPY\n"
+        },
+        {
+          "uses": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+          "if": "always()",
+          "with": {
+            "name": "original-5df-callback-evidence",
+            "path": "original-callback-evidence/",
+            "if-no-files-found": "error",
+            "retention-days": 14
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,4 +1,4 @@
-name: Exact lifecycle report contract repair
+name: Completed prepare callback lifecycle acceptance
 'on':
   push:
     branches:
@@ -21,17 +21,17 @@ jobs:
           ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
           persist-credentials: false
       - &ref_0
-        name: Restore exact bfb230 scripts and retain original report failure
+        name: Restore exact e44b83 scripts and unchanged command budgets
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import hashlib,os,pathlib,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/bfb2300b6e3ff133e2626b930c7e89814a8a833b/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as r:raw=r.read(22203)
-          assert len(raw)==22202 and hashlib.sha1(b"blob 22202"+bytes([0])+raw).hexdigest()=="5b9d9b6ec8621696de98c9d67f855e1d7c31ebb0"
-          text=raw.decode();out=pathlib.Path(os.environ["RUNNER_TEMP"])/"queue-report-predecessor";out.mkdir()
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/e44b83bd4f25f2e083ecca5f6420af9400916105/.github/workflows/shortcut-storage.yml"
+          with urllib.request.urlopen(url,timeout=60) as r:raw=r.read(16727)
+          assert len(raw)==16726 and hashlib.sha1(b"blob 16726"+bytes([0])+raw).hexdigest()=="714714aba10c6f98742b57bb99be34cbdf8c9778"
+          text=raw.decode();out=pathlib.Path(os.environ["RUNNER_TEMP"])/"callback-predecessor";out.mkdir()
           shared=None
-          for job,count in {'shortcut_host': 24, 'shortcut_device': 9, 'shortcut_report': 9}.items():
+          for job,count in {'shortcut_host': 26, 'shortcut_device': 10, 'shortcut_report': 10}.items():
               rest=text.split("  "+job+":\n",1)[1];lines=[]
               for line in rest.splitlines(keepends=True):
                   if line.startswith("  shortcut_"):break
@@ -55,101 +55,109 @@ jobs:
                   assert script.startswith("set -euo pipefail\n")
                   (out/(job+"-"+str(i)+".sh")).write_text(script)
           PY
+      - name: Restore exact bfb230 scripts and retain original report failure
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-0.sh"
       - name: Restore exact accepted 512263 scripts and original budgets
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-0.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-1.sh"
       - name: Restore exact 05fc scripts with first failure retained
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-1.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-2.sh"
       - name: Restore exact e9bf scripts without combining steps
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-2.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-3.sh"
       - name: Restore exact accepted predecessor scripts
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-3.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-4.sh"
       - name: Restore hash-bound original c91 host steps
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-4.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-5.sh"
       - name: Verify exact original source and repair two transport escapes
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-5.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-6.sh"
       - name: Use Java 17
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-6.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-7.sh"
       - name: Restore exact pinned backend materializer
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-7.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-8.sh"
       - name: Preserve original RED and backend host gates
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-8.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-9.sh"
       - name: Prove and repair actual media checked-exception signature
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-9.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-10.sh"
       - name: Preserve exact parser RED and bind layered selftest witnesses
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-10.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-11.sh"
       - name: Add missing activation Android declarations with original RED and four omission controls
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-11.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-12.sh"
       - name: Use screen-space dialog touch and preserve explicit unchecked witnesses
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-12.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-13.sh"
       - name: Bind deterministic lifecycle checks to actual candidate Java members
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-13.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-14.sh"
       - name: Persist all UI label families with raw-stream identity
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-14.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-15.sh"
       - name: Collect activation database and independently replay exact history
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-15.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-16.sh"
       - name: Isolate old scripted report fixtures and verify actual report SQLite rejection
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-16.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-17.sh"
       - name: Add native startup database collection and independent replay
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-17.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-18.sh"
       - name: Capture device screen ownership on the Android main thread
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-18.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-19.sh"
       - name: Verify actual Android rotation recreation and finish with consent pending
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-19.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-20.sh"
       - name: Repair lifecycle host declarations and execute actual assertion members
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-20.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-21.sh"
       - name: Exercise real queued activation destruction with original failure controls
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-21.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-22.sh"
       - name: Repair exact report schema with original RED and negative controls
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-23.sh"
+      - name: Exercise completed prepare callback pending finish with original failure controls
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import ast,base64,hashlib,lzma,os,pathlib
-          hook=lzma.decompress(base64.b64decode('/Td6WFoAAATm1rRGAgAhARYAAAB0L+Wj4A+6BNtdADCYyu8/Ykb6S0ZS7StLb/xqxTCFUemXuT0BrlXPuJbiX9Pr9o8I7FtTgpS5p1jkuQtSC+aIEyTm0DRXsDrO8VTm9dSIypcThYwtPNr+NJ4cM516zhlYy5l6QYuT6LhyEeT1u0m3SOHic9rFxt8tLEalVC4ghnkzoiAScfz7lua1sHDHi/sLvD149Oi8NMxT8KCIyUDomLfID1mqC3W/1WxqmUKPwyxdv+gaM7TCM02T4H81vStj5irc6YmVfWNFGCiZ38USCoPUKo3GZT/RjtBUcbh0mvi2icpz+33Bn40575IJxVfEZ3SzDEIKvVaIxBbvKlqxiCSQpST6whqbMSubj+5XOaSk+YCsgC5zHxsgv317nHA00ruJg/3Bwhrc2FT/l5zDQkMZBOw6yZOD0Xc9ODzvizAmfpT+D/vCQ+3TdPb9DAWZET5TDV45suYfz3ky/jOYPkYZmgZTXt6uWOYDyOsgMaEamkVeA4Q3n85QGPir9jFDIdQLJXDLuLfZjPot9MLj4qDDI8ymlsB+LpkhpIClKF41Cl06d1zUXlMSfHycvz4o+edteu3dYVUJLJXVHIeSQmuiDv+8SXock8nYajQ2XkipP0kMqD7ZMK4t0rSQYgzARAY5NijeVYeVuqnBMAc4IG/U50729EIrC2lC+2i7lqrZcGUltJM4nA46aw36+nqQpZbUGt+uORF5y6LCKtWUYt5VUTiqVkq0B83UrZqYlXy3r5C/iARJ9XOMd41IqA6aIoI24S0ayfvferL1BC8TD5FYaoc1csLvQQd8TQboSYe4j75HDS9dYpudmW8Fz+5J1YBeIw1O7wGVaL5+FFlJzzcwppnIijYipix6lp8uLSxqYqaakx2kfSbSoBX63n4yUHCoPe8BrIdqGF5L4fpemRtAjz04uEppVza3hqnwhFfu0+O3HSWow5xM5+/x6B/b89+KXX9DJWGKCWkgVLe++sFQZzvrzJfh2FPPH8u4pC8NVb3YViWKJclGoETqzrkxOPaRh7EQcyn8h3T0GEk/e869JHSgKa4hjueOvzXKxWQrgH+XBHbR2vMdmDV2vysta6nnb03ZlthuYnpTYi8azL6P7irzW+i7bdno2wbV46xA8dYdRgwPLpcI4q5Rm/h5wGfoieQZeQ2QAtiQUBY+ToDWPpLmW6w7rhfqtQZvYSa5XUejGKvT+nMfBiedNtfvSarVG4kNmlCzXRn6+9u5iImR02S4Xq0AdJt6IsIJh/vs8r5xHcEZvqG7aQ3WNdveSqyOjDnK9FZoVNBvapZ2rN7Q//UbHk0eucdFNirZkBF1MMDs+sNWCf/3zTFkkGFjbi72S2W25RGHXDWSdgAlE4RkzBZYXQfGkN8NhsK3PuczuaWJRO+4hyLqPtaKbp8uXa/RYPjJxCtYoVtwHMvId1VR4znxKMiHPnmHG8nQ0O7CnLWHdUE3JvZCMgmUaT4pjCKkRhUHAGgy/9QiFrB2hiIUbfaC9pqN/lsGqD2uPezF7SeRkfAXX5likoQYUCuIWS5VreD00XRJElAHqfEzEJ14OtVjiaQ3VcrrRqFOD4K4UeH0iFnsoln5DRSWyNNxvGzXqHDjYorf3W8AG/ojCULwHZm9KUpp/IDbVd9LIXCuPDoKaUt/91q+RcebNutMzq0XsgAAAM7Wb6XmLgtCAAH3CbsfAADbstsbscRn+wIAAAAABFla',validate=True)).decode()
-          assert hashlib.sha256(hook.encode()).hexdigest()=='0587014e4554016c8d77307756143b3a410a52ac394fff8fea63e0992a3265e1'
+          hook=lzma.decompress(base64.b64decode('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',validate=True)).decode()
+          assert hashlib.sha256(hook.encode()).hexdigest()=='730341b71011fbb0be8c0efe8279287638501473a3a7bbea3cce4b621ec956bf'
           path=pathlib.Path(os.environ["RUNNER_TEMP"])/"exact-activation-scripts/3.sh"
           script=path.read_text();head,body=script.split("import ast",1)
           tree=ast.parse("import ast"+body.rsplit("\nPY",1)[0])
@@ -171,7 +179,7 @@ jobs:
         id: integration
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-22.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-24.sh"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: evidence
         if: always()
@@ -189,7 +197,7 @@ jobs:
           ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_host-23.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_host-25.sh"
   shortcut_device:
     needs: shortcut_host
     if: github.event_name != 'pull_request'
@@ -209,22 +217,26 @@ jobs:
           ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
           persist-credentials: false
       - *ref_0
+      - name: Restore exact bfb230 scripts and retain original report failure
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_device-0.sh"
       - name: Restore exact accepted 512263 scripts and original budgets
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_device-0.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_device-1.sh"
       - name: Restore exact 05fc scripts with first failure retained
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_device-1.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_device-2.sh"
       - name: Restore exact e9bf scripts without combining steps
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_device-2.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_device-3.sh"
       - name: Restore exact accepted predecessor scripts
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_device-3.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_device-4.sh"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: activation-host
@@ -232,26 +244,26 @@ jobs:
       - name: Verify exact original source and repair two transport escapes
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_device-4.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_device-5.sh"
       - name: Restore exact six-file host-verified candidate
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_device-5.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_device-6.sh"
       - name: Fixed disposable Android setup
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_device-6.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_device-7.sh"
       - name: Build isolated runner and restore original Gradle source
         env:
           BUILD_429_EXECUTE: 'true'
           BUILD_LOG: shortcut-build.log
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_device-7.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_device-8.sh"
       - name: Original regressions plus actual native default startup
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_device-8.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_device-9.sh"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -283,22 +295,26 @@ jobs:
           ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
           persist-credentials: false
       - *ref_0
+      - name: Restore exact bfb230 scripts and retain original report failure
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_report-0.sh"
       - name: Restore exact accepted 512263 scripts and original budgets
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_report-0.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_report-1.sh"
       - name: Restore exact 05fc scripts with first failure retained
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_report-1.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_report-2.sh"
       - name: Restore exact e9bf scripts without combining steps
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_report-2.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_report-3.sh"
       - name: Restore exact accepted predecessor scripts
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_report-3.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_report-4.sh"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: activation-host
@@ -306,11 +322,11 @@ jobs:
       - name: Verify exact original source and repair two transport escapes
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_report-4.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_report-5.sh"
       - name: Restore exact six-file host-verified candidate
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_report-5.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_report-6.sh"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: shortcut-*
@@ -322,12 +338,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_report-6.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_report-7.sh"
       - name: Include native database evidence without truncation
         if: always()
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_report-7.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_report-8.sh"
       - name: Publish exact new UI checks and original seed reopen streams
         id: ui_evidence
         if: always()
@@ -335,7 +351,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/queue-report-predecessor/shortcut_report-8.sh"
+          bash "$RUNNER_TEMP/callback-predecessor/shortcut_report-9.sh"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

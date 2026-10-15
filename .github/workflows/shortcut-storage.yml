@@ -1,4 +1,4 @@
-name: Device screen ownership main-thread acceptance
+name: Actual activation preview lifecycle acceptance
 'on':
   push:
     branches:
@@ -20,16 +20,16 @@ jobs:
         with:
           ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
           persist-credentials: false
-      - name: Restore exact accepted predecessor scripts
+      - name: Restore exact e9bf scripts without combining steps
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import hashlib,os,pathlib,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/cc06d83314b629746ac9a5588bcd2e0f581c255d/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as r: raw=r.read(21795)
-          assert len(raw)==21794 and hashlib.sha1(b"blob 21794"+bytes([0])+raw).hexdigest()=="93a051e95e02d9057a35ff335ffc3e3e2714f6f1"
-          text=raw.decode();out=pathlib.Path(os.environ["RUNNER_TEMP"])/"native-predecessor";out.mkdir()
-          for job,count in (("shortcut_host",15),("shortcut_device",5),("shortcut_report",4)):
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/e9bf430691bda02f4b5dbd2c7cf960c88cc2f6f9/.github/workflows/shortcut-storage.yml"
+          with urllib.request.urlopen(url,timeout=60) as r:raw=r.read(21936)
+          assert len(raw)==21935 and hashlib.sha1(b"blob 21935"+bytes([0])+raw).hexdigest()=="83a0a60fdb5889355a3447b52d4776c001d4c3d0"
+          text=raw.decode();out=pathlib.Path(os.environ["RUNNER_TEMP"])/"life-predecessor";out.mkdir()
+          for job,count in {'shortcut_host': 18, 'shortcut_device': 6, 'shortcut_report': 6}.items():
               assert text.count("  "+job+":\n")==1
               rest=text.split("  "+job+":\n",1)[1]
               lines=[]
@@ -49,84 +49,77 @@ jobs:
                   assert script.startswith("set -euo pipefail\n")
                   (out/(job+"-"+str(i)+".sh")).write_text(script)
           PY
+      - name: Restore exact accepted predecessor scripts
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_host-0.sh"
       - name: Restore hash-bound original c91 host steps
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_host-0.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_host-1.sh"
       - name: Verify exact original source and repair two transport escapes
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_host-1.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_host-2.sh"
       - name: Use Java 17
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_host-2.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_host-3.sh"
       - name: Restore exact pinned backend materializer
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_host-3.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_host-4.sh"
       - name: Preserve original RED and backend host gates
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_host-4.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_host-5.sh"
       - name: Prove and repair actual media checked-exception signature
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_host-5.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_host-6.sh"
       - name: Preserve exact parser RED and bind layered selftest witnesses
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_host-6.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_host-7.sh"
       - name: Add missing activation Android declarations with original RED and four omission controls
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_host-7.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_host-8.sh"
       - name: Use screen-space dialog touch and preserve explicit unchecked witnesses
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_host-8.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_host-9.sh"
       - name: Bind deterministic lifecycle checks to actual candidate Java members
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_host-9.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_host-10.sh"
       - name: Persist all UI label families with raw-stream identity
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_host-10.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_host-11.sh"
       - name: Collect activation database and independently replay exact history
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_host-11.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_host-12.sh"
       - name: Isolate old scripted report fixtures and verify actual report SQLite rejection
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_host-12.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_host-13.sh"
       - name: Add native startup database collection and independent replay
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import hashlib,os,pathlib,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/e4843a7353fe3bd1fc9fbe9e40481208d136c57d/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as r:raw=r.read(29320)
-          assert len(raw)==29319 and hashlib.sha1(b"blob 29319"+bytes([0])+raw).hexdigest()=="f0b2553893bbedb1984c5549d7f52d08c88a7766"
-          text=raw.decode();marker="      - name: Add native startup database collection and independent replay\n        run: |\n"
-          assert text.count(marker)==1
-          rest=text.split(marker,1)[1];lines=[]
-          for line in rest.splitlines(keepends=True):
-              if line.strip() and not line.startswith("          "):break
-              lines.append(line[10:] if line.startswith("          ") else line)
-          script="".join(lines)
-          assert hashlib.sha256(script.rstrip("\n").encode()).hexdigest()=='7cae2ca659aa3d23b854cd94dd4c9cbc1d76acdfab7e99d51cb4fdcb239cf207'
-          (pathlib.Path(os.environ["RUNNER_TEMP"])/"e484-native-replay.sh").write_text(script)
-          PY
-          bash "$RUNNER_TEMP/e484-native-replay.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_host-14.sh"
       - name: Capture device screen ownership on the Android main thread
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_host-15.sh"
+      - name: Verify actual Android rotation recreation and finish with consent pending
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import ast,base64,hashlib,lzma,os,pathlib
-          hook=lzma.decompress(base64.b64decode('/Td6WFoAAATm1rRGAgAhARYAAAB0L+Wj4E8iDcFdADCYyu8/Ykb6S0ZS7StLb/xqxTCFUemXuT0BrlXPuJbiX9Pr9o8I7F6bF1KRimT0sMws9nfa/VuVXKjmWqGnI93oBn4ZYoWR7Bp9/r84GIUP0nycnGbt3+gvzZc/pAGEN73vPDDiiIndXbOJYxkVjJfkBPuTTN3VJ5ZLfCK4ijNnKmqUlbqrZnfCoylOKMdXAsdfmEDSdOhWPxCOkvO0AcFfRKEx6oBVHlNzfwd4D1pw9fKuiDaJKuCnEmm32xaK1EGoaOxSPJ+uuQMTCReFHjMTOzjQVO3PsjuutpiPbFv3KFIynjnkUvW8WZ4MK3/JyWJonBTosSRdKc9NY1uwsUv5PquNC8um3TePm6ytlBCMVR3C545tKw8zpJe7yZFDQDvZnfHSFPQjh5aRGP7yvL/HlCVnkVFwMrFqJfBLaDH9hIMqJFoW1B3uh4g+kw8CshMTuzWoYiCdoQVngsEgPDnbGTFqNBUs8gjq0kQJ9xOrJNJgp7o+T/vtr/5/9QzPucH/JTMSKoh4tHJVtFI4Kf4O3/NX8CXSDkGtffA97ReESOmx4XQOYDSgYyAGKxIuwRrZ7jwvCh7PYCY/BEqWqXw/t8B2UldRs2Ni0yXIoMl8FCxOipDyDCISBfXkRLOxy4MQEBuFQI6pZ/UVKn8MFbXJs/tBCd9CFaubQZadCulEKDEmKA8GVAHAsjqHcAKoc4v1yQoZ8IbGtATbLO8c+R0RdRqhHKRZJhVT7wcrTWYOEw81hw8arrM+FnjJg6QwbvIa+ZEJH0xOaSJ7531XU0L4q+YUTyvYcXFvAx867gjQ4b0pZ4ULOdGeuK3SqwS6XaQg1mgmmKBBwb4+IpBxjnDQYo9e7GU3ljbkI8Azy+oQX0+vCSOLfGZXspkYngqpcWuRUWazzyxVv6jXhSNgqbyPpMsCcspa1c0120EK/d/pZuc9sCMR8xjjggTIVDWjA/p58vBg7WHiDto1ZzdYg2t4QuXYpmnBJaPfeiKamfZyzCy8sBYmN8xtLC7t1n3/Awp5MFMuQVYU4mY717OTmmfEOmQgD7QwWAKpeqTWs9uNtE6rCzhianDahSFc0JvY1slJCmkDNy0tQrFu3u8hdclHehUT3fa7ri0IZkiMOapqcv8tFh9kzKOjOZXAG36JnIcWOdHLqUCOD/C5brMDlaDUHBfIB9xVuLYBQi4Li69wvk28bNYoCMrtb0mhlnEaGCUbDRQDQMqTrhLkJqAAomr2D6tOSLNFESdc2GecND1vYsugZN/ykQbYGcMGKhgzGYmyBMiyMElCf7VpS1GNRsxcQjx4vGILc8zQhPYGpI+x0KqR9HZ7bFwAdN9PXXPzxWCGg8iMTJLaNUO7zCgh7gg9is8+sNHsZQF7Noxs00FqlPJRqBFOdBxG4Fes5PHzKdV1W00q9a78qApB/Mjzq7XevX8uS4iEDnMotq9uQh268+VY/UMLKQYmavORKEqk8gx6XLNpfB2hAhso7VpEGq9G0fpSM19vedqLX0IGHs52mbzSD32E+3sk2E469bJJr2diKmRwersihaI8Mg53miX5S9kVOQQKzWJDu58u+Psp1zv4ORyTbYzIghmKMuloC0tsW8gZZZPB49hurW4SNdoW9IRsiQqsfO40/nbie8phZUAdvfC2e8POdZGd+G4rBrbi3VHpgXEEj/M7dfVW7gVRFlMLftKN0ixxrkY2Hkm9SFk5hLfyanTzi2y8cOEotJiqhmYr62MyHoRNeny81TWZUmiKYHhJGS4L3/pIKSgKilMIJS0k+XYMtBH+caU4y7tGH8ivaO6c5+HFproDlHTD7BE+1A0zAyX3GZqYIpIuq+xP6f35RXx4JPnefd8vb64Pi4spo3KtKqdt2eHBRusURYVnD4mU2NSd9KqnU9aZLR3fvL5klzxgCO+QztOGv0HU+tYA4EI9GgT4g3m3MVBSx6aqSk8GzxpuF+qfXs5dPhhJGm1Q1RuC7TmhfhMcyZjoMZ4X7NvStgAdz2BcLxt3iYNbl5qmeuxBxTm3TFd9QBrIU9jYkrTTl8uZdoVJSPWIHhBaxfrIxXU08bb7/WC+iVAv6eO9B96N6Or5PGaXdxSTSKYMh7JCSQmYd93bzZRnjGEC4tigDggLeId2s8VvFfb8E3ZW4Vb02kue/DCOQ4ZJeh7gVuUc2s97HPLNZqIGnGHux5P2i/LmB++ThDNFHiHWLVH2Hr1WsrFIiIWw50puZ7J3VVrIdnwU+zNLyzYz/LyRTra6ug+B8M3FBbzGKCp6gIy5eqCY3lx2JJ2vzRhJPgkDdX5PfKq0/KNjj91KTaRoYpVYX5vQr0uZb2TyCCUHGGkla8CAOLH7I/rM5OVzFtJ2aDtw6jNW1uYSeP6G/g7GwIpRPJPHPgUKsE7VAZkuRIRMZLO4s12+K789Zo+tzyerEh+ZJ1Di4cBfNH11tNJvaEwPyQxqYZcbTWU4CII3mmVVbw3Z5rMgt2fkA5irHmixC0Mi/YhBMXTB979jEEkQQvu0RQ2Xsq0nvx/WAE/JHpM/YHU4ULF37WTvX0VsgJYMOn++7Tb5Xsf8FT8PZpapqdVeMAeBYzrUygli3HohlaO8m/D674icAO+HIbB1R5qLE1VVt5k06Ht8eVgk5/zTaEBRWWFlVW2wPxSZDli0K4g6MlWkcPMQTd9CRbr3hJ/3LLyF0RP94CWt+98jHcfTOTM02v8+cJUbgjK7+zyVYAUlIXGc8A0F0FhzGT6plBD+uQJaqQcMhGCUWScYRr3sjJG7U+A3G4Qf3lUSgxtW0dhUxfwPcIU/0U4VmLjvqg0agqpNLlJsaf/gYbF97uLQrKObq1UKEGrzvCxHEYw3XamleyfV8kML1avQfhg7GHqLmxXkvA0jhqxnUEEbNc4hddA1EjQlARC1+sMAM1OUZwMv8/+xGTcFwp5xB4ZjvwIZwDaz/mUAa5xD6URqZ4L9vURRcfAGHHrBwBV4o21IdF48tA3G2m9XUTmRYMsAI531fyLNs26E0ALbf7Xnf0utTlTJdL/ZlrYJzBXZbyB15pJm1GVD8Okpv9J/naFA6+bXqMHwtsbankmZdn1/yK3zRvc5f4OPxJkO5AE+UVNbZx9vGIhccVulYinOduoWg2huhBoC5EmmVlHMA3XgnZf2hkWNEA7izV7WoweMxhmzrcHMpU2ccolm2JTCijgErzMleAX4lozZ3y17txBeAK6p/pJUpsNb0p/YgK7HLTcAONvqXttCw9DbwFQW0nA24hr30WEVNkX6MTy/8+9krxE2qD+TFP3P95rttoUHu5+UUcRq7JP9Iu4Ui9gXJBZwtond2gj5xy5JIaBvXb3EqbZzA/IFZ3GCRr9A/eNhQEmkTDi1Fdye7oqvXeIcmsr/q+6UpWBREEItjRbj6CsCBGsinUgsoTpXZ2Vn0STxTY3LnrLCfRq+mnugVpWrBE6dY6y5QJHNwOH8QVz2QkFWtzZ8EYPP3H4l6mmrs6Mj2knJJLCMTjbnRlBpQGHHsQLe3+g8tbp755sRnyKNMBOtx4XJrLuFmYlUMX5JXnWIc7V1dBOkLBkEZbe+MG0wAEIiCwL5sMLtjez4QuOU18iCO/6YHuTv4tYM8+L2TsHiYM+VKfiOLonCKk7oxt//yjVmcwGhmGO9GmwasxZK8OknWUWEMjDvT7pN6ggxdbFz1s2PVYJTlHfm9JJ1y5YSnWV8F3H0cv7j9h8dTPQ0ni4RgFJuiIk6IBhQg3kDbobDcldNmfhYfSuBCtsX/LX/DLUioTBQRH1Udk6b8sFUSwknDzVH9VG2+AKFkQR31JdFqxe4LXKLcpuvlcnw5N3MJ5CqaUfvx/uZnfsAsgnewuwMRf4khiEju7KW3ETV1G2LYLQGO57BU03VyiLQ8H61iT+3eUY4a/JPCles+3N2XMP/cG3SPFqyL5J00sMbVbe6a0OXKPswItBNg/18RKJoJOLjGbJep+IewBE5+/KvN27DxXVqsXtxYWDuSUA/fEZQ1L4MHIzMFQ9jZdmIYwJQEtnVsWIus9zpKtIJlnG7PHg+uGkgT0xlz+miA+Aq83M1Mig2cC+mkGUujkSXb9MjOuu2fnzfoW48ssGjfjGtbzXEh3tt+WtOzYMGfvjyA+Uv5cRp0fTbXZVQeq7m/vxJYTY1hT3mELT9h1/U0EItWfmjUjLxaeNuFKa8ba5ho6Uv7Dl6Gr9yq+4ZV3nA3GQ7cQM61/kgfdFUXNu5nCyK3BR4fXJhOTmh4Myl3cP9IAtEnN3QWvt1rzJp9RgpfOwVDj1s3iuqBarmFrnEv9uF7N0HHF7bHf4WKjdAMQnR8fZbWqFWfzc8Sln6k6z0YrAgnUqcKbYGFLPR0rQewTdlDE8mQHzKNIuv4Oybzsn/yzDkMvs02PBdi4Wf1rIff3YrkKfGDqHgMSpfmbzRN4/jaiwYZG1FVhRVYCAoOqbw1WRGI9hiSufbbEmiihcPHuCcblZHhj+REKlOfr1JtHEtqtb8X3cnEhFgdsCmPp3Bf4fqHJ8/zJJURdvDgqDYx66aTBhGiubwudM6UGW9HLr/p1oGAXtq2GF1DUL457qyD8UeUjuN4eagCzREFMyofl85QvTmL/Y9Ou6A/RHqpz+o6DQeDpk4B1DRGRA5hmNGWFOVNsqsVkPGOdaUl+w3h46D2HFwrplShthWGXGUJHMR2KD3N9iXiDuFFqFXSp146FWjAAAAABvRwNWgh3SkAAHdG6OeAQDvb43LscRn+wIAAAAABFla',validate=True)).decode()
-          assert hashlib.sha256(hook.encode()).hexdigest()=='751e018ee783fb5a5a200011487ef75ce80cca4285134d87b40a7b0d781783e7'
+          hook=lzma.decompress(base64.b64decode('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',validate=True)).decode()
+          assert hashlib.sha256(hook.encode()).hexdigest()=='58ef1c20da8b4c899f7d635d2626c544b3917cb7fb7aea34a485a1db5ce5f27d'
           path=pathlib.Path(os.environ["RUNNER_TEMP"])/"exact-activation-scripts/3.sh"
           script=path.read_text();head,body=script.split("import ast",1)
           tree=ast.parse("import ast"+body.rsplit("\nPY",1)[0])
@@ -148,7 +141,7 @@ jobs:
         id: integration
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_host-13.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_host-16.sh"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: evidence
         if: always()
@@ -166,7 +159,7 @@ jobs:
           ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_host-14.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_host-17.sh"
   shortcut_device:
     needs: shortcut_host
     if: github.event_name != 'pull_request'
@@ -185,16 +178,16 @@ jobs:
         with:
           ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
           persist-credentials: false
-      - name: Restore exact accepted predecessor scripts
+      - name: Restore exact e9bf scripts without combining steps
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import hashlib,os,pathlib,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/cc06d83314b629746ac9a5588bcd2e0f581c255d/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as r: raw=r.read(21795)
-          assert len(raw)==21794 and hashlib.sha1(b"blob 21794"+bytes([0])+raw).hexdigest()=="93a051e95e02d9057a35ff335ffc3e3e2714f6f1"
-          text=raw.decode();out=pathlib.Path(os.environ["RUNNER_TEMP"])/"native-predecessor";out.mkdir()
-          for job,count in (("shortcut_host",15),("shortcut_device",5),("shortcut_report",4)):
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/e9bf430691bda02f4b5dbd2c7cf960c88cc2f6f9/.github/workflows/shortcut-storage.yml"
+          with urllib.request.urlopen(url,timeout=60) as r:raw=r.read(21936)
+          assert len(raw)==21935 and hashlib.sha1(b"blob 21935"+bytes([0])+raw).hexdigest()=="83a0a60fdb5889355a3447b52d4776c001d4c3d0"
+          text=raw.decode();out=pathlib.Path(os.environ["RUNNER_TEMP"])/"life-predecessor";out.mkdir()
+          for job,count in {'shortcut_host': 18, 'shortcut_device': 6, 'shortcut_report': 6}.items():
               assert text.count("  "+job+":\n")==1
               rest=text.split("  "+job+":\n",1)[1]
               lines=[]
@@ -214,6 +207,10 @@ jobs:
                   assert script.startswith("set -euo pipefail\n")
                   (out/(job+"-"+str(i)+".sh")).write_text(script)
           PY
+      - name: Restore exact accepted predecessor scripts
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_device-0.sh"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: activation-host
@@ -221,26 +218,26 @@ jobs:
       - name: Verify exact original source and repair two transport escapes
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_device-0.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_device-1.sh"
       - name: Restore exact six-file host-verified candidate
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_device-1.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_device-2.sh"
       - name: Fixed disposable Android setup
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_device-2.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_device-3.sh"
       - name: Build isolated runner and restore original Gradle source
         env:
           BUILD_429_EXECUTE: 'true'
           BUILD_LOG: shortcut-build.log
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_device-3.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_device-4.sh"
       - name: Original regressions plus actual native default startup
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_device-4.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_device-5.sh"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -271,16 +268,16 @@ jobs:
         with:
           ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
           persist-credentials: false
-      - name: Restore exact accepted predecessor scripts
+      - name: Restore exact e9bf scripts without combining steps
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import hashlib,os,pathlib,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/cc06d83314b629746ac9a5588bcd2e0f581c255d/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as r: raw=r.read(21795)
-          assert len(raw)==21794 and hashlib.sha1(b"blob 21794"+bytes([0])+raw).hexdigest()=="93a051e95e02d9057a35ff335ffc3e3e2714f6f1"
-          text=raw.decode();out=pathlib.Path(os.environ["RUNNER_TEMP"])/"native-predecessor";out.mkdir()
-          for job,count in (("shortcut_host",15),("shortcut_device",5),("shortcut_report",4)):
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/e9bf430691bda02f4b5dbd2c7cf960c88cc2f6f9/.github/workflows/shortcut-storage.yml"
+          with urllib.request.urlopen(url,timeout=60) as r:raw=r.read(21936)
+          assert len(raw)==21935 and hashlib.sha1(b"blob 21935"+bytes([0])+raw).hexdigest()=="83a0a60fdb5889355a3447b52d4776c001d4c3d0"
+          text=raw.decode();out=pathlib.Path(os.environ["RUNNER_TEMP"])/"life-predecessor";out.mkdir()
+          for job,count in {'shortcut_host': 18, 'shortcut_device': 6, 'shortcut_report': 6}.items():
               assert text.count("  "+job+":\n")==1
               rest=text.split("  "+job+":\n",1)[1]
               lines=[]
@@ -300,6 +297,10 @@ jobs:
                   assert script.startswith("set -euo pipefail\n")
                   (out/(job+"-"+str(i)+".sh")).write_text(script)
           PY
+      - name: Restore exact accepted predecessor scripts
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_report-0.sh"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: activation-host
@@ -307,11 +308,11 @@ jobs:
       - name: Verify exact original source and repair two transport escapes
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_report-0.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_report-1.sh"
       - name: Restore exact six-file host-verified candidate
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_report-1.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_report-2.sh"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: shortcut-*
@@ -323,19 +324,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_report-2.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_report-3.sh"
       - name: Include native database evidence without truncation
         if: always()
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import os,pathlib
-          path=pathlib.Path(os.environ["RUNNER_TEMP"])/"native-predecessor/shortcut_report-3.sh"
-          old=path.read_text();anchor='        value["status"] = "PASS"';added='        value["native_database_replay"] = {}\n        for phase in ("seed","reopen"):\n            assert verifier.replay_native_ui(root,result,phase) is True\n            entry=result["native_ui_snapshots"][phase]\n            value["native_database_replay"][phase]={\n                "status":"PASS","files":entry["files"],\n                "old_table_count":len(entry["snapshot"]["old_cells"]),\n                "old_cells_sha256":hashlib.sha256(json.dumps(entry["snapshot"]["old_cells"],sort_keys=True,ensure_ascii=False).encode()).hexdigest(),\n                "schema":entry["snapshot"]["schema"],\n                "category_shortcuts":entry["snapshot"]["category_shortcuts"]}\n        value["status"] = "PASS"'
-          assert old.count(anchor)==1
-          new=old.replace(anchor,added,1);assert new.replace(added,anchor,1)==old
-          path.write_text(new)
-          PY
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_report-4.sh"
       - name: Publish exact new UI checks and original seed reopen streams
         id: ui_evidence
         if: always()
@@ -343,7 +337,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/native-predecessor/shortcut_report-3.sh"
+          bash "$RUNNER_TEMP/life-predecessor/shortcut_report-5.sh"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

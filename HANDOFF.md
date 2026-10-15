@@ -1,41 +1,43 @@
 # 口袋待办：当前接续入口
 
-2026-10-15 11:37继续轮。单分支一个写入者，新账号独立授权GitHub，不假定继承技能/记忆/沙箱。没有产品交付、新APK、合并或发布。
+2026-10-15 14:14继续轮。单分支一个写入者；新账号独立授权GitHub，不假定继承沙箱/记忆/技能。没有新APK、产品提交、合并或发布。
 
-## 第一件事：读取bfb230队列候选自己的首轮结果
+## 首要动作：读e44b83本候选的首轮结果
 
-[提交bfb2300b6e3ff133e2626b930c7e89814a8a833b](https://github.com/supercubegame/todo-pocket-android/commit/bfb2300b6e3ff133e2626b930c7e89814a8a833b)，[CI38677741594](https://github.com/supercubegame/todo-pocket-android/actions/runs/38677741594)，push、attempt1、run50，check suite104810096490。刚启动，尚无本候选完整主机/双API结论，不能借用512263绿灯。
+[提交e44b83bd4f25f2e083ecca5f6420af9400916105](https://github.com/supercubegame/todo-pocket-android/commit/e44b83bd4f25f2e083ecca5f6420af9400916105)，[CI38691647981](https://github.com/supercubegame/todo-pocket-android/actions/runs/38691647981)，push、attempt1、run51、check suite104847489924。最近读取为in_progress，尚无本候选完整主机/双API/报告结论，不能用bfb设备绿灯或512263全绿替代。
 
-仅提交ci/shortcut-storage-preflight-4d8742现有.github/workflows/shortcut-storage.yml。22202字节，blob5b9d9b6ec8621696de98c9d67f855e1d7c31ebb0，SHA2564c14532e91c8f114ee57404d7e4c9ca2da645aafbf94a1b910cbb3cc439ee476，本地、写入响应、独立不可变远端目录全部一致。没有待处理安全确认。
+仅提交既有隔离分支ci/shortcut-storage-preflight-4d8742的.github/workflows/shortcut-storage.yml。16726字节，blob714714aba10c6f98742b57bb99be34cbdf8c9778，SHA25650eeb976d6195ddb49606f2d1f3b953318b43c6194bc825d190024eadc74154f；本地、写入响应、独立不可变目录核验一致。无待处理安全确认。
 
-新材料只改既有DeviceTest和verify_shortcuts生成内容，不改产品运行Java。新增两次真实设备事件：分别让准备请求、已勾选确认请求排在真实TodayScreen.io执行器的有界latch后面，先证实busy且阻挡任务未完成，再finish并确认旧Activity销毁、screen关闭、executor shutdown发生在释放前。finally释放latch后等待执行器退出和主线程空闲，检查没有迟到的dialog/plan/attempt，schema3全历史不变；确认场景还检查原备份字节不变，重新打开再核历史。
+只追加既有verify_shortcuts.py生成内容的报告契约修复，不改产品Java，不改bfb设备测试，不改旧报告发布器。require_ui_evidence现在严格接受原7字段加queue/life两字段，逐项与原始流解析结果相等，再把原7字段交给原校验器核验。不是允许任意额外字段，不是删除新证据，不是跳过失败。旧测试有意使用旧producer，仅在原selftest链try/finally内配对旧checker，结束恢复新checker；实际设备/报告仍严格走新入口。
 
-范围是请求已排队但业务动作尚未开始。不是SQLite事务执行中、文件写到一半、主线程回调排队期间销毁，也不是进程杀死/手机/覆盖升级。不可把队列测试写成整个in-flight边界已完成。阻挡等待10秒，销毁观察5秒，沿用原命令预算，没有重试。
+永久selftest增加实际producer->JSON往返->实际checker：原UI evidence exact fields红灯、4正例、76精确拒绝反例，覆盖每字段缺失、未知字段、两新族伪值、原身份/旧标签/原始流摘要；两处整新字段验证省略见证先过好输入，再错误接受坏值，真实checker拒绝。该门在设备作业之前运行，减少再到报告阶段才发现字段不兼容的浪费。
 
-新增ACTIVATION_QUEUE_PASS精确seed两项/reopen零项，原ACTIVATION_LIFE_PASS三项保持；输出JSON现在也列出queue和life标签数组，原始流仍完整保存。本地原无队列证据RED、新解析器4正例16反例、Java AST两实际断言省略变异和seed整调用注释变异通过。JDK AST从实际候选提取四个方法，在真实Java Executor/CountDownLatch上执行，Android/数据库为明确替身：两场景、12故障反例、整段状态谓词省略变异通过。旧生命周期4/18、旧UI4/56、组合4/36/两旁路/一晚绑定及旧解析器继续通过。这些本地结果不等于完整checkout/Android。
+本地上述4/76通过，旧UI4/56、生命周期4/18及Java AST、组合4/36/两旁路/一晚绑定、旧启动/激活解析继续通过。另执行实际publish-ui-evidence.py源的1正例/9反例（明确旧标签夹具和GitHub传输替身）：保留双API失败可见性、身份拒绝、缺reopen、缺queue/life标签、精确回写拒绝。该发布器本地检查不是实际GitHub网络或新增双库SQLite验收。尝试本地全selftest时，片段Source缺parents导致夹具能力错误，未算通过；改为明确有限旧解析器测试，完整checkout交给CI。
 
-旧自测有意使用不含新标签的旧流，其原ui_phase_evidence契约只在旧selftest调用的try/finally中恢复，结束恢复新入口。真实device/report入口从未放宽。新工作流逐字恢复512263的38个run脚本(host22/device8/report8)，显式处理既有YAML别名，保留步骤边界/环境/命令/预算/原失败。materializer和设备代码精确逆向还原、全部shell语法已本地核对。新hook SHA256e88b24d678084c4dcb7dd87cd70d64548ceeef029436b16fc83b88c92e11c0ab。
+工作流逐字恢复bfb全部42个run脚本(host24/device9/report9)，步骤/环境/原命令/预算/首次失败保留，只有集成前追加修复。materializer精确逆向还原、shell语法检查通过。hook SHA2560587014e4554016c8d77307756143b3a410a52ac394fff8fea63e0992a3265e1。
 
-## 512263已接受：真实预览完成后的旋转/重建/退出
+## bfb230：主机和设备通过，但报告失败，不能叫整轮通过
 
-[CI38675713479](https://github.com/supercubegame/todo-pocket-android/actions/runs/38675713479)八作业/检查全部通过，提交51226379913c352b806fa071e46cbd8f5dbfca01。host116228724414、API26 116231832752、API34 116231832707、汇总116233183131。两份完整主机回执[上半](https://github.com/supercubegame/todo-pocket-android/runs/116231818515)/[下半](https://github.com/supercubegame/todo-pocket-android/runs/116231822006)已完整读取：原21命令每项一次、300秒、return0、无超时。host21耗时117.84832839秒，stdout16105字节/SHA2564bbcd178678c9387a514ab670ac71b336a7517bbe28eb4cf07d2afabe22ceab0/blob8f7c0c88829488e4412831ffe61c3d4748a2d41b，stderr空。artifact11946473031未下载，未逐字读取完整host21 stdout，不假称全日志已读。
+[原CI38677741594](https://github.com/supercubegame/todo-pocket-android/actions/runs/38677741594)，提交bfb2300b6e3ff133e2626b930c7e89814a8a833b。host116235080962成功；API26 116237979538/API34 116237979594实际构建及设备作业成功；report116239179371在最后发布精确UI证据步骤失败。没有无改动重跑。
 
-[API26完整证据](https://github.com/supercubegame/todo-pocket-android/runs/116233233033)、[API34完整证据](https://github.com/supercubegame/todo-pocket-android/runs/116233236616)中的完整output JSON、seed/reopen原始流和双库回放均已直接读取；外层GitHub app尾部截断不影响output。两端原始流明确含rotation/recreate/finish三个ACTIVATION_LIFE_PASS。旧标签97/16、原生启动6/2、激活8/2全部保留。seed6340字节：API26 SHA2569d4a3793bf46e7796e602bd69f9b52cf86fbaac5bdcdcefb58ead8af3fe64284，API34 50307694774611d9d492efa45f8266e5af82954d0e1e43f12967cb42ee5c6d0b。reopen1188字节：API26 41995c1b653dbfa8b122c117c2664ee633c7871cab26a76f128d7f8f7a0b9890，API34 68b60879a9cc7fc268ec6a5207c0479a1ee68fb2606332dc109058bd4a009a0e。
+[API26原失败](https://github.com/supercubegame/todo-pocket-android/runs/116239240144)、[API34原失败](https://github.com/supercubegame/todo-pocket-android/runs/116239244988)完整output已直接读取。二者相同首错误AssertionError: UI evidence exact fields，source_status PASS、phases空、NOT_VERIFIED；只保存到seed流，reopen尚未进入读取。两端完整seed明确含原97标签、启动6、激活8、life3、queue2以及最终PASS。因此可称队列场景实际设备执行通过，不能称本轮完整报告/双库证据回读验收完成。没有把这个报告错误说成产品数据失败。
 
-本次是备份预览完成、勾选但未确认后的真实旋转方向变化、显式recreate和finish，检查旧执行器退休、旧确认监听器失效、schema3历史和备份字节不变。不是全部生命周期或覆盖升级。
+根因：bfb的ui_phase_evidence新增activation_queue_labels/activation_life_labels，旧require_ui_evidence仍要求恰好7字段。旧自测范围恢复旧producer，故21主机没有触及新producer与旧checker的不兼容。已在本地用同一组合复现原报错，然后最小修复并增加新永久门。
 
-DeviceTest77191字节/blob72fb515a32787e89ec3a4d0f72204e6755bcbe3c/SHA256beef5d68ecb9298be8378ca5c3ab4f8b4e8cc8e609ac2a497cde9258dda87d19；verifier253496/blob85ef4eaed5bef3f8e92b5747fe41d5076ca98241/SHA2568d33b5b0d645e1efd9132f89633c73c21628a5aa18235fa22c56d2d68f252db4，双API绑定相同摘要。四份产品Java与e9bf相同。
+全21主机回执[上半](https://github.com/supercubegame/todo-pocket-android/runs/116237962085)/[下半](https://github.com/supercubegame/todo-pocket-android/runs/116237966080)已完整读取，均一次、300秒、return0、无超时。host21 elapsed127.52439687399999秒、stdout17390字节/SHA256e0989c04219eace01fed0f3a4e379d37f56b553651e07aeb7b240e8da36ccd16/blob956e6d397a3dd4fee8d03ec24d8ef00a2b0dfcff，stderr空。artifact11947192080未下载，未逐字读完整host21 stdout。
 
-启动库各phase184320字节，API26 SHA256e556c4545d894267d1a698f9f6cfb0f08cf43c9a222c3f0f6b6d2bbf2288bee8，API34 ca00fdb4f54981a1b72e38c6aae8ae233dc9e11c78faf3c1306fe19ecf291b3f；oracle2771字节/SHA25696d8cad444e96b47fd854cd31b0ea60ee371578b7aed5f63e130e58c9c3f712d，18旧表a670d8086e51e17d9e382d2fead7f2684f9cce91daf96c7d7c23b0139ff1455a，schema4、关系[[7,10],[8,10]]。每端seed/reopen精确相同。
+bfb DeviceTest81260字节/blob00c19198bc59dcc9a8f3911da394ee3bd686a339/SHA256cb9ca2c3f14e0abee11b032637a78392d2eb82a1b86ab2aa8c34a441f1042372；verifier269924/blobc1d697a25b71618e0dc4ae27511ddff28ad21a58/SHA256f0defa978ba61b0f64b5ed32c4e267f3f04aa09607f4e43804a3e678a3c45854。四份产品Java与512263相同。
 
-激活库各phase184320字节，API26 SHA2567b0ebf79503655dfb7e03cea316d478041add7dcc7241c9f139bd84c8dacff01，API34 8f82278047ebf2008cc5673b21f8820f5201d43ec89374af8f876fcf599e3dcd；oracle2735字节/SHA25684a8073b8831cd7a71015b447ac2db712878962834afdaa73e60667bfa98cbb4，18旧表92d1a6d935f75c43fed428c091ede652ef884dd2b9d80a538e099f4d3afce23b，schema4空关系。每端seed/reopen相同。API间物理字节不同不代表逻辑历史不同；停止快照未登记WAL，不能把主机WAL对照说成设备WAL。
+队列场景限定：准备或确认请求在真实screen执行器排队，旧Activity销毁/screen关闭/executor shutdown先于latch释放；随后旧任务完成且无迟到dialog/plan/attempt，schema3历史及确认备份不变，重开再次核验。不是业务动作/SQLite事务执行中、文件写入中、主线程回调排队销毁、进程杀死、手机或覆盖升级。
 
-## 原失败、授权与后续顺序
+## 最新完整已验收仍512263
 
-[前版完整交接](https://github.com/supercubegame/todo-pocket-android/blob/c08ec7845b3645fe2671b8a58a55a0a4b09618dd/HANDOFF.md)保留05fc主机声明首失败、512263修复和e9bf。其512263 pending由本文替代。05fc devices skipped，原完整4792字节stderr已读，原artifact11940311278保留，未无改动重跑；不是产品运行失败。历史c91、cc06、e484、e9bf从链接可追溯。
+[512263 CI38675713479](https://github.com/supercubegame/todo-pocket-android/actions/runs/38675713479)八作业/检查全绿，全21及API26/API34真实预览完成后rotation/recreate/finish、双库独立回放、精确报告读回全部通过。完整JSON和seed/reopen已直接读取。[上一版完整交接](https://github.com/supercubegame/todo-pocket-android/blob/0b086585651abe8078bcc9d2b15496a8527e9ccb/HANDOFF.md)保存全部主机/源码/数据库/原始流摘要与链接，其bfb pending由本文替代。更早05fc、c91原失败从该文链接永久追溯，不重跑覆盖。
 
-先读bfb230自己的全21及真实双API；若红先读首次错误，不重试掩盖。随后处理真实prepare/commit执行中或回调排队销毁，稳定签名旧APK覆盖升级，AGENTS/CLAUDE同文不超200行，最终产品集成/全21/原子非强制推送/独立远端核验/同最终提交双API及升级，之后才给新APK。旧绿灯不能接受新候选，文档不是交付。
+## 实际剩余交付顺序
 
-产品仍最近核验3a5a17e1fdc570c73804007cd9a4d2ef36c0966b，近期产品推送0；手机仍4d8742阶段预览。ADB255/ANR根因未证实，剩余功能、照片/EXIF/输入法/大字体、性能、存储失败、易用性、商业签名与分发未全验，不给虚构百分比。
+先验e44b83自己的原21、两端实际构建/所有场景、完整seed/reopen、新两族字段、双库回放和源码身份。失败先读第一实际错误，最小修复，不靠重试。之后继续真实prepare/commit执行中与回调排队销毁，稳定签名旧APK覆盖升级，AGENTS/CLAUDE同文且不超200行，最终产品完整集成/21主机/原子非强制推送/精确远端读回/同最终提交双API及升级，之后交付新APK。文档不能替代代码，旧绿灯不能接受新候选。
 
-沿用[10月11日十一文件授权和21命令](https://github.com/supercubegame/todo-pocket-android/blob/9a6c72f8c67e2ae3520398833dc1ace7bcfcddf4/HANDOFF.md)。仅现有凭据；明确同意、验证备份后迁移、普通启动不自动升级、失败关闭；不清数据、不卸载、不操作手机、不启动外部应用、不合并发布。原UI片段缺IOException，不能覆盖已修复完整类。完整重建依赖不可变工作流而非沙箱/短期artifact；对话结束不表示助手继续开发。
+产品最近核验仍3a5a17e1fdc570c73804007cd9a4d2ef36c0966b，近期产品推送0；手机仍4d8742阶段预览。ADB255/ANR根因未证实。剩余功能、照片/EXIF/输入法/大字体、性能、存储失败、易用性、商业签名和分发未全验；没有可靠整体百分比。
+
+沿用[十一文件授权与原21命令](https://github.com/supercubegame/todo-pocket-android/blob/9a6c72f8c67e2ae3520398833dc1ace7bcfcddf4/HANDOFF.md)：现有凭据、明确同意、先验证备份、普通启动不自动迁移、失败关闭；不清数据、不卸载、不操作手机、不启动外部应用、不合并发布。原UI片段缺IOException，不可覆盖修复后的完整类。完整重建依赖不可变工作流，不依赖短期artifact或沙箱。对话结束不表示助手继续开发。

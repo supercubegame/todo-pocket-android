@@ -1,4 +1,4 @@
-name: Lifecycle declaration repair and actual member gates
+name: Queued activation lifecycle acceptance
 'on':
   push:
     branches:
@@ -21,16 +21,17 @@ jobs:
           ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
           persist-credentials: false
       - &ref_0
-        name: Restore exact 05fc scripts with first failure retained
+        name: Restore exact accepted 512263 scripts and original budgets
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import hashlib,os,pathlib,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/05fc58b7c50b243efa0bd72ffeb5d022de2b4f78/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as r:raw=r.read(19866)
-          assert len(raw)==19865 and hashlib.sha1(b"blob 19865"+bytes([0])+raw).hexdigest()=="2aec5d5f36de30b37dcba31431f2ed876ccf38c6"
-          text=raw.decode();out=pathlib.Path(os.environ["RUNNER_TEMP"])/"shape-predecessor";out.mkdir()
-          for job,count in {'shortcut_host': 20, 'shortcut_device': 7, 'shortcut_report': 7}.items():
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/51226379913c352b806fa071e46cbd8f5dbfca01/.github/workflows/shortcut-storage.yml"
+          with urllib.request.urlopen(url,timeout=60) as r:raw=r.read(19282)
+          assert len(raw)==19281 and hashlib.sha1(b"blob 19281"+bytes([0])+raw).hexdigest()=="f4c7d7cb8782397b364e446cd520805b2a3f935f"
+          text=raw.decode();out=pathlib.Path(os.environ["RUNNER_TEMP"])/"queue-predecessor";out.mkdir()
+          shared=None
+          for job,count in {'shortcut_host': 22, 'shortcut_device': 8, 'shortcut_report': 8}.items():
               rest=text.split("  "+job+":\n",1)[1];lines=[]
               for line in rest.splitlines(keepends=True):
                   if line.startswith("  shortcut_"):break
@@ -43,90 +44,104 @@ jobs:
                           if item.strip() and not item.startswith("          "):break
                           body.append(item[10:] if item.startswith("          ") else item)
                       scripts.append("".join(body))
+              if job=="shortcut_host":
+                  assert "      - &ref_0\n" in rest
+                  shared=scripts[0]
+              else:
+                  assert "".join(lines).count("      - *ref_0\n")==1
+                  scripts.insert(0,shared)
               assert len(scripts)==count,(job,len(scripts))
               for i,script in enumerate(scripts):
                   assert script.startswith("set -euo pipefail\n")
                   (out/(job+"-"+str(i)+".sh")).write_text(script)
           PY
+      - name: Restore exact 05fc scripts with first failure retained
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_host-0.sh"
       - name: Restore exact e9bf scripts without combining steps
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_host-0.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_host-1.sh"
       - name: Restore exact accepted predecessor scripts
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_host-1.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_host-2.sh"
       - name: Restore hash-bound original c91 host steps
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_host-2.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_host-3.sh"
       - name: Verify exact original source and repair two transport escapes
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_host-3.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_host-4.sh"
       - name: Use Java 17
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_host-4.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_host-5.sh"
       - name: Restore exact pinned backend materializer
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_host-5.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_host-6.sh"
       - name: Preserve original RED and backend host gates
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_host-6.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_host-7.sh"
       - name: Prove and repair actual media checked-exception signature
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_host-7.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_host-8.sh"
       - name: Preserve exact parser RED and bind layered selftest witnesses
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_host-8.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_host-9.sh"
       - name: Add missing activation Android declarations with original RED and four omission controls
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_host-9.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_host-10.sh"
       - name: Use screen-space dialog touch and preserve explicit unchecked witnesses
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_host-10.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_host-11.sh"
       - name: Bind deterministic lifecycle checks to actual candidate Java members
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_host-11.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_host-12.sh"
       - name: Persist all UI label families with raw-stream identity
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_host-12.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_host-13.sh"
       - name: Collect activation database and independently replay exact history
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_host-13.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_host-14.sh"
       - name: Isolate old scripted report fixtures and verify actual report SQLite rejection
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_host-14.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_host-15.sh"
       - name: Add native startup database collection and independent replay
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_host-15.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_host-16.sh"
       - name: Capture device screen ownership on the Android main thread
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_host-16.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_host-17.sh"
       - name: Verify actual Android rotation recreation and finish with consent pending
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_host-17.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_host-18.sh"
       - name: Repair lifecycle host declarations and execute actual assertion members
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_host-19.sh"
+      - name: Exercise real queued activation destruction with original failure controls
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import ast,base64,hashlib,lzma,os,pathlib
-          hook=lzma.decompress(base64.b64decode('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',validate=True)).decode()
-          assert hashlib.sha256(hook.encode()).hexdigest()=='cc54169fe5b1dc5815f33020c0e2debb49067269eb7261eae3beb72c0218cb44'
+          hook=lzma.decompress(base64.b64decode('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',validate=True)).decode()
+          assert hashlib.sha256(hook.encode()).hexdigest()=='e88b24d678084c4dcb7dd87cd70d64548ceeef029436b16fc83b88c92e11c0ab'
           path=pathlib.Path(os.environ["RUNNER_TEMP"])/"exact-activation-scripts/3.sh"
           script=path.read_text();head,body=script.split("import ast",1)
           tree=ast.parse("import ast"+body.rsplit("\nPY",1)[0])
@@ -148,7 +163,7 @@ jobs:
         id: integration
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_host-18.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_host-20.sh"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: evidence
         if: always()
@@ -166,7 +181,7 @@ jobs:
           ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_host-19.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_host-21.sh"
   shortcut_device:
     needs: shortcut_host
     if: github.event_name != 'pull_request'
@@ -186,14 +201,18 @@ jobs:
           ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
           persist-credentials: false
       - *ref_0
+      - name: Restore exact 05fc scripts with first failure retained
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_device-0.sh"
       - name: Restore exact e9bf scripts without combining steps
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_device-0.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_device-1.sh"
       - name: Restore exact accepted predecessor scripts
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_device-1.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_device-2.sh"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: activation-host
@@ -201,26 +220,26 @@ jobs:
       - name: Verify exact original source and repair two transport escapes
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_device-2.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_device-3.sh"
       - name: Restore exact six-file host-verified candidate
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_device-3.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_device-4.sh"
       - name: Fixed disposable Android setup
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_device-4.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_device-5.sh"
       - name: Build isolated runner and restore original Gradle source
         env:
           BUILD_429_EXECUTE: 'true'
           BUILD_LOG: shortcut-build.log
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_device-5.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_device-6.sh"
       - name: Original regressions plus actual native default startup
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_device-6.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_device-7.sh"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -252,14 +271,18 @@ jobs:
           ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
           persist-credentials: false
       - *ref_0
+      - name: Restore exact 05fc scripts with first failure retained
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_report-0.sh"
       - name: Restore exact e9bf scripts without combining steps
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_report-0.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_report-1.sh"
       - name: Restore exact accepted predecessor scripts
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_report-1.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_report-2.sh"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: activation-host
@@ -267,11 +290,11 @@ jobs:
       - name: Verify exact original source and repair two transport escapes
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_report-2.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_report-3.sh"
       - name: Restore exact six-file host-verified candidate
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_report-3.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_report-4.sh"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: shortcut-*
@@ -283,12 +306,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_report-4.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_report-5.sh"
       - name: Include native database evidence without truncation
         if: always()
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_report-5.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_report-6.sh"
       - name: Publish exact new UI checks and original seed reopen streams
         id: ui_evidence
         if: always()
@@ -296,7 +319,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/shape-predecessor/shortcut_report-6.sh"
+          bash "$RUNNER_TEMP/queue-predecessor/shortcut_report-7.sh"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

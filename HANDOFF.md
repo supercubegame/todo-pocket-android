@@ -1,43 +1,43 @@
 # 口袋待办：当前接续入口
 
-2026-10-16 16:47继续轮。10b90458的21项原主机验证通过，但API26/API34实际测试均报Process crashed，不能接受。原始归档只读恢复已完成，未找到足够崩溃栈定因；已提交不改产品和测试源码的崩溃缓冲区采集，绑定新诊断运行。没有新APK、产品推送、合并、发布或手机操作。
+2026-10-16 17:53继续轮。9e938双API完整崩溃栈已读并定位测试观察器错误。已提交最小测试连接修复7920bbe3，独立远端内容一致，首轮CI正在执行。未修改产品运行Java、未关闭数据保护、无新APK、产品推送、合并、发布或手机操作。
 
-## 首要动作：读取新诊断，而非猜测修复
+## 首要动作：读取7920bbe3首轮完整验收
 
-[诊断提交9e93888af2ed2450a6d1077379edfc3595913f04](https://github.com/supercubegame/todo-pocket-android/commit/9e93888af2ed2450a6d1077379edfc3595913f04)，[CI38877832949](https://github.com/supercubegame/todo-pocket-android/actions/runs/38877832949)，run61、push、attempt1、suite105358792481，最近读取in_progress。提交2026-10-16T09:03:25Z，tree70ca3c535e909e7d374b7e6f67541eccaae23ece。
+[修复7920bbe315a61cdfd7c8af78cc54f30cee254da8](https://github.com/supercubegame/todo-pocket-android/commit/7920bbe315a61cdfd7c8af78cc54f30cee254da8)，[CI38884051157](https://github.com/supercubegame/todo-pocket-android/actions/runs/38884051157)，run62、push、attempt1、suite105375795571，最近读取in_progress。提交2026-10-16T09:57:56Z，tree d3df7a4b290ee613246637435790d11722cf803b。
 
-只更新ci/shortcut-storage-preflight-4d8742既有.github/workflows/shortcut-storage.yml。24666字节，blob c4ebc9b185542c900c8b6b0fbc22ae04dec7a27e，SHA256 38fd8d10d9504745f8ff1e16f7c43fb94b95da73268f53a40f3060c85bfe5ed0。本地、写响应、独立不可变目录一致，无待批准安全事项。
+只更新ci/shortcut-storage-preflight-4d8742既有.github/workflows/shortcut-storage.yml，21062字节，blob095664be07cfc453e32f259ce0b971d453d10a0f，SHA256 c591e61ecee350109876d270e413efce1e698adaa25fcafdfa06a375ba8117bd。本地、写入响应及独立不可变目录相符。没有待批准安全事项。
 
-不可变10b工作流恢复全部66个原run脚本，host36/device15/report15，逐项本地核对一致。保留原21命令及300秒预算、原作业预算、原源码和测试内容，不修产品、不放宽断言、不无条件重试。步骤显示名称简化，但原脚本及边界未合并。原Android执行命令只调用一次，外部观察器同时等待固定emulator-5554并读取logcat crash缓冲区，记录命令、退出码、时间、字节数、摘要及本次身份。不清日志、不杀ADB服务、不碰手机。结束时只停止自己创建的观察进程。
+## 已证实的是新诊断运行中的测试错误
 
-本地真实子进程1正例、5反例和1整段失败保留守卫省略控制通过，并嵌入设备步骤永久运行。原命令exit7必须仍返回7；移除该守卫后错误变成0，证明控制有效。空数据、等待失败、超时和超限明确不是验证成功。Android行为仍须读取新CI，不能用本地假ADB当实际设备。
+[API26完整栈116902915904](https://github.com/supercubegame/todo-pocket-android/runs/116902915904)：3387字节，SHA256 82ab9b8611db2b2ec6f937ae88692d429e4e4fad48bc1c6cf693a942a7cde4f2。[API34完整栈116902978986](https://github.com/supercubegame/todo-pocket-android/runs/116902978986)：3417字节，SHA256 00540a0923db49c6d3e079241e4af42d82cb492e2026282d24f2a6a3b2b557e1。两者完整读取，绑定9e93888af2ed2450a6d1077379edfc3595913f04/run38877832949/attempt1。
 
-新增crash-diagnostic/receipt.json、crash.stdout/stderr、wait.stdout/stderr随原设备归档上传。完整文本分片发布至名为Crash diagnostic API26/API34的检查，逐项独立读回。单成员超过256KiB时拒绝宣称完整发布，完整产物仍保留；采集端4MiB限制会明确标记超限。新日志是新诊断运行的证据，绝不是10b原始崩溃现场，也不是产品修复或验收。CAPTURED只说明有字节，不说明已找到本应用根因。应读取receipt和完整crash.stdout，确认实际包名、线程、异常和调用栈。
+两端都是实际preview进程的线程池FATAL EXCEPTION：Schema4DeviceTest测试Provider.engineDigest第895行调用AppDatabase.getReadableDatabase，经Schema3Store及startupDatabase进入schema3保护，因当前DDL已写到schema4抛出IllegalStateException: Startup schema changed; preserve database。测试第899行把它包成AssertionError抛出，逃出产品只捕获Exception的work，导致进程崩溃。栈同时包含Schema4Store.confirmActivation149、activationDigest81和AppDatabase.confirmShortcutActivation167，证明已在真实确认路径。不能通过放宽产品schema保护或笼统捕获Error修这个测试错误。
 
-## 10b原始失败与恢复结果
+[API34完整instrumentation](https://github.com/supercubegame/todo-pocket-android/runs/116903094226)还保存原97条SHORTCUT标签、6条STARTUP_NATIVE标签后相同失败；API26仍只有Process crashed：[原始流](https://github.com/supercubegame/todo-pocket-android/runs/116903089268)。API34采集收据116902984348已完整读取，wait0，logcat结束255但已保留3417字节完整栈，原测试return1、observer已结束。这个logcat结束码不等于旧ADB255问题根因已解决。
 
-[原失败CI38871586910](https://github.com/supercubegame/todo-pocket-android/actions/runs/38871586910)，commit10b90458f365931e6d87df0d389fabca9a9f09d9，attempt1。完整主机收据116880673385、116880679401已读：21命令一次、300秒、return0、无超时；第21耗时206.87365085200003秒。stdout24807字节、SHA256 38e5f6a6d99d7affa6403f0f26cccb900eb615f6c2b978c6d67a5459cf098acc，stderr为空。未逐行读完整stdout。
+[实际AppDatabase源码窗口](https://github.com/supercubegame/todo-pocket-android/runs/116417941553)也已读取：139068字节、SHA256 f3be495c2d4ca175b10b446eacab69d46d2588c8fdc74eecb34c0c84f8ac886c，startupDatabase198至204只允许已有开放schema3连接。此产品源码身份与10b原候选一致。10b首次没有保存崩溃栈，不能把9e938新日志冒充10b原现场；新诊断已复现并证实上述机制。
 
-[API26原失败](https://github.com/supercubegame/todo-pocket-android/runs/116882548549)和[API34原失败](https://github.com/supercubegame/todo-pocket-android/runs/116882554664)完整原始流已读：seed仅74字节，INSTRUMENTATION_RESULT: shortMsg=Process crashed.，INSTRUMENTATION_CODE: 0。postddl complete ordered checks是缺失标签的次生报错，不能拿它定根因。没有新场景PASS、seed/reopen验收或新数据库回放成功。
+## 最小修复及证明
 
-[只读恢复4a4343d9 / CI38876272396](https://github.com/supercubegame/todo-pocket-android/actions/runs/38876272396)已直接读到success，未重跑设备、未推产品。[完整原始归档清单](https://github.com/supercubegame/todo-pocket-android/runs/116892135139)已读。两个原ZIP的来源、大小、摘要、唯一成员、路径、展开预算、CRC均校验；所有UTF-8文本成员已发布分片。清单没有独立logcat/crash栈文件；API34完整shortcut-android.log四片已读，只有主机自测、SDK/模拟器启动、原控制流程和次生解析失败，没有应用崩溃栈。API26该大日志尚未逐片完整审计，不夸大读取范围。
+仅在activationPostDdlScenario内，在确认前通过原screen执行器取得同一facade的既有SQLiteDatabase连接，后续测试Provider在真实worker内直接读取这份连接的inTransaction和version4。保留所有原断言、两个提交/回滚结果、原5秒观察与10秒释放预算、Provider清理、旧cells和备份精确保留、重开及原完整测试。没有新增产品测试入口，也没有在迁移后绕过产品保护去继续业务写入。
 
-原API26归档12034895391，17670字节，SHA256 0f2f018adead0861bf736089d0f489c237ec76b9942def69dd4ecfc23f2552b0。原API34归档12034347759，19219字节，SHA256 764f2c63feec8d3d7f338f93e053b73b3fbc40ac4089e91c2989aa046be61971。主机12033921467、452909字节、SHA256 8c195751a5bc1f8a9eeac5eb780b08bfc0779cf5c47f5fe82c20523e4fa9f226；报告12034736220、5129字节、SHA256 ff01af498311ed66f0a864526d9eb96ccb31adcfc3423296810a6b319275f7b6。后二者未下载。
+主机闸门改为JDK AST提取实际候选AppDatabase.startupDatabase方法放入执行夹具，而不是原先永远返回DB的过宽替身。每次先把实际测试方法还原旧调用，要求出现同一个schema保护错误RED，再执行修复后的实际方法/双场景调用者GREEN及原13故障、2整段断言省略、1调用省略。本地已通过。当地startupDatabase输入为从不可变源码窗口抄取的明确夹具；CI读取实际完整AppDatabase文件并经AST提取。Android/SQLite仍为替身，真实JCA、线程池、latch、文件和Java实际方法执行不能冒充Android验收。
 
-[API26构建原收据](https://github.com/supercubegame/todo-pocket-android/runs/116892020407)和[API34构建原收据](https://github.com/supercubegame/todo-pocket-android/runs/116892085288)均完整读到PASS，绑定10b原run。两端实际Android编译成功，但不是运行验收；均为一次性签名，不可作为稳定覆盖升级APK。
+本次恢复9e938全部70个原脚本(host37/device17/report16)并逐项本地比对，再增加测试组装修复步骤。原21主机命令、300秒预算和作业预算不变。保留崩溃采集；同时修正诊断wrapper的成功条件：原测试成功且采集进程正常结束时，空crash缓冲区不再把它判失败，仍记录NO_CRASH_BYTES_NOT_VERIFIED，不据此证明没有崩溃。原测试非零必须原样返回；等待失败/采集超时/超限仍失败。新增原成功且零崩溃字节的行为对照，原真实子进程1正例、5反例及整段失败守卫省略测试全部保留并通过。这里变更一个既有诊断脚本的返回语义，不宣称所有脚本执行字节完全未变。
 
-10b工作流28332字节/blob e8c08c036b3a074c43d288aa269d01c4d72b311f。DeviceTest109218字节/blob93890332b2f6e3a7f4b582897e55a954a612e83c/SHA256317a64ff38b9b337198b0cff8433346b97db9cebf2e34b131cc1959ad0fc21aa；verifier350004字节/blob6f81b048e1ff8a7b759809f29afd42b76fa3af94/SHA25609ce976924c7cb06ecb2286d0baa1c91c79406e105fb05e71b55ac0271c8308a。
+本地文件/home/user/work/startup-ui：postddl-connection-repair.py、build-postddl-connection.py、postddl-connection-device.java、postddl-connection-hook.py、postddl-connection-local.log、build-connection-workflow.py、connection-workflow.json、connection-candidate.yml、connection-loader-emitted.sh。跨账号从不可变GitHub工作流及校验载荷恢复，不假定这些路径存在。
 
-## 已接受基线与后续顺序
+## 基线、历史证据与后续
 
-最新完整已验收隔离基线仍fa12481ce8013304aa47d9d848025496ab1242d3：[CI38865507655](https://github.com/supercubegame/todo-pocket-android/actions/runs/38865507655)。原21主机、双API完整seed/reopen、确认事务消费同意前退出、双库独立回放及汇总已复核通过。不能用其绿灯接受10b或新诊断。
+最新完整验收隔离基线仍fa12481ce8013304aa47d9d848025496ab1242d3，[CI38865507655](https://github.com/supercubegame/todo-pocket-android/actions/runs/38865507655)。原21主机、双API seed/reopen、确认消费同意前退出、双库独立回放及汇总已复核。不能用旧绿灯接受7920。
 
-[上一份不可变交接8f279530](https://github.com/supercubegame/todo-pocket-android/blob/8f279530eea0b2c5b1aa3187f41f0dd9894f0a3d/HANDOFF.md)保存fa全部身份与验收、10b真实双场景设计、13故障/2整段断言省略/1调用省略、原始授权和旧链入口；其中10b pending由本文失败状态替代。新测试拟在真实确认线程第二次备份摘要处验证已处schema4事务，分别继续提交及注入故障回滚；本地Android/SQLite为替身，实际设备未接受。不能猜测getReadableDatabase、Error逃逸或夹具重建就是根因。
+[上一份不可变交接a0d08a39](https://github.com/supercubegame/todo-pocket-android/blob/a0d08a39f8b49c53f9ab237901281a16fc183a4d/HANDOFF.md)保留10b原失败及完整21主机收据、4a只读恢复成功、两个原归档身份、原实际Android构建、9e938诊断设计。其9e938 pending和未知根因由本文替代；9e938完整21主机回执本轮尚未重新逐项读取，不编造新主机结论。
 
-先读9e938诊断的原始崩溃栈，确定首失败属于产品、测试观察器还是环境；做原路径RED、最小修复GREEN和有意义反例，恢复10b验收基线加最小修复，实际提交/独立远端/同提交原21及双API。随后转向已批准产品集成、AGENTS/CLAUDE同文不超200行、原子非强制产品推送、同最终产品提交双API及稳定签名旧APK覆盖升级，最后交付APK。不任意扩展无关竞态；不把诊断绿灯当产品验收。
+[更早交接8f279530](https://github.com/supercubegame/todo-pocket-android/blob/8f279530eea0b2c5b1aa3187f41f0dd9894f0a3d/HANDOFF.md)保存fa全部身份、10b两场景设计与旧链入口。postDDL场景只涵盖正常finish下最终摘要检查点的提交/回滚，不是任意SQL点、进程强杀、断电；最终独立数据库回放不等于中间两场景单独导出回放。
 
-产品最后核验3a5a17e1fdc570c73804007cd9a4d2ef36c0966b；手机4d8742预览。近期产品推送0，无新APK。ADB255/ANR根因未证实，其余功能、真实照片/EXIF/输入法/大字体、性能/存储失败、商业签名分发未全验，无可靠整体百分比。文档不能代替代码交付。
+下一步：读取7920原21完整主机收据、双API完整seed/reopen、两个postDDL标签、双库独立回放、汇总和采集收据；失败先读首失败而非重跑。通过后重点转已批准产品集成、AGENTS/CLAUDE同文不超200行、完整21主机、原子非强制推送、独立远端核对、同最终产品提交双API和稳定签名覆盖升级，最后交付APK。不继续任意扩展无关测试。
 
-沿用[十一文件授权与原21命令](https://github.com/supercubegame/todo-pocket-android/blob/9a6c72f8c67e2ae3520398833dc1ace7bcfcddf4/HANDOFF.md)：既有凭据，明确同意、已校验备份先于迁移、普通启动不自动迁移、失败关闭、不清用户数据、不卸载、不操作手机、不启动外部应用、不合并发布。单分支一个写入者，跨账号不假定继承沙箱或短期artifact，对话结束不表示助手继续开发。
+产品最后核验3a5a17e1fdc570c73804007cd9a4d2ef36c0966b，手机4d8742预览，近期产品推送0、无新APK。旧ADB255/ANR根因仍未证实，剩余功能/真机UX/性能/商业分发未全验，无可靠整体百分比。
 
-本地辅助文件位于/home/user/work/startup-ui：crash-observer.py、test-crash-observer.py、build-crash-workflow.py、crash-workflow.json、crash-candidate.yml；原postddl文件均保留。跨账号优先不可变GitHub工作流及原始证据，不依赖这些本地路径。
+沿用[十一文件授权与原21命令](https://github.com/supercubegame/todo-pocket-android/blob/9a6c72f8c67e2ae3520398833dc1ace7bcfcddf4/HANDOFF.md)：既有凭据，明确同意，已校验备份先于迁移，普通启动不自动迁移，失败关闭，不清用户数据、不卸载、不操作手机、不启动外部应用、不合并发布。单分支一个写入者；对话结束不表示助手继续开发。

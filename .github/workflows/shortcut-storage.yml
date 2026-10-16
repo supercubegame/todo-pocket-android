@@ -1,4 +1,4 @@
-name: Running confirmation lifecycle acceptance
+name: Post-DDL lifecycle acceptance
 'on':
   push:
     branches:
@@ -21,17 +21,17 @@ jobs:
           ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
           persist-credentials: false
       - &ref_0
-        name: Restore exact accepted 4ab scripts and original budgets
+        name: Restore exact accepted fa12481 scripts and original budgets
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import hashlib,os,pathlib,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/4abffaec78ad18aac963be0dddd03cb3e0868227/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as r:raw=r.read(25122)
-          assert len(raw)==25121 and hashlib.sha1(b"blob 25121"+bytes([0])+raw).hexdigest()=="b0c0ffffb0c36ee4e3e22ba94ef84b725676c498"
-          text=raw.decode();out=pathlib.Path(os.environ["RUNNER_TEMP"])/"confirm-running-predecessor";out.mkdir()
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/fa12481ce8013304aa47d9d848025496ab1242d3/.github/workflows/shortcut-storage.yml"
+          with urllib.request.urlopen(url,timeout=60) as r:raw=r.read(27063)
+          assert len(raw)==27062 and hashlib.sha1(b"blob 27062"+bytes([0])+raw).hexdigest()=="da865e9289e7f414354536cff288a525ed52a878"
+          text=raw.decode();out=pathlib.Path(os.environ["RUNNER_TEMP"])/"postddl-predecessor";out.mkdir()
           shared=None
-          for job,count in {'shortcut_host': 32, 'shortcut_device': 13, 'shortcut_report': 13}.items():
+          for job,count in {'shortcut_host': 34, 'shortcut_device': 14, 'shortcut_report': 14}.items():
               rest=text.split("  "+job+":\n",1)[1];lines=[]
               for line in rest.splitlines(keepends=True):
                   if line.startswith("  shortcut_"):break
@@ -55,133 +55,141 @@ jobs:
                   assert script.startswith("set -euo pipefail\n")
                   (out/(job+"-"+str(i)+".sh")).write_text(script)
           PY
+      - name: Restore exact accepted 4ab scripts and original budgets
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-0.sh"
       - name: Restore exact accepted 6c3 scripts and original budgets
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-0.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-1.sh"
       - name: Restore exact 5f9dab scripts and preserve first failure
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-1.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-2.sh"
       - name: Restore exact e44b83 scripts and unchanged command budgets
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-2.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-3.sh"
       - name: Restore exact bfb230 scripts and retain original report failure
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-3.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-4.sh"
       - name: Restore exact accepted 512263 scripts and original budgets
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-4.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-5.sh"
       - name: Restore exact 05fc scripts with first failure retained
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-5.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-6.sh"
       - name: Restore exact e9bf scripts without combining steps
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-6.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-7.sh"
       - name: Restore exact accepted predecessor scripts
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-7.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-8.sh"
       - name: Restore hash-bound original c91 host steps
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-8.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-9.sh"
       - name: Verify exact original source and repair two transport escapes
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-9.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-10.sh"
       - name: Use Java 17
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-10.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-11.sh"
       - name: Restore exact pinned backend materializer
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-11.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-12.sh"
       - name: Preserve original RED and backend host gates
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-12.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-13.sh"
       - name: Prove and repair actual media checked-exception signature
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-13.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-14.sh"
       - name: Preserve exact parser RED and bind layered selftest witnesses
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-14.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-15.sh"
       - name: Add missing activation Android declarations with original RED and four omission controls
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-15.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-16.sh"
       - name: Use screen-space dialog touch and preserve explicit unchecked witnesses
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-16.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-17.sh"
       - name: Bind deterministic lifecycle checks to actual candidate Java members
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-17.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-18.sh"
       - name: Persist all UI label families with raw-stream identity
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-18.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-19.sh"
       - name: Collect activation database and independently replay exact history
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-19.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-20.sh"
       - name: Isolate old scripted report fixtures and verify actual report SQLite rejection
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-20.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-21.sh"
       - name: Add native startup database collection and independent replay
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-21.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-22.sh"
       - name: Capture device screen ownership on the Android main thread
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-22.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-23.sh"
       - name: Verify actual Android rotation recreation and finish with consent pending
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-23.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-24.sh"
       - name: Repair lifecycle host declarations and execute actual assertion members
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-24.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-25.sh"
       - name: Exercise real queued activation destruction with original failure controls
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-25.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-26.sh"
       - name: Repair exact report schema with original RED and negative controls
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-26.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-27.sh"
       - name: Exercise completed prepare callback pending finish with original failure controls
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-27.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-28.sh"
       - name: Observe callback owner destruction before existing retirement assertions
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-28.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-29.sh"
       - name: Verify destruction during actual prepare publication
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-29.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-30.sh"
       - name: Verify exit inside confirmation transaction before consent consumption
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-31.sh"
+      - name: Verify post-DDL exit with commit and forced rollback outcomes
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import ast,base64,hashlib,lzma,os,pathlib
-          hook=lzma.decompress(base64.b64decode('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',validate=True)).decode()
-          assert hashlib.sha256(hook.encode()).hexdigest()=='2d1ac9c4ef44fb7c5e8534309c3d27a6b244986d1a0f27ab2e3078e614bc9996'
+          hook=lzma.decompress(base64.b64decode('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',validate=True)).decode()
+          assert hashlib.sha256(hook.encode()).hexdigest()=='6107dd3788eb681c15b3921048d84df3dd37637dcf246c5deeb5d28c02183ac1'
           path=pathlib.Path(os.environ["RUNNER_TEMP"])/"exact-activation-scripts/3.sh"
           script=path.read_text();head,body=script.split("import ast",1)
           tree=ast.parse("import ast"+body.rsplit("\nPY",1)[0])
@@ -203,7 +211,7 @@ jobs:
         id: integration
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-30.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-32.sh"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: evidence
         if: always()
@@ -221,7 +229,7 @@ jobs:
           ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_host-31.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-33.sh"
   shortcut_device:
     needs: shortcut_host
     if: github.event_name != 'pull_request'
@@ -241,38 +249,42 @@ jobs:
           ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
           persist-credentials: false
       - *ref_0
+      - name: Restore exact accepted 4ab scripts and original budgets
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-0.sh"
       - name: Restore exact accepted 6c3 scripts and original budgets
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_device-0.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-1.sh"
       - name: Restore exact 5f9dab scripts and preserve first failure
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_device-1.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-2.sh"
       - name: Restore exact e44b83 scripts and unchanged command budgets
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_device-2.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-3.sh"
       - name: Restore exact bfb230 scripts and retain original report failure
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_device-3.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-4.sh"
       - name: Restore exact accepted 512263 scripts and original budgets
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_device-4.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-5.sh"
       - name: Restore exact 05fc scripts with first failure retained
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_device-5.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-6.sh"
       - name: Restore exact e9bf scripts without combining steps
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_device-6.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-7.sh"
       - name: Restore exact accepted predecessor scripts
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_device-7.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-8.sh"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: activation-host
@@ -280,26 +292,26 @@ jobs:
       - name: Verify exact original source and repair two transport escapes
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_device-8.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-9.sh"
       - name: Restore exact six-file host-verified candidate
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_device-9.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-10.sh"
       - name: Fixed disposable Android setup
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_device-10.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-11.sh"
       - name: Build isolated runner and restore original Gradle source
         env:
           BUILD_429_EXECUTE: 'true'
           BUILD_LOG: shortcut-build.log
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_device-11.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-12.sh"
       - name: Original regressions plus actual native default startup
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_device-12.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-13.sh"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -331,38 +343,42 @@ jobs:
           ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
           persist-credentials: false
       - *ref_0
+      - name: Restore exact accepted 4ab scripts and original budgets
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-0.sh"
       - name: Restore exact accepted 6c3 scripts and original budgets
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_report-0.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-1.sh"
       - name: Restore exact 5f9dab scripts and preserve first failure
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_report-1.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-2.sh"
       - name: Restore exact e44b83 scripts and unchanged command budgets
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_report-2.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-3.sh"
       - name: Restore exact bfb230 scripts and retain original report failure
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_report-3.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-4.sh"
       - name: Restore exact accepted 512263 scripts and original budgets
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_report-4.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-5.sh"
       - name: Restore exact 05fc scripts with first failure retained
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_report-5.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-6.sh"
       - name: Restore exact e9bf scripts without combining steps
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_report-6.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-7.sh"
       - name: Restore exact accepted predecessor scripts
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_report-7.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-8.sh"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: activation-host
@@ -370,11 +386,11 @@ jobs:
       - name: Verify exact original source and repair two transport escapes
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_report-8.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-9.sh"
       - name: Restore exact six-file host-verified candidate
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_report-9.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-10.sh"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: shortcut-*
@@ -386,12 +402,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_report-10.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-11.sh"
       - name: Include native database evidence without truncation
         if: always()
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_report-11.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-12.sh"
       - name: Publish exact new UI checks and original seed reopen streams
         id: ui_evidence
         if: always()
@@ -399,7 +415,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          bash "$RUNNER_TEMP/confirm-running-predecessor/shortcut_report-12.sh"
+          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-13.sh"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

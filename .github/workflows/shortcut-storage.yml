@@ -1,16 +1,17 @@
-name: Trace original delivery worktree refusal
-on:
+name: Isolate host outputs before exact product delivery
+'on':
   push:
-    branches: [ci/shortcut-storage-preflight-4d8742]
+    branches:
+      - ci/shortcut-storage-preflight-4d8742
 permissions:
-  contents: read
-  actions: read
+  contents: write
+  actions: write
   checks: write
 concurrency:
   group: shortcut-business-bridge-delivery
   cancel-in-progress: false
 jobs:
-  delivery_diagnostic:
+  activation_delivery:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -18,7 +19,7 @@ jobs:
         with:
           ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
           persist-credentials: false
-      - name: Recover exact original driver and add read-only per-command observations
+      - name: Restore immutable original delivery and bounded worktree separation
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -26,74 +27,34 @@ jobs:
           url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/42f2ae2fc8bfd6de86a92aed21784da195aee31c/.github/workflows/shortcut-storage.yml"
           with urllib.request.urlopen(url,timeout=60) as response:raw=response.read(14885)
           assert len(raw)==14884 and hashlib.sha256(raw).hexdigest()=="968ed9265fb35f7f1614e866da37e91159ea3865eb519ec49bbb1482007d5592"
-          text=raw.decode()
-          body=text.split("          python3 - <<'PY'\n",1)[1].split("          PY\n",1)[0]
+          body=raw.decode().split("          python3 - <<'PY'\n",1)[1].split("          PY\n",1)[0]
           assert all(not line or line.startswith("          ") for line in body.splitlines())
-          program="\n".join(line[10:] for line in body.splitlines())+"\n"
-          ast.parse(program);exec(compile(program,"immutable-original-payload","exec"),{})
-          root=pathlib.Path(os.environ["RUNNER_TEMP"])
-          path=root/"deliver-accepted.py";source=path.read_text()
-          (root/"deliver-accepted-original.py").write_text(source)
-          header='    save()\n    try:\n'
-          helper='''    def observe_worktree(label):
-                  raw = subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard", "-z"], cwd=root)
-                  names = raw.decode("utf-8").split("\\0")[:-1]
-                  records = []
-                  for name in names:
-                      path = root/name
-                      row = {"path": name, "symlink": path.is_symlink()}
-                      if not row["symlink"] and path.is_file():
-                          row.update(identity(path.read_bytes()))
-                      records.append(row)
-                  receipt.setdefault("worktree_observations", []).append({"after": label, "untracked": records})
-                  save()
-              save()
-              observe_worktree("before-original-hosts")
-              try:
-          '''
-          after='            receipt["host_commands"].append(row);save()\n'
-          final='        need(subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard"], cwd=root) == b"", "no untracked product paths")'
-          stop='        need(api("git/ref/heads/"+BRANCH)["object"]["sha"] == BASE, "product changed during preflight")'
-          for anchor in (header,after,final,stop):assert source.count(anchor)==1,anchor
-          source=source.replace(header,helper,1)
-          source=source.replace(after,after+'            observe_worktree("host-"+str(i))\n',1)
-          source=source.replace(final,'        observe_worktree("original-final-guard")\n'+final,1)
-          source=source.replace(stop,'        raise AssertionError("DIAGNOSTIC_ONLY_NO_PRODUCT_WRITE")\n'+stop,1)
-          ast.parse(source)
-          assert source.count(final)==1
-          assert source.index('raise AssertionError("DIAGNOSTIC_ONLY_NO_PRODUCT_WRITE")')<source.index('api("git/blobs", "POST"')
-          path.write_text(source)
-          (root/"worktree-observer.py").write_text(helper.split('    save()\n    observe_worktree',1)[0])
-          import subprocess,tempfile,textwrap
-          observer=textwrap.dedent(helper.split('    save()\n    observe_worktree',1)[0])
-          with tempfile.TemporaryDirectory() as tmp:
-              repo=pathlib.Path(tmp);subprocess.run(["git","init","-q",tmp],check=True)
-              receipt={};saves=[]
-              scope={"root":repo,"receipt":receipt,"subprocess":subprocess,
-                  "identity":lambda raw:{"bytes":len(raw),"sha256":hashlib.sha256(raw).hexdigest()},
-                  "save":lambda:saves.append(True)}
-              exec(observer,scope)
-              scope["observe_worktree"]("before")
-              assert receipt["worktree_observations"][-1]["untracked"]==[]
-              (repo/"fixture-output.txt").write_bytes(b"exact")
-              scope["observe_worktree"]("after")
-              assert receipt["worktree_observations"][-1]["untracked"]==[
-                  {"path":"fixture-output.txt","symlink":False,"bytes":5,"sha256":hashlib.sha256(b"exact").hexdigest()}]
-              original=subprocess.check_output(["git","ls-files","--others","--exclude-standard"],cwd=repo)
-              assert original!=b"" and (repo/"fixture-output.txt").read_bytes()==b"exact" and len(saves)==2
-          print("REAL_GIT_OBSERVER_CONTROLS_PASS_ORIGINAL_UNTRACKED_REFUSAL_PRESERVED")
+          code="\n".join(line[10:] for line in body.splitlines())+"\n"
+          ast.parse(code);exec(compile(code,"immutable-original-driver","exec"),{})
+          import base64,json,lzma
+          payload=lzma.decompress(base64.b64decode('/Td6WFoAAATm1rRGAgAhARYAAAB0L+Wj4BxICVhdAD2IiSdz+CBeepkA1YtyFvBojbNVGKokzfCNYVRE+Sv0s8RJMMTpcIYfAh1XsUNArsyXE73wScs2sQu7q8zUlR56rLoHAku0B5cnc23YWpqYopkoEFuTjZ7FOPn+XI2748DOl3VNu9EhExGpe80j7B4t2P9f2e7sNqVmILMFcgI92veLiSxPQ3MCMj4C+MBkzM7l3WGBUYFuKofDpuEvCB+htuzC0A8BtQ5Y9ylwiaqksnrFDdWQiXGMaOnH1dxWbD5VBiU89xkurDGgkUyLztaebdbS6bbtn1SBG+LUrtbikWx5FGRCXB3cG97FZV4Lok9xBHncBJb+295OqYqk5VGznymEb6ypM07yvVccRcPTXUlgPVA2lebXjwp6/2eFEl18X+yXIzu5GzpKFtwPaDEaPaA0YXXpi23I94NUQX2/m+zOl+jC2QyiCahKb3rUk9rfdikvybuALImhCpRuhvU0smyxcbaqQ5aUCDTgk1rnaIN28xJlMz4TsumzVe2CP4/gSJLRrB/F+Po26dkXmquF67rY5PHyIG5smi/Own5gwiqLW//9YeQ7Nt+u/Wgmlrv+4TfjZsYnLqGR1K5OsE37y1E7IoO9tU40Cj8DlVWDeRejujSmb1TPTlvmRUw+RhzkTXmzUW3Z2A56gh6ZIuw1kYDnaDYz0TiwuNmSFMFcE12P7mfZ2nJ/A+FBdt/SqG3XFT5hmUmv8ClBVZnoHF7ARfyS56mK/zNuH6xiy+dWvW7jI0SMppM6lCDQub/EwwjM9Yu64Y1o6NJ+svWD+HpDugE3GK2LcStJB1UkFFrRJYfwfFeDT/b3HN4Eak/JYvZ4QM5R3LMLOfphTrMvvk2h9axBkgWR0Ox1DdIvfvnUxyzrEkg3gUWHgvCtmpZUn8MpS9TblPUYK0/TFoVrToYJ1NrbRPWiNvbX9yuTlz4jGI5I3zFOipS7ffGHyQ/zN6Ow//Yxag2GbRav9nGGF7gFc8ujGwhIqUmjfaoBxxLcruxPa//11PCJrBdORv3b/Z+NlmOfHljCcxLF0uVClGw3lEjR7q1dspx0A3TQee8QjAtZymX/Tee7fNWks7C6R0RxW/EzzzYZu2MuNIRUT+9pEHcLswolzeTI7nAd/JVh2ZP2PV/hTQbjxBGVn4KtSg9DjjAwux7Vy3JjOjhDC4aV7dhOc767X3y8rEZPS0sVxaQ1FWOU73+AZkMrpeds84id2dXbNHM9xJagezUI/MD23PRQLNkYmZW55xkgLv4MylIoJDzCwsDNQT+fNzNJYojnyJts9ODR6tlE9dzGnuJBbOJvWT+fvJdVzDhuytXnNW7IA8hqPKUQL0jbZQhiemegfu646kZjYJTBBTRYt598wzHDW6+ZvToCF0Yfw1LpFiQURln1j9n/j7gOVWfEQkYbpujZevXiqQp1OO4tC224BSLd3BIdReEeCVJo4tYrP00Gayx7PGaLzh6y6ECZ13/wt7bMD6gRN25M/CpwDBZlWdljA1OOSZb/vrZrh3r/yZmxMhcyY5NlFNKMGiLvs6ftr36rFgmmZd6uaDwo7gpktk4T7nMMzDWoQ0Arq5oa8oINTrOXT7DNhwV1FXk04zP6phgRneVYgKKorQGCH8FSXN4NNyIwIJJofRpDmeWGcEi/rWar5mlJ//tQK/B8nbgP2TByfDU9O/8vAnh+smBbab5Uc3GzqU/B3+1wN3PbahD5TY/LkQrHJBNmeMVkoBBMxJMAFLfIJr2lm0Tkr9jwAHz3vk0xbxuCcBqpthRAG6diSUgriJn4vzYGrrZWNxq9RjkNZ8eOBUQrfzTduTBtU/F3wvJqxXkcXkqUyE+1hakUHfQ0DXt6wZbBOoKcxyBmMgRvgeu6wPrR6XPsTqnJ0IV12A0bTu/NWEzTFHfHltaBX89oT57eRZbaiypg2LIC+SW+UD8suiIEnJVN6zfLjKoL+BnSIGI+qo6wQJzrHv1+6gt6lNKFpAuiEXbWk0nRrwzK8SjrepzcVIO9HH/uaRHopTW8Bu9XJDbIxiF388rb/2sPM52/Bmqos7wyF5N/qVUAjUOvY4f2VHVsAk7RS7DneYDgR1TFDRvNd7k7WUePoCNnsQFAoXANjg4TmZJe3+j0clvmwbf8eHMuTrzlVrLnpvk+M9lzNyQse6kaSTivElpu1bBA3oD8gbzkrdtSrH+cMPeIiWRwOE4xJFFVZ4Q8rdZzJ4c0RXXhgahS7bwTiYupdUwXHax/MzMDGYsTba3bIF2THfwp7cQFRKNvnSAajGwr4ZkJG6shjsE/GJQJg+mTy3XDhX/BxdjTUBRKiH/TLEiZLzBGq9wnjXQQIwtTPXvA0plsCjlZvaAWHPhbxNJt7PiamApdgadp19vugwQTZ/ljn4cZvo3jzifaJ3xCzyQckhou9Oh2dQnyrLuqTvzjlsCtd2Y0AoV/heVDvVWlry044qKCO/jn+SAeWl+tD6aKRPrvTtShe6CP9Os6eii+oOLXwSC8BqaQTxTMoG7sk01/JgAy0+Kng2p9ZraVDdDsF2kp/UnJC7BkraV60AkdS7BkPSrZgSFwdwrzLBfjT2Ul440iDlMx+DIsG1ERTa30XB4U4M27JlzAfOx5usSF0FshsbEdRrD1LwOAP3+L5R+1QIIMfk3Q+nxn6kPXwf38k7qX1WJM88sRBLbX9MsrFfajUzDmBgQ8FSLroTf1i61fNQ0eq+oeoqfNYWFOP5wkYBd1sMj5EZ1sED8uRzQ21ZSXp4Gu5dTHGkNhklyxTscYXIaRSuXc+VKAZjwkXoHAe+ZiPNeArcuFqe0MSdNsfsmhneF1Xm5tGd9sZOl0O1o0gMz5FY4EWd4RfA/Cwht6/2DGPVhMuW5xJIGgCO8pMs8mt6w2CdvWeh4zsXo8G4sAaZnPY2HCxHheCrcN0rwspzQAfMem6RYHgGl8eTLSpGcrFGJhXtf3yc6dZAMziDM2MJRKmRn2IU6Bg6ws77lpC+8kOy0hW6XLDTlkhyRFCh/Ee4L8wxnaI2ni5uKsQp1HS6S4h2/yd2n+6GDtZXmRaavLn6IpwXxWvQJFT5Eqv899yibx2LKqDNENXNf26Tz+GmC9io3GbwybhJUZTJObsAaasDeFWnBiR+YoqWf/hr0ZzxJMOhPuXcB7nO7XnIdN0BtUePf4leMba6jgR3ZMTuRKwi95XqM9tyllOJs0E4cAlbH5VYUvhJcAAfQSyTgAAJReS3axxGf7AgAAAAAEWVo=',validate=True))
+          assert hashlib.sha256(payload).hexdigest()=='24cea102fde4353e36ffa3926dbd9479c0754e5d473c22c097a9365198ba44b7'
+          bundle=json.loads(payload)
+          assert set(bundle)=={"isolate-delivery-validation.py","test-validation-worktree.py"}
+          for name,code in bundle.items():
+              ast.parse(code);(pathlib.Path(os.environ["RUNNER_TEMP"])/name).write_text(code)
           PY
-      - name: Use Java17 and retain original transport tests
+      - name: Use Java17 and test delivery failure boundaries
         run: |
           set -euo pipefail
           echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
           echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
-          cp "$RUNNER_TEMP/deliver-accepted.py" "$RUNNER_TEMP/deliver-diagnostic.py"
-          cp "$RUNNER_TEMP/deliver-accepted-original.py" "$RUNNER_TEMP/deliver-accepted.py"
           python3 "$RUNNER_TEMP/test-deliver-accepted.py"
-          cp "$RUNNER_TEMP/deliver-diagnostic.py" "$RUNNER_TEMP/deliver-accepted.py"
-      - name: Original21 commands once with per-command worktree identities
-        id: diagnostic
+          python3 "$RUNNER_TEMP/test-validation-worktree.py"
+          python3 - <<'PY'
+          import importlib.util,os,pathlib
+          root=pathlib.Path(os.environ["RUNNER_TEMP"])
+          spec=importlib.util.spec_from_file_location("isolate",root/"isolate-delivery-validation.py")
+          m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+          p=root/"deliver-accepted.py";p.write_text(m.patch_source(p.read_text()))
+          PY
+      - name: Verify accepted archive, full21 hosts, atomic product update and dispatch
+        id: delivery
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -103,16 +64,16 @@ jobs:
         id: evidence
         if: always()
         with:
-          name: activation-worktree-diagnostic
+          name: activation-product-delivery
           path: ${{ runner.temp }}/product-delivery/
           if-no-files-found: error
           retention-days: 14
-      - name: Publish complete original refusal and file observations
+      - name: Publish complete original delivery receipt with exact readback
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
-          DELIVERY_OUTCOME: ${{ steps.diagnostic.outcome }}
+          DELIVERY_OUTCOME: ${{ steps.delivery.outcome }}
         run: |
           set -euo pipefail
           python3 "$RUNNER_TEMP/deliver-accepted.py" publish "$RUNNER_TEMP/product-delivery"

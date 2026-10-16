@@ -1,0 +1,170 @@
+{
+  "commit": "c9d905b37061c0f52f57be54c318ce275ef0f1fa",
+  "run_id": "38917276308",
+  "status": "NOT_VERIFIED",
+  "scope": "PARALLEL_EXPORT_BACKEND_PREVIEW_AND_SYNTHETIC_NATIVE_MULTIPAGE_NOT_FULL_REGRESSION",
+  "devices": {
+    "26": {
+      "status": "FAIL",
+      "commit": "c9d905b37061c0f52f57be54c318ce275ef0f1fa",
+      "run_id": "38917276308",
+      "api": 26,
+      "scope": "PARALLEL_EXPORT_BACKEND_PREVIEW_AND_SYNTHETIC_NATIVE_MULTIPAGE_NOT_FULL_REGRESSION",
+      "release_ready": false,
+      "durable_upgrade_ready": false,
+      "preflight": {
+        "phase": "CODEC_AND_PREVIEW",
+        "apps": [
+          "build/outputs/apk/debug/todo-pocket-android-debug.apk"
+        ],
+        "tests": [
+          "build/outputs/apk/androidTest/debug/todo-pocket-android-debug-androidTest.apk"
+        ],
+        "app_certificate": "38fced79d5bc611fa1e5c51fba98c545482b5ee48b432df7258dd0aa9a1a808e",
+        "test_certificate": "38fced79d5bc611fa1e5c51fba98c545482b5ee48b432df7258dd0aa9a1a808e",
+        "badging": "package: name='com.supercubegame.pockettodo.v12.preview' versionCode='3' versionName='1.2' platformBuildVersionName='15' platformBuildVersionCode='35' compileSdkVersion='35' compileSdkVersionCodename='15'\nsdkVersion:'26'\ntargetSdkVersion:'34'\napplication-label:'口袋待办·预览'\napplication-icon-160:'res/drawable/ic_launcher.xml'\napplication: label='口袋待办·预览' icon='res/drawable/ic_launcher.xml'\napplication-debuggable\nlaunchable-activity: name='com.supercubegame.pockettodo.MainActivity'  label='' icon=''\nfeature-group: label=''\n  uses-feature: name='android.hardware.faketouch'\n  uses-implied-feature: name='android.hardware.faketouch' reason='default feature for all apps'\nmain\nsupports-screens: 'small' 'normal' 'large' 'xlarge'\nsupports-any-density: 'true'\nlocales: '--_--'\ndensities: '160'\n",
+        "apk": "build/outputs/apk/androidTest/debug/todo-pocket-android-debug-androidTest.apk",
+        "installed_path": "package:/data/app/com.supercubegame.pockettodo.v12.preview-S6eVz3j9UT1_nBoTNtbDow==/base.apk",
+        "installed_transfer": {
+          "status": "PASS",
+          "method": "ADB_PULL_SINGLE_PRIMARY_EXACT_BYTES",
+          "attempts": 1,
+          "budget_seconds": 30,
+          "expected_bytes": 9408925,
+          "expected_sha256": "b4deaf118ca48eb68a15e2de91fa55e82e41e8e9c6219ec845bc1edd7ef3d21d",
+          "command": [
+            "/usr/local/lib/android/sdk/platform-tools/adb",
+            "-s",
+            "emulator-5554",
+            "pull",
+            "-Z",
+            "/data/app/com.supercubegame.pockettodo.v12.preview-S6eVz3j9UT1_nBoTNtbDow==/base.apk",
+            "/tmp/installed-apk-pull-pd4woj2h/base.apk"
+          ],
+          "stdin": "DEVNULL",
+          "timeout_seconds": 29.99427536799999,
+          "returncode": 0,
+          "stdout_tail": "",
+          "stderr_tail": "/data/app/com.supercubegame.pockettodo.v12.preview-S6eVz3j9UT1_nBoTNtbDow==/base.apk: 1 file pulled, 0 skipped. 207.5 MB/s (9408925 bytes in 0.043s)\n",
+          "actual_bytes": 9408925,
+          "file_bytes": 9408925,
+          "actual_sha256": "b4deaf118ca48eb68a15e2de91fa55e82e41e8e9c6219ec845bc1edd7ef3d21d",
+          "read_limited": false,
+          "elapsed_seconds": 0.06322783799998888
+        },
+        "actual_bytes": 9408925,
+        "expected_bytes": 9408925,
+        "actual_sha256": "b4deaf118ca48eb68a15e2de91fa55e82e41e8e9c6219ec845bc1edd7ef3d21d",
+        "expected_sha256": "b4deaf118ca48eb68a15e2de91fa55e82e41e8e9c6219ec845bc1edd7ef3d21d"
+      },
+      "error": "AssertionError()",
+      "original_failure": {
+        "type": "AssertionError",
+        "message": "",
+        "command": null,
+        "returncode": null,
+        "stdout": {
+          "captured": false,
+          "tail": null,
+          "truncated": false
+        },
+        "stderr": {
+          "captured": false,
+          "tail": null,
+          "truncated": false
+        }
+      },
+      "traceback": "Traceback (most recent call last):\n  File \"<stdin>\", line 75, in <module>\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/emulator_gate.py\", line 1803, in main\n    verify_database(adb)\n  File \"<stdin>\", line 47, in install_and_probe\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_exports.py\", line 657, in android_codec\n    paged_report=verify_paged(folder,classes,android,prefix,remote,gate)\n                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_paged_exports.py\", line 955, in verify\n    labels,identity=instrumentation(folder,prefix,gate)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_paged_exports.py\", line 740, in instrumentation\n    labels=observe(output,gate.PKG)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_paged_exports.py\", line 317, in observe\n    assert re.findall(r\"^PAGED_PREVIEW_PASS ([^\\r\\n]+)\",text,re.M)==PREVIEW_LABELS\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError\n",
+      "elapsed_seconds": 137.896,
+      "stages": [
+        "installed_exact_product"
+      ]
+    },
+    "34": {
+      "status": "FAIL",
+      "commit": "c9d905b37061c0f52f57be54c318ce275ef0f1fa",
+      "run_id": "38917276308",
+      "api": 34,
+      "scope": "PARALLEL_EXPORT_BACKEND_PREVIEW_AND_SYNTHETIC_NATIVE_MULTIPAGE_NOT_FULL_REGRESSION",
+      "release_ready": false,
+      "durable_upgrade_ready": false,
+      "preflight": {
+        "phase": "CODEC_AND_PREVIEW",
+        "apps": [
+          "build/outputs/apk/debug/todo-pocket-android-debug.apk"
+        ],
+        "tests": [
+          "build/outputs/apk/androidTest/debug/todo-pocket-android-debug-androidTest.apk"
+        ],
+        "app_certificate": "0903316b800942638e8db49356fb2e417e6ee25a8ef9a7e5cba322444208c5b8",
+        "test_certificate": "0903316b800942638e8db49356fb2e417e6ee25a8ef9a7e5cba322444208c5b8",
+        "badging": "package: name='com.supercubegame.pockettodo.v12.preview' versionCode='3' versionName='1.2' platformBuildVersionName='15' platformBuildVersionCode='35' compileSdkVersion='35' compileSdkVersionCodename='15'\nsdkVersion:'26'\ntargetSdkVersion:'34'\napplication-label:'口袋待办·预览'\napplication-icon-160:'res/drawable/ic_launcher.xml'\napplication: label='口袋待办·预览' icon='res/drawable/ic_launcher.xml'\napplication-debuggable\nlaunchable-activity: name='com.supercubegame.pockettodo.MainActivity'  label='' icon=''\nfeature-group: label=''\n  uses-feature: name='android.hardware.faketouch'\n  uses-implied-feature: name='android.hardware.faketouch' reason='default feature for all apps'\nmain\nsupports-screens: 'small' 'normal' 'large' 'xlarge'\nsupports-any-density: 'true'\nlocales: '--_--'\ndensities: '160'\n",
+        "apk": "build/outputs/apk/androidTest/debug/todo-pocket-android-debug-androidTest.apk",
+        "installed_path": "package:/data/app/~~yokwCxihyBN_iQ5MyKnDvA==/com.supercubegame.pockettodo.v12.preview-BKWlRJt-VL_2z21iM93Mqg==/base.apk",
+        "installed_transfer": {
+          "status": "PASS",
+          "method": "ADB_PULL_SINGLE_PRIMARY_EXACT_BYTES",
+          "attempts": 1,
+          "budget_seconds": 30,
+          "expected_bytes": 9408925,
+          "expected_sha256": "af587993c6f1f57037107ed5f628c7231e379fedd6ce8d26b3765be1e4516451",
+          "command": [
+            "/usr/local/lib/android/sdk/platform-tools/adb",
+            "-s",
+            "emulator-5554",
+            "pull",
+            "-Z",
+            "/data/app/~~yokwCxihyBN_iQ5MyKnDvA==/com.supercubegame.pockettodo.v12.preview-BKWlRJt-VL_2z21iM93Mqg==/base.apk",
+            "/tmp/installed-apk-pull-4u9l8ijv/base.apk"
+          ],
+          "stdin": "DEVNULL",
+          "timeout_seconds": 29.99321482900001,
+          "returncode": 0,
+          "stdout_tail": "",
+          "stderr_tail": "/data/app/~~yokwCxihyBN_iQ5MyKnDvA==/com.supercubegame.pockettodo.v12.preview-BKWlRJt-VL_2z21iM93Mqg==/base.apk: 1 file pulled, 0 skipped. 110.4 MB/s (9408925 bytes in 0.081s)\n",
+          "actual_bytes": 9408925,
+          "file_bytes": 9408925,
+          "actual_sha256": "af587993c6f1f57037107ed5f628c7231e379fedd6ce8d26b3765be1e4516451",
+          "read_limited": false,
+          "elapsed_seconds": 0.14513631800002713
+        },
+        "actual_bytes": 9408925,
+        "expected_bytes": 9408925,
+        "actual_sha256": "af587993c6f1f57037107ed5f628c7231e379fedd6ce8d26b3765be1e4516451",
+        "expected_sha256": "af587993c6f1f57037107ed5f628c7231e379fedd6ce8d26b3765be1e4516451"
+      },
+      "error": "AssertionError()",
+      "original_failure": {
+        "type": "AssertionError",
+        "message": "",
+        "command": null,
+        "returncode": null,
+        "stdout": {
+          "captured": false,
+          "tail": null,
+          "truncated": false
+        },
+        "stderr": {
+          "captured": false,
+          "tail": null,
+          "truncated": false
+        }
+      },
+      "traceback": "Traceback (most recent call last):\n  File \"<stdin>\", line 75, in <module>\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/emulator_gate.py\", line 1803, in main\n    verify_database(adb)\n  File \"<stdin>\", line 47, in install_and_probe\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_exports.py\", line 657, in android_codec\n    paged_report=verify_paged(folder,classes,android,prefix,remote,gate)\n                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_paged_exports.py\", line 955, in verify\n    labels,identity=instrumentation(folder,prefix,gate)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_paged_exports.py\", line 740, in instrumentation\n    labels=observe(output,gate.PKG)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_paged_exports.py\", line 317, in observe\n    assert re.findall(r\"^PAGED_PREVIEW_PASS ([^\\r\\n]+)\",text,re.M)==PREVIEW_LABELS\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError\n",
+      "elapsed_seconds": 153.758,
+      "stages": [
+        "installed_exact_product"
+      ]
+    }
+  },
+  "observer_controls": {
+    "positive": 1,
+    "negative": 125,
+    "native_positive": 1,
+    "native_negative": 50,
+    "loss_positive": 1,
+    "loss_negative": 35
+  },
+  "release_ready": false,
+  "durable_upgrade_ready": false
+}

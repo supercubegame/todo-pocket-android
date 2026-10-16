@@ -1,95 +1,551 @@
-name: Recover original post-DDL crash evidence
-on:
+name: Post-DDL crash observation, unchanged test
+'on':
   push:
-    branches: [ci/shortcut-storage-preflight-4d8742]
+    branches:
+      - ci/shortcut-storage-preflight-4d8742
 permissions:
   contents: read
-  actions: read
-  checks: write
 concurrency:
   group: shortcut-business-bridge-delivery
   cancel-in-progress: false
 jobs:
-  recover:
+  shortcut_host:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      checks: write
     steps:
-      - name: Read original archives only, no device rerun
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
+          persist-credentials: false
+      - &ref_0
+        name: Restore exact failed candidate without product changes
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,os,pathlib,urllib.request
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/10b90458f365931e6d87df0d389fabca9a9f09d9/.github/workflows/shortcut-storage.yml"
+          with urllib.request.urlopen(url,timeout=60) as r:raw=r.read(28333)
+          assert len(raw)==28332 and hashlib.sha1(b"blob 28332"+bytes([0])+raw).hexdigest()=="e8c08c036b3a074c43d288aa269d01c4d72b311f"
+          text=raw.decode();out=pathlib.Path(os.environ["RUNNER_TEMP"])/"crash-predecessor";out.mkdir()
+          shared=None
+          for job,count in {'shortcut_host': 36, 'shortcut_device': 15, 'shortcut_report': 15}.items():
+              rest=text.split("  "+job+":\n",1)[1];lines=[]
+              for line in rest.splitlines(keepends=True):
+                  if line.startswith("  shortcut_"):break
+                  lines.append(line)
+              scripts=[]
+              for i,line in enumerate(lines):
+                  if line=="        run: |\n":
+                      body=[]
+                      for item in lines[i+1:]:
+                          if item.strip() and not item.startswith("          "):break
+                          body.append(item[10:] if item.startswith("          ") else item)
+                      scripts.append("".join(body))
+              if job=="shortcut_host":
+                  assert "      - &ref_0\n" in rest
+                  shared=scripts[0]
+              else:
+                  assert "".join(lines).count("      - *ref_0\n")==1
+                  scripts.insert(0,shared)
+              assert len(scripts)==count,(job,len(scripts))
+              for i,script in enumerate(scripts):
+                  assert script.startswith("set -euo pipefail\n")
+                  (out/(job+"-"+str(i)+".sh")).write_text(script)
+          PY
+      - name: Original shortcut_host step 0
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-0.sh"
+      - name: Original shortcut_host step 1
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-1.sh"
+      - name: Original shortcut_host step 2
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-2.sh"
+      - name: Original shortcut_host step 3
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-3.sh"
+      - name: Original shortcut_host step 4
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-4.sh"
+      - name: Original shortcut_host step 5
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-5.sh"
+      - name: Original shortcut_host step 6
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-6.sh"
+      - name: Original shortcut_host step 7
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-7.sh"
+      - name: Original shortcut_host step 8
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-8.sh"
+      - name: Original shortcut_host step 9
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-9.sh"
+      - name: Original shortcut_host step 10
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-10.sh"
+      - name: Original shortcut_host step 11
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-11.sh"
+      - name: Original shortcut_host step 12
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-12.sh"
+      - name: Original shortcut_host step 13
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-13.sh"
+      - name: Original shortcut_host step 14
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-14.sh"
+      - name: Original shortcut_host step 15
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-15.sh"
+      - name: Original shortcut_host step 16
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-16.sh"
+      - name: Original shortcut_host step 17
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-17.sh"
+      - name: Original shortcut_host step 18
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-18.sh"
+      - name: Original shortcut_host step 19
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-19.sh"
+      - name: Original shortcut_host step 20
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-20.sh"
+      - name: Original shortcut_host step 21
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-21.sh"
+      - name: Original shortcut_host step 22
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-22.sh"
+      - name: Original shortcut_host step 23
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-23.sh"
+      - name: Original shortcut_host step 24
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-24.sh"
+      - name: Original shortcut_host step 25
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-25.sh"
+      - name: Original shortcut_host step 26
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-26.sh"
+      - name: Original shortcut_host step 27
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-27.sh"
+      - name: Original shortcut_host step 28
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-28.sh"
+      - name: Original shortcut_host step 29
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-29.sh"
+      - name: Original shortcut_host step 30
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-30.sh"
+      - name: Original shortcut_host step 31
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-31.sh"
+      - name: Original shortcut_host step 32
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-32.sh"
+      - name: Original shortcut_host step 33
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-33.sh"
+      - name: Original shortcut_host step 34
+        id: integration
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-34.sh"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: evidence
+        if: always()
+        with:
+          name: activation-host
+          path: ${{ runner.temp }}/activation-evidence/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Original shortcut_host step 35
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HOST_OUTCOME: ${{ steps.integration.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.evidence.outcome }}
+          ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_host-35.sh"
+  shortcut_device:
+    needs: shortcut_host
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        api:
+          - 26
+          - 34
+    env:
+      TEST_API: ${{ matrix.api }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
+          persist-credentials: false
+      - *ref_0
+      - name: Original shortcut_device step 0
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_device-0.sh"
+      - name: Original shortcut_device step 1
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_device-1.sh"
+      - name: Original shortcut_device step 2
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_device-2.sh"
+      - name: Original shortcut_device step 3
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_device-3.sh"
+      - name: Original shortcut_device step 4
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_device-4.sh"
+      - name: Original shortcut_device step 5
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_device-5.sh"
+      - name: Original shortcut_device step 6
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_device-6.sh"
+      - name: Original shortcut_device step 7
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_device-7.sh"
+      - name: Original shortcut_device step 8
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_device-8.sh"
+      - name: Original shortcut_device step 9
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_device-9.sh"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: activation-host
+          path: activation-evidence
+      - name: Original shortcut_device step 10
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_device-10.sh"
+      - name: Original shortcut_device step 11
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_device-11.sh"
+      - name: Original shortcut_device step 12
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_device-12.sh"
+      - name: Original shortcut_device step 13
+        env:
+          BUILD_429_EXECUTE: 'true'
+          BUILD_LOG: shortcut-build.log
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_device-13.sh"
+      - name: Original regressions plus actual native default startup
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/crash-observer.py" <<'OBSERVER'
+          import hashlib,json,os,pathlib,subprocess,sys,threading,time
+
+          def observe(command,folder,stop,budget=1800,limit=4*1024*1024):
+              started=time.monotonic()
+              result={"command":command,"attempts":1,"status":"START_FAILED"}
+              with open(str(folder)+".stdout","wb") as out,open(str(folder)+".stderr","wb") as err:
+                  process=None
+                  try:
+                      process=subprocess.Popen(command,stdout=out,stderr=err)
+                      while True:
+                          code=process.poll()
+                          if max(out.tell(),err.tell())>limit:
+                              result["status"]="LIMIT_EXCEEDED";break
+                          if code is not None:
+                              result.update(status="EXITED",returncode=code);break
+                          if stop.is_set():
+                              result["status"]="STOPPED_AFTER_ORIGINAL";break
+                          if time.monotonic()-started>=budget:
+                              result["status"]="TIMED_OUT";break
+                          time.sleep(.05)
+                  except Exception as error:
+                      result["error"]=repr(error)
+                  finally:
+                      if process is not None and process.poll() is None:
+                          process.terminate()
+                          try:process.wait(timeout=2)
+                          except subprocess.TimeoutExpired:process.kill();process.wait(timeout=2)
+              result["elapsed_seconds"]=time.monotonic()-started
+              for suffix in ("stdout","stderr"):
+                  path=pathlib.Path(str(folder)+"."+suffix);raw=path.read_bytes()
+                  result[suffix]={"bytes":len(raw),"sha256":hashlib.sha256(raw).hexdigest()}
+              return result
+
+          def run(original,adb,out):
+              out.mkdir(parents=True,exist_ok=False)
+              stop=threading.Event();result={"scope":"NEW_DIAGNOSTIC_NOT_ORIGINAL_RUN_OR_ACCEPTANCE",
+                  "original_failed_commit":"10b90458f365931e6d87df0d389fabca9a9f09d9",
+                  "original_failed_run":38871586910,"original_attempts":1,
+                  "binding":{k:os.environ.get(k) for k in ("GITHUB_SHA","GITHUB_RUN_ID","GITHUB_RUN_ATTEMPT","TEST_API")}}
+              def collect():
+                  try:
+                      result["wait"]=observe([adb,"-s","emulator-5554","wait-for-device"],out/"wait",stop)
+                      if result["wait"].get("returncode")!=0:
+                          result["status"]="NO_DEVICE_NOT_VERIFIED";return
+                      result["logcat"]=observe([adb,"-s","emulator-5554","logcat","-b","crash","-v","threadtime"],out/"crash",stop)
+                      result["status"]="CAPTURED_NOT_ROOT_CAUSE" if (
+                          result["logcat"]["status"] in ("EXITED","STOPPED_AFTER_ORIGINAL") and
+                          result["logcat"]["stdout"]["bytes"]>0) else "NO_CRASH_BYTES_NOT_VERIFIED"
+                  except BaseException as error:
+                      result.update(status="OBSERVER_FAILED",error=repr(error))
+              worker=threading.Thread(target=collect);worker.start()
+              try:
+                  code=subprocess.run(original,check=False).returncode
+                  result["original_returncode"]=code
+              finally:
+                  worker.join(timeout=2);stop.set();worker.join(timeout=6)
+                  result["observer_joined"]=not worker.is_alive()
+                  (out/"receipt.json").write_text(json.dumps(result,indent=2))
+              if code!=0:return code
+              return 0 if result.get("status")=="CAPTURED_NOT_ROOT_CAUSE" and not worker.is_alive() else 1
+
+          if __name__=="__main__":
+              sys.exit(run(sys.argv[2:],sys.argv[1],pathlib.Path("crash-diagnostic")))
+          OBSERVER
+          cat > "$RUNNER_TEMP/test-crash-observer.py" <<'TEST'
+          import importlib.util,json,pathlib,sys,tempfile,threading
+          from unittest.mock import patch
+          p=pathlib.Path(__file__).parent
+          spec=importlib.util.spec_from_file_location("observer",p/"crash-observer.py")
+          m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+          with tempfile.TemporaryDirectory() as tmp:
+              root=pathlib.Path(tmp)
+              fake=root/"adb"
+              fake.write_text("#!"+sys.executable+"\nimport sys\nif 'logcat' in sys.argv:print('FATAL EXCEPTION: test\\noriginal stack sentinel')\n")
+              fake.chmod(0o700)
+              original=[sys.executable,"-c","import time;time.sleep(.2);raise SystemExit(7)"]
+              assert m.run(original,str(fake),root/"good")==7
+              receipt=json.loads((root/"good/receipt.json").read_text())
+              assert receipt["status"]=="CAPTURED_NOT_ROOT_CAUSE" and receipt["original_attempts"]==1
+              assert (root/"good/crash.stdout").read_text()=="FATAL EXCEPTION: test\noriginal stack sentinel\n"
+              source=(p/"crash-observer.py").read_text()
+              assertion="    if code!=0:return code\n"
+              assert source.count(assertion)==1
+              mutant={"__name__":"mutant"}
+              exec(compile(source.replace(assertion,"",1),"omitted-failure-preservation","exec"),mutant)
+              assert mutant["run"](original,str(fake),root/"mutant")==0
+              fake.write_text("#!"+sys.executable+"\nraise SystemExit(9)\n")
+              assert m.run(original,str(fake),root/"waitfail")==7
+              assert json.loads((root/"waitfail/receipt.json").read_text())["status"]=="NO_DEVICE_NOT_VERIFIED"
+              assert m.run([sys.executable,"-c","import time;time.sleep(.2)"],str(fake),root/"empty")==1
+              assert m.observe([sys.executable,"-c","print('x'*10000)"],root/"cap",threading.Event(),limit=10)["status"]=="LIMIT_EXCEEDED"
+              assert m.observe([sys.executable,"-c","import time;time.sleep(5)"],root/"timeout",threading.Event(),budget=.05)["status"]=="TIMED_OUT"
+              stopped=threading.Event();stopped.set()
+              assert m.observe([sys.executable,"-c","import time;time.sleep(5)"],root/"stop",stopped)["status"]=="STOPPED_AFTER_ORIGINAL"
+          print("CRASH_OBSERVER real subprocess positive=1 negatives=5 whole-guard-omission=1 PASS; NOT_ANDROID")
+          TEST
+          python3 "$RUNNER_TEMP/test-crash-observer.py"
+          python3 "$RUNNER_TEMP/crash-observer.py" "$ANDROID_HOME/platform-tools/adb" bash "$RUNNER_TEMP/crash-predecessor/shortcut_device-14.sh"
+      - name: Publish complete bounded crash evidence
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import hashlib,io,json,os,pathlib,subprocess,zipfile
-          REPO="supercubegame/todo-pocket-android"
-          RUN=38871586910
-          HEAD="10b90458f365931e6d87df0d389fabca9a9f09d9"
-          ITEMS=[
-           (12034895391,"shortcut-device-api-26","0f2f018adead0861bf736089d0f489c237ec76b9942def69dd4ecfc23f2552b0"),
-           (12034347759,"shortcut-device-api-34","764f2c63feec8d3d7f338f93e053b73b3fbc40ac4089e91c2989aa046be61971")]
+          import hashlib,json,os,pathlib,subprocess
           def api(path,value=None):
-              command=["gh","api","repos/"+REPO+"/"+path]
-              if value is not None:command+=["--method","POST","--input","-"]
-              return subprocess.run(command,input=None if value is None else json.dumps(value).encode(),
-                  capture_output=True,timeout=60,check=True).stdout
-          def checked(raw,digest):
-              assert hashlib.sha256(raw).hexdigest()==digest,"archive digest"
-              z=zipfile.ZipFile(io.BytesIO(raw));names=z.namelist()
-              assert len(names)==len(set(names)) and len(names)<=300,"member identity"
-              assert sum(i.file_size for i in z.infolist())<=16*1024*1024,"expanded budget"
-              assert all(not n.startswith("/") and ".." not in pathlib.PurePosixPath(n).parts for n in names),"member path"
-              assert z.testzip() is None,"CRC"
-              return z
-          def fixture(name):
-              out=io.BytesIO()
-              with zipfile.ZipFile(out,"w") as z:z.writestr(name,b"test")
-              return out.getvalue()
-          good=fixture("safe");checked(good,hashlib.sha256(good).hexdigest())
-          for raw,digest in [(good,"0"*64),(fixture("../escape"),None),(fixture("/absolute"),None)]:
-              try:checked(raw,digest or hashlib.sha256(raw).hexdigest())
-              except AssertionError:pass
-              else:raise AssertionError("bad archive accepted")
-          def publish(name,text):
-              assert len(text.encode())<55000,"publication budget"
-              value={"name":name,"head_sha":os.environ["GITHUB_SHA"],"status":"completed","conclusion":"success",
-                  "output":{"title":"ORIGINAL_CRASH_EVIDENCE_NOT_ACCEPTANCE",
-                  "summary":"Source run 38871586910 attempt 1. Device reruns=0; product pushes=0.",
-                  "text":text}}
-              made=json.loads(api("check-runs",value));seen=json.loads(api("check-runs/"+str(made["id"])))
-              assert seen["head_sha"]==value["head_sha"] and seen["output"]==dict(seen["output"],**value["output"])
-          assert os.environ["GITHUB_REPOSITORY"]==REPO and os.environ["GITHUB_RUN_ATTEMPT"]=="1"
-          run=json.loads(api("actions/runs/"+str(RUN)))
-          assert run["head_sha"]==HEAD and run["run_attempt"]==1 and run["conclusion"]=="failure"
-          out=pathlib.Path("original-postddl");out.mkdir()
-          manifest=[]
-          for aid,name,digest in ITEMS:
-              meta=json.loads(api("actions/artifacts/"+str(aid)))
-              assert meta["name"]==name and not meta["expired"] and meta["digest"]=="sha256:"+digest
-              assert meta["workflow_run"]["id"]==RUN and meta["workflow_run"]["head_sha"]==HEAD
-              raw=api("actions/artifacts/"+str(aid)+"/zip")
-              assert len(raw)==meta["size_in_bytes"]
-              z=checked(raw,digest);(out/(name+".zip")).write_bytes(raw)
-              rows=[]
-              for index,n in enumerate(z.namelist()):
-                  data=z.read(n);identity={"name":n,"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()}
-                  rows.append(identity)
-                  if n.endswith((".log",".txt",".json",".stdout",".stderr")):
-                      try:text=data.decode("utf-8","strict")
-                      except UnicodeDecodeError:continue
-                      # Publish all original text in bounded parts; never just the tail.
-                      parts=[text[i:i+10000] for i in range(0,len(text),10000)] or [""]
-                      assert len(parts)<=100,"member publication budget"
-                      for part,body in enumerate(parts):
-                          publish(name+" member "+str(index)+" part "+str(part+1)+"/"+str(len(parts)),
-                              json.dumps(identity)+"\n```text\n"+body+"\n```")
-              manifest.append({"id":aid,"name":name,"sha256":digest,"members":rows})
-          text=json.dumps(manifest,indent=2);(out/"manifest.json").write_text(text)
-          publish("Original post-DDL archive manifest","```json\n"+text+"\n```")
+              args=["gh","api","repos/"+os.environ["GITHUB_REPOSITORY"]+"/"+path]
+              if value is not None:args+=["--method","POST","--input","-"]
+              return json.loads(subprocess.run(args,input=None if value is None else json.dumps(value).encode(),capture_output=True,timeout=60,check=True).stdout)
+          folder=pathlib.Path("crash-diagnostic")
+          assert folder.is_dir(),"diagnostic did not execute"
+          for path in sorted(folder.iterdir()):
+              raw=path.read_bytes();text=raw.decode("utf-8","replace")
+              identity={"file":path.name,"bytes":len(raw),"sha256":hashlib.sha256(raw).hexdigest(),"decode_replaced":text.encode()!=raw}
+              assert len(raw)<=256*1024,"publication budget exceeded; full artifact retained, not complete publication"
+              parts=[text[i:i+10000] for i in range(0,len(text),10000)] or [""]
+              for index,body in enumerate(parts):
+                  value={"name":"Crash diagnostic API"+os.environ["TEST_API"]+" "+path.name+" "+str(index+1)+"/"+str(len(parts)),
+                      "head_sha":os.environ["GITHUB_SHA"],"status":"completed","conclusion":"success",
+                      "output":{"title":"DIAGNOSTIC_BYTES_NOT_ACCEPTANCE",
+                      "summary":"New observation of unchanged test; not the original crash run and not a product repair.",
+                      "text":json.dumps(identity)+"\n```text\n"+body+"\n```"}}
+                  made=api("check-runs",value);seen=api("check-runs/"+str(made["id"]))
+                  assert seen["head_sha"]==value["head_sha"]
+                  assert all(seen["output"][k]==v for k,v in value["output"].items()),"exact readback"
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: original-postddl-crash
-          path: original-postddl/
+          name: shortcut-device-api-${{ matrix.api }}
+          path: |
+            shortcut-device/
+            shortcut-build.json
+            shortcut-build.log
+            shortcut-build-driver.log
+            shortcut-android.log
+            shortcut-setup.log
+            emulator.log
+            crash-diagnostic/
+          if-no-files-found: error
+          retention-days: 14
+    permissions:
+      contents: read
+      checks: write
+  shortcut_report:
+    needs:
+      - shortcut_host
+      - shortcut_device
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+      checks: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
+          persist-credentials: false
+      - *ref_0
+      - name: Original shortcut_report step 0
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_report-0.sh"
+      - name: Original shortcut_report step 1
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_report-1.sh"
+      - name: Original shortcut_report step 2
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_report-2.sh"
+      - name: Original shortcut_report step 3
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_report-3.sh"
+      - name: Original shortcut_report step 4
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_report-4.sh"
+      - name: Original shortcut_report step 5
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_report-5.sh"
+      - name: Original shortcut_report step 6
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_report-6.sh"
+      - name: Original shortcut_report step 7
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_report-7.sh"
+      - name: Original shortcut_report step 8
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_report-8.sh"
+      - name: Original shortcut_report step 9
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_report-9.sh"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: activation-host
+          path: activation-evidence
+      - name: Original shortcut_report step 10
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_report-10.sh"
+      - name: Original shortcut_report step 11
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_report-11.sh"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: shortcut-*
+          path: collected-shortcuts
+      - name: Original shortcut_report step 12
+        if: always()
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_report-12.sh"
+      - name: Original shortcut_report step 13
+        if: always()
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_report-13.sh"
+      - name: Original shortcut_report step 14
+        id: ui_evidence
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/crash-predecessor/shortcut_report-14.sh"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: independent-shortcut-report
+          path: |
+            shortcut-report.json
+            shortcut-report.log
+            ui-compact-api*.json
           if-no-files-found: error
           retention-days: 14

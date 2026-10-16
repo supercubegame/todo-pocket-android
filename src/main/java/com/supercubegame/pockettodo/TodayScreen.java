@@ -138,6 +138,85 @@ public final class TodayScreen {
         undo.setContentDescription("todo-undo-"+token.todoId());todoUndoButton=undo;body.addView(undo,new LinearLayout.LayoutParams(-1,-2));
     }
 
+    // BEGIN_EXPLICIT_ACTIVATION_UI
+    private AppDatabase.ShortcutActivationPlan activationPlan,activationAttempt;
+    private AlertDialog activationDialog;
+    private Object activationView=new Object();
+    private boolean activationCurrent(Object expected){
+        return !closed&&!activity.isDestroyed()&&!activity.isFinishing()&&activationView==expected;
+    }
+    private MediaRepository activationMedia()throws java.io.IOException{
+        return new MediaRepository(activity.getFilesDir().toPath().resolve("media"),64L*1024*1024);
+    }
+    private void clearActivation(){
+        activationView=new Object();
+        AppDatabase.ShortcutActivationPlan plan=activationPlan;activationPlan=null;
+        AppDatabase.ShortcutActivationPlan attempt=activationAttempt;activationAttempt=null;
+        AlertDialog dialog=activationDialog;activationDialog=null;
+        if(plan!=null)plan.close();
+        if(attempt!=null)attempt.close();
+        if(dialog!=null)dialog.dismiss();
+    }
+    private void requestShortcutActivation(){
+        if(busy||closed||activity.isDestroyed()||activity.isFinishing()||activationDialog!=null)return;
+        rememberDraft();leaveTodoSession();
+        final Object expected=activationView;
+        work(()->{
+            int version=db.getReadableDatabase().getVersion();
+            if(version==4)return null;
+            if(version!=3)throw new IllegalStateException("Activation requires schema3");
+            return db.prepareShortcutActivation(activity.getFilesDir().toPath().resolve("activation-backups"),activationMedia());
+        },plan->{
+            if(!activationCurrent(expected)){if(plan!=null)plan.close();return;}
+            if(plan==null){message("分类快捷入口已启用，可在活动分类中设置",false);return;}
+            showShortcutActivation(plan,expected);
+        },()->message("未能创建并验证升级备份，未执行启用操作；请保留应用数据",true),
+          plan->{if(plan!=null)plan.close();});
+    }
+    private void showShortcutActivation(AppDatabase.ShortcutActivationPlan plan,Object expected){
+        if(!activationCurrent(expected)){plan.close();return;}
+        activationPlan=plan;
+        LinearLayout body=column();body.setPadding(dp(20),dp(8),dp(20),dp(8));
+        TextView detail=text("备份已创建并校验："+plan.backupName()+"\n启用后会升级本机数据格式，保留原有内容和关联，不会启动其他应用。",16,INK);
+        detail.setContentDescription("activation-backup-details");body.addView(detail);
+        TextView warning=text("这是应用内部的本机备份：卸载或清除数据会一并删除。建议先另行导出备份。启用后没有一键降级；旧版本不支持新格式。",15,ERROR);
+        warning.setContentDescription("activation-backup-warning");body.addView(warning);
+        CheckBox consent=new CheckBox(activity);consent.setText("我已了解备份位置与升级限制，确认启用");
+        consent.setContentDescription("activation-consent");consent.setMinHeight(dp(48));body.addView(consent);
+        TextView validation=text("",14,ERROR);validation.setContentDescription("activation-validation");body.addView(validation);
+        ScrollView scroll=new ScrollView(activity);scroll.addView(body);
+        AlertDialog dialog=new AlertDialog.Builder(activity).setTitle("启用分类快捷入口？").setView(scroll)
+            .setNegativeButton("暂不启用",null).setPositiveButton("确认启用",null).create();
+        activationDialog=dialog;
+        dialog.setOnDismissListener(unused->{
+            if(activationDialog==dialog)activationDialog=null;
+            if(activationPlan==plan){activationPlan=null;plan.close();message("已取消启用；校验备份保留，未升级数据格式",false);}
+        });
+        dialog.setOnShowListener(unused->{
+            Button confirm=dialog.getButton(AlertDialog.BUTTON_POSITIVE),cancel=dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
+            confirm.setContentDescription("activation-confirm");cancel.setContentDescription("activation-cancel");
+            confirm.setMinHeight(dp(48));cancel.setMinHeight(dp(48));
+            confirm.setOnClickListener(v->{
+                if(busy||activationPlan!=plan||!activationCurrent(expected))return;
+                if(!consent.isChecked()){validation.setText("请先勾选确认，未勾选不会升级");return;}
+                activationPlan=null;activationAttempt=plan;
+                dialog.setCancelable(false);confirm.setEnabled(false);cancel.setEnabled(false);consent.setEnabled(false);
+                work(()->{db.confirmShortcutActivation(plan,activationMedia());return true;},ignored->{
+                    activationAttempt=null;dialog.dismiss();
+                    if(!activationCurrent(expected))return;
+                    ((MainActivity)activity).restartAfterShortcutActivation(this);
+                },()->{
+                    activationAttempt=null;plan.close();dialog.dismiss();
+                    // A failure after transaction commit/connection close cannot
+                    // be described as "data unchanged". Retire this facade.
+                    ((MainActivity)activity).activationNeedsRestart(this);
+                });
+            });
+        });
+        dialog.show();
+    }
+    // END_EXPLICIT_ACTIVATION_UI
+
     public TodayScreen(Activity activity) {
         this(activity,AppDatabase.openSchema3(activity,"pocket-v12.db"));
     }
@@ -154,6 +233,8 @@ public final class TodayScreen {
         activity.setContentView(root);root.requestFocus();
         TextView label=text("口袋待办  /  1.2 开发预览",14,ACCENT);label.setContentDescription("v12-home");root.addView(label);
         TextView heading=text("把今天，放进口袋",28,INK);heading.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));heading.setPadding(0,dp(8),0,dp(8));root.addView(heading);
+        Button activate=button("启用分类快捷入口",this::requestShortcutActivation);
+        activate.setContentDescription("activation-entry");root.addView(activate);
         status=text("正在读取本机数据…",14,MUTED);status.setContentDescription("v12-status");status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);root.addView(status);
         content=column();LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,0,1);cp.topMargin=dp(12);root.addView(content,cp);
         LinearLayout nav=new LinearLayout(activity);
@@ -330,5 +411,5 @@ public final class TodayScreen {
     boolean awaitShortcutClose()throws InterruptedException{return io.awaitTermination(10,java.util.concurrent.TimeUnit.SECONDS);}
     public void save(Bundle out){rememberDraft();out.putInt("page",page);out.putInt("filter",filter);out.putString("draft",draft);out.putLong("activity",activities.selected);}
     public boolean back(){if(busy)return true;if(page==1&&activities.selected!=0){activities.selected=0;activities.load();return true;}return false;}
-    public void close(){if(closed)return;closed=true;leaveTodoSession();io.execute(db::close);io.shutdown();}
+    public void close(){if(closed)return;closed=true;clearActivation();leaveTodoSession();io.execute(db::close);io.shutdown();}
 }

@@ -17,6 +17,8 @@ public final class MainActivity extends Activity {
     // In-process instrumentation hook only: no intent, exported component, file flag
     // or persisted preference can enable this. It accepts no caller-selected path.
     static boolean isolatedShortcutTest;
+    static boolean isolatedStartupTest;
+    static boolean isolatedActivationTest;
     TodayScreen shortcutTestScreen(){return screen;}
     private java.util.function.Consumer<Uri> pendingImage;
     private ShareTicket pendingShare;
@@ -27,10 +29,11 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle saved){super.onCreate(saved);if(isolatedShortcutTest){
         screen=new TodayScreen(this,AppDatabase.openSchema4(this,"schema4-ui.db"));
         Bundle isolated=new Bundle();isolated.putInt("page",1);screen.show(isolated);
-    }else{screen=new TodayScreen(this);screen.show(saved);}}
-    @Override protected void onSaveInstanceState(Bundle out){if(screen!=null)screen.save(out);super.onSaveInstanceState(out);}
+    }else{beginDefaultStartup(saved);}}
+    @Override protected void onSaveInstanceState(Bundle out){if(screen!=null)screen.save(out);else if(startupSaved!=null)out.putAll(startupSaved);super.onSaveInstanceState(out);}
     @Override public void onBackPressed(){if(screen==null||!screen.back())super.onBackPressed();}
     @Override protected void onDestroy(){
+        stopStartup();
         pendingImage=null;
         if(pendingShare!=null){pendingShare.close();pendingShare=null;}
         for(android.app.AlertDialog d:new java.util.ArrayList<>(shareDialogs))d.dismiss();
@@ -56,6 +59,113 @@ public final class MainActivity extends Activity {
         @Override public synchronized void close(){state=null;zip=null;}
     }
     // END_SHARE_TICKET
+    // BEGIN_STARTUP_DELIVERY
+    private final java.util.concurrent.ExecutorService startupIo=java.util.concurrent.Executors.newSingleThreadExecutor();
+    private final StartupDelivery startupDelivery=new StartupDelivery();
+    private Bundle startupSaved;
+    private boolean startupStopped;
+    /** Owns a background-opened connection until exactly one screen takes it.
+     * Cancellation before/after offer is terminal. Close is scheduled by the
+     * owner, never performed while holding this monitor or on the UI thread.
+     */
+    static final class StartupDelivery {
+        private AppDatabase value;
+        private boolean terminal;
+        synchronized boolean offer(AppDatabase opened){
+            if(terminal||value!=null)return false;
+            value=opened;return true;
+        }
+        synchronized AppDatabase take(){
+            if(terminal||value==null)return null;
+            AppDatabase result=value;value=null;terminal=true;return result;
+        }
+        synchronized AppDatabase cancel(){
+            terminal=true;AppDatabase result=value;value=null;return result;
+        }
+    }
+    private void beginDefaultStartup(Bundle saved){
+        startupSaved=saved==null?null:new Bundle(saved);
+        startupMessage(false);
+        final android.content.Context context=getApplicationContext();
+        final String startupName=isolatedActivationTest?"schema4-activation-ui.db":isolatedStartupTest?"schema4-startup-ui.db":"pocket-v12.db";
+        startupIo.execute(()->{
+            try{
+                AppDatabase opened=AppDatabase.openForStartup(context,startupName);
+                if(!startupDelivery.offer(opened)){opened.close();return;}
+                runOnUiThread(this::finishDefaultStartup);
+            }catch(Exception e){
+                runOnUiThread(()->{if(!startupStopped&&!isDestroyed()&&!isFinishing())startupMessage(true);});
+            }
+        });
+    }
+    private void finishDefaultStartup(){
+        if(isDestroyed()||isFinishing()){releaseStartup();return;}
+        AppDatabase opened=startupDelivery.take();
+        if(opened==null)return;
+        TodayScreen next=null;
+        try{
+            next=new TodayScreen(this,opened);
+            next.show(startupSaved);
+            screen=next;startupSaved=null;
+        }catch(Exception e){
+            screen=null;
+            if(next!=null)next.close();else startupIo.execute(opened::close);
+            startupMessage(true);
+        }
+    }
+    private void releaseStartup(){
+        AppDatabase unclaimed=startupDelivery.cancel();
+        if(unclaimed!=null)startupIo.execute(unclaimed::close);
+    }
+    private void stopStartup(){
+        if(startupStopped)return;
+        startupStopped=true;releaseStartup();startupIo.shutdown();
+    }
+    // END_STARTUP_DELIVERY
+    // BEGIN_ACTIVATION_RESTART
+    void restartAfterShortcutActivation(TodayScreen expected){
+        if(screen!=expected||isDestroyed()||isFinishing())return;
+        Bundle saved=new Bundle();expected.save(saved);
+        expected.close();screen=null;startupSaved=saved;
+        try{recreate();}catch(Exception failure){activationRestartMessage();}
+    }
+    void activationNeedsRestart(TodayScreen expected){
+        if(screen!=expected||isDestroyed()||isFinishing())return;
+        expected.close();screen=null;startupSaved=null;activationRestartMessage();
+    }
+    private void activationRestartMessage(){
+        android.widget.LinearLayout body=new android.widget.LinearLayout(this);body.setOrientation(android.widget.LinearLayout.VERTICAL);
+        int pad=Math.round(20*getResources().getDisplayMetrics().density);body.setPadding(pad,pad,pad,pad);
+        android.widget.TextView message=new android.widget.TextView(this);message.setTextSize(18);
+        message.setText("启用流程未完整结束，请关闭后重新打开。\n数据格式可能已升级，不能断言未变化；请保留应用及内部备份，不要卸载或清除数据。");
+        message.setContentDescription("activation-restart-required");body.addView(message);
+        android.widget.Button close=new android.widget.Button(this);close.setText("关闭应用");
+        close.setMinHeight(Math.round(48*getResources().getDisplayMetrics().density));
+        close.setOnClickListener(v->finish());body.addView(close);setContentView(body);
+    }
+    // END_ACTIVATION_RESTART
+
+    private void startupMessage(boolean failed){
+        android.widget.LinearLayout body=new android.widget.LinearLayout(this);
+        body.setOrientation(android.widget.LinearLayout.VERTICAL);
+        int pad=Math.round(24*getResources().getDisplayMetrics().density);
+        body.setPadding(pad,pad,pad,pad);body.setBackgroundColor(TodayScreen.BG);
+        android.widget.TextView title=new android.widget.TextView(this);
+        title.setText(failed?"暂时无法打开本机数据":"正在打开口袋待办");
+        title.setTextSize(22);title.setTextColor(TodayScreen.INK);
+        title.setContentDescription(failed?"startup-error":"startup-loading");body.addView(title);
+        android.widget.TextView hint=new android.widget.TextView(this);
+        hint.setText(failed?"为保护现有数据，已停止打开。没有执行清空或重建；请保留原安装，不要清除数据或卸载。":"首次打开可能需要稍等。旧数据不会自动启用快捷入口。");
+        hint.setTextSize(16);hint.setTextColor(TodayScreen.MUTED);
+        hint.setAccessibilityLiveRegion(android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE);body.addView(hint);
+        if(failed){
+            android.widget.Button exit=new android.widget.Button(this);exit.setText("关闭");
+            exit.setMinHeight(Math.round(48*getResources().getDisplayMetrics().density));
+            exit.setOnClickListener(v->finish());body.addView(exit);
+        }
+        setContentView(body);
+    }
+
     /** Stream completion is not provider atomicity: failures may leave partial files.
      * Factories are opened once, only after the caller has consumed valid consent.
      * Closing output must succeed BEFORE readback; every byte and EOF must match.

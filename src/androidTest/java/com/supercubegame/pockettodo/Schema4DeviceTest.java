@@ -169,7 +169,11 @@ public final class Schema4DeviceTest extends Instrumentation {
         refused(()->{try(Schema4Store ignored=new Schema4Store(context,"pocket-v12.db")){};},"Live UI database not enabled");
         need(!context.getDatabasePath("pocket-v12.db").exists(),"live_ui_database_never_opened");
         bridgeSeed();
+        activationSeed();
+        startupSeed();
         uiSeed();
+        startupUiSeed();
+        activationUiSeed();
     }
     private void restoreChecks(Schema4Store store,Path backup,Path oldZip,MediaRepository media)throws Exception{
         Path stage=getTargetContext().getCacheDir().toPath().resolve("schema4-stage");
@@ -261,7 +265,11 @@ public final class Schema4DeviceTest extends Instrumentation {
             need(Arrays.equals(exact,store.exportState()),"separate_process_backup_restore_exact");
             need(!getTargetContext().getDatabasePath("pocket-v12.db").exists(),"separate_process_no_live_ui_database");
             bridgeReopen();
+        activationReopen();
+        startupReopen();
         uiReopen();
+        startupUiReopen();
+        activationUiReopen();
         }
     }
     private static final String BUSINESS_DB="schema4-business.db";
@@ -409,11 +417,18 @@ public final class Schema4DeviceTest extends Instrumentation {
             .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
         awaitUi("shortcut-manage-7");
     }
+    private TodayScreen captureScreenOnMain(MainActivity activity){
+        TodayScreen[] captured={null};
+        runOnMainSync(()->captured[0]=activity.shortcutTestScreen());
+        assertThat(captured[0]!=null,"UI screen capture missing");
+        return captured[0];
+    }
     private void closeShortcutUi()throws Exception{
         if(uiActivity!=null){
-            MainActivity old=uiActivity;runOnMainSync(old::finish);waitForIdleSync();
+            MainActivity old=uiActivity;TodayScreen screen=captureScreenOnMain(old);
+            runOnMainSync(old::finish);waitForIdleSync();
             // Wait for the existing serial executor's close, without reopening it.
-            assertThat(old.shortcutTestScreen().awaitShortcutClose(),"UI close executor deadline");
+            assertThat(screen.awaitShortcutClose(),"UI close executor deadline");
             uiActivity=null;
         }
         MainActivity.isolatedShortcutTest=false;
@@ -536,6 +551,979 @@ public final class Schema4DeviceTest extends Instrumentation {
             need(Arrays.equals(expected,uiCells()),"ui_separate_process_navigation_pure");
         }finally{closeShortcutUi();}
         need(!getTargetContext().getDatabasePath("pocket-v12.db").exists(),"ui_separate_process_live_database_absent");
+    }
+
+    private static final String ACTIVATION_DB="schema4-activation.db";
+    private Path activationBackups(){return root().resolve("schema4-activation-backups");}
+    private boolean activationUnchanged(AppDatabase app,byte[] expected)throws Exception{
+        return app.getWritableDatabase().getVersion()==3&&Arrays.equals(expected,cells(app.getWritableDatabase(),true));
+    }
+    private void activationSeed()throws Exception{
+        Context context=getTargetContext();context.deleteDatabase(ACTIVATION_DB);
+        try(SQLiteDatabase db=context.openOrCreateDatabase(ACTIVATION_DB,0,null)){frozen(db);}
+        MediaRepository media=media();
+        AppDatabase app=AppDatabase.openSchema3(context,ACTIVATION_DB);
+        try{
+            SQLiteDatabase sql=app.getWritableDatabase();byte[] before=cells(sql,true);
+            for(String table:OLD)assertThat(number(sql,"SELECT count(*) FROM "+table)>0,"activation fixture empty "+table);
+            need(sql.getVersion()==3,"activation_original_schema3_nonempty");
+            {
+        
+        resumeRefused(ACTIVATION_DB);
+        need(activationUnchanged(app,before),"activation_resume_schema3_never_migrates");
+        String missing="schema4-resume-missing.db";
+        assertThat(!context.getDatabasePath(missing).exists(),"resume fixture must start missing");
+        resumeRefused(missing);
+        need(!context.getDatabasePath(missing).exists(),"activation_resume_missing_never_creates");
+        String empty="schema4-resume-empty.db";
+        Path emptyPath=context.getDatabasePath(empty).toPath();
+        Files.write(emptyPath,new byte[0]);resumeRefused(empty);
+        need(Files.exists(emptyPath)&&Files.size(emptyPath)==0,"activation_resume_empty_preserved");
+        String corrupt="schema4-resume-corrupt.db";
+        Path corruptPath=context.getDatabasePath(corrupt).toPath();
+        byte[] invalid=new byte[4096];Arrays.fill(invalid,(byte)0x5a);
+        Files.write(corruptPath,invalid);resumeRefused(corrupt);
+        need(Arrays.equals(invalid,Files.readAllBytes(corruptPath)),"activation_resume_corrupt_never_deleted");
+        String future="schema4-resume-future.db";
+        try(SQLiteDatabase futureSql=context.openOrCreateDatabase(future,0,null)){
+            futureSql.execSQL("CREATE TABLE sentinel(value TEXT)");futureSql.execSQL("INSERT INTO sentinel VALUES('keep')");
+            futureSql.setVersion(99);
+        }
+        byte[] futureBytes=Files.readAllBytes(context.getDatabasePath(future).toPath());
+        resumeRefused(future);
+        need(Arrays.equals(futureBytes,Files.readAllBytes(context.getDatabasePath(future).toPath())),
+             "activation_resume_future_exact_preservation");
+        String linked="schema4-resume-symlink.db";
+        Files.createSymbolicLink(context.getDatabasePath(linked).toPath(),context.getDatabasePath(ACTIVATION_DB).toPath());
+        resumeRefused(linked);
+        need(activationUnchanged(app,before),"activation_resume_symlink_refused");
+    
+            }
+            AppDatabase.ShortcutActivationPlan cancelled=app.prepareShortcutActivation(activationBackups(),media);
+            Path cancelledBackup=activationBackups().resolve(cancelled.backupName());
+            need(Files.size(cancelledBackup)>0&&sql.getVersion()==3&&Arrays.equals(before,cells(sql,true)),
+                 "activation_preview_backup_without_migration");
+            cancelled.close();
+            refused(()->app.confirmShortcutActivation(cancelled,media),"expired");
+            need(activationUnchanged(app,before),"activation_cancel_refuses_replay");
+            AppDatabase.ShortcutActivationPlan foreign=app.prepareShortcutActivation(activationBackups(),media);
+            try(AppDatabase other=AppDatabase.openSchema3(context,"schema4-activation-foreign.db")){
+                refused(()->other.confirmShortcutActivation(foreign,media),"Foreign");
+            }
+            need(!context.getDatabasePath("schema4-activation-foreign.db").exists(),
+                 "activation_foreign_attempt_never_opens_database");
+            foreign.close();
+            AppDatabase.ShortcutActivationPlan stale=app.prepareShortcutActivation(activationBackups(),media);
+            sql.execSQL("UPDATE todos SET title='修改但不增加修订' WHERE id='todo'");
+            before=cells(sql,true);
+            refused(()->app.confirmShortcutActivation(stale,media),"changed");
+            need(activationUnchanged(app,before),"activation_same_revision_change_refused");
+            refused(()->app.confirmShortcutActivation(stale,media),"expired");
+            need(activationUnchanged(app,before),"activation_failed_attempt_consumed");
+            AppDatabase.ShortcutActivationPlan damaged=app.prepareShortcutActivation(activationBackups(),media);
+            Files.write(activationBackups().resolve(damaged.backupName()),new byte[]{1,2,3});
+            refused(()->app.confirmShortcutActivation(damaged,media),"changed");
+            need(activationUnchanged(app,before),"activation_changed_backup_refused");
+            AppDatabase.ShortcutActivationPlan missing=app.prepareShortcutActivation(activationBackups(),media);
+            Files.delete(activationBackups().resolve(missing.backupName()));
+            refused(()->app.confirmShortcutActivation(missing,media),"missing");
+            need(activationUnchanged(app,before),"activation_missing_backup_refused");
+            AppDatabase.ShortcutActivationPlan badMedia=app.prepareShortcutActivation(activationBackups(),media);
+            Files.write(media.path(ASSET),new byte[]{120,121,122});
+            try{
+                refused(()->app.confirmShortcutActivation(badMedia,media),"digest differs");
+                need(activationUnchanged(app,before),"activation_changed_media_refused");
+            }finally{Files.write(media.path(ASSET),new byte[]{97,98,99});}
+            AppDatabase.ShortcutActivationPlan closed=app.prepareShortcutActivation(activationBackups(),media);
+            app.close();
+            refused(()->app.confirmShortcutActivation(closed,media),"changed");
+            need(activationUnchanged(app,before),"activation_helper_close_expires_consent");
+            AppDatabase.ShortcutActivationPlan nested=app.prepareShortcutActivation(activationBackups(),media);
+            sql=app.getWritableDatabase();sql.beginTransaction();
+            try{refused(()->app.confirmShortcutActivation(nested,media),"outer transaction");}
+            finally{sql.endTransaction();}
+            need(activationUnchanged(app,before),"activation_outer_transaction_refused");
+            AppDatabase.ShortcutActivationPlan success=app.prepareShortcutActivation(activationBackups(),media);
+            Path backup=activationBackups().resolve(success.backupName());
+            byte[] backupBefore=Files.readAllBytes(backup);String oldSchema=schema(app.getWritableDatabase());
+            Files.write(root().resolve("schema4-activation-before.bin"),before);
+            app.confirmShortcutActivation(success,media);
+            try(AppDatabase activated=AppDatabase.openSchema4(context,ACTIVATION_DB)){
+                SQLiteDatabase after=activated.getWritableDatabase();
+                need(after.getVersion()==4&&Arrays.equals(before,cells(after,true))&&
+                     schema(after,true).equals(oldSchema)&&number(after,"SELECT count(*) FROM category_shortcuts")==0,
+                     "activation_atomic_schema4_preserves_all_cells");
+                need(Arrays.equals(backupBefore,Files.readAllBytes(backup))&&
+                     Arrays.equals(new byte[]{97,98,99},Files.readAllBytes(media.path(ASSET))),
+                     "activation_retains_verified_backup_and_media");
+                need(activated.setShortcut(7,10,true)&&activated.setShortcut(8,10,true)&&activated.activityTargets(7,10).equals(List.of(20L,21L)),
+                     "activation_new_facade_supports_shortcuts");
+                Files.write(root().resolve("schema4-activation-final.bin"),cells(after,true));
+            }
+            {
+        AppDatabase resumed=AppDatabase.resumeActivated(getTargetContext(),ACTIVATION_DB);
+        try{
+            SQLiteDatabase connection=resumed.getWritableDatabase();
+            need(connection==resumed.getReadableDatabase()&&connection.getVersion()==4,
+                 "activation_resume_one_existing_connection");
+            need(Arrays.equals(Files.readAllBytes(root().resolve("schema4-activation-final.bin")),cells(connection,true))&&
+                 resumed.shortcutApplications(7).equals(List.of(10L)),
+                 "activation_resume_exact_state_and_links");
+            resumed.close();
+            boolean denied=false;
+            try{resumed.getReadableDatabase();}catch(IllegalStateException expectedFailure){denied=true;}
+            need(denied&&!connection.isOpen(),"activation_resume_closed_cannot_reopen");
+        }finally{resumed.close();}
+    
+            }
+            refused(()->app.confirmShortcutActivation(success,media),"expired");
+            need(!context.getDatabasePath("pocket-v12.db").exists(),"activation_never_touches_phone_database");
+        }finally{app.close();}
+    }
+    private void activationReopen()throws Exception{
+        try(AppDatabase app=AppDatabase.resumeActivated(getTargetContext(),ACTIVATION_DB)){
+            need(Arrays.equals(Files.readAllBytes(root().resolve("schema4-activation-final.bin")),
+                              cells(app.getWritableDatabase(),true)),
+                 "activation_separate_process_exact_state");
+            need(app.shortcutApplications(7).equals(List.of(10L))&&app.activityTargets(7,10).equals(List.of(20L,21L)),
+                 "activation_separate_process_relations");
+        }
+        need(!getTargetContext().getDatabasePath("pocket-v12.db").exists(),
+             "activation_separate_process_phone_database_absent");
+    }
+
+private void resumeRefused(String name)throws Exception{
+        try(AppDatabase ignored=AppDatabase.resumeActivated(getTargetContext(),name)){
+            throw new AssertionError("resume unexpectedly accepted "+name);
+        }catch(IllegalArgumentException|IllegalStateException|android.database.sqlite.SQLiteException expected){}
+    }
+    private static final String STARTUP_DB="schema4-startup.db";
+    private void startupSeed()throws Exception{
+        Context context=getTargetContext();
+        String fresh="schema4-startup-new.db";
+        assertThat(!context.getDatabasePath(fresh).exists(),"fresh fixture absent");
+        try(AppDatabase app=AppDatabase.openForStartup(context,fresh)){
+            need(app.getWritableDatabase().getVersion()==3&&!app.shortcutsEnabled(),
+                 "startup_fresh_stays_schema3");
+            app.addTodo("new","保留新待办");
+        }
+        try(AppDatabase app=AppDatabase.openForStartup(context,fresh)){
+            need(app.todoIds().equals(List.of("new"))&&!app.shortcutsEnabled(),
+                 "startup_existing_schema3_keeps_data");
+        }
+        String[] invalid={"schema4-resume-empty.db","schema4-resume-corrupt.db","schema4-resume-future.db"};
+        for(String name:invalid){
+            Path file=context.getDatabasePath(name).toPath();byte[] prior=Files.readAllBytes(file);
+            boolean denied=false;
+            try(AppDatabase app=AppDatabase.openForStartup(context,name)){}
+            catch(IllegalArgumentException|IllegalStateException|android.database.sqlite.SQLiteException expected){denied=true;}
+            assertThat(denied&&Arrays.equals(prior,Files.readAllBytes(file)),"startup bad file altered "+name);
+        }
+        need(true,"startup_invalid_files_exact_preservation");
+        String link="schema4-resume-symlink.db";
+        boolean denied=false;
+        try(AppDatabase app=AppDatabase.openForStartup(context,link)){}
+        catch(IllegalArgumentException|IllegalStateException expected){denied=true;}
+        need(denied&&Files.isSymbolicLink(context.getDatabasePath(link).toPath()),
+             "startup_symlink_refused_without_reset");
+        try(SQLiteDatabase original=context.openOrCreateDatabase(STARTUP_DB,0,null)){frozen(original);}
+        byte[] wire2;
+        try(AppDatabase old=new AppDatabase(context,STARTUP_DB)){wire2=old.exportState();}
+        byte[] normalized;
+        try(SQLiteDatabase expected=Schema3Store.normalizeLegacyState(wire2)){normalized=cells(expected,true);}
+        try(AppDatabase app=AppDatabase.openForStartup(context,STARTUP_DB)){
+            SQLiteDatabase connection=app.getWritableDatabase();
+            need(connection.getVersion()==3&&!app.shortcutsEnabled()&&Arrays.equals(normalized,cells(connection,true)),
+                 "startup_schema2_uses_frozen_migration");
+            byte[] before=cells(connection,true);
+            AppDatabase.ShortcutActivationPlan plan=app.prepareShortcutActivation(activationBackups(),media());
+            plan.close();
+            need(Arrays.equals(before,cells(connection,true))&&connection.getVersion()==3,
+                 "startup_cancelled_activation_stays_schema3");
+            AppDatabase.ShortcutActivationPlan accepted=app.prepareShortcutActivation(activationBackups(),media());
+            app.confirmShortcutActivation(accepted,media());
+        }
+        try(AppDatabase app=AppDatabase.openForStartup(context,STARTUP_DB)){
+            need(app.shortcutsEnabled()&&app.getWritableDatabase().getVersion()==4&&
+                 Arrays.equals(normalized,cells(app.getWritableDatabase(),true)),
+                 "startup_activated_schema4_resumes_exactly");
+            app.setShortcut(7,10,true);app.setShortcut(8,10,true);
+            Files.write(root().resolve("schema4-startup-final.bin"),cells(app.getWritableDatabase(),true));
+        }
+        AppDatabase closed=AppDatabase.openForStartup(context,fresh);
+        SQLiteDatabase connection=closed.getWritableDatabase();closed.close();
+        denied=false;
+        try{closed.getReadableDatabase();}catch(IllegalStateException expected){denied=true;}
+        need(denied&&!connection.isOpen(),"startup_closed_facade_cannot_reopen");
+        need(!context.getDatabasePath("pocket-v12.db").exists(),"startup_never_touches_phone_database");
+    }
+    private void startupReopen()throws Exception{
+        try(AppDatabase app=AppDatabase.openForStartup(getTargetContext(),STARTUP_DB)){
+            need(Arrays.equals(Files.readAllBytes(root().resolve("schema4-startup-final.bin")),
+                              cells(app.getWritableDatabase(),true))&&app.shortcutsEnabled(),
+                 "startup_separate_process_exact_state");
+            need(app.shortcutApplications(7).equals(List.of(10L))&&
+                 app.activityTargets(7,10).equals(List.of(20L,21L)),
+                 "startup_separate_process_relations");
+        }
+    }
+
+    // Fixed in-process test routing; uses the actual default background startup.
+    private static final String STARTUP_UI_DB="schema4-startup-ui.db";
+    private void nativeStartupNeed(boolean value,String label){
+        assertThat(value,label);
+        log.append("STARTUP_NATIVE_PASS ").append(label).append('\n');
+    }
+    private void launchStartupUi(boolean error)throws Exception{
+        MainActivity.isolatedShortcutTest=false;
+        MainActivity.isolatedStartupTest=true;
+        uiActivity=(MainActivity)startActivitySync(new android.content.Intent(getTargetContext(),MainActivity.class)
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+        awaitUi(error?"startup-error":"新待办输入");
+        final boolean[] attached={false};
+        runOnMainSync(()->attached[0]=uiActivity.shortcutTestScreen()!=null);
+        assertThat(attached[0]!=error,"startup screen/error ownership");
+    }
+    private void closeStartupUi()throws Exception{
+        try{
+            if(uiActivity!=null){
+                MainActivity old=uiActivity;
+                TodayScreen[] screen={null};
+                runOnMainSync(()->{screen[0]=old.shortcutTestScreen();old.finish();});
+                waitForIdleSync();
+                java.lang.reflect.Field field=MainActivity.class.getDeclaredField("startupIo");
+                field.setAccessible(true);
+                java.util.concurrent.ExecutorService executor=(java.util.concurrent.ExecutorService)field.get(old);
+                assertThat(executor.awaitTermination(10,java.util.concurrent.TimeUnit.SECONDS),"startup executor close deadline");
+                if(screen[0]!=null)assertThat(screen[0].awaitShortcutClose(),"startup screen close deadline");
+                uiActivity=null;
+            }
+        }finally{MainActivity.isolatedStartupTest=false;}
+    }
+    private byte[] startupUiCells(boolean links)throws Exception{
+        // File must already exist. Independent read never creates or upgrades.
+        try(SQLiteDatabase db=SQLiteDatabase.openDatabase(
+                getTargetContext().getDatabasePath(STARTUP_UI_DB).getPath(),null,
+                SQLiteDatabase.OPEN_READWRITE,(bad)->{throw new IllegalStateException("native snapshot corruption");})){
+            assertThat(db.getVersion()==(links?4:3),"native startup schema");
+            return links?bridgeCells(db):cells(db,true);
+        }
+    }
+    private void startupUiSeed()throws Exception{
+        Context context=getTargetContext();
+        assertThat(!context.getDatabasePath("pocket-v12.db").exists(),"native live fixture precondition");
+        context.deleteDatabase(STARTUP_UI_DB);
+        try{
+            launchStartupUi(false);closeStartupUi();
+            byte[] fresh=startupUiCells(false);
+            nativeStartupNeed(fresh.length>0,"native_startup_fresh_schema3");
+            context.deleteDatabase(STARTUP_UI_DB);
+            try(SQLiteDatabase db=context.openOrCreateDatabase(STARTUP_UI_DB,0,null)){frozen(db);}
+            try(Schema3Store old=new Schema3Store(context,STARTUP_UI_DB)){old.getWritableDatabase();}
+            byte[] prior=startupUiCells(false);
+            launchStartupUi(false);
+            awaitUi("todo-todo");
+            closeStartupUi();
+            nativeStartupNeed(Arrays.equals(prior,startupUiCells(false)),"native_startup_existing_schema3_exact");
+            context.deleteDatabase(STARTUP_UI_DB);
+            byte[] corrupt=new byte[256];Arrays.fill(corrupt,(byte)71);
+            Path path=context.getDatabasePath(STARTUP_UI_DB).toPath();Files.write(path,corrupt);
+            launchStartupUi(true);closeStartupUi();
+            nativeStartupNeed(Arrays.equals(corrupt,Files.readAllBytes(path)),"native_startup_corrupt_file_retained");
+            // Discard only this synthetic corrupt fixture, never a live database.
+            context.deleteDatabase(STARTUP_UI_DB);
+            try(SQLiteDatabase db=context.openOrCreateDatabase(STARTUP_UI_DB,0,null)){frozen(db);}
+            try(Schema3Store old=new Schema3Store(context,STARTUP_UI_DB)){old.getWritableDatabase();}
+            try(AppDatabase app=AppDatabase.openSchema4(context,STARTUP_UI_DB)){
+                app.setShortcut(7,10,true);app.setShortcut(8,10,true);
+            }
+            byte[] expected=startupUiCells(true);
+            launchStartupUi(false);awaitUi("todo-todo");closeStartupUi();
+            nativeStartupNeed(Arrays.equals(expected,startupUiCells(true)),"native_startup_schema4_exact");
+            launchStartupUi(false);awaitUi("todo-todo");closeStartupUi();
+            nativeStartupNeed(Arrays.equals(expected,startupUiCells(true)),"native_startup_relaunch_exact");
+            Files.write(root().resolve("startup-ui-expected.bin"),expected);
+            nativeStartupNeed(!context.getDatabasePath("pocket-v12.db").exists(),"native_startup_phone_database_absent");
+        }finally{closeStartupUi();}
+    }
+    private void startupUiReopen()throws Exception{
+        byte[] expected=Files.readAllBytes(root().resolve("startup-ui-expected.bin"));
+        assertThat(Arrays.equals(expected,startupUiCells(true)),"native prelaunch separate process cells");
+        try{launchStartupUi(false);awaitUi("todo-todo");}finally{closeStartupUi();}
+        nativeStartupNeed(Arrays.equals(expected,startupUiCells(true)),"native_startup_separate_process_exact");
+        nativeStartupNeed(!getTargetContext().getDatabasePath("pocket-v12.db").exists(),"native_startup_separate_process_phone_absent");
+    }
+
+
+    private void activationPostDdlScenario(byte[] before,boolean rollback)throws Exception{
+        // Existing isolated fixture only. Observe final archive digest after DDL,
+        // before setTransactionSuccessful/endTransaction, not process death.
+        launchActivationUi();
+        touchUi("activation-entry");awaitActivation("activation-confirm");
+        Path backup=activationUiBackup();byte[] archived=Files.readAllBytes(backup);
+        touchActivation("activation-consent");
+        MainActivity old=uiActivity;TodayScreen screen=captureScreenOnMain(old);
+        AppDatabase database=(AppDatabase)activationQueueField(screen,"db");
+        java.util.concurrent.ExecutorService executor=(java.util.concurrent.ExecutorService)activationQueueField(screen,"io");
+        // Capture this facade's existing connection on its owner before migration.
+        // Reopening through the schema3 facade after DDL correctly fails closed.
+        SQLiteDatabase observed=executor.submit(()->database.getReadableDatabase()).get(2,java.util.concurrent.TimeUnit.SECONDS);
+        Thread worker=executor.submit(()->Thread.currentThread()).get(2,java.util.concurrent.TimeUnit.SECONDS);
+        java.security.Provider original=java.security.MessageDigest.getInstance("SHA-256").getProvider();
+        java.util.concurrent.CountDownLatch entered=new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release=new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicInteger hits=new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicReference<Throwable> failure=new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicBoolean injected=new java.util.concurrent.atomic.AtomicBoolean();
+        String providerName="PocketPostDdlObservation";
+        assertThat(java.security.Security.getProvider(providerName)==null,"postddl provider initially absent");
+        java.security.Provider provider=new java.security.Provider(providerName,1.0,"Test-only delegated digest observation"){
+            {
+                putService(new java.security.Provider.Service(this,"MessageDigest","SHA-256","delegated",null,null){
+                    @Override public Object newInstance(Object ignored)throws java.security.NoSuchAlgorithmException{
+                        java.security.MessageDigest delegate=java.security.MessageDigest.getInstance("SHA-256",original);
+                        return new java.security.MessageDigestSpi(){
+                            @Override protected void engineUpdate(byte value){delegate.update(value);}
+                            @Override protected void engineUpdate(byte[] value,int offset,int length){delegate.update(value,offset,length);}
+                            @Override protected void engineReset(){delegate.reset();}
+                            @Override protected int engineGetDigestLength(){return delegate.getDigestLength();}
+                            @Override protected byte[] engineDigest(){
+                                boolean confirm=false,digest=false;
+                                if(Thread.currentThread()==worker)for(StackTraceElement frame:worker.getStackTrace()){
+                                    confirm|=frame.getClassName().equals(Schema4Store.class.getName())&&frame.getMethodName().equals("confirmActivation");
+                                    digest|=frame.getClassName().equals(Schema4Store.class.getName())&&frame.getMethodName().equals("activationDigest");
+                                }
+                                if(confirm&&digest&&hits.incrementAndGet()==2){
+                                    try{
+                                        assertThat(observed.inTransaction()&&
+                                            observed.getVersion()==4,"postddl actual schema4 transaction");
+                                        entered.countDown();
+                                        assertThat(release.await(10,java.util.concurrent.TimeUnit.SECONDS),"postddl release deadline");
+                                    }catch(Throwable error){failure.set(error);entered.countDown();throw new AssertionError(error);}
+                                    if(rollback){
+                                        injected.set(true);
+                                        throw new IllegalStateException("intentional post-DDL digest failure");
+                                    }
+                                }
+                                return delegate.digest();
+                            }
+                        };
+                    }
+                });
+            }
+        };
+        java.util.concurrent.Future<?> tail=null;
+        try{
+            assertThat(java.security.Security.insertProviderAt(provider,1)==1&&
+                java.security.Security.getProvider(providerName)==provider,"postddl provider installed");
+            assertThat(java.security.MessageDigest.getInstance("SHA-256").getProvider()==provider,
+                "postddl provider selected");
+            assertThat(Arrays.equals(java.security.MessageDigest.getInstance("SHA-256").digest(new byte[]{97,98,99}),
+                java.security.MessageDigest.getInstance("SHA-256",original).digest(new byte[]{97,98,99})),
+                "postddl digest delegates exact bytes");
+            touchActivation("activation-confirm");tail=executor.submit(()->null);
+            assertThat(entered.await(5,java.util.concurrent.TimeUnit.SECONDS)&&failure.get()==null,
+                "postddl transaction entered: "+failure.get());
+            assertThat(hits.get()==2&&!tail.isDone(),"postddl worker remains paused");
+            boolean[] owned={false};runOnMainSync(()->{
+                try{owned[0]=(Boolean)activationQueueField(screen,"busy")&&
+                    activationQueueField(screen,"activationAttempt")!=null;}
+                catch(Exception error){throw new AssertionError(error);}
+            });
+            assertThat(owned[0],"postddl owns active attempt");
+            runOnMainSync(old::finish);
+            boolean[] destroyed={false};long end=android.os.SystemClock.uptimeMillis()+5000;
+            while(!destroyed[0]&&android.os.SystemClock.uptimeMillis()<end){
+                runOnMainSync(()->{
+                    try{destroyed[0]=old.isDestroyed()&&(Boolean)activationQueueField(screen,"closed");}
+                    catch(Exception error){throw new AssertionError(error);}
+                });
+                if(!destroyed[0])Thread.sleep(10);
+            }
+            assertThat(destroyed[0]&&executor.isShutdown()&&!tail.isDone(),
+                "postddl destruction precedes digest release");
+        }finally{
+            release.countDown();
+            try{
+                if(tail!=null)tail.get(10,java.util.concurrent.TimeUnit.SECONDS);
+            }finally{
+                if(java.security.Security.getProvider(providerName)==provider)java.security.Security.removeProvider(providerName);
+            }
+        }
+        assertThat(failure.get()==null&&hits.get()==2,"postddl observation completed once");
+        assertThat(java.security.Security.getProvider(providerName)==null&&
+            java.security.MessageDigest.getInstance("SHA-256").getProvider()==original,"postddl provider restored");
+        awaitActivationRetired(old,screen);waitForIdleSync();
+        boolean[] clean={false};runOnMainSync(()->{
+            try{clean[0]=activationQueueField(screen,"activationDialog")==null&&
+                activationQueueField(screen,"activationPlan")==null&&activationQueueField(screen,"activationAttempt")==null;}
+            catch(Exception error){throw new AssertionError(error);}
+        });
+        assertThat(clean[0],"postddl no late owned UI");
+        assertThat(Arrays.equals(before,activationUiCells(rollback?3:4))&&Arrays.equals(archived,Files.readAllBytes(backup)),
+            "postddl exact outcome preserves history and backup");
+        uiActivity=null;closeActivationUi();launchActivationUi();
+        assertThat(Arrays.equals(before,activationUiCells(rollback?3:4))&&Arrays.equals(archived,Files.readAllBytes(backup)),
+            "postddl relaunch preserves history and backup");
+        assertThat(injected.get()==rollback,"postddl injected outcome witnessed");
+        closeActivationUi();uiActivity=null;
+        log.append("ACTIVATION_POSTDDL_PASS ").append(rollback?"postddl_failure_finish_rolls_back_exact":"postddl_success_finish_commits_exact").append('\n');
+    }
+
+    private void activationPostDdlLifecycle(byte[] before)throws Exception{
+        activationPostDdlScenario(before,false);
+        resetPostDdlFixture(before);
+        activationPostDdlScenario(before,true);
+        resetPostDdlFixture(before);
+    }
+    private void resetPostDdlFixture(byte[] before)throws Exception{
+        // Recreate ONLY the disposable fixture, after its old facade is closed.
+        Context context=getTargetContext();
+        assertThat(uiActivity==null&&ACTIVATION_UI_DB.equals("schema4-activation-ui.db")&&
+            !context.getDatabasePath("pocket-v12.db").exists(),"postddl fixture-only reset guard");
+        context.deleteDatabase(ACTIVATION_UI_DB);
+        try(SQLiteDatabase db=context.openOrCreateDatabase(ACTIVATION_UI_DB,0,null)){frozen(db);}
+        try(Schema3Store old=new Schema3Store(context,ACTIVATION_UI_DB)){old.getWritableDatabase();}
+        assertThat(Arrays.equals(before,activationUiCells(3)),"postddl recreated original fixture exact");
+    }
+
+    private void activationConfirmRunningLifecycle(byte[] before)throws Exception{
+        // Test-only digest provider delegates every byte to the original provider.
+        // Pause only this worker in the real transaction's pre-consent archive digest.
+        // This is NOT a claim about interruption after DDL or process death.
+        touchUi("activation-entry");awaitActivation("activation-confirm");
+        Path backup=activationUiBackup();byte[] archived=Files.readAllBytes(backup);
+        touchActivation("activation-consent");
+        MainActivity old=uiActivity;TodayScreen screen=captureScreenOnMain(old);
+        AppDatabase database=(AppDatabase)activationQueueField(screen,"db");
+        java.util.concurrent.ExecutorService executor=(java.util.concurrent.ExecutorService)activationQueueField(screen,"io");
+        Thread worker=executor.submit(()->Thread.currentThread()).get(2,java.util.concurrent.TimeUnit.SECONDS);
+        java.security.Provider original=java.security.MessageDigest.getInstance("SHA-256").getProvider();
+        java.util.concurrent.CountDownLatch entered=new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release=new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicInteger hits=new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.atomic.AtomicReference<Throwable> failure=new java.util.concurrent.atomic.AtomicReference<>();
+        String providerName="PocketConfirmObservation";
+        assertThat(java.security.Security.getProvider(providerName)==null,"confirm running provider initially absent");
+        java.security.Provider provider=new java.security.Provider(providerName,1.0,"Test-only delegated digest observation"){
+            {
+                putService(new java.security.Provider.Service(this,"MessageDigest","SHA-256","delegated",null,null){
+                    @Override public Object newInstance(Object ignored)throws java.security.NoSuchAlgorithmException{
+                        java.security.MessageDigest delegate=java.security.MessageDigest.getInstance("SHA-256",original);
+                        return new java.security.MessageDigestSpi(){
+                            @Override protected void engineUpdate(byte value){delegate.update(value);}
+                            @Override protected void engineUpdate(byte[] value,int offset,int length){delegate.update(value,offset,length);}
+                            @Override protected void engineReset(){delegate.reset();}
+                            @Override protected int engineGetDigestLength(){return delegate.getDigestLength();}
+                            @Override protected byte[] engineDigest(){
+                                boolean confirm=false,digest=false;
+                                if(Thread.currentThread()==worker)for(StackTraceElement frame:worker.getStackTrace()){
+                                    confirm|=frame.getClassName().equals(Schema4Store.class.getName())&&frame.getMethodName().equals("confirmActivation");
+                                    digest|=frame.getClassName().equals(Schema4Store.class.getName())&&frame.getMethodName().equals("activationDigest");
+                                }
+                                if(confirm&&digest&&hits.incrementAndGet()==1){
+                                    try{
+                                        assertThat(database.getReadableDatabase().inTransaction()&&
+                                            database.getReadableDatabase().getVersion()==3,"confirm running actual schema3 transaction");
+                                        entered.countDown();
+                                        assertThat(release.await(10,java.util.concurrent.TimeUnit.SECONDS),"confirm running release deadline");
+                                    }catch(Throwable error){failure.set(error);entered.countDown();throw new AssertionError(error);}
+                                }
+                                return delegate.digest();
+                            }
+                        };
+                    }
+                });
+            }
+        };
+        java.util.concurrent.Future<?> tail=null;
+        try{
+            assertThat(java.security.Security.insertProviderAt(provider,1)==1&&
+                java.security.Security.getProvider(providerName)==provider,"confirm running provider installed");
+            assertThat(java.security.MessageDigest.getInstance("SHA-256").getProvider()==provider,
+                "confirm running provider selected");
+            assertThat(Arrays.equals(java.security.MessageDigest.getInstance("SHA-256").digest(new byte[]{97,98,99}),
+                java.security.MessageDigest.getInstance("SHA-256",original).digest(new byte[]{97,98,99})),
+                "confirm running digest delegates exact bytes");
+            touchActivation("activation-confirm");tail=executor.submit(()->null);
+            assertThat(entered.await(5,java.util.concurrent.TimeUnit.SECONDS)&&failure.get()==null,
+                "confirm running transaction entered: "+failure.get());
+            assertThat(hits.get()==1&&!tail.isDone(),"confirm running worker remains paused");
+            boolean[] owned={false};runOnMainSync(()->{
+                try{owned[0]=(Boolean)activationQueueField(screen,"busy")&&
+                    activationQueueField(screen,"activationAttempt")!=null;}
+                catch(Exception error){throw new AssertionError(error);}
+            });
+            assertThat(owned[0],"confirm running owns active attempt");
+            runOnMainSync(old::finish);
+            boolean[] destroyed={false};long end=android.os.SystemClock.uptimeMillis()+5000;
+            while(!destroyed[0]&&android.os.SystemClock.uptimeMillis()<end){
+                runOnMainSync(()->{
+                    try{destroyed[0]=old.isDestroyed()&&(Boolean)activationQueueField(screen,"closed");}
+                    catch(Exception error){throw new AssertionError(error);}
+                });
+                if(!destroyed[0])Thread.sleep(10);
+            }
+            assertThat(destroyed[0]&&executor.isShutdown()&&!tail.isDone(),
+                "confirm running destruction precedes digest release");
+        }finally{
+            release.countDown();
+            try{
+                if(tail!=null)tail.get(10,java.util.concurrent.TimeUnit.SECONDS);
+            }finally{
+                if(java.security.Security.getProvider(providerName)==provider)java.security.Security.removeProvider(providerName);
+            }
+        }
+        assertThat(failure.get()==null&&hits.get()==1,"confirm running observation completed once");
+        assertThat(java.security.Security.getProvider(providerName)==null&&
+            java.security.MessageDigest.getInstance("SHA-256").getProvider()==original,"confirm running provider restored");
+        awaitActivationRetired(old,screen);waitForIdleSync();
+        boolean[] clean={false};runOnMainSync(()->{
+            try{clean[0]=activationQueueField(screen,"activationDialog")==null&&
+                activationQueueField(screen,"activationPlan")==null&&activationQueueField(screen,"activationAttempt")==null;}
+            catch(Exception error){throw new AssertionError(error);}
+        });
+        assertThat(clean[0],"confirm running no late owned UI");
+        assertThat(Arrays.equals(before,activationUiCells(3))&&Arrays.equals(archived,Files.readAllBytes(backup)),
+            "confirm running rollback preserves history and backup");
+        uiActivity=null;closeActivationUi();launchActivationUi();
+        assertThat(Arrays.equals(before,activationUiCells(3))&&Arrays.equals(archived,Files.readAllBytes(backup)),
+            "confirm running relaunch preserves history and backup");
+        log.append("ACTIVATION_CONFIRM_RUNNING_PASS confirm_transaction_before_consent_finish_preserves_exact\n");
+    }
+
+    private void activationInflightLifecycle(byte[] before)throws Exception{
+        // Hold the existing static publication monitor, not the executor queue.
+        // The captured worker must be inside actual prepare/ZIP publication.
+        MainActivity old=uiActivity;TodayScreen screen=captureScreenOnMain(old);
+        java.util.concurrent.ExecutorService executor=(java.util.concurrent.ExecutorService)activationQueueField(screen,"io");
+        Thread worker=executor.submit(()->Thread.currentThread()).get(2,java.util.concurrent.TimeUnit.SECONDS);
+        Path directory=root().resolve("activation-backups");
+        java.util.Set<Path> prior=new java.util.HashSet<>();
+        if(Files.exists(directory))try(java.util.stream.Stream<Path> files=Files.list(directory)){files.forEach(prior::add);}
+        java.util.concurrent.Future<?> tail;
+        synchronized(MediaRepository.class){
+            runOnMainSync(()->{
+                try{
+                    java.lang.reflect.Method request=TodayScreen.class.getDeclaredMethod("requestShortcutActivation");
+                    request.setAccessible(true);request.invoke(screen);
+                }catch(Exception error){throw new AssertionError("inflight request",error);}
+            });
+            tail=executor.submit(()->null);
+            boolean entered=false;long end=android.os.SystemClock.uptimeMillis()+5000;
+            while(!entered&&android.os.SystemClock.uptimeMillis()<end){
+                boolean prepare=false,archive=false,publish=false;
+                for(StackTraceElement frame:worker.getStackTrace()){
+                    prepare|=frame.getClassName().equals(Schema4Store.class.getName())&&frame.getMethodName().equals("prepareActivation");
+                    archive|=frame.getClassName().equals(BackupArchive.class.getName())&&frame.getMethodName().equals("write");
+                    publish|=frame.getClassName().equals(MediaRepository.class.getName())&&frame.getMethodName().equals("publishNewFile");
+                }
+                entered=worker.getState()==Thread.State.BLOCKED&&prepare&&archive&&publish&&!tail.isDone();
+                if(!entered)Thread.sleep(10);
+            }
+            assertThat(entered,"inflight real prepare publication stack: "+worker.getState()+" "+Arrays.toString(worker.getStackTrace()));
+            boolean[] pending={false};
+            runOnMainSync(()->{
+                try{pending[0]=(Boolean)activationQueueField(screen,"busy")&&
+                    activationQueueField(screen,"activationPlan")==null&&activationQueueField(screen,"activationDialog")==null;}
+                catch(Exception error){throw new AssertionError(error);}
+            });
+            assertThat(pending[0],"inflight prepare has no completed plan");
+            runOnMainSync(old::finish);
+            boolean[] destroyed={false};end=android.os.SystemClock.uptimeMillis()+5000;
+            while(!destroyed[0]&&android.os.SystemClock.uptimeMillis()<end){
+                runOnMainSync(()->{
+                    try{destroyed[0]=old.isDestroyed()&&(Boolean)activationQueueField(screen,"closed");}
+                    catch(Exception error){throw new AssertionError(error);}
+                });
+                if(!destroyed[0])Thread.sleep(10);
+            }
+            assertThat(destroyed[0]&&executor.isShutdown()&&!tail.isDone(),
+                "inflight destruction precedes prepare release");
+        }
+        tail.get(10,java.util.concurrent.TimeUnit.SECONDS);
+        awaitActivationRetired(old,screen);waitForIdleSync();
+        boolean[] clean={false};runOnMainSync(()->{
+            try{clean[0]=activationQueueField(screen,"activationDialog")==null&&
+                activationQueueField(screen,"activationPlan")==null&&activationQueueField(screen,"activationAttempt")==null;}
+            catch(Exception error){throw new AssertionError(error);}
+        });
+        assertThat(clean[0],"inflight no late owned UI");
+        java.util.List<Path> added=new java.util.ArrayList<>();
+        try(java.util.stream.Stream<Path> files=Files.list(directory)){files.filter(path->!prior.contains(path)).forEach(added::add);}
+        Path retained=null,verification=null;
+        for(Path path:added){
+            String name=path.getFileName().toString();
+            assertThat(!Files.isSymbolicLink(path),"inflight no backup symlinks");
+            if(name.startsWith("before-shortcuts-")&&name.endsWith(".zip")&&Files.isRegularFile(path))retained=path;
+            else if(name.startsWith("verify-")&&Files.isDirectory(path))verification=path;
+        }
+        assertThat(added.size()==2&&retained!=null&&verification!=null,"inflight completed backup layout");
+        try(java.util.stream.Stream<Path> files=Files.list(verification)){
+            assertThat(!files.findAny().isPresent(),"inflight verification root empty");
+        }
+        byte[] archived=Files.readAllBytes(retained);
+        try(java.util.zip.ZipFile zip=new java.util.zip.ZipFile(retained.toFile())){
+            assertThat(archived.length>0&&zip.size()>0,"inflight complete retained ZIP");
+        }
+        assertThat(Arrays.equals(before,activationUiCells(3)),"inflight exact schema3 history");
+        uiActivity=null;closeActivationUi();launchActivationUi();
+        assertThat(Arrays.equals(before,activationUiCells(3))&&Arrays.equals(archived,Files.readAllBytes(retained)),
+            "inflight relaunch preserves history and backup");
+        log.append("ACTIVATION_INFLIGHT_PASS prepare_running_finish_preserves_exact\n");
+    }
+
+    private void activationCallbackLifecycle(byte[] before)throws Exception{
+        // Hold one main-thread turn until the real prepare worker has posted
+        // its callback. finish() then precedes callback dispatch, NOT onDestroy.
+        MainActivity old=uiActivity;TodayScreen screen=captureScreenOnMain(old);
+        java.util.concurrent.ExecutorService executor=(java.util.concurrent.ExecutorService)activationQueueField(screen,"io");
+        Path directory=root().resolve("activation-backups");
+        java.util.Set<Path> prior=new java.util.HashSet<>();
+        if(Files.exists(directory))try(java.util.stream.Stream<Path> files=Files.list(directory)){
+            files.forEach(prior::add);
+        }
+        Path[] retained={null};byte[][] archived={null};Throwable[] failure={null};
+        runOnMainSync(()->{
+            try{
+                java.lang.reflect.Method request=TodayScreen.class.getDeclaredMethod("requestShortcutActivation");
+                request.setAccessible(true);request.invoke(screen);
+                executor.submit(()->null).get(2,java.util.concurrent.TimeUnit.SECONDS);
+                assertThat((Boolean)activationQueueField(screen,"busy")&&
+                    activationQueueField(screen,"activationPlan")==null&&
+                    activationQueueField(screen,"activationDialog")==null,
+                    "activation callback worker done before UI dispatch");
+                java.util.List<Path> added=new java.util.ArrayList<>();
+                try(java.util.stream.Stream<Path> files=Files.list(directory)){
+                    files.filter(path->!prior.contains(path)).forEach(added::add);
+                }
+                java.util.List<Path> archives=new java.util.ArrayList<>();
+                java.util.List<Path> verification=new java.util.ArrayList<>();
+                for(Path path:added){
+                    assertThat(!Files.isSymbolicLink(path),"activation callback no backup symlinks");
+                    if(Files.isRegularFile(path,java.nio.file.LinkOption.NOFOLLOW_LINKS))archives.add(path);
+                    else if(Files.isDirectory(path,java.nio.file.LinkOption.NOFOLLOW_LINKS))verification.add(path);
+                }
+                assertThat(added.size()==2&&archives.size()==1&&verification.size()==1&&
+                    archives.get(0).getFileName().toString().startsWith("before-shortcuts-")&&
+                    archives.get(0).getFileName().toString().endsWith(".zip")&&
+                    verification.get(0).getFileName().toString().startsWith("verify-"),
+                    "activation callback exact archive and verification root: "+added);
+                try(java.util.stream.Stream<Path> files=Files.list(verification.get(0))){
+                    assertThat(!files.findAny().isPresent(),"activation callback verification root empty");
+                }
+                retained[0]=archives.get(0);archived[0]=Files.readAllBytes(retained[0]);
+                try(java.util.zip.ZipFile zip=new java.util.zip.ZipFile(retained[0].toFile())){
+                    assertThat(zip.size()>0,"activation callback backup is complete ZIP");
+                }
+                old.finish();
+                assertThat(old.isFinishing()&&activationQueueField(screen,"activationPlan")==null,
+                    "activation callback finish precedes delivery");
+            }catch(Throwable error){failure[0]=error;old.finish();}
+        });
+        if(failure[0]!=null)throw new AssertionError("activation callback setup",failure[0]);
+        // Idleness is not lifecycle completion. Observe on the main thread;
+        // finish() was requested exactly once above, never retried here.
+        boolean[] destroyed={false};
+        long destroyEnd=android.os.SystemClock.uptimeMillis()+5000;
+        while(!destroyed[0]&&android.os.SystemClock.uptimeMillis()<destroyEnd){
+            runOnMainSync(()->destroyed[0]=old.isDestroyed());
+            if(!destroyed[0])Thread.sleep(10);
+        }
+        assertThat(destroyed[0],"activation callback destroy observation deadline");
+        awaitActivationRetired(old,screen);waitForIdleSync();
+        boolean[] clean={false};runOnMainSync(()->{
+            try{clean[0]=activationQueueField(screen,"activationDialog")==null&&
+                activationQueueField(screen,"activationPlan")==null&&
+                activationQueueField(screen,"activationAttempt")==null;}
+            catch(Exception e){throw new AssertionError(e);}
+        });
+        assertThat(clean[0],"activation callback no late owned UI");
+        assertThat(Arrays.equals(before,activationUiCells(3))&&
+            Arrays.equals(archived[0],Files.readAllBytes(retained[0])),
+            "activation callback exact cells and retained backup");
+        uiActivity=null;closeActivationUi();launchActivationUi();
+        assertThat(Arrays.equals(before,activationUiCells(3)),
+            "activation callback relaunch exact history");
+        log.append("ACTIVATION_CALLBACK_PASS prepare_complete_finish_before_delivery_exact\n");
+    }
+
+    private void activationQueueNeed(boolean ok,String label){
+        assertThat(ok,label);log.append("ACTIVATION_QUEUE_PASS ").append(label).append('\n');
+    }
+    private Object activationQueueField(TodayScreen screen,String name)throws Exception{
+        java.lang.reflect.Field field=TodayScreen.class.getDeclaredField(name);
+        field.setAccessible(true);return field.get(screen);
+    }
+    private boolean finishQueuedActivation(boolean confirm,byte[] before)throws Exception{
+        // The real screen executor is held BEFORE the requested operation.
+        // This is queued work, not an in-progress SQLite transaction.
+        Path backup=null;byte[] backupBytes=null;
+        if(confirm){
+            touchUi("activation-entry");awaitActivation("activation-confirm");
+            backup=activationUiBackup();backupBytes=Files.readAllBytes(backup);
+            touchActivation("activation-consent");
+        }
+        MainActivity old=uiActivity;TodayScreen screen=captureScreenOnMain(old);
+        java.util.concurrent.ExecutorService executor=(java.util.concurrent.ExecutorService)activationQueueField(screen,"io");
+        java.util.concurrent.CountDownLatch entered=new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release=new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.Future<?> held=executor.submit(()->{
+            entered.countDown();
+            if(!release.await(10,java.util.concurrent.TimeUnit.SECONDS))
+                throw new AssertionError("activation queue release deadline");
+            return null;
+        });
+        try{
+            assertThat(entered.await(10,java.util.concurrent.TimeUnit.SECONDS),"activation queue worker held");
+            if(confirm)touchActivation("activation-confirm");else touchUi("activation-entry");
+            boolean[] busy={false};runOnMainSync(()->{
+                try{busy[0]=(Boolean)activationQueueField(screen,"busy");}
+                catch(Exception e){throw new AssertionError(e);}
+            });
+            assertThat(busy[0]&&!held.isDone(),"activation queue request actually pending");
+            runOnMainSync(old::finish);
+            boolean[] retired={false};
+            long end=android.os.SystemClock.uptimeMillis()+5000;
+            while(!retired[0]&&android.os.SystemClock.uptimeMillis()<end){
+                runOnMainSync(()->{
+                    try{retired[0]=old.isDestroyed()&&(Boolean)activationQueueField(screen,"closed");}
+                    catch(Exception e){throw new AssertionError(e);}
+                });
+                if(!retired[0])Thread.sleep(10);
+            }
+            assertThat(retired[0]&&executor.isShutdown()&&!held.isDone(),
+                "activation queue destruction precedes worker release");
+        }finally{release.countDown();}
+        held.get(10,java.util.concurrent.TimeUnit.SECONDS);
+        awaitActivationRetired(old,screen);
+        waitForIdleSync();
+        boolean[] clean={false};runOnMainSync(()->{
+            try{clean[0]=activationQueueField(screen,"activationDialog")==null&&
+                activationQueueField(screen,"activationPlan")==null&&
+                activationQueueField(screen,"activationAttempt")==null;}
+            catch(Exception e){throw new AssertionError(e);}
+        });
+        assertThat(clean[0],"activation queue no late dialog or owned plan");
+        boolean exact=Arrays.equals(before,activationUiCells(3))&&
+            (backup==null||Arrays.equals(backupBytes,Files.readAllBytes(backup)));
+        uiActivity=null;closeActivationUi();launchActivationUi();
+        return exact&&Arrays.equals(before,activationUiCells(3));
+    }
+    private void activationQueuedLifecycle(byte[] before)throws Exception{
+        activationQueueNeed(finishQueuedActivation(false,before),
+            "activation_queue_prepare_finish_preserves_exact");
+        activationQueueNeed(finishQueuedActivation(true,before),
+            "activation_queue_confirm_finish_preserves_exact");
+    }
+
+    private void activationLifeNeed(boolean ok,String label){
+        assertThat(ok,label);log.append("ACTIVATION_LIFE_PASS ").append(label).append('\n');
+    }
+    private void awaitActivationRetired(MainActivity old,TodayScreen screen)throws Exception{
+        waitForIdleSync();
+        boolean[] destroyed={false};runOnMainSync(()->destroyed[0]=old.isDestroyed());
+        assertThat(destroyed[0],"activation lifecycle old Activity destroyed");
+        java.lang.reflect.Field f=MainActivity.class.getDeclaredField("startupIo");f.setAccessible(true);
+        java.util.concurrent.ExecutorService executor=(java.util.concurrent.ExecutorService)f.get(old);
+        assertThat(executor.awaitTermination(10,java.util.concurrent.TimeUnit.SECONDS),"activation lifecycle startup executor retired");
+        assertThat(screen.awaitShortcutClose(),"activation lifecycle screen executor retired");
+    }
+    private void activationLifecycle(byte[] before)throws Exception{
+        // These are real Android configuration/recreation/finish events, not
+        // simulated callbacks. Preparation-in-flight and commit-in-flight are
+        // deliberately not claimed by this completed-preview suite.
+        touchUi("activation-entry");awaitActivation("activation-confirm");
+        Path rotatedBackup=activationUiBackup();byte[] rotatedBytes=Files.readAllBytes(rotatedBackup);
+        touchActivation("activation-consent");
+        android.view.View rotatedConfirm=awaitActivation("activation-confirm");
+        MainActivity rotated=uiActivity;TodayScreen rotatedScreen=captureScreenOnMain(rotated);
+        int[] orientation={0};
+        runOnMainSync(()->orientation[0]=rotated.getResources().getConfiguration().orientation);
+        assertThat(orientation[0]==1||orientation[0]==2,"activation lifecycle known orientation");
+        int target=orientation[0]==1?2:1;
+        ActivityMonitor rotationMonitor=addMonitor(MainActivity.class.getName(),null,false);
+        try{
+            runOnMainSync(()->rotated.setRequestedOrientation(target==2?
+                android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE:
+                android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT));
+            Activity replacement=waitForMonitorWithTimeout(rotationMonitor,10000);
+            assertThat(replacement instanceof MainActivity&&replacement!=rotated,"activation lifecycle rotation replacement");
+            uiActivity=(MainActivity)replacement;awaitUi("todo-todo");
+            runOnMainSync(()->orientation[0]=uiActivity.getResources().getConfiguration().orientation);
+            assertThat(orientation[0]==target,"activation lifecycle actual orientation changed");
+            awaitActivationRetired(rotated,rotatedScreen);
+        }finally{removeMonitor(rotationMonitor);}
+        runOnMainSync(()->rotatedConfirm.performClick());waitForIdleSync();
+        activationLifeNeed(Arrays.equals(before,activationUiCells(3))&&
+            Arrays.equals(rotatedBytes,Files.readAllBytes(rotatedBackup)),
+            "activation_life_rotation_stale_consent_preserves_exact");
+
+        touchUi("activation-entry");awaitActivation("activation-confirm");
+        Path recreatedBackup=activationUiBackup();byte[] recreatedBytes=Files.readAllBytes(recreatedBackup);
+        touchActivation("activation-consent");
+        android.view.View recreatedConfirm=awaitActivation("activation-confirm");
+        MainActivity recreated=uiActivity;TodayScreen recreatedScreen=captureScreenOnMain(recreated);
+        ActivityMonitor recreateMonitor=addMonitor(MainActivity.class.getName(),null,false);
+        try{
+            runOnMainSync(recreated::recreate);
+            Activity replacement=waitForMonitorWithTimeout(recreateMonitor,10000);
+            assertThat(replacement instanceof MainActivity&&replacement!=recreated,"activation lifecycle explicit replacement");
+            uiActivity=(MainActivity)replacement;awaitUi("todo-todo");
+            awaitActivationRetired(recreated,recreatedScreen);
+        }finally{removeMonitor(recreateMonitor);}
+        runOnMainSync(()->recreatedConfirm.performClick());waitForIdleSync();
+        activationLifeNeed(Arrays.equals(before,activationUiCells(3))&&
+            Arrays.equals(recreatedBytes,Files.readAllBytes(recreatedBackup)),
+            "activation_life_recreate_stale_consent_preserves_exact");
+
+        touchUi("activation-entry");awaitActivation("activation-confirm");
+        Path finishedBackup=activationUiBackup();byte[] finishedBytes=Files.readAllBytes(finishedBackup);
+        touchActivation("activation-consent");
+        android.view.View finishedConfirm=awaitActivation("activation-confirm");
+        MainActivity finished=uiActivity;TodayScreen finishedScreen=captureScreenOnMain(finished);
+        closeActivationUi();awaitActivationRetired(finished,finishedScreen);
+        runOnMainSync(()->finishedConfirm.performClick());waitForIdleSync();
+        activationLifeNeed(Arrays.equals(before,activationUiCells(3))&&
+            Arrays.equals(finishedBytes,Files.readAllBytes(finishedBackup)),
+            "activation_life_finish_stale_consent_preserves_exact");
+        launchActivationUi();
+    }
+
+    private static final String ACTIVATION_UI_DB="schema4-activation-ui.db";
+    private void activationUiNeed(boolean ok,String label){
+        assertThat(ok,label);log.append("ACTIVATION_UI_PASS ").append(label).append('\n');
+    }
+    private void launchActivationUi()throws Exception{
+        MainActivity.isolatedShortcutTest=false;MainActivity.isolatedStartupTest=false;
+        MainActivity.isolatedActivationTest=true;
+        uiActivity=(MainActivity)startActivitySync(new android.content.Intent(getTargetContext(),MainActivity.class)
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+        awaitUi("todo-todo");
+    }
+    private void closeActivationUi()throws Exception{
+        try{closeStartupUi();}finally{MainActivity.isolatedActivationTest=false;}
+    }
+    private byte[] activationUiCells(int version)throws Exception{
+        try(SQLiteDatabase db=SQLiteDatabase.openDatabase(getTargetContext().getDatabasePath(ACTIVATION_UI_DB).getPath(),null,
+                SQLiteDatabase.OPEN_READWRITE,(bad)->{throw new IllegalStateException("activation fixture corruption");})){
+            assertThat(db.getVersion()==version,"activation UI expected schema");
+            return cells(db,true);
+        }
+    }
+    private android.view.View awaitActivation(String id)throws Exception{
+        long end=android.os.SystemClock.uptimeMillis()+10000;
+        while(android.os.SystemClock.uptimeMillis()<end){
+            android.view.View[] found={null};
+            runOnMainSync(()->{
+                TodayScreen screen=uiActivity.shortcutTestScreen();
+                if(screen==null)return;
+                try{
+                    java.lang.reflect.Field f=TodayScreen.class.getDeclaredField("activationDialog");f.setAccessible(true);
+                    android.app.AlertDialog d=(android.app.AlertDialog)f.get(screen);
+                    if(d==null||d.getWindow()==null)return;
+                    android.view.View v=findUi(d.getWindow().getDecorView(),id);
+                    if(v!=null&&v.isAttachedToWindow()&&v.isEnabled())found[0]=v;
+                }catch(ReflectiveOperationException e){throw new AssertionError(e);}
+            });
+            if(found[0]!=null)return found[0];
+            Thread.sleep(25);
+        }
+        throw new AssertionError("activation dialog observation deadline "+id);
+    }
+    private static android.graphics.Rect activationTouchRect(android.view.View view){
+        android.graphics.Rect rect=new android.graphics.Rect();
+        assertThat(view.isEnabled()&&view.isAttachedToWindow()&&view.getLocalVisibleRect(rect)
+            &&rect.width()>0&&rect.height()>0,"activation visible screen bounds");
+        int[] screen=new int[2];view.getLocationOnScreen(screen);
+        rect.offset(screen[0],screen[1]);
+        return rect;
+    }
+
+    private android.view.View touchActivation(String id)throws Exception{
+        android.view.View v=awaitActivation(id);
+        runOnMainSync(()->v.requestRectangleOnScreen(new android.graphics.Rect(0,0,v.getWidth(),v.getHeight()),true));
+        waitForIdleSync();android.graphics.Rect r=new android.graphics.Rect();
+        runOnMainSync(()->r.set(activationTouchRect(v)));
+        long now=android.os.SystemClock.uptimeMillis();
+        android.view.MotionEvent down=android.view.MotionEvent.obtain(now,now,0,r.exactCenterX(),r.exactCenterY(),0);
+        android.view.MotionEvent up=android.view.MotionEvent.obtain(now,now+50,1,r.exactCenterX(),r.exactCenterY(),0);
+        try{sendPointerSync(down);sendPointerSync(up);}finally{down.recycle();up.recycle();}
+        waitForIdleSync();return v;
+    }
+    private Path activationUiBackup()throws Exception{
+        AppDatabase.ShortcutActivationPlan[] plan={null};
+        runOnMainSync(()->{
+            try{
+                java.lang.reflect.Field f=TodayScreen.class.getDeclaredField("activationPlan");f.setAccessible(true);
+                plan[0]=(AppDatabase.ShortcutActivationPlan)f.get(uiActivity.shortcutTestScreen());
+            }catch(ReflectiveOperationException e){throw new AssertionError(e);}
+        });
+        assertThat(plan[0]!=null,"actual activation plan");
+        return root().resolve("activation-backups").resolve(plan[0].backupName());
+    }
+    private void activationUiSeed()throws Exception{
+        Context context=getTargetContext();
+        assertThat(!context.getDatabasePath("pocket-v12.db").exists(),"activation UI phone absent before");
+        context.deleteDatabase(ACTIVATION_UI_DB);
+        try(SQLiteDatabase db=context.openOrCreateDatabase(ACTIVATION_UI_DB,0,null)){frozen(db);}
+        try(Schema3Store old=new Schema3Store(context,ACTIVATION_UI_DB)){old.getWritableDatabase();}
+        MediaRepository m=new MediaRepository(root().resolve("media"),64L*1024*1024);
+        assertThat(ASSET.equals(m.copy(new ByteArrayInputStream(new byte[]{97,98,99}))),"activation real media abc vector");
+        byte[] before=activationUiCells(3);
+        activationPostDdlLifecycle(before);
+        try{
+            launchActivationUi();touchUi("activation-entry");
+            android.view.View stale=awaitActivation("activation-confirm");
+            Path retained=activationUiBackup();
+            activationUiNeed(Files.size(retained)>0&&Arrays.equals(before,activationUiCells(3)),"activation_ui_preview_keeps_schema3");
+            touchActivation("activation-confirm");
+            android.widget.TextView validation=(android.widget.TextView)awaitActivation("activation-validation");
+            String[] warning={""};runOnMainSync(()->warning[0]=validation.getText().toString());
+            assertThat(warning[0].startsWith("请先勾选"),"unchecked validation feedback: "+warning[0]);
+            byte[] unchecked=activationUiCells(3);
+            assertThat(Arrays.equals(before,unchecked),"unchecked exact old cells changed");
+            activationUiNeed(warning[0].startsWith("请先勾选")&&Arrays.equals(before,unchecked),"activation_ui_unchecked_cannot_commit");
+            touchActivation("activation-cancel");awaitUiText("v12-status","已取消启用");
+            activationUiNeed(Files.isRegularFile(retained)&&Arrays.equals(before,activationUiCells(3)),"activation_ui_cancel_keeps_backup_and_cells");
+            runOnMainSync(()->stale.performClick());waitForIdleSync();
+            activationUiNeed(Arrays.equals(before,activationUiCells(3)),"activation_ui_stale_confirm_refused");
+            activationLifecycle(before);
+            activationQueuedLifecycle(before);
+            activationCallbackLifecycle(before);
+            activationInflightLifecycle(before);
+            activationConfirmRunningLifecycle(before);
+            touchUi("activation-entry");awaitActivation("activation-confirm");
+            Path changed=activationUiBackup();Files.write(changed,new byte[]{0});
+            TodayScreen old=captureScreenOnMain(uiActivity);
+            touchActivation("activation-consent");touchActivation("activation-confirm");
+            awaitUi("activation-restart-required");
+            assertThat(old.awaitShortcutClose(),"failed activation facade retired");
+            activationUiNeed(Arrays.equals(before,activationUiCells(3)),"activation_ui_changed_backup_refused");
+            closeActivationUi();launchActivationUi();touchUi("activation-entry");awaitActivation("activation-confirm");
+            Path good=activationUiBackup();
+            ActivityMonitor monitor=addMonitor(MainActivity.class.getName(),null,false);
+            TodayScreen retired=captureScreenOnMain(uiActivity);
+            try{
+                touchActivation("activation-consent");touchActivation("activation-confirm");
+                Activity replacement=waitForMonitorWithTimeout(monitor,10000);
+                assertThat(replacement instanceof MainActivity&&replacement!=uiActivity,"activation actual recreation");
+                uiActivity=(MainActivity)replacement;awaitUi("todo-todo");
+                assertThat(retired.awaitShortcutClose(),"successful activation old facade retired");
+            }finally{removeMonitor(monitor);}
+            activationUiNeed(Files.isRegularFile(good)&&Arrays.equals(before,activationUiCells(4)),"activation_ui_confirm_recreates_with_exact_history");
+            touchUi("activation-entry");awaitUiText("v12-status","分类快捷入口已启用");
+            activationUiNeed(Arrays.equals(before,activationUiCells(4)),"activation_ui_repeat_entry_is_noop");
+            closeActivationUi();
+            Files.write(root().resolve("activation-ui-expected.bin"),before);
+            activationUiNeed(!context.getDatabasePath("pocket-v12.db").exists(),"activation_ui_phone_database_absent");
+        }finally{closeActivationUi();}
+    }
+    private void activationUiReopen()throws Exception{
+        byte[] expected=Files.readAllBytes(root().resolve("activation-ui-expected.bin"));
+        try{launchActivationUi();awaitUi("todo-todo");}finally{closeActivationUi();}
+        activationUiNeed(Arrays.equals(expected,activationUiCells(4)),"activation_ui_separate_process_exact");
+        activationUiNeed(!getTargetContext().getDatabasePath("pocket-v12.db").exists(),"activation_ui_separate_process_phone_absent");
     }
 
     @Override public void onStart(){

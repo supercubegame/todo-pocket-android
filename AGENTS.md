@@ -42,3 +42,12 @@
 
 ## Isolated shortcut UI acceptance
 Normal startup remains schema3 pocket-v12.db; only an in-process instrumentation flag selects fixed schema4-ui.db, never intent extras or phone migration. Preserve all original commands/budgets and separate storage seed/reopen processes. Shortcut UI manages one stable category/application relation; navigation revalidates full-state owner/session/connection tokens and never creates activities, records money/check-ins, or launches external apps. Device acceptance uses actual native DOWN/UP events and typed stopped-database replay, not host Java guard checks. Independently replay both business and UI databases in the report. UI screenshots are evidence, not visual/usability acceptance. No commercial release or general crash/ABA/phone-upgrade claim.
+
+## Explicit shortcut activation integration
+These rules supersede earlier schema3-only startup and isolated-only activation statements above.
+Normal startup opens existing schema3 without upgrading; existing schema4 resumes on its original connection. Corrupt, future, symlink or changed schemas fail closed without clearing data.
+Only explicit preview, verified internal backup, checked consent and confirmation can activate schema4. Backup is retained on cancel/failure; uninstall or clear-data loses internal backups. No automatic migration, external app launch or one-click downgrade.
+Activation plans are owner/session-bound and single-attempt. Closing retires callbacks and queues connection close. Preserve all prior host and Android checks, original deadlines and negative controls.
+Post-DDL observer captures the existing connection before confirmation; never re-enter the schema3 facade after DDL. The original guard-exception RED and actual-source guard harness remain mandatory.
+Isolated acceptance: 7920bbe315a61cdfd7c8af78cc54f30cee254da8, run38884051157, original21 hosts once plus actual API26/API34 seed/reopen and independent database replay. This is not final product, stable overwrite, phone, power-loss or commercial acceptance.
+Product delivery requires new same-commit device and stable-signature overwrite results. Keep release_ready=false; full v1.2 and historical ADB255 diagnosis remain incomplete. AGENTS.md and CLAUDE.md must stay identical and at most200 lines.

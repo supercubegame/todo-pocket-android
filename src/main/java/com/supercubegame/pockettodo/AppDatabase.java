@@ -147,9 +147,162 @@ public final class AppDatabase extends SQLiteOpenHelper {
         }finally{plan.close();}
     }
 
+    /** Backend only until the UI/upgrade gate is integrated. No default factory
+     * or live database-name guard changes in this test-first candidate. */
+    public static final class ShortcutActivationPlan implements AutoCloseable {
+        private final Schema4Store.ActivationPlan staged;
+        private ShortcutActivationPlan(Schema4Store.ActivationPlan staged){this.staged=staged;}
+        public String backupName(){return staged.archive.getFileName().toString();}
+        @Override public void close(){staged.close();}
+    }
+    public synchronized ShortcutActivationPlan prepareShortcutActivation(Path directory,MediaRepository media)throws IOException{
+        require(schema3!=null&&schema4==null,"Activation requires schema3 facade");
+        return new ShortcutActivationPlan(Schema4Store.prepareActivation(
+            this,restoreSession,getWritableDatabase(),directory,media));
+    }
+    public synchronized void confirmShortcutActivation(ShortcutActivationPlan plan,MediaRepository media)throws IOException{
+        require(plan!=null,"Activation plan required");
+        plan.staged.consent.checkActive(this,restoreSession);
+        require(schema3!=null&&schema4==null,"Activation requires schema3 facade");
+        Schema4Store.confirmActivation(this,restoreSession,getWritableDatabase(),plan.staged,media);
+        // Retire the schema3 facade: it must never write through a migrated file.
+        close();
+    }
+
+    /** Takes ownership of an existing, validated schema4 connection.
+     * Ordinary openSchema3/openSchema4 factories remain unchanged.
+     */
+    private AppDatabase(Context context,String name,Schema4Store existing){
+        super(context.getApplicationContext(),validName(name),null,2);
+        schema4=existing;schema3=existing.businessAdapter(context,name);
+    }
+    static AppDatabase resumeActivated(Context context,String name){
+        Schema4Store existing=Schema4Store.resumeExisting(context,name);
+        try{return new AppDatabase(context,name,existing);}
+        catch(RuntimeException|Error e){existing.close();throw e;}
+    }
+
+    // Only the new startup facade owns this direct connection. Legacy factories
+    // and their close/reopen contracts remain unchanged.
+    private SQLiteDatabase startupConnection;
+    private boolean startupOwned,startupClosed;
+    private AppDatabase(Context context,String name,SQLiteDatabase connection){
+        super(context.getApplicationContext(),validName(name),null,2);
+        startupOwned=true;startupConnection=connection;schema4=null;
+        schema3=new Schema3Store(context,name,new Schema3Store.BusinessConnection(){
+            public SQLiteDatabase database(){return startupDatabase();}
+            public byte[] snapshot(SQLiteDatabase db){return startupSnapshot(db);}
+            public void validate(SQLiteDatabase db){startupSnapshot(db);}
+        });
+    }
+    private synchronized SQLiteDatabase startupDatabase(){
+        if(!startupOwned||startupClosed||startupConnection==null||!startupConnection.isOpen())
+            throw new IllegalStateException("Startup facade closed");
+        if(startupConnection.getVersion()!=3)
+            throw new IllegalStateException("Startup schema changed; preserve database");
+        return startupConnection;
+    }
+    private byte[] startupSnapshot(SQLiteDatabase db){
+        require(db==startupDatabase(),"Foreign startup connection");
+        schema3.exportState(); // Strict semantic validation, including origins.
+        return noteDeletionState(db);
+    }
+    /** Exact legacy projection including rowids; new origin cells are separately
+     * required to be NULL after the unchanged schema2-to-schema3 migration. */
+    private static byte[] startupLegacyCells(SQLiteDatabase db)throws IOException{
+        LimitedBytes bytes=new LimitedBytes();DataOutputStream out=new DataOutputStream(bytes);
+        for(String table:SNAPSHOT_TABLES){
+            List<String> names=new ArrayList<>();
+            try(Cursor columns=db.rawQuery("PRAGMA table_info("+table+")",null)){
+                while(columns.moveToNext()){
+                    String name=columns.getString(1);
+                    if(table.equals("blocks")&&name.equals("original_asset_id"))continue;
+                    require(name.matches("[a-z_]+"),"Invalid startup column");names.add(name);
+                }
+            }
+            try(Cursor rows=db.rawQuery("SELECT rowid,"+String.join(",",names)+" FROM "+table+" ORDER BY rowid",null)){
+                utf8(out,table);out.writeInt(rows.getColumnCount());out.writeInt(rows.getCount());
+                for(String name:rows.getColumnNames())utf8(out,name);
+                while(rows.moveToNext())for(int i=0;i<rows.getColumnCount();i++){
+                    Object value=cell(rows,i);out.writeByte(rows.getType(i));
+                    if(value instanceof Long)out.writeLong((Long)value);
+                    else if(value instanceof String)utf8(out,(String)value);
+                    else if(value instanceof byte[])blob(out,(byte[])value);
+                }
+            }
+        }
+        out.flush();return bytes.toByteArray();
+    }
+    /** Startup is not consent. Existing files open WITHOUT CREATE_IF_NECESSARY.
+     * Fresh installs reserve their pathname atomically; any partial initialization
+     * remains in place and fails closed on a subsequent launch, never auto-resets.
+     * Same-UID malicious file replacement and crash durability are not claimed.
+     */
+    static synchronized AppDatabase openForStartup(Context context,String name){
+        validName(name);Path file=context.getDatabasePath(name).toPath();
+        SQLiteDatabase connection=null;AppDatabase app=null;
+        try{
+            boolean fresh=Files.notExists(file,LinkOption.NOFOLLOW_LINKS);
+            if(fresh){
+                Files.createDirectories(file.getParent());
+                Files.createFile(file); // CREATE_NEW, never truncates a competing file.
+            }else Schema4Store.resumeFile(file);
+            connection=SQLiteDatabase.openDatabase(file.toString(),null,SQLiteDatabase.OPEN_READWRITE,
+                broken->{throw new IllegalStateException("Corrupt database; preserve original file");});
+            connection.setForeignKeyConstraintsEnabled(true);
+            int observed=connection.getVersion();
+            int route=startupSchema(!fresh,observed);
+            if(route==4){
+                connection.close();connection=null;
+                return resumeActivated(context,name); // Rechecks version4; no helper migration.
+            }
+            connection.beginTransaction();
+            try{
+                require(connection.getVersion()==observed,"Startup version changed");
+                if(fresh){
+                    require(observed==0,"New database identity changed");
+                    Schema3Store.createSchema3(connection);connection.setVersion(3);
+                }else if(observed==2){
+                    byte[] wire=encodeState(connection),before=startupLegacyCells(connection);
+                    try(SQLiteDatabase checked=strictSchema2Candidate(wire)){}
+                    try(Schema3Store frozen=new Schema3Store(context,name)){frozen.onUpgrade(connection,2,3);}
+                    connection.setVersion(3);
+                    require(Arrays.equals(before,startupLegacyCells(connection)),"Startup migration changed historical cells");
+                    try(Cursor origins=connection.rawQuery("SELECT original_asset_id FROM blocks WHERE original_asset_id IS NOT NULL",null)){
+                        require(!origins.moveToFirst(),"Startup migration invented image origins");
+                    }
+                }
+                require(connection.getVersion()==3,"Startup must not activate shortcuts");
+                app=new AppDatabase(context,name,connection);
+                app.schema3.exportState();app.startupSnapshot(connection);
+                connection.setTransactionSuccessful();
+            }finally{connection.endTransaction();}
+            return app;
+        }catch(IOException e){
+            if(app!=null)app.close();else if(connection!=null)connection.close();
+            throw new IllegalStateException("Startup refused; database preserved",e);
+        }catch(RuntimeException|Error e){
+            if(app!=null)app.close();else if(connection!=null)connection.close();
+            throw e;
+        }
+    }
+
+    /** Startup never consents to activation. Only an already-v4 file may
+     * resume v4; a genuinely missing database follows the original v3 path.
+     * This policy does not validate SQLite bytes, schema or race conditions. */
+    static int startupSchema(boolean exists,int version){
+        if(!exists){
+            if(version==0)return 3;
+            throw new IllegalStateException("Missing database identity changed");
+        }
+        if(version==2||version==3)return 3;
+        if(version==4)return 4;
+        throw new IllegalStateException("Unsupported database; preserve file");
+    }
+
     @Override public synchronized SQLiteDatabase getWritableDatabase(){return schema3==null?super.getWritableDatabase():schema3.getWritableDatabase();}
     @Override public synchronized SQLiteDatabase getReadableDatabase(){return schema3==null?super.getReadableDatabase():schema3.getReadableDatabase();}
-    @Override public synchronized void close(){restoreSession=new Object();if(schema3!=null)schema3.close();if(schema4!=null)schema4.close();super.close();}
+    @Override public synchronized void close(){restoreSession=new Object();if(startupOwned){startupClosed=true;if(startupConnection!=null){startupConnection.close();startupConnection=null;}}if(schema3!=null)schema3.close();if(schema4!=null)schema4.close();super.close();}
     private static String validName(String name) {
         if(name==null||!name.matches("[A-Za-z0-9_-]+\\.db"))throw new IllegalArgumentException("无效数据库文件名");return name;
     }

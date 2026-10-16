@@ -17,9 +17,198 @@ import java.util.*;
 public final class Schema4Store extends SQLiteOpenHelper {
     private static final String[] OLD=("revision categories applications activities paths tags batches ledger checkins media notes blocks fields field_options field_values field_notes todos legacy_imports").split(" ");
     static final String SHORTCUT_DDL="CREATE TABLE category_shortcuts(category_id INTEGER NOT NULL REFERENCES categories(id) CHECK(category_id>0),application_id INTEGER NOT NULL REFERENCES applications(id) CHECK(application_id>0),PRIMARY KEY(category_id,application_id)) WITHOUT ROWID";
+    /** Single-process explicit consent, not a persistent ABA or crash journal.
+     * Foreign callers cannot consume the owner's attempt. Every owner attempt,
+     * including changed-state refusal, is terminal.
+     */
+    static final class ActivationConsent implements AutoCloseable {
+        private final Object owner,session,connection;
+        private byte[] cells,archive;
+        private boolean terminal;
+        ActivationConsent(Object owner,Object session,Object connection,byte[] cells,byte[] archive){
+            if(owner==null||session==null||connection==null||cells==null||cells.length==0||
+               cells.length>8*1024*1024||archive==null||archive.length!=32)
+                throw new IllegalArgumentException("Invalid activation consent");
+            this.owner=owner;this.session=session;this.connection=connection;
+            this.cells=cells.clone();this.archive=archive.clone();
+        }
+        synchronized void checkOwner(Object attemptedOwner){
+            if(attemptedOwner!=owner)throw new IllegalArgumentException("Foreign activation plan");
+        }
+        synchronized void checkActive(Object attemptedOwner,Object currentSession){
+            checkOwner(attemptedOwner);
+            if(terminal)throw new IllegalStateException("Activation plan expired");
+            if(currentSession!=session){close();throw new IllegalStateException("Activation review changed");}
+        }
+        synchronized void consume(Object attemptedOwner,Object currentSession,Object currentConnection,
+                                  byte[] currentCells,byte[] currentArchive){
+            checkOwner(attemptedOwner);
+            if(terminal)throw new IllegalStateException("Activation plan expired");
+            try{
+                if(currentSession!=session||currentConnection!=connection||
+                   !Arrays.equals(cells,currentCells)||!Arrays.equals(archive,currentArchive))
+                    throw new IllegalStateException("Activation review changed");
+            }finally{close();}
+        }
+        @Override public synchronized void close(){terminal=true;cells=null;archive=null;}
+    }
+    static final class ActivationPlan implements AutoCloseable {
+        final ActivationConsent consent;
+        final Path archive,staging;
+        final byte[] wire,cells;
+        final SQLiteDatabase connection;
+        private ActivationPlan(Object owner,Object session,SQLiteDatabase db,Path archive,Path staging,
+                               byte[] wire,byte[] cells,byte[] digest){
+            this.archive=archive;this.staging=staging;this.wire=wire.clone();this.cells=cells.clone();
+            connection=db;consent=new ActivationConsent(owner,session,db,cells,digest);
+        }
+        @Override public void close(){consent.close();}
+    }
+    private static byte[] activationDigest(Path archive)throws IOException{
+        if(Files.isSymbolicLink(archive)||!Files.isRegularFile(archive,LinkOption.NOFOLLOW_LINKS))
+            throw new IOException("Activation backup missing");
+        long size=Files.size(archive);
+        if(size<=0||size>64L*1024*1024)throw new IOException("Activation backup budget");
+        java.security.MessageDigest digest=MediaRepository.sha();long count=0;
+        try(InputStream input=Files.newInputStream(archive,StandardOpenOption.READ,LinkOption.NOFOLLOW_LINKS)){
+            byte[] buffer=new byte[16384];int n;
+            while((n=input.read(buffer))!=-1){
+                if(n<=0||n>size-count)throw new IOException("Activation backup read changed");
+                count+=n;digest.update(buffer,0,n);
+            }
+        }
+        if(count!=size)throw new IOException("Activation backup truncated");
+        return digest.digest();
+    }
+    private static void activationMedia(SQLiteDatabase db,MediaRepository media)throws IOException{
+        require(media!=null,"Activation media required");
+        for(Map.Entry<String,Long> entry:mediaRegistry(db).entrySet())
+            exactFile(entry.getKey(),entry.getValue(),media.path(entry.getKey()));
+    }
+    private static void activationArchive(Path archive,Path staging,byte[] expected)throws IOException{
+        try(BackupArchive.Snapshot snapshot=BackupArchive.read(archive,staging,64L*1024*1024);
+            SQLiteDatabase candidate=archiveCandidate(snapshot)){
+            require(Arrays.equals(expected,snapshot.state()),"Activation backup state changed");
+            require(links(candidate).isEmpty(),"Activation backup unexpectedly contains shortcuts");
+        }
+    }
+    /** Creates a retained private backup, never a data replacement. The UI must
+     * explain that uninstall/clear-data removes this LOCAL recovery copy.
+     * Partial/failed backups are retained too; none can authorize migration.
+     */
+    static ActivationPlan prepareActivation(Object owner,Object session,SQLiteDatabase db,
+                                            Path directory,MediaRepository media)throws IOException{
+        outsideTransaction(db);
+        Files.createDirectories(directory);
+        require(!Files.isSymbolicLink(directory)&&Files.isDirectory(directory,LinkOption.NOFOLLOW_LINKS),
+                "Activation backup directory invalid");
+        Path archive=directory.resolve("before-shortcuts-"+UUID.randomUUID()+".zip");
+        Path staging=directory.resolve("verify-"+UUID.randomUUID());
+        db.beginTransaction();
+        try{
+            require(db.getVersion()==3,"Activation requires schema3");
+            layout(db,false);byte[] before=businessCells(db,true),wire=baseWire(db);
+            try(SQLiteDatabase checked=Schema3Store.stateCandidate(wire)){}
+            activationMedia(db,media);
+            BackupArchive.write(archive,wire,mediaRegistry(db).keySet(),media);
+            byte[] digest=activationDigest(archive);
+            activationArchive(archive,staging,wire);
+            activationMedia(db,media);
+            require(Arrays.equals(digest,activationDigest(archive))&&
+                    Arrays.equals(before,businessCells(db,true))&&Arrays.equals(wire,baseWire(db)),
+                    "Activation preparation changed");
+            ActivationPlan plan=new ActivationPlan(owner,session,db,archive,staging,wire,before,digest);
+            db.setTransactionSuccessful();return plan;
+        }finally{db.endTransaction();}
+    }
+    /** DDL, version, exact readback and final archive/media checks share the
+     * original schema3 write transaction. Never reconstruct or replace old rows.
+     * The caller must retire the old facade after success before business writes.
+     */
+    static void confirmActivation(Object owner,Object session,SQLiteDatabase db,
+                                  ActivationPlan plan,MediaRepository media)throws IOException{
+        require(plan!=null,"Activation plan required");
+        plan.consent.checkActive(owner,session);
+        try{
+            outsideTransaction(db);db.beginTransaction();
+            try{
+                require(db.getVersion()==3,"Activation requires schema3");
+                layout(db,false);
+                byte[] digest=activationDigest(plan.archive);
+                plan.consent.consume(owner,session,db,businessCells(db,true),digest);
+                require(Arrays.equals(plan.wire,baseWire(db)),"Activation source changed");
+                activationArchive(plan.archive,plan.staging,plan.wire);
+                activationMedia(db,media);
+                db.execSQL(SHORTCUT_DDL);
+                db.setVersion(4);
+                require(Arrays.equals(plan.cells,businessCells(db,true))&&
+                        Arrays.equals(plan.wire,baseWire(db))&&links(db).isEmpty(),
+                        "Activation changed historical data");
+                encodeState(db);
+                activationMedia(db,media);
+                require(Arrays.equals(digest,activationDigest(plan.archive)),"Activation backup changed");
+                db.setTransactionSuccessful();
+            }finally{db.endTransaction();}
+        }finally{plan.close();}
+    }
+
+    /** Resume only: never SQLiteOpenHelper's create/upgrade path.
+     * A custom corruption handler refuses instead of deleting the user's file.
+     * This does not claim resistance to malicious same-UID file replacement.
+     */
+    private final boolean resumeOnly;
+    private SQLiteDatabase resumedConnection;
+    private boolean resumeClosed;
+    private static String resumeName(String name){
+        require(name!=null&&name.matches("[A-Za-z0-9_-]+\\.db"),"Invalid resume database name");
+        return name;
+    }
+    static void resumeFile(Path path)throws IOException{
+        if(Files.isSymbolicLink(path)||!Files.isRegularFile(path,LinkOption.NOFOLLOW_LINKS)||
+           Files.size(path)==0)throw new IOException("Existing nonempty database required");
+    }
+    private Schema4Store(Context context,String name,boolean resume){
+        super(context.getApplicationContext(),resumeName(name),null,4);
+        if(!resume)throw new IllegalArgumentException("Resume-only constructor");
+        resumeOnly=true;
+    }
+    static Schema4Store resumeExisting(Context context,String name){
+        Schema4Store helper=new Schema4Store(context,name,true);
+        try{
+            Path path=context.getDatabasePath(resumeName(name)).toPath();
+            resumeFile(path);
+            helper.resumedConnection=SQLiteDatabase.openDatabase(path.toString(),null,
+                SQLiteDatabase.OPEN_READWRITE,broken->{
+                    throw new IllegalStateException("Corrupt database; preserve original file");
+                });
+            SQLiteDatabase db=helper.resumedConnection;
+            db.setForeignKeyConstraintsEnabled(true);
+            db.beginTransaction();
+            try{
+                if(db.getVersion()!=4)throw new IllegalStateException("Resume requires already activated schema4");
+                validate(db);encodeState(db);
+                db.setTransactionSuccessful();
+            }finally{db.endTransaction();}
+            return helper;
+        }catch(IOException e){helper.close();throw new IllegalStateException("Cannot resume; database preserved",e);}
+        catch(RuntimeException|Error e){helper.close();throw e;}
+    }
+    @Override public synchronized SQLiteDatabase getWritableDatabase(){
+        if(!resumeOnly)return super.getWritableDatabase();
+        if(resumeClosed||resumedConnection==null||!resumedConnection.isOpen())
+            throw new IllegalStateException("Resume facade closed");
+        if(resumedConnection.getVersion()!=4)
+            throw new IllegalStateException("Resumed schema changed; preserve database");
+        return resumedConnection;
+    }
+    @Override public synchronized SQLiteDatabase getReadableDatabase(){
+        return resumeOnly?getWritableDatabase():super.getReadableDatabase();
+    }
+
     private Object session=new Object();
     public Schema4Store(Context context,String name){
         super(context.getApplicationContext(),validName(name),null,4);
+        resumeOnly=false;
         setWriteAheadLoggingEnabled(true);
     }
     private static String validName(String name){
@@ -31,9 +220,11 @@ public final class Schema4Store extends SQLiteOpenHelper {
     private static void require(boolean ok,String reason){if(!ok)throw new IllegalArgumentException(reason);}
     @Override public void onConfigure(SQLiteDatabase db){db.setForeignKeyConstraintsEnabled(true);}
     @Override public void onCreate(SQLiteDatabase db){
+        if(resumeOnly)throw new IllegalStateException("Resume must never create");
         Schema3Store.createSchema3(db);db.execSQL(SHORTCUT_DDL);validate(db);
     }
     @Override public void onUpgrade(SQLiteDatabase db,int from,int to){
+        if(resumeOnly)throw new IllegalStateException("Resume must never upgrade");
         if(from!=3||to!=4)throw new IllegalStateException("Unsupported migration; preserve database");
         layout(db,false);
         byte[] before=businessCells(db,true);
@@ -44,7 +235,7 @@ public final class Schema4Store extends SQLiteOpenHelper {
         encodeState(db); // Fail before helper transaction commits if wire exceeds budget.
     }
     @Override public void onDowngrade(SQLiteDatabase db,int from,int to){throw new IllegalStateException("Newer database; preserve data");}
-    @Override public synchronized void close(){session=new Object();super.close();}
+    @Override public synchronized void close(){session=new Object();resumeClosed=true;if(resumedConnection!=null){resumedConnection.close();resumedConnection=null;}super.close();}
 
 
     /** Exact layout validator for internal business comparisons, not old decoders. */

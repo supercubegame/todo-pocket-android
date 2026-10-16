@@ -1,338 +1,63 @@
-name: Post-DDL observer connection repair
+name: Promote accepted explicit activation
 'on':
   push:
     branches:
       - ci/shortcut-storage-preflight-4d8742
 permissions:
-  contents: read
+  contents: write
+  actions: write
+  checks: write
 concurrency:
   group: shortcut-business-bridge-delivery
   cancel-in-progress: false
 jobs:
-  shortcut_host:
+  activation_delivery:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
-    permissions:
-      contents: read
-      checks: write
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
           persist-credentials: false
-      - &ref_0
-        name: Restore unchanged diagnostic and original budgets
+      - name: Materialize reviewed bounded delivery and transport controls
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import hashlib,os,pathlib,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/9e93888af2ed2450a6d1077379edfc3595913f04/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as r:raw=r.read(24667)
-          assert len(raw)==24666 and hashlib.sha1(b"blob 24666"+bytes([0])+raw).hexdigest()=="c4ebc9b185542c900c8b6b0fbc22ae04dec7a27e"
-          text=raw.decode();out=pathlib.Path(os.environ["RUNNER_TEMP"])/"connection-predecessor";out.mkdir()
-          shared=None
-          for job,count in {'shortcut_host': 37, 'shortcut_device': 17, 'shortcut_report': 16}.items():
-              rest=text.split("  "+job+":\n",1)[1];lines=[]
-              for line in rest.splitlines(keepends=True):
-                  if line.startswith("  shortcut_"):break
-                  lines.append(line)
-              scripts=[]
-              for i,line in enumerate(lines):
-                  if line=="        run: |\n":
-                      body=[]
-                      for item in lines[i+1:]:
-                          if item.strip() and not item.startswith("          "):break
-                          body.append(item[10:] if item.startswith("          ") else item)
-                      scripts.append("".join(body))
-              if job=="shortcut_host":
-                  assert "      - &ref_0\n" in rest
-                  shared=scripts[0]
-              else:
-                  assert "".join(lines).count("      - *ref_0\n")==1
-                  scripts.insert(0,shared)
-              assert len(scripts)==count,(job,len(scripts))
-              for i,script in enumerate(scripts):
-                  assert script.startswith("set -euo pipefail\n")
-                  (out/(job+"-"+str(i)+".sh")).write_text(script)
+          import base64,hashlib,json,lzma,os,pathlib
+          raw=lzma.decompress(base64.b64decode('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',validate=True))
+          assert hashlib.sha256(raw).hexdigest()=='b587d77a1ec3834346614d60f9a41ffd8f14848a38ea55585780bbe8cd3e0400'
+          files=json.loads(raw)
+          assert set(files)=={"deliver-accepted.py","test-deliver-accepted.py"}
+          for name,text in files.items():
+              (pathlib.Path(os.environ["RUNNER_TEMP"])/name).write_text(text)
           PY
-      - name: Retained shortcut_host 0
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-0.sh"
-      - name: Retained shortcut_host 1
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-1.sh"
-      - name: Retained shortcut_host 2
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-2.sh"
-      - name: Retained shortcut_host 3
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-3.sh"
-      - name: Retained shortcut_host 4
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-4.sh"
-      - name: Retained shortcut_host 5
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-5.sh"
-      - name: Retained shortcut_host 6
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-6.sh"
-      - name: Retained shortcut_host 7
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-7.sh"
-      - name: Retained shortcut_host 8
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-8.sh"
-      - name: Retained shortcut_host 9
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-9.sh"
-      - name: Retained shortcut_host 10
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-10.sh"
-      - name: Retained shortcut_host 11
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-11.sh"
-      - name: Retained shortcut_host 12
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-12.sh"
-      - name: Retained shortcut_host 13
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-13.sh"
-      - name: Retained shortcut_host 14
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-14.sh"
-      - name: Retained shortcut_host 15
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-15.sh"
-      - name: Retained shortcut_host 16
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-16.sh"
-      - name: Retained shortcut_host 17
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-17.sh"
-      - name: Retained shortcut_host 18
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-18.sh"
-      - name: Retained shortcut_host 19
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-19.sh"
-      - name: Retained shortcut_host 20
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-20.sh"
-      - name: Retained shortcut_host 21
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-21.sh"
-      - name: Retained shortcut_host 22
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-22.sh"
-      - name: Retained shortcut_host 23
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-23.sh"
-      - name: Retained shortcut_host 24
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-24.sh"
-      - name: Retained shortcut_host 25
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-25.sh"
-      - name: Retained shortcut_host 26
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-26.sh"
-      - name: Retained shortcut_host 27
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-27.sh"
-      - name: Retained shortcut_host 28
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-28.sh"
-      - name: Retained shortcut_host 29
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-29.sh"
-      - name: Retained shortcut_host 30
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-30.sh"
-      - name: Retained shortcut_host 31
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-31.sh"
-      - name: Retained shortcut_host 32
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-32.sh"
-      - name: Retained shortcut_host 33
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-33.sh"
-      - name: Retained shortcut_host 34
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-34.sh"
-      - name: Fix observer connection reentry with original RED and retained negative controls
+      - name: Use Java17 and test delivery failure boundaries
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import ast,base64,hashlib,lzma,os,pathlib
-          hook=lzma.decompress(base64.b64decode('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',validate=True)).decode()
-          assert hashlib.sha256(hook.encode()).hexdigest()=='4e25cde1d59826a73a94ce8250e0d8527e6a48d97027da3cd60f796eda293f31'
-          path=pathlib.Path(os.environ["RUNNER_TEMP"])/"exact-activation-scripts/3.sh"
-          script=path.read_text();head,body=script.split("import ast",1)
-          tree=ast.parse("import ast"+body.rsplit("\nPY",1)[0])
-          class Patch(ast.NodeTransformer):
-              count=0
-              def visit_Constant(self,node):
-                  if isinstance(node.value,str) and node.value.startswith("import base64,json,lzma,importlib.util"):
-                      anchor="for name,content in activation_files.items(): (folder/name).write_text(content)"
-                      assert node.value.count(anchor)==1
-                      self.count+=1
-                      value=node.value.replace(anchor,hook+"\n"+anchor,1);ast.parse(value)
-                      return ast.copy_location(ast.Constant(value=value),node)
-                  return node
-          change=Patch();tree=change.visit(tree);assert change.count==1
-          path.write_text(head+ast.unparse(tree)+"\nPY\n")
-          PY
-      - name: Retained shortcut_host 35
-        id: integration
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-35.sh"
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+          python3 "$RUNNER_TEMP/test-deliver-accepted.py"
+      - name: Verify accepted archive, full21 hosts, atomic product update and dispatch
+        id: delivery
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 "$RUNNER_TEMP/deliver-accepted.py" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/product-delivery"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: evidence
         if: always()
         with:
-          name: activation-host
-          path: ${{ runner.temp }}/activation-evidence/
+          name: activation-product-delivery
+          path: ${{ runner.temp }}/product-delivery/
           if-no-files-found: error
           retention-days: 14
-      - name: Retained shortcut_host 36
+      - name: Publish complete original delivery receipt with exact readback
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-          HOST_OUTCOME: ${{ steps.integration.outcome }}
-          UPLOAD_OUTCOME: ${{ steps.evidence.outcome }}
           ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_host-36.sh"
-  shortcut_device:
-    needs: shortcut_host
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 35
-    strategy:
-      fail-fast: false
-      matrix:
-        api:
-          - 26
-          - 34
-    env:
-      TEST_API: ${{ matrix.api }}
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
-          persist-credentials: false
-      - *ref_0
-      - name: Retained shortcut_device 0
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_device-0.sh"
-      - name: Retained shortcut_device 1
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_device-1.sh"
-      - name: Retained shortcut_device 2
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_device-2.sh"
-      - name: Retained shortcut_device 3
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_device-3.sh"
-      - name: Retained shortcut_device 4
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_device-4.sh"
-      - name: Retained shortcut_device 5
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_device-5.sh"
-      - name: Retained shortcut_device 6
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_device-6.sh"
-      - name: Retained shortcut_device 7
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_device-7.sh"
-      - name: Retained shortcut_device 8
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_device-8.sh"
-      - name: Retained shortcut_device 9
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_device-9.sh"
-      - name: Retained shortcut_device 10
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_device-10.sh"
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: activation-host
-          path: activation-evidence
-      - name: Retained shortcut_device 11
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_device-11.sh"
-      - name: Retained shortcut_device 12
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_device-12.sh"
-      - name: Retained shortcut_device 13
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_device-13.sh"
-      - name: Retained shortcut_device 14
-        env:
-          BUILD_429_EXECUTE: 'true'
-          BUILD_LOG: shortcut-build.log
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_device-14.sh"
-      - name: Keep successful original tests successful when crash buffer is empty
+          DELIVERY_OUTCOME: ${{ steps.delivery.outcome }}
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import os,pathlib
-          p=pathlib.Path(os.environ["RUNNER_TEMP"])/"connection-predecessor/shortcut_device-15.sh"
-          s=p.read_text()
-          for old,new in [('return 0 if result.get("status")=="CAPTURED_NOT_ROOT_CAUSE" and not worker.is_alive() else 1', 'return 0 if (not worker.is_alive() and result.get("logcat",{}).get("status") in ("EXITED","STOPPED_AFTER_ORIGINAL")) else 1'), ('    fake.write_text("#!"+sys.executable+"\\nraise SystemExit(9)\\n")', '    fake.write_text("#!"+sys.executable+"\\nraise SystemExit(0)\\n")\n    assert m.run([sys.executable,"-c","import time;time.sleep(.2)"],str(fake),root/"no-crash-success")==0\n    assert json.loads((root/"no-crash-success/receipt.json").read_text())["status"]=="NO_CRASH_BYTES_NOT_VERIFIED"\n    fake.write_text("#!"+sys.executable+"\\nraise SystemExit(9)\\n")')]:
-              assert s.count(old)==1,old
-              s=s.replace(old,new,1)
-          p.write_text(s)
-          PY
-      - name: Retained shortcut_device 15
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_device-15.sh"
-      - name: Retained shortcut_device 16
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_device-16.sh"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: shortcut-device-api-${{ matrix.api }}
-          path: |
-            shortcut-device/
-            shortcut-build.json
-            shortcut-build.log
-            shortcut-build-driver.log
-            shortcut-android.log
-            shortcut-setup.log
-            emulator.log
-            crash-diagnostic/
-          if-no-files-found: error
-          retention-days: 14
-    permissions:
-      contents: read
-      checks: write
-  shortcut_report:
-    needs:
-      - shortcut_host
-      - shortcut_device
-    if: always() && github.event_name != 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: write
-      actions: read
-      checks: write
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
-          persist-credentials: false
-      - *ref_0
-      - name: Retained shortcut_report 0
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_report-0.sh"
-      - name: Retained shortcut_report 1
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_report-1.sh"
-      - name: Retained shortcut_report 2
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_report-2.sh"
-      - name: Retained shortcut_report 3
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_report-3.sh"
-      - name: Retained shortcut_report 4
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_report-4.sh"
-      - name: Retained shortcut_report 5
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_report-5.sh"
-      - name: Retained shortcut_report 6
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_report-6.sh"
-      - name: Retained shortcut_report 7
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_report-7.sh"
-      - name: Retained shortcut_report 8
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_report-8.sh"
-      - name: Retained shortcut_report 9
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_report-9.sh"
-      - name: Retained shortcut_report 10
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_report-10.sh"
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: activation-host
-          path: activation-evidence
-      - name: Retained shortcut_report 11
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_report-11.sh"
-      - name: Retained shortcut_report 12
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_report-12.sh"
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          pattern: shortcut-*
-          path: collected-shortcuts
-      - name: Retained shortcut_report 13
-        if: always()
-        env:
-          NEEDS_JSON: ${{ toJSON(needs) }}
-          GH_TOKEN: ${{ github.token }}
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_report-13.sh"
-      - name: Retained shortcut_report 14
-        if: always()
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_report-14.sh"
-      - name: Retained shortcut_report 15
-        id: ui_evidence
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: set -euo pipefail; bash "$RUNNER_TEMP/connection-predecessor/shortcut_report-15.sh"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: independent-shortcut-report
-          path: |
-            shortcut-report.json
-            shortcut-report.log
-            ui-compact-api*.json
-          if-no-files-found: error
-          retention-days: 14
+          python3 "$RUNNER_TEMP/deliver-accepted.py" publish "$RUNNER_TEMP/product-delivery"

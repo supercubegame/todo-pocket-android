@@ -1,4 +1,4 @@
-name: Recover original product regression evidence
+name: Recover exact original product evidence
 on:
   push:
     branches: [ci/shortcut-storage-preflight-4d8742]
@@ -14,187 +14,30 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - name: Recover pinned original archives without running product tests
+      - name: Restore exact tested reader and recover original evidence only
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          """Read immutable original CI evidence; no checkout, product write or rerun."""
-          import base64
-          import hashlib
-          import io
-          import json
-          import os
-          from pathlib import Path, PurePosixPath
-          import re
-          import subprocess
-          import zipfile
-          
-          REPO = "supercubegame/todo-pocket-android"
-          HEAD = "c9d905b37061c0f52f57be54c318ce275ef0f1fa"
-          ITEMS = [
-              (38917276308, 12052952813, "database-api-26", 53009, "053a8b82ecd0bf372216932a7224ef78033f100ea148203df89811ebbebfa320"),
-              (38917276308, 12054130666, "database-api-34", 33726, "f098e5dca1a9074eaadf1cc8ef12a0763e0d78bd8f19f223238d4affb323ca03"),
-              (38917276308, 12053002293, "export-probe-api-26", 18283, "e7456abcf846c0b7af0a703301195228438ca27df506faa256b12bd45ce36880"),
-              (38917276308, 12052699941, "export-probe-api-34", 19749, "883f8bfb450cab8bcec28e4d9855b91e64c7f9c3ae5f9ba3d5d0fc92a7041"),
-              (38917272644, 12053112472, "shortcut-device-api-26", 320749, "5156839cfdd12d28bd6a84596c1327f895efe0db9ef6ba7ffd016a908a2f5005"),
-              (38917272644, 12053956461, "shortcut-device-api-34", 235979, "58fd34f97b0241571b9f335cb10376cb04686cd3bb6555b1a068952bfeff09ed"),
-              (38917272644, 12053432067, "independent-shortcut-report", 23780, "f9f0d3622b094b8a0e6b8882225e59ab97c7ec3cea82b42ba557b6af0e91cae9"),
-          ]
-          
-          
-          def sha(raw):
-              return hashlib.sha256(raw).hexdigest()
-          
-          
-          def api(path, value=None):
-              args = ["gh", "api", "repos/" + REPO + "/" + path]
-              if value is not None:
-                  args += ["--method", "POST", "--input", "-"]
-              return subprocess.run(args, input=None if value is None else json.dumps(value).encode(),
-                                    capture_output=True, check=True, timeout=60).stdout
-          
-          
-          def checked(raw, size, digest):
-              assert len(raw) == size and sha(raw) == digest, "archive exact identity"
-              archive = zipfile.ZipFile(io.BytesIO(raw))
-              names = archive.namelist()
-              assert 0 < len(names) <= 300 and len(names) == len(set(names)), "unique bounded members"
-              assert all(not n.startswith("/") and ".." not in PurePosixPath(n).parts
-                         and "\\" not in n for n in names), "safe member path"
-              assert all(not i.flag_bits & 1 and (i.external_attr >> 16) & 0o170000 != 0o120000
-                         for i in archive.infolist()), "no encrypted or symlink members"
-              assert sum(i.file_size for i in archive.infolist()) <= 16 * 1024 * 1024, "expanded budget"
-              assert archive.testzip() is None, "CRC"
-              return archive
-          
-          
-          def excerpts(text):
-              """Exact original line windows with explicit omitted-line count, not acceptance."""
-              lines = text.splitlines()
-              hits = [i for i, line in enumerate(lines)
-                      if re.search(r"FAILED|FATAL EXCEPTION|Traceback|NullPointerException|TimeoutExpired|"
-                                   r"AssertionError|Caused by:|NOT_VERIFIED|ANR in", line)]
-              selected = set()
-              for i in hits:
-                  selected.update(range(max(0, i - 4), min(len(lines), i + 16)))
-              return {"total_lines": len(lines), "omitted_lines": len(lines) - len(selected),
-                      "lines": [{"line": i + 1, "text": lines[i]} for i in sorted(selected)]}
-          
-          
-          def controls():
-              import warnings
-              def fixture(names):
-                  stream = io.BytesIO()
-                  with warnings.catch_warnings():
-                      warnings.simplefilter("ignore")
-                      with zipfile.ZipFile(stream, "w") as z:
-                          for name in names:
-                              z.writestr(name, b"synthetic")
-                  return stream.getvalue()
-              good = fixture(["safe.txt"])
-              assert checked(good, len(good), sha(good)).read("safe.txt") == b"synthetic"
-              cases = [(good, len(good) + 1, sha(good)), (good, len(good), "0" * 64)]
-              for names in (["../escape"], ["/absolute"], ["a\\b"], ["same", "same"]):
-                  raw = fixture(names)
-                  cases.append((raw, len(raw), sha(raw)))
-              for args in cases:
-                  try:
-                      checked(*args)
-                  except AssertionError:
-                      pass
-                  else:
-                      raise AssertionError("invalid archive accepted")
-              lines = ["prefix"] * 50 + ["java.lang.NullPointerException: fixture", "\tat Test.state(Test.java:1)"] + ["tail"] * 50
-              result = excerpts("\n".join(lines))
-              assert result["total_lines"] == 102 and result["omitted_lines"] > 0
-              assert any(v == {"line": 52, "text": lines[51]} for v in result["lines"])
-              assert excerpts("healthy") == {"total_lines": 1, "omitted_lines": 1, "lines": []}
-              print("RECOVERY_CONTROLS 1 valid archive; 6 invalid archives rejected; exact excerpt boundaries PASS")
-          
-          
-          def main():
-              controls()
-              assert os.environ["GITHUB_REPOSITORY"] == REPO and os.environ["GITHUB_RUN_ATTEMPT"] == "1"
-              out = Path("original-product-regression")
-              out.mkdir()
-              index = []
-              def publish(name, text):
-                  parts = [text[i:i + 10000] for i in range(0, len(text), 10000)] or [""]
-                  assert len(parts) <= 100, "bounded publication"
-                  rows = []
-                  for i, part in enumerate(parts):
-                      output = {"title": "ORIGINAL_EVIDENCE_ONLY_NOT_NEW_ACCEPTANCE",
-                                "summary": "Product c9d905. Original runs 38917276308 and 38917272644. Product updates=0; device reruns=0.",
-                                "text": part}
-                      assert len(part.encode()) < 55000
-                      value = {"name": name + " " + str(i + 1) + "/" + str(len(parts)),
-                               "head_sha": os.environ["GITHUB_SHA"], "status": "completed",
-                               "conclusion": "success", "output": output}
-                      made = json.loads(api("check-runs", value))
-                      seen = json.loads(api("check-runs/" + str(made["id"])))
-                      assert seen["head_sha"] == value["head_sha"]
-                      assert all(seen["output"][k] == v for k, v in output.items())
-                      rows.append(made["id"])
-                  index.append({"name": name, "bytes": len(text.encode()), "sha256": sha(text.encode()), "checks": rows})
-          
-              for run_id, expected in ((38917276308, "failure"), (38917272644, "success")):
-                  run = json.loads(api("actions/runs/" + str(run_id)))
-                  assert run["head_sha"] == HEAD and run["run_attempt"] == 1 and run["conclusion"] == expected
-              blob = "ee2c0ecae3232cb2c8b00793b5c07327c876ac5f"
-              value = json.loads(api("git/blobs/" + blob))
-              raw = base64.b64decode(value["content"])
-              assert len(raw) == 105053
-              assert hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest() == blob
-              report = json.loads(raw)
-              assert report["commit"] == HEAD and report["run_id"] == "38917276308"
-              (out / "original-main-report.json").write_bytes(raw)
-              def without_logs(value):
-                  if isinstance(value, dict):
-                      return {k: without_logs(v) for k, v in value.items() if k != "logs"}
-                  if isinstance(value, list):
-                      return [without_logs(v) for v in value]
-                  return value
-              publish("Main report structured evidence", json.dumps(without_logs(report), indent=2, ensure_ascii=False))
-              manifest = []
-              for run_id, aid, name, size, digest in ITEMS:
-                  meta = json.loads(api("actions/artifacts/" + str(aid)))
-                  assert meta["name"] == name and not meta["expired"] and meta["size_in_bytes"] == size
-                  assert meta["digest"] == "sha256:" + digest
-                  assert meta["workflow_run"]["id"] == run_id and meta["workflow_run"]["head_sha"] == HEAD
-                  raw = api("actions/artifacts/" + str(aid) + "/zip")
-                  archive = checked(raw, size, digest)
-                  (out / (name + ".zip")).write_bytes(raw)
-                  members, failures = [], []
-                  for member in archive.namelist():
-                      data = archive.read(member)
-                      identity = {"name": member, "bytes": len(data), "sha256": sha(data)}
-                      members.append(identity)
-                      if member.endswith((".txt", ".log", ".json", ".stdout", ".stderr")):
-                          text = data.decode("utf-8", "strict")
-                          if name.startswith(("database-", "export-probe-")):
-                              evidence = excerpts(text)
-                              if evidence["lines"]:
-                                  failures.append({"identity": identity, "excerpt": evidence})
-                          elif (member.endswith(".json") or
-                                ("seed" in member or "reopen" in member) and member.endswith((".txt", ".log"))):
-                              publish(name + " " + member, json.dumps(identity) + "\n" + text)
-                  manifest.append({"artifact_id": aid, "name": name, "run_id": run_id, "sha256": digest, "members": members})
-                  if failures:
-                      publish(name + " original failure windows", json.dumps(failures, indent=2, ensure_ascii=False))
-              (out / "manifest.json").write_text(json.dumps(manifest, indent=2))
-              publish("Original artifact member manifest", json.dumps(manifest, indent=2))
-              (out / "publication-index.json").write_text(json.dumps(index, indent=2))
-              publish("Recovery publication index", json.dumps(index, indent=2))
-              print("ORIGINAL_RECOVERY_COMPLETE product_updates=0 device_reruns=0")
-          
-          
-          if __name__ == "__main__":
-              if len(__import__("sys").argv) > 1:
-                  controls()
-              else:
-                  main()
+          import ast,hashlib,urllib.request
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/84b246aaa94a58dd8b3864f1fdeec13e7a1e6245/.github/workflows/shortcut-storage.yml"
+          with urllib.request.urlopen(url,timeout=60) as response:raw=response.read(11478)
+          assert len(raw)==11477 and hashlib.sha256(raw).hexdigest()=="2e80bc2e78d91b1408a0293c76cb5db7e1fc93c7920d86a6d7c371a415b6a9b0"
+          old=b"883f8bfb450cab8bcec28e4d9855b91e64c7f9c3ae5f9ba3d5d0fc92a7041"
+          new=b"883f8bfb450cab8bcebcec28e4d9855b91e64c7f9c3ae5f9ba3d5d0fc92a7041"
+          assert raw.count(old)==1 and len(old)==61 and len(new)==64
+          restored=raw.replace(old,new)
+          assert len(restored)==11480 and hashlib.sha256(restored).hexdigest()=="1292fb4c1e27e1d30a25eb000bb14057c7cc4d9708e50f83de8c882f9cd9fe7b"
+          body=restored.decode().split("          python3 - <<'PY'\n",1)[1].split("          PY\n",1)[0]
+          assert all(not line or line.startswith("          ") for line in body.splitlines())
+          source="\n".join(line[10:] for line in body.splitlines())+"\n"
+          assert hashlib.sha256(source.encode()).hexdigest()=="8005bf0a4cddf3596e1251f7b47aac590f6f8b7e741c33f462f8364cd690eddc"
+          ast.parse(source)
+          scope={"__name__":"recovery"}
+          exec(compile(source,"exact-tested-recovery","exec"),scope)
+          assert all(len(row[4])==64 for row in scope["ITEMS"])
+          scope["main"]()
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()

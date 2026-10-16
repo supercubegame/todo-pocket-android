@@ -1,428 +1,95 @@
-name: Post-DDL lifecycle acceptance
-'on':
+name: Recover original post-DDL crash evidence
+on:
   push:
-    branches:
-      - ci/shortcut-storage-preflight-4d8742
+    branches: [ci/shortcut-storage-preflight-4d8742]
 permissions:
   contents: read
+  actions: read
+  checks: write
 concurrency:
   group: shortcut-business-bridge-delivery
   cancel-in-progress: false
 jobs:
-  shortcut_host:
+  recover:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
-    permissions:
-      contents: read
-      checks: write
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
-          persist-credentials: false
-      - &ref_0
-        name: Restore exact accepted fa12481 scripts and original budgets
+      - name: Read original archives only, no device rerun
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import hashlib,os,pathlib,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/fa12481ce8013304aa47d9d848025496ab1242d3/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as r:raw=r.read(27063)
-          assert len(raw)==27062 and hashlib.sha1(b"blob 27062"+bytes([0])+raw).hexdigest()=="da865e9289e7f414354536cff288a525ed52a878"
-          text=raw.decode();out=pathlib.Path(os.environ["RUNNER_TEMP"])/"postddl-predecessor";out.mkdir()
-          shared=None
-          for job,count in {'shortcut_host': 34, 'shortcut_device': 14, 'shortcut_report': 14}.items():
-              rest=text.split("  "+job+":\n",1)[1];lines=[]
-              for line in rest.splitlines(keepends=True):
-                  if line.startswith("  shortcut_"):break
-                  lines.append(line)
-              scripts=[]
-              for i,line in enumerate(lines):
-                  if line=="        run: |\n":
-                      body=[]
-                      for item in lines[i+1:]:
-                          if item.strip() and not item.startswith("          "):break
-                          body.append(item[10:] if item.startswith("          ") else item)
-                      scripts.append("".join(body))
-              if job=="shortcut_host":
-                  assert "      - &ref_0\n" in rest
-                  shared=scripts[0]
-              else:
-                  assert "".join(lines).count("      - *ref_0\n")==1
-                  scripts.insert(0,shared)
-              assert len(scripts)==count,(job,len(scripts))
-              for i,script in enumerate(scripts):
-                  assert script.startswith("set -euo pipefail\n")
-                  (out/(job+"-"+str(i)+".sh")).write_text(script)
+          import hashlib,io,json,os,pathlib,subprocess,zipfile
+          REPO="supercubegame/todo-pocket-android"
+          RUN=38871586910
+          HEAD="10b90458f365931e6d87df0d389fabca9a9f09d9"
+          ITEMS=[
+           (12034895391,"shortcut-device-api-26","0f2f018adead0861bf736089d0f489c237ec76b9942def69dd4ecfc23f2552b0"),
+           (12034347759,"shortcut-device-api-34","764f2c63feec8d3d7f338f93e053b73b3fbc40ac4089e91c2989aa046be61971")]
+          def api(path,value=None):
+              command=["gh","api","repos/"+REPO+"/"+path]
+              if value is not None:command+=["--method","POST","--input","-"]
+              return subprocess.run(command,input=None if value is None else json.dumps(value).encode(),
+                  capture_output=True,timeout=60,check=True).stdout
+          def checked(raw,digest):
+              assert hashlib.sha256(raw).hexdigest()==digest,"archive digest"
+              z=zipfile.ZipFile(io.BytesIO(raw));names=z.namelist()
+              assert len(names)==len(set(names)) and len(names)<=300,"member identity"
+              assert sum(i.file_size for i in z.infolist())<=16*1024*1024,"expanded budget"
+              assert all(not n.startswith("/") and ".." not in pathlib.PurePosixPath(n).parts for n in names),"member path"
+              assert z.testzip() is None,"CRC"
+              return z
+          def fixture(name):
+              out=io.BytesIO()
+              with zipfile.ZipFile(out,"w") as z:z.writestr(name,b"test")
+              return out.getvalue()
+          good=fixture("safe");checked(good,hashlib.sha256(good).hexdigest())
+          for raw,digest in [(good,"0"*64),(fixture("../escape"),None),(fixture("/absolute"),None)]:
+              try:checked(raw,digest or hashlib.sha256(raw).hexdigest())
+              except AssertionError:pass
+              else:raise AssertionError("bad archive accepted")
+          def publish(name,text):
+              assert len(text.encode())<55000,"publication budget"
+              value={"name":name,"head_sha":os.environ["GITHUB_SHA"],"status":"completed","conclusion":"success",
+                  "output":{"title":"ORIGINAL_CRASH_EVIDENCE_NOT_ACCEPTANCE",
+                  "summary":"Source run 38871586910 attempt 1. Device reruns=0; product pushes=0.",
+                  "text":text}}
+              made=json.loads(api("check-runs",value));seen=json.loads(api("check-runs/"+str(made["id"])))
+              assert seen["head_sha"]==value["head_sha"] and seen["output"]==dict(seen["output"],**value["output"])
+          assert os.environ["GITHUB_REPOSITORY"]==REPO and os.environ["GITHUB_RUN_ATTEMPT"]=="1"
+          run=json.loads(api("actions/runs/"+str(RUN)))
+          assert run["head_sha"]==HEAD and run["run_attempt"]==1 and run["conclusion"]=="failure"
+          out=pathlib.Path("original-postddl");out.mkdir()
+          manifest=[]
+          for aid,name,digest in ITEMS:
+              meta=json.loads(api("actions/artifacts/"+str(aid)))
+              assert meta["name"]==name and not meta["expired"] and meta["digest"]=="sha256:"+digest
+              assert meta["workflow_run"]["id"]==RUN and meta["workflow_run"]["head_sha"]==HEAD
+              raw=api("actions/artifacts/"+str(aid)+"/zip")
+              assert len(raw)==meta["size_in_bytes"]
+              z=checked(raw,digest);(out/(name+".zip")).write_bytes(raw)
+              rows=[]
+              for index,n in enumerate(z.namelist()):
+                  data=z.read(n);identity={"name":n,"bytes":len(data),"sha256":hashlib.sha256(data).hexdigest()}
+                  rows.append(identity)
+                  if n.endswith((".log",".txt",".json",".stdout",".stderr")):
+                      try:text=data.decode("utf-8","strict")
+                      except UnicodeDecodeError:continue
+                      # Publish all original text in bounded parts; never just the tail.
+                      parts=[text[i:i+10000] for i in range(0,len(text),10000)] or [""]
+                      assert len(parts)<=100,"member publication budget"
+                      for part,body in enumerate(parts):
+                          publish(name+" member "+str(index)+" part "+str(part+1)+"/"+str(len(parts)),
+                              json.dumps(identity)+"\n```text\n"+body+"\n```")
+              manifest.append({"id":aid,"name":name,"sha256":digest,"members":rows})
+          text=json.dumps(manifest,indent=2);(out/"manifest.json").write_text(text)
+          publish("Original post-DDL archive manifest","```json\n"+text+"\n```")
           PY
-      - name: Restore exact accepted 4ab scripts and original budgets
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-0.sh"
-      - name: Restore exact accepted 6c3 scripts and original budgets
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-1.sh"
-      - name: Restore exact 5f9dab scripts and preserve first failure
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-2.sh"
-      - name: Restore exact e44b83 scripts and unchanged command budgets
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-3.sh"
-      - name: Restore exact bfb230 scripts and retain original report failure
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-4.sh"
-      - name: Restore exact accepted 512263 scripts and original budgets
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-5.sh"
-      - name: Restore exact 05fc scripts with first failure retained
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-6.sh"
-      - name: Restore exact e9bf scripts without combining steps
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-7.sh"
-      - name: Restore exact accepted predecessor scripts
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-8.sh"
-      - name: Restore hash-bound original c91 host steps
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-9.sh"
-      - name: Verify exact original source and repair two transport escapes
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-10.sh"
-      - name: Use Java 17
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-11.sh"
-      - name: Restore exact pinned backend materializer
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-12.sh"
-      - name: Preserve original RED and backend host gates
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-13.sh"
-      - name: Prove and repair actual media checked-exception signature
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-14.sh"
-      - name: Preserve exact parser RED and bind layered selftest witnesses
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-15.sh"
-      - name: Add missing activation Android declarations with original RED and four omission controls
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-16.sh"
-      - name: Use screen-space dialog touch and preserve explicit unchecked witnesses
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-17.sh"
-      - name: Bind deterministic lifecycle checks to actual candidate Java members
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-18.sh"
-      - name: Persist all UI label families with raw-stream identity
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-19.sh"
-      - name: Collect activation database and independently replay exact history
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-20.sh"
-      - name: Isolate old scripted report fixtures and verify actual report SQLite rejection
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-21.sh"
-      - name: Add native startup database collection and independent replay
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-22.sh"
-      - name: Capture device screen ownership on the Android main thread
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-23.sh"
-      - name: Verify actual Android rotation recreation and finish with consent pending
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-24.sh"
-      - name: Repair lifecycle host declarations and execute actual assertion members
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-25.sh"
-      - name: Exercise real queued activation destruction with original failure controls
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-26.sh"
-      - name: Repair exact report schema with original RED and negative controls
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-27.sh"
-      - name: Exercise completed prepare callback pending finish with original failure controls
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-28.sh"
-      - name: Observe callback owner destruction before existing retirement assertions
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-29.sh"
-      - name: Verify destruction during actual prepare publication
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-30.sh"
-      - name: Verify exit inside confirmation transaction before consent consumption
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-31.sh"
-      - name: Verify post-DDL exit with commit and forced rollback outcomes
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import ast,base64,hashlib,lzma,os,pathlib
-          hook=lzma.decompress(base64.b64decode('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',validate=True)).decode()
-          assert hashlib.sha256(hook.encode()).hexdigest()=='6107dd3788eb681c15b3921048d84df3dd37637dcf246c5deeb5d28c02183ac1'
-          path=pathlib.Path(os.environ["RUNNER_TEMP"])/"exact-activation-scripts/3.sh"
-          script=path.read_text();head,body=script.split("import ast",1)
-          tree=ast.parse("import ast"+body.rsplit("\nPY",1)[0])
-          class Patch(ast.NodeTransformer):
-              count=0
-              def visit_Constant(self,node):
-                  if isinstance(node.value,str) and node.value.startswith("import base64,json,lzma,importlib.util"):
-                      anchor="for name,content in activation_files.items(): (folder/name).write_text(content)"
-                      assert node.value.count(anchor)==1
-                      self.count+=1
-                      value=node.value.replace(anchor,hook+"\n"+anchor,1)
-                      ast.parse(value)
-                      return ast.copy_location(ast.Constant(value=value),node)
-                  return node
-          change=Patch();tree=change.visit(tree);assert change.count==1
-          path.write_text(head+ast.unparse(tree)+"\nPY\n")
-          PY
-      - name: Integrate default startup UI and rerun all 21 original hosts
-        id: integration
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-32.sh"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        id: evidence
-        if: always()
-        with:
-          name: activation-host
-          path: ${{ runner.temp }}/activation-evidence/
-          if-no-files-found: error
-          retention-days: 14
-      - name: Publish exact host outcome
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          HOST_OUTCOME: ${{ steps.integration.outcome }}
-          UPLOAD_OUTCOME: ${{ steps.evidence.outcome }}
-          ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_host-33.sh"
-  shortcut_device:
-    needs: shortcut_host
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 35
-    strategy:
-      fail-fast: false
-      matrix:
-        api:
-          - 26
-          - 34
-    env:
-      TEST_API: ${{ matrix.api }}
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
-          persist-credentials: false
-      - *ref_0
-      - name: Restore exact accepted 4ab scripts and original budgets
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-0.sh"
-      - name: Restore exact accepted 6c3 scripts and original budgets
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-1.sh"
-      - name: Restore exact 5f9dab scripts and preserve first failure
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-2.sh"
-      - name: Restore exact e44b83 scripts and unchanged command budgets
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-3.sh"
-      - name: Restore exact bfb230 scripts and retain original report failure
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-4.sh"
-      - name: Restore exact accepted 512263 scripts and original budgets
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-5.sh"
-      - name: Restore exact 05fc scripts with first failure retained
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-6.sh"
-      - name: Restore exact e9bf scripts without combining steps
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-7.sh"
-      - name: Restore exact accepted predecessor scripts
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-8.sh"
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: activation-host
-          path: activation-evidence
-      - name: Verify exact original source and repair two transport escapes
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-9.sh"
-      - name: Restore exact six-file host-verified candidate
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-10.sh"
-      - name: Fixed disposable Android setup
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-11.sh"
-      - name: Build isolated runner and restore original Gradle source
-        env:
-          BUILD_429_EXECUTE: 'true'
-          BUILD_LOG: shortcut-build.log
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-12.sh"
-      - name: Original regressions plus actual native default startup
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_device-13.sh"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: shortcut-device-api-${{ matrix.api }}
-          path: |
-            shortcut-device/
-            shortcut-build.json
-            shortcut-build.log
-            shortcut-build-driver.log
-            shortcut-android.log
-            shortcut-setup.log
-            emulator.log
-          if-no-files-found: error
-          retention-days: 14
-  shortcut_report:
-    needs:
-      - shortcut_host
-      - shortcut_device
-    if: always() && github.event_name != 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: write
-      actions: read
-      checks: write
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: 3a5a17e1fdc570c73804007cd9a4d2ef36c0966b
-          persist-credentials: false
-      - *ref_0
-      - name: Restore exact accepted 4ab scripts and original budgets
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-0.sh"
-      - name: Restore exact accepted 6c3 scripts and original budgets
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-1.sh"
-      - name: Restore exact 5f9dab scripts and preserve first failure
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-2.sh"
-      - name: Restore exact e44b83 scripts and unchanged command budgets
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-3.sh"
-      - name: Restore exact bfb230 scripts and retain original report failure
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-4.sh"
-      - name: Restore exact accepted 512263 scripts and original budgets
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-5.sh"
-      - name: Restore exact 05fc scripts with first failure retained
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-6.sh"
-      - name: Restore exact e9bf scripts without combining steps
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-7.sh"
-      - name: Restore exact accepted predecessor scripts
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-8.sh"
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: activation-host
-          path: activation-evidence
-      - name: Verify exact original source and repair two transport escapes
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-9.sh"
-      - name: Restore exact six-file host-verified candidate
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-10.sh"
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          pattern: shortcut-*
-          path: collected-shortcuts
-      - name: Publish both original device receipts including failures
-        if: always()
-        env:
-          NEEDS_JSON: ${{ toJSON(needs) }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-11.sh"
-      - name: Include native database evidence without truncation
-        if: always()
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-12.sh"
-      - name: Publish exact new UI checks and original seed reopen streams
-        id: ui_evidence
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          bash "$RUNNER_TEMP/postddl-predecessor/shortcut_report-13.sh"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: independent-shortcut-report
-          path: |
-            shortcut-report.json
-            shortcut-report.log
-            ui-compact-api*.json
+          name: original-postddl-crash
+          path: original-postddl/
           if-no-files-found: error
           retention-days: 14

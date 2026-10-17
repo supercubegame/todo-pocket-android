@@ -752,7 +752,176 @@ def restore_picker_summary_selftest():
     print("RESTORE_PICKER_SUMMARY positive=4 negative=4 witnessed_mutant=1 PASS; HOST_REPLAY_NOT_ANDROID",flush=True)
 
 
+
+def run_database_phase(args, *, timeout, capture, phase):
+    """Keep one original call and exception; persist partial streams without decoding."""
+    try:
+        return run(args, timeout=timeout, capture=capture)
+    except subprocess.TimeoutExpired as failure:
+        try:
+            streams={}
+            for name,value in (("stdout",failure.stdout),("stderr",failure.stderr)):
+                raw=value if isinstance(value,bytes) else (value.encode("utf-8") if value is not None else b"")
+                filename="device-"+phase+"-timeout-"+name+".txt"
+                (ROOT/filename).write_bytes(raw)
+                streams[name]={"file":filename,"bytes":len(raw),"sha256":hashlib.sha256(raw).hexdigest(),
+                               "captured":value is not None,"original_type":type(value).__name__}
+            receipt={"status":"TIMEOUT_NOT_VERIFIED","phase":phase,"command":list(map(str,failure.cmd)),
+                     "timeout_seconds":failure.timeout,"attempts":1,"streams":streams}
+            (ROOT/("device-"+phase+"-timeout.txt")).write_text(json.dumps(receipt,indent=2)+"\n")
+            print("DATABASE_TIMEOUT_EVIDENCE "+json.dumps(receipt),flush=True)
+        except Exception as secondary:
+            print("DATABASE_TIMEOUT_EVIDENCE_FAILED "+type(secondary).__name__,flush=True)
+        raise
+
+def database_timeout_selftest():
+    """Actual helper, exception doubles and a real host child timeout, never Android."""
+    import ast, inspect, tempfile, sys
+    from unittest.mock import patch
+    source=inspect.getsource(run_database_phase)
+    def exercise(function,mode):
+        with tempfile.TemporaryDirectory(prefix="database-timeout-") as directory:
+            root=Path(directory);calls=[];command=["adb","-s","fixture","shell","am","instrument"]
+            payload={"binary":b"\x00\xffpartial\n","unicode":"中文输出","empty":b"","missing":None}.get(mode,b"sentinel")
+            error=subprocess.TimeoutExpired(command,180,output=payload,stderr=b"stderr\x00")
+            sentinel=subprocess.CompletedProcess(command,0,"ok")
+            if mode=="nonzero":error=subprocess.CalledProcessError(7,command,output=b"failure")
+            if mode=="oserror":error=OSError("host sentinel")
+            def runner(args,**kw):
+                calls.append((args,kw))
+                if mode=="success":return sentinel
+                raise error
+            seen=None;result=None
+            with patch.dict(function.__globals__,run=runner,ROOT=root):
+                try:result=function(command,timeout=180,capture=True,phase="seed")
+                except BaseException as exc:seen=exc
+            assert calls==[(command,{"timeout":180,"capture":True})],"command/budget/attempt changed"
+            if mode=="success":
+                assert result is sentinel and seen is None and not list(root.iterdir())
+            elif mode in ("nonzero","oserror"):
+                assert seen is error and not list(root.iterdir())
+            else:
+                assert seen is error,"original exception replaced"
+                receipt=json.loads((root/"device-seed-timeout.txt").read_text())
+                assert receipt["status"]=="TIMEOUT_NOT_VERIFIED" and receipt["command"]==command
+                assert receipt["timeout_seconds"]==180 and receipt["attempts"]==1
+                for name,value in (("stdout",payload),("stderr",b"stderr\x00")):
+                    expected=value if isinstance(value,bytes) else (value.encode() if value is not None else b"")
+                    row=receipt["streams"][name]
+                    assert row=={"file":"device-seed-timeout-"+name+".txt","bytes":len(expected),
+                                 "sha256":hashlib.sha256(expected).hexdigest(),"captured":value is not None,
+                                 "original_type":type(value).__name__}
+                    assert (root/row["file"]).read_bytes()==expected,"partial stream changed"
+    modes=("success","binary","unicode","empty","missing","nonzero","oserror")
+    for mode in modes:exercise(run_database_phase,mode)
+    changes=[
+        ("write_bytes(raw)","write_bytes(b'')","binary"),
+        ('"attempts":1','"attempts":2',"binary"),
+        ("        raise\n","        return None\n","binary"),
+    ]
+    for old,new,bad in changes:
+        assert source.count(old)==1
+        scope=dict(globals());exec(compile(source.replace(old,new,1),"<timeout-mutant>","exec"),scope)
+        function=scope["run_database_phase"];exercise(function,"success")
+        try:exercise(function,bad)
+        except AssertionError:pass
+        else:raise AssertionError("timeout mutant survived "+old)
+    # A real Python child flushes then stays alive beyond the HOST-only test cap.
+    # This cap is not the unchanged 180-second device command.
+    with tempfile.TemporaryDirectory(prefix="timeout-child-") as directory:
+        command=[sys.executable,"-c","import os,time;os.write(1,b'HOST_PARTIAL_SENTINEL\\n');time.sleep(60)"]
+        seen=None
+        with patch.dict(globals(),ROOT=Path(directory)):
+            try:run_database_phase(command,timeout=2,capture=True,phase="seed")
+            except subprocess.TimeoutExpired as exc:seen=exc
+        assert seen is not None and seen.timeout==2 and seen.cmd==command
+        assert seen.stdout==b"HOST_PARTIAL_SENTINEL\n","child fixture failed to reach output precondition"
+        assert (Path(directory)/"device-seed-timeout-stdout.txt").read_bytes()==seen.stdout
+    # Secondary persistence failure never replaces the original timeout.
+    sentinel=subprocess.TimeoutExpired(["test"],180,output=b"partial")
+    def failed(*a,**kw):raise sentinel
+    with tempfile.TemporaryDirectory(prefix="timeout-write-failure-") as directory:
+        root=Path(directory)/"file";root.write_bytes(b"x")
+        with patch.dict(globals(),ROOT=root,run=failed):
+            try:run_database_phase(["test"],timeout=180,capture=True,phase="seed")
+            except subprocess.TimeoutExpired as exc:assert exc is sentinel
+            else:raise AssertionError("secondary failure swallowed timeout")
+    print("DATABASE_TIMEOUT_HOST cases=7 witnessed_mutants=3 real_child_timeout=1 secondary_failure=1 PASS NOT_DEVICE_ROOT_CAUSE",flush=True)
+
+def readiness_timeout_wiring_selftest():
+    """Cross-file registration and exact actual caller checks, not string presence."""
+    import ast,copy
+    emulator=ast.parse(Path(__file__).read_text())
+    paged=ast.parse((ROOT/"tools/verify_paged_exports.py").read_text())
+    def check(e,p):
+        functions={n.name:n for n in e.body if isinstance(n,ast.FunctionDef)}
+        phase=functions["verify_database"]
+        calls=[n for n in ast.walk(phase) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name)
+               and n.func.id=="run_database_phase"]
+        assert len(calls)==1
+        call=calls[0]
+        assert ast.unparse(call)=="run_database_phase([adb, '-s', SERIAL, 'shell', 'am', 'instrument', '-w', '-r', '-e', 'phase', phase, '-e', 'expectedApi', str(API), PKG + '.test/com.supercubegame.pockettodo.V12DeviceTest'], timeout=180, capture=True, phase=phase)"
+        assert sum(isinstance(n,ast.For) and ast.unparse(n.iter)=="('seed', 'reopen')" for n in ast.walk(phase))==1
+        for tree,name,required in ((e,"parser_selftest",("database_timeout_selftest","readiness_timeout_wiring_selftest")),
+                                   (p,"selftest",("paged_readiness_selftest",))):
+            f=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name==name)
+            names=[n.value.func.id for n in f.body if isinstance(n,ast.Expr) and isinstance(n.value,ast.Call) and isinstance(n.value.func,ast.Name)]
+            assert all(names.count(x)==1 for x in required),"permanent test call omitted"
+    check(emulator,paged)
+    for name in ("run_database_phase","database_timeout_selftest","paged_readiness_selftest"):
+        e,p=copy.deepcopy(emulator),copy.deepcopy(paged);changed=0
+        tree=p if name=="paged_readiness_selftest" else e
+        fname="selftest" if tree is p else ("verify_database" if name=="run_database_phase" else "parser_selftest")
+        f=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name==fname)
+        for n in ast.walk(f):
+            if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id==name:n.func.id="omitted";changed+=1
+        assert changed==1
+        try:check(e,p)
+        except AssertionError:pass
+        else:raise AssertionError("registration omission survived")
+    workflow=(ROOT/".github/workflows/android.yml").read_text()
+    def collected(text):
+        import re
+        lines=[];active=False
+        for line in text.splitlines():
+            if not line.strip() or line.lstrip().startswith("#"):continue
+            if re.match(r"^  [A-Za-z_][A-Za-z0-9_]*:",line):active=line=="  database:"
+            if active:lines.append(line)
+        steps=[];current=[]
+        for line in lines:
+            if line.startswith("      - "):
+                if current:steps.append(current)
+                current=[]
+            current.append(line)
+        if current:steps.append(current)
+        selected=[s for s in steps if "          name: database-api-${{ matrix.api }}" in s]
+        assert len(selected)==1,"actual database upload absent"
+        step=selected[0]
+        assert step[0]=="      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
+        assert step.count("        if: always()")==1
+        assert step.count("          if-no-files-found: error")==1
+        assert step.count("          path: |")==1
+        paths=[]
+        for line in step[step.index("          path: |")+1:]:
+            if not line.startswith("            "):break
+            paths.append(line.strip())
+        assert "device-*.txt" in paths,"partial streams/receipt not collected"
+    collected(workflow)
+    # Alter only the selected database upload, not matching prose in host scripts.
+    mark="          name: database-api-${{ matrix.api }}"
+    assert workflow.count("\n"+mark+"\n")==1
+    at=workflow.index("\n"+mark+"\n")
+    tail=workflow[at:]
+    assert "            device-*.txt\n" in tail
+    bad=workflow[:at]+tail.replace("            device-*.txt\n","",1)
+    try:collected(bad)
+    except AssertionError:pass
+    else:raise AssertionError("artifact collection omission survived")
+    print("READINESS_TIMEOUT_WIRING actual_call=1 registration_omissions=3 upload_omissions=1 PASS AST_AND_COLLECTION_ONLY",flush=True)
+
 def parser_selftest():
+    database_timeout_selftest()
+    readiness_timeout_wiring_selftest()
     restore_picker_summary_selftest()
     restore_picker_selftest()
     restore_picker_wiring_selftest()
@@ -801,8 +970,8 @@ def verify_database(adb):
     for phase in ('seed', 'reopen'):
         if phase == 'reopen':
             stop_verified(adb, SERIAL, PKG)
-        output = run([adb, '-s', SERIAL, 'shell', 'am', 'instrument', '-w', '-r', '-e', 'phase', phase,
-                      '-e', 'expectedApi', str(API), PKG + '.test/com.supercubegame.pockettodo.V12DeviceTest'], timeout=180, capture=True).stdout
+        output = run_database_phase([adb, '-s', SERIAL, 'shell', 'am', 'instrument', '-w', '-r', '-e', 'phase', phase,
+                      '-e', 'expectedApi', str(API), PKG + '.test/com.supercubegame.pockettodo.V12DeviceTest'], timeout=180, capture=True, phase=phase).stdout
         print(output, flush=True)
         Path('device-' + phase + '.txt').write_text(output)
         results[phase] = verify_phase(output, phase)

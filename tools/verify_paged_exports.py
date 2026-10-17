@@ -100,8 +100,36 @@ public final class PagedContractTest {
   inst.runOnMainSync(()->{try{action.run();}catch(Throwable e){failure[0]=e;}});
   if(failure[0]!=null)throw new AssertionError("preview UI failure",failure[0]);
  }
- static byte[] state(android.app.Activity activity)throws Exception{
-  Object db=field(field(activity,"screen"),"db");
+ static void awaitPreviewScreen(android.app.Instrumentation inst,android.app.Activity activity)throws Exception{
+  long started=android.os.SystemClock.uptimeMillis(),deadline=started+10000;
+  int observations=0;
+  while(android.os.SystemClock.uptimeMillis()<deadline){
+   boolean[] ready={false};
+   onUi(inst,()->{
+    if(activity.isDestroyed()||activity.isFinishing())throw new IllegalStateException("paged startup owner retired");
+    Object screen=field(activity,"screen");
+    ready[0]=screen!=null&&!((Boolean)field(screen,"busy"));
+   });
+   observations++;
+   long observed=android.os.SystemClock.uptimeMillis();
+   if(observed>=deadline)throw new AssertionError("paged startup observation exceeded bound");
+   if(ready[0]){
+    System.out.println("PAGED_STARTUP_READY observations="+observations+" elapsed_ms="+(observed-started));
+    return;
+   }
+   android.os.SystemClock.sleep(Math.min(50,deadline-observed));
+  }
+  throw new AssertionError("paged startup not ready within observation bound; observations="+observations);
+ }
+ static byte[] state(android.app.Instrumentation inst,android.app.Activity activity)throws Exception{
+  Object[] database={null};
+  onUi(inst,()->{
+   if(activity.isDestroyed()||activity.isFinishing())throw new IllegalStateException("paged snapshot owner retired");
+   Object screen=field(activity,"screen");
+   if(screen==null||((Boolean)field(screen,"busy")))throw new IllegalStateException("paged snapshot screen not ready");
+   database[0]=field(screen,"db");
+  });
+  Object db=database[0];
   return(byte[])privateMethod(db.getClass(),"exportState").invoke(db);
  }
  @SuppressWarnings("unchecked")
@@ -111,9 +139,11 @@ public final class PagedContractTest {
   Method preview=privateMethod(activityClass,"previewShare",byte[][].class,int.class);
   android.content.Intent start=new android.content.Intent().setClassName(inst.getTargetContext(),
     activityClass.getName()).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
-  android.app.Activity activity=inst.startActivitySync(start);inst.waitForIdleSync();
-  byte[] before=state(activity);
+  android.app.Activity activity=inst.startActivitySync(start);
   try{
+   inst.waitForIdleSync();
+   awaitPreviewScreen(inst,activity);
+   byte[] before=state(inst,activity);
    for(int format=1;format<=2;format++){
     final int selectedFormat=format;String suffix=format==1?"PDF":"PNG_ZIP";
     byte[] payload=read(new File(root,format==1?"paged.pdf":"paged.zip"));
@@ -194,7 +224,7 @@ public final class PagedContractTest {
        filename.equals(captured[0].getStringExtra(android.content.Intent.EXTRA_TITLE))&&
        captured[0].hasCategory(android.content.Intent.CATEGORY_OPENABLE),"saf_format_after_consent_"+suffix);
      previewOk(field(activity,"pendingShare")==null,"cancel_clears_ticket_"+suffix);
-     previewOk(Arrays.equals(before,state(activity)),"preview_preserves_database_"+suffix);
+     previewOk(Arrays.equals(before,state(inst,activity)),"preview_preserves_database_"+suffix);
      boolean recycled=true;for(android.graphics.Bitmap bitmap:shown)recycled&=bitmap.isRecycled();
      previewOk(recycled,"dialog_bitmaps_recycled_"+suffix);
     }finally{
@@ -813,7 +843,82 @@ def pdf_text_diagnostic(text):
             "expected":[ "U+%04X"%ord(c) for c in "中文说明"],
             "form_feeds":text.count("\f")}
 
+
+PAGED_READY_EXTRACTOR='\nimport java.nio.file.*;\nimport java.util.*;\nimport javax.tools.*;\nimport com.sun.source.tree.*;\nimport com.sun.source.util.*;\npublic class Extract {\n static void need(boolean b,String s){if(!b)throw new AssertionError(s);}\n static String called(MethodInvocationTree n){return n.getMethodSelect().toString();}\n static List<MethodInvocationTree> calls(Tree t){\n  List<MethodInvocationTree> r=new ArrayList<>();\n  new TreeScanner<Void,Void>(){\n   public Void visitMethodInvocation(MethodInvocationTree n,Void v){r.add(n);return super.visitMethodInvocation(n,v);}\n  }.scan(t,null);return r;\n }\n public static void main(String[] a)throws Exception{\n  String source=Files.readString(Path.of(a[0]));\n  JavaCompiler c=ToolProvider.getSystemJavaCompiler();\n  DiagnosticCollector<JavaFileObject> d=new DiagnosticCollector<>();\n  try(StandardJavaFileManager fm=c.getStandardFileManager(d,null,null)){\n   JavacTask task=(JavacTask)c.getTask(null,fm,d,List.of("-proc:none"),null,fm.getJavaFileObjects(a[0]));\n   CompilationUnitTree unit=task.parse().iterator().next();\n   need(d.getDiagnostics().stream().noneMatch(x->x.getKind()==Diagnostic.Kind.ERROR),"parse");\n   Map<String,MethodTree> methods=new HashMap<>();\n   ClassTree cls=(ClassTree)unit.getTypeDecls().get(0);\n   for(Tree t:cls.getMembers())if(t instanceof MethodTree){\n    MethodTree m=(MethodTree)t;need(methods.put(m.getName().toString(),m)==null,"duplicate method");\n   }\n   if(a[2].equals("new")){\n    MethodTree preview=methods.get("previewUi");need(preview!=null,"preview absent");\n    List<? extends StatementTree> statements=preview.getBody().getStatements();\n    List<TryTree> tries=new ArrayList<>();\n    for(StatementTree s:statements)if(s instanceof TryTree)tries.add((TryTree)s);\n    need(tries.size()==1,"one outer cleanup");\n    TryTree tr=tries.get(0);\n    List<? extends StatementTree> body=tr.getBlock().getStatements();\n    need(body.size()>=4,"preview body");\n    need(body.get(0).toString().equals("inst.waitForIdleSync();"),"idle inside cleanup");\n    need(body.get(1).toString().equals("awaitPreviewScreen(inst, activity);"),"readiness caller");\n    need(body.get(2) instanceof VariableTree,"snapshot declaration");\n    VariableTree before=(VariableTree)body.get(2);\n    need(before.getName().contentEquals("before")&&before.getInitializer().toString().equals("state(inst, activity)"),"snapshot binding");\n    need(tr.getFinallyBlock()!=null&&tr.getFinallyBlock().getStatements().size()==2,"cleanup retained");\n    need(tr.getFinallyBlock().getStatements().get(0).toString().equals("onUi(inst, activity::finish);"),"finish cleanup");\n    need(tr.getFinallyBlock().getStatements().get(1).toString().equals("inst.waitForIdleSync();"),"cleanup idle");\n    need(calls(preview).stream().filter(x->called(x).equals("awaitPreviewScreen")).count()==1,"one readiness call");\n    List<MethodInvocationTree> snapshots=new ArrayList<>();\n    for(MethodInvocationTree x:calls(preview))if(called(x).equals("state"))snapshots.add(x);\n    need(snapshots.size()==2&&snapshots.stream().allMatch(x->x.toString().equals("state(inst, activity)")),"both snapshots bound");\n    for(StatementTree s:statements)if(s!=tr){\n     need(calls(s).stream().noneMatch(x->Set.of("state","awaitPreviewScreen","inst.waitForIdleSync").contains(called(x))),"startup read outside cleanup");\n    }\n    need(calls(methods.get("verify")).stream().filter(x->x.toString().equals("previewUi(inst, root)")).count()==1,"actual preview entry");\n   }\n   Trees trees=Trees.instance(task);SourcePositions positions=trees.getSourcePositions();\n   StringBuilder out=new StringBuilder();\n   for(String name:List.of("privateMethod","field","onUi","awaitPreviewScreen","state")){\n    MethodTree m=methods.get(name);\n    if(m==null){need(name.equals("awaitPreviewScreen")&&a[2].equals("old"),"missing method "+name);continue;}\n    out.append(source.substring((int)positions.getStartPosition(unit,m),(int)positions.getEndPosition(unit,m))).append("\\n");\n   }\n   Files.writeString(Path.of(a[1]),out.toString());\n  }\n }\n}\n'
+PAGED_READY_HARNESS='\nimport java.util.*;\npublic class ReadyTest {\n interface Action{void run()throws Exception;}\n@@METHODS@@\n public static class Database{\n  int reads;\n  public byte[] exportState(){if(android.app.Instrumentation.main)throw new AssertionError("database on UI");reads++;return new byte[]{4,8,15};}\n }\n public static class Screen{public boolean busy;public Database db=new Database();}\n static void need(boolean b,String s){if(!b)throw new AssertionError(s);}\n public static void main(String[] args)throws Exception{\n  String mode=args[0];boolean old=args[1].equals("old");\n  android.app.Activity a=new android.app.Activity();\n  Screen s=new Screen();\n  android.app.Instrumentation inst=new android.app.Instrumentation();\n  android.app.Instrumentation.before=()->{\n   if(mode.equals("late"))android.os.SystemClock.now=10000;\n   boolean delayed=mode.equals("delayed")||mode.equals("never");\n   a.screen=delayed&&android.os.SystemClock.now< (mode.equals("never")?20000:100)?null:s;\n   s.busy=mode.equals("busy")&&android.os.SystemClock.now<100;\n  };\n  a.destroyed=mode.equals("destroyed");a.finishing=mode.equals("finishing");\n  if(mode.equals("ready"))a.screen=s;\n  Throwable failure=null;byte[] result=null;\n  try{\n   @@INVOKE@@\n  }catch(Throwable t){failure=t;}\n  if(old){\n   if(mode.equals("ready"))need(failure==null&&Arrays.equals(result,new byte[]{4,8,15}),"old ready");\n   else need(failure instanceof NullPointerException,"original null-screen RED "+failure);\n  }else if(Set.of("ready","delayed","busy").contains(mode)){\n   need(failure==null&&Arrays.equals(result,new byte[]{4,8,15})&&s.db.reads==1,"new snapshot "+failure);\n   need(android.app.Instrumentation.calls==(mode.equals("ready")?2:4),"main-thread observation and snapshot");\n   need(android.os.SystemClock.now==(mode.equals("ready")?0:100),"bounded poll semantics");\n  }else{\n   need(failure!=null&&s.db.reads==0,"failed readiness must not export");\n   if(mode.equals("never"))need(android.os.SystemClock.now==10000&&android.app.Instrumentation.calls==200,"exact observation cap");\n   if(Set.of("finishing","destroyed","late").contains(mode))need(android.app.Instrumentation.calls==1,"reject during wait, not a later snapshot");\n  }\n  System.out.println("CASE_PASS "+mode+" "+args[1]);\n }\n}\n'
+PAGED_OLD_STATE=' static byte[] state(android.app.Activity activity)throws Exception{\n  Object db=field(field(activity,"screen"),"db");\n  return(byte[])privateMethod(db.getClass(),"exportState").invoke(db);\n }\n'
+
+def paged_readiness_selftest():
+    """Compile actual method bytes with explicit Android doubles; not device proof."""
+    import ast
+    import inspect
+    import textwrap
+    with tempfile.TemporaryDirectory(prefix="paged-readiness-") as directory:
+        root=Path(directory)
+        (root/"Extract.java").write_text(PAGED_READY_EXTRACTOR)
+        def command(args):
+            p=subprocess.run(args,text=True,capture_output=True,timeout=40)
+            assert p.returncode==0,p.stdout+p.stderr
+            return p.stdout
+        command(["java","-m","jdk.compiler/com.sun.tools.javac.Main","-d",str(root),str(root/"Extract.java")])
+        def extract(source,mode="new",accept=True):
+            (root/"PagedContractTest.java").write_text(source)
+            p=subprocess.run(["java","-cp",str(root),"Extract",str(root/"PagedContractTest.java"),
+                str(root/"methods.txt"),mode],text=True,capture_output=True,timeout=40)
+            assert (p.returncode==0)==accept,p.stdout+p.stderr
+            if accept:return (root/"methods.txt").read_text()
+            assert "AssertionError" in p.stderr,p.stderr
+        actual=extract(JAVA)
+        # Actual helper bodies below are extracted from the currently executing JAVA.
+        stubs={
+          "android/app/Activity.java": "package android.app; public class Activity{public Object screen;public boolean destroyed,finishing;public boolean isDestroyed(){return destroyed;}public boolean isFinishing(){return finishing;}}",
+          "android/app/Instrumentation.java": "package android.app; public class Instrumentation{public static boolean main;public static int calls;public static Runnable before=()->{};public void runOnMainSync(Runnable r){calls++;main=true;try{before.run();r.run();}finally{main=false;}}}",
+          "android/os/SystemClock.java": "package android.os; public class SystemClock{public static long now;public static long uptimeMillis(){return now;}public static void sleep(long n){if(android.app.Instrumentation.main)throw new AssertionError(\"sleep on UI\");now+=n;}}",
+        }
+        for name,body in stubs.items():
+            path=root/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(body)
+        def compile_methods(methods,old=False):
+            invoke="result=state(a);" if old else "awaitPreviewScreen(inst,a); result=state(inst,a);"
+            code=PAGED_READY_HARNESS.replace("@@METHODS@@",methods).replace("@@INVOKE@@",invoke)
+            (root/"ReadyTest.java").write_text(code)
+            command(["java","-m","jdk.compiler/com.sun.tools.javac.Main","-d",str(root),
+                     str(root/"ReadyTest.java"),*[str(root/name) for name in stubs]])
+        def case(name,old=False,accept=True):
+            p=subprocess.run(["java","-cp",str(root),"ReadyTest",name,"old" if old else "new"],
+                             text=True,capture_output=True,timeout=10)
+            assert (p.returncode==0)==accept,p.stdout+p.stderr
+            if not accept:assert "AssertionError" in p.stderr,p.stderr
+        compile_methods(actual)
+        cases=("ready","delayed","busy","never","finishing","destroyed","late")
+        for name in cases:case(name)
+        changes=[
+          ('screen!=null&&!((Boolean)field(screen,"busy"))','screen!=null',"busy"),
+          ('activity.isDestroyed()||activity.isFinishing()','false',"finishing"),
+          ('if(observed>=deadline)','if(false)',"late"),
+          ('android.os.SystemClock.sleep(Math.min(50,deadline-observed))','android.os.SystemClock.sleep(10000)',"delayed"),
+        ]
+        for old,new,bad in changes:
+            # Lifecycle guard occurs in wait and snapshot; mutate wait only.
+            assert old in actual
+            mutant=actual.replace(old,new,1);assert mutant!=actual
+            compile_methods(mutant);case("ready");case(bad,accept=False)
+        # Real original state fragment retained as a regression fixture.
+        old_methods=actual[:actual.index("static void awaitPreviewScreen")]+PAGED_OLD_STATE
+        compile_methods(old_methods,True);case("ready",True);case("delayed",True)
+        # Whole-call omissions use the exact same JDK AST checker.
+        omissions=[
+          ("awaitPreviewScreen(inst,activity);",""),
+          ("previewUi(inst,root);",""),
+          ("onUi(inst,activity::finish);",""),
+          ("byte[] before=state(inst,activity);","byte[] before=null;"),
+        ]
+        for old,new in omissions:
+            assert JAVA.count(old)==1,old
+            extract(JAVA.replace(old,new,1),accept=False)
+    print("PAGED_READINESS_HOST cases=7 witnessed_mutants=4 caller_omissions=4 original_null_RED PASS ANDROID_DOUBLES_ONLY",flush=True)
+
 def selftest():
+    paged_readiness_selftest()
     paged_signing_selftest()
     dependency_setup_selftest()
     format_button_selftest()

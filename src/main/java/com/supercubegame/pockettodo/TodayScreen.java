@@ -268,7 +268,7 @@ public final class TodayScreen {
         LinearLayout tabs=new LinearLayout(activity);String[] labels={"全部","待办","已完成"};
         for(int i=0;i<labels.length;i++){final int choice=i;Button b=button(labels[i],()->{filter=choice;loadTodos();});if(i==filter){b.setBackgroundTintList(ColorStateList.valueOf(ACCENT));b.setTextColor(WHITE);}tabs.addView(b,new LinearLayout.LayoutParams(0,dp(48),1));}
         body.addView(tabs);
-        ScrollView scroll=new ScrollView(activity);scroll.setFillViewport(true);LinearLayout rows=column();scroll.addView(rows);body.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        ScrollView scroll=new ScrollView(activity);scroll.setContentDescription("todo-list-scroll");scroll.setFillViewport(true);LinearLayout rows=column();scroll.addView(rows);body.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         int visible=0;
         for(TodoRow item:todos){
             if((filter==1&&item.done)||(filter==2&&!item.done))continue;visible++;
@@ -341,7 +341,12 @@ public final class TodayScreen {
             String value=field.getText().toString().trim();
             if(!multiline&&value.isEmpty()){validation.setText("内容不能为空");validation.setTextColor(ERROR);return;}
             dialog.setCancelable(false);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);field.setEnabled(false);
-            work(()->{save.accept(value);return true;},ignored->{dialog.dismiss();success.run();},()->{
+            work(()->{save.accept(value);return true;},ignored->{
+                InputMethodManager ime=(InputMethodManager)activity.getSystemService(Activity.INPUT_METHOD_SERVICE);
+                if(ime!=null)ime.hideSoftInputFromWindow(field.getWindowToken(),0);
+                field.clearFocus();
+                dialog.dismiss();success.run();
+            },()->{
                 dialog.setCancelable(true);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);field.setEnabled(true);validation.setText("未能保存，请检查内容后重试");validation.setTextColor(ERROR);
             });
         }));

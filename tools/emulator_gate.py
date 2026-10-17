@@ -919,7 +919,362 @@ def readiness_timeout_wiring_selftest():
     else:raise AssertionError("artifact collection omission survived")
     print("READINESS_TIMEOUT_WIRING actual_call=1 registration_omissions=3 upload_omissions=1 PASS AST_AND_COLLECTION_ONLY",flush=True)
 
+def reveal_todo(read_nodes, swipe, package, title, clock=time.monotonic):
+    """Navigation within one original20s observation budget, never retry a write."""
+    deadline=clock()+20
+    history=[]
+    for direction in (-1,1):
+        previous=None
+        for attempt in range(9):
+            assert clock()<deadline, 'todo navigation deadline; history='+repr(history)
+            frame=list(read_nodes())
+            assert clock()<deadline, 'todo observation exceeded deadline'
+            view=[n for n in frame if n.get('content-desc')=='todo-list-scroll']
+            assert len(view)==1, 'missing/duplicate todo viewport'
+            view=view[0]
+            assert view.get('package')==package and view.get('class')=='android.widget.ScrollView' and view.get('enabled')=='true', 'invalid todo viewport owner/type'
+            def bounds(n):
+                m=re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]',n.get('bounds',''))
+                assert m, 'malformed todo bounds'
+                a,b,c,d=map(int,m.groups())
+                assert c>a and d>b, 'empty todo bounds'
+                return a,b,c,d
+            left,top,right,bottom=bounds(view)
+            assert right-left>=3 and bottom-top>=3, 'collapsed todo viewport'
+            matches=[n for n in frame if n.get('text')==title]
+            assert len(matches)<=1, 'ambiguous todo title'
+            if matches:
+                n=matches[0];a,b,c,d=bounds(n)
+                assert n.get('package')==package and n.get('class')=='android.widget.CheckBox' and n.get('enabled')=='true', 'invalid todo checkbox'
+                identity=n.get('content-desc','')
+                assert identity.startswith('todo-') and len(identity)>5, 'missing todo identity'
+                assert left<=a<c<=right and top<=b<d<=bottom, 'todo outside viewport'
+                print('TODO_VIEWPORT_FOUND '+json.dumps(dict(title=title,identity=identity,bounds=[a,b,c,d],history=history),ensure_ascii=False),flush=True)
+                return n
+            signature=tuple(tuple(n.get(k,'') for k in ('package','content-desc','text','bounds','class')) for n in frame)
+            if signature==previous:break
+            previous=signature
+            if attempt<8:
+                x,start,_,end=summary_gesture((left,top,right,bottom))
+                if direction==-1:start,end=end,start
+                history.append(dict(direction=direction,attempt=attempt,viewport=[left,top,right,bottom],gesture=[x,start,x,end]))
+                swipe(x,start,x,end)
+    raise AssertionError('todo identity absent at navigation bound; history='+repr(history))
+
+def todo_navigation_selftest():
+    import ast,inspect,copy
+    package='fixture.todo'
+    view=dict(package=package,**{'content-desc':'todo-list-scroll','class':'android.widget.ScrollView','enabled':'true','bounds':'[18,288][302,522]'})
+    target=dict(package=package,text='After backup',**{'content-desc':'todo-id3','class':'android.widget.CheckBox','enabled':'true','bounds':'[26,400][178,452]'})
+    def run(fn,mode):
+        offset=0;gestures=[];ticks=0
+        def read():
+            if mode=='bad-owner':return [dict(view,package='other'),target]
+            if mode=='collapsed':return [dict(view,bounds='[18,341][302,343]')]
+            if mode=='duplicate-view':return [view,view]
+            if mode=='malformed':return [dict(view,bounds='broken')]
+            if mode=='empty':return [dict(view,bounds='[18,288][18,522]')]
+            visible=mode!='absent' and (mode!='delayed' or offset>0)
+            if not visible:return [view]
+            n=dict(target)
+            if mode=='bad-class':n['class']='android.widget.TextView'
+            if mode=='bad-id':n['content-desc']='todo-'
+            if mode=='outside':n['bounds']='[26,523][178,575]'
+            if mode=='disabled':n['enabled']='false'
+            if mode=='foreign-target':n['package']='other'
+            return [view,n,n] if mode=='duplicate-target' else [view,n]
+        def swipe(x,a,y,b):
+            nonlocal offset
+            assert 18<x<302 and x==y and 288<a<522 and 288<b<522, 'gesture outside current viewport'
+            gestures.append((x,a,y,b));offset=max(0,offset+(1 if a>b else -1))
+        def clock():
+            nonlocal ticks
+            ticks+=1
+            return ticks*21 if mode=='deadline' else ticks/1000
+        result=fn(read,swipe,package,'After backup',clock)
+        if mode in ('ready','delayed'):assert result==target
+        if mode=='delayed':assert len(gestures)==2,gestures
+        return gestures
+    assert run(reveal_todo,'ready')==[]
+    run(reveal_todo,'delayed')
+    negatives=['bad-owner','collapsed','duplicate-view','malformed','empty','absent','bad-class','bad-id','outside','disabled','foreign-target','duplicate-target','deadline']
+    for mode in negatives:
+        try:run(reveal_todo,mode)
+        except AssertionError:pass
+        else:raise AssertionError('todo negative survived '+mode)
+    source=inspect.getsource(reveal_todo)
+    mutations=[
+        ("view.get('package')==package","True",'bad-owner'),
+        ("n.get('class')=='android.widget.CheckBox'","True",'bad-class'),
+        (" and len(identity)>5","",'bad-id'),
+        ("left<=a<c<=right and top<=b<d<=bottom","True",'outside'),
+        ("clock()<deadline","True",'deadline'),
+    ]
+    for old,new,mode in mutations:
+        assert old in source
+        scope=dict(globals());exec(compile(source.replace(old,new),'<todo-mutant>','exec'),scope)
+        fn=scope['reveal_todo'];run(fn,'ready')
+        try:run(fn,mode)
+        except AssertionError:raise AssertionError('todo mutant was not witnessed '+mode)
+    module=ast.parse(Path(__file__).read_text())
+    def wiring(tree):
+        funcs={n.name:n for n in tree.body if isinstance(n,ast.FunctionDef)}
+        caller=next(n for n in funcs['_verify_native_ui'].body if isinstance(n,ast.FunctionDef) and n.name=='named_todo')
+        assert any(isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='reveal_todo' for n in ast.walk(caller)), 'todo caller omitted'
+        for name in ('todo_navigation_selftest','result_ui_selftest'):
+            assert any(isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id==name for n in ast.walk(funcs['parser_selftest'])), 'selftest omitted'
+    wiring(module)
+    for name in ('reveal_todo','todo_navigation_selftest','result_ui_selftest'):
+        mutant=copy.deepcopy(module)
+        class Remove(ast.NodeTransformer):
+            def visit_Call(self,n):
+                if isinstance(n.func,ast.Name) and n.func.id==name:return ast.Constant(None)
+                return self.generic_visit(n)
+        mutant=Remove().visit(mutant)
+        try:wiring(mutant)
+        except AssertionError:pass
+        else:raise AssertionError('whole call omission survived '+name)
+    print('TODO_NAVIGATION_HOST positive=2 negatives=13 witnessed_mutants=5 caller_omissions=3 PASS SYNTHETIC_GEOMETRY_NOT_ANDROID')
+
+RESULT_UI_EXTRACTOR=r'''
+import java.nio.file.*;import java.util.*;import javax.tools.*;
+import com.sun.source.tree.*;import com.sun.source.util.*;
+public class Extract {
+ public static void main(String[] a)throws Exception {
+  String s=Files.readString(Path.of(a[0]));JavaCompiler c=ToolProvider.getSystemJavaCompiler();
+  DiagnosticCollector<JavaFileObject> d=new DiagnosticCollector<>();
+  try(StandardJavaFileManager fm=c.getStandardFileManager(d,null,null)){
+   JavacTask t=(JavacTask)c.getTask(null,fm,d,List.of("-proc:none"),null,fm.getJavaFileObjects(a[0]));
+   CompilationUnitTree u=t.parse().iterator().next();
+   if(d.getDiagnostics().stream().anyMatch(x->x.getKind()==Diagnostic.Kind.ERROR))throw new AssertionError("parse");
+   SourcePositions p=Trees.instance(t).getSourcePositions();Set<String> wanted=new HashSet<>(Arrays.asList(a[2].split(","))),found=new HashSet<>();
+   StringBuilder out=new StringBuilder();
+   for(Tree member:((ClassTree)u.getTypeDecls().get(0)).getMembers()){
+    String name=member instanceof MethodTree m?m.getName().toString():member instanceof VariableTree v?v.getName().toString():"";
+    if(wanted.contains(name)){
+     if(!found.add(name)&&!name.equals("work"))throw new AssertionError("duplicate");
+     out.append(s.substring((int)p.getStartPosition(u,member),(int)p.getEndPosition(u,member))).append("\n");
+    }
+   }
+   if(!found.equals(wanted))throw new AssertionError("missing actual member "+found);
+   Files.writeString(Path.of(a[1]),out.toString());
+  }
+ }
+}
+'''
+
+RESULT_UI_HARNESS=r'''
+import java.nio.file.*;import java.io.*;import java.util.concurrent.*;import java.util.function.*;
+class Uri {String getScheme(){throw new AssertionError("URI must not be read");}}
+class Intent {Uri getData(){throw new AssertionError("result payload must not be read");}}
+class Base {static final int RESULT_OK=-1;protected void onActivityResult(int a,int b,Intent c){}}
+public class Harness extends Base {
+ static int writes,readbacks,opens,closes;static final String MESSAGE="页面已重建，请重新选择导出内容";
+ static final int EXPORT_BACKUP=41,IMPORT_BACKUP=42,PICK_NOTE_IMAGE=43,EXPORT_NOTES=44;
+ static final String[] SHARE_FORMATS={"Markdown","PDF","PNG"};
+ static class android {static class database {static class sqlite {
+  static class SQLiteDatabase {void beginTransaction(){}void setTransactionSuccessful(){}void endTransaction(){}}
+ }}}
+ static class AppDatabase {
+  void close(){}byte[] exportState(){throw new AssertionError("DB read not allowed");}
+  android.database.sqlite.SQLiteDatabase getWritableDatabase(){throw new AssertionError("DB write not allowed");}
+ }
+ static class TodayScreen {
+  AppDatabase db;String message="";int notices;
+  TodayScreen(Harness owner,AppDatabase d){db=d;}
+  void show(Object saved){message="已保存到本机";}
+  void close(){}void message(String s,boolean error){message=s;notices++;}
+  void backupCancelled(){throw new AssertionError("backup must not replay");}
+  void exportBackup(Path p){throw new AssertionError("backup must not replay");}
+  void backupExported(){}void previewRestore(Path p){throw new AssertionError("restore must not replay");}
+  void backupFailed(Exception e){throw new AssertionError(e);}
+  <T> void work(Callable<T> a,Consumer<T> b,Runnable c){throw new AssertionError("work must not enqueue");}
+ }
+ static class ShareTicket {void close(){closes++;}byte[] take(byte[] b){throw new AssertionError("consent must not resurrect");}}
+ static class VerifiedShareWrite {
+  interface O {OutputStream open()throws IOException;}interface I {InputStream open()throws IOException;}
+  static void write(byte[] b,O o,I i){writes++;throw new AssertionError("no output");}
+ }
+ static class Delivery {boolean taken;AppDatabase take(){if(taken)return null;taken=true;opens++;return new AppDatabase();}}
+ static class Resolver {InputStream openInputStream(Uri u){readbacks++;throw new AssertionError("no URI read");}}
+ TodayScreen screen;Object startupSaved;ShareTicket pendingShare;int pendingShareFormat;
+ Consumer<Uri> pendingImage;Delivery startupDelivery=new Delivery();
+ Executor startupIo=Runnable::run;boolean destroyed,finishing;
+ boolean isDestroyed(){return destroyed;}boolean isFinishing(){return finishing;}
+ void releaseStartup(){}void startupMessage(boolean failed){throw new AssertionError("startup failed");}
+ java.io.File getCacheDir(){throw new AssertionError("no cache access");}
+ Resolver getContentResolver(){return new Resolver();}
+ OutputStream openDestination(Uri u){writes++;throw new AssertionError("no output");}
+ /*ACTUAL*/
+ public static void main(String[] args){
+  Harness h=new Harness();String scenario=args[0];int request=EXPORT_NOTES;
+  if(scenario.equals("ready"))h.finishDefaultStartup();
+  if(scenario.equals("image"))request=PICK_NOTE_IMAGE;
+  if(scenario.equals("backup"))request=EXPORT_BACKUP;
+  if(scenario.equals("import"))request=IMPORT_BACKUP;
+  if(scenario.equals("unknown"))request=987;
+  if(scenario.equals("destroyed"))h.destroyed=true;
+  if(scenario.equals("finishing"))h.finishing=true;
+  if(scenario.equals("ticket")){h.pendingShare=new ShareTicket();h.pendingImage=u->{throw new AssertionError("callback replay");};}
+  h.onActivityResult(request,RESULT_OK,new Intent());
+  if(h.destroyed||h.finishing){
+   if(h.startupRefusal!=0||h.screen!=null||opens!=0)throw new AssertionError("retired notice");
+  }else{
+   if(!scenario.equals("ready"))h.finishDefaultStartup();
+   String expected=request==EXPORT_NOTES?MESSAGE:request==PICK_NOTE_IMAGE?"页面已重建，请重新选择图片；笔记未改变":request==987?"已保存到本机":"页面已重建，请重新选择备份或恢复操作；本机数据未改变";
+   if(!expected.equals(h.screen.message))throw new AssertionError("lost_notice: actual="+h.screen.message);
+   if(h.startupRefusal!=0)throw new AssertionError("notice not consumed");
+   int before=h.screen.notices;h.finishDefaultStartup();
+   if(before!=h.screen.notices||opens!=1)throw new AssertionError("notice replay");
+   if(scenario.equals("ticket")&&(closes!=1||h.pendingShare!=null||h.pendingImage!=null))throw new AssertionError("consent retained");
+  }
+  if(writes!=0||readbacks!=0)throw new AssertionError("side effects");
+  System.out.println("PASS "+scenario+" no_URI_no_write");
+ }
+}
+'''
+
+EDITOR_UI_HARNESS=r'''
+import java.util.*;import java.util.concurrent.*;import java.util.function.*;
+public class EditorHarness {
+ static List<String> events=new ArrayList<>();static Button positive,negative;static EditText current;static boolean fail,absentIme;
+ static final int MUTED=1,ERROR=2;boolean busy;
+ static class Activity {static final String INPUT_METHOD_SERVICE="ime";Object getSystemService(String key){return absentIme?null:new InputMethodManager();}}
+ Activity activity=new Activity();
+ static class InputMethodManager {void hideSoftInputFromWindow(Object token,int flags){if(!token.equals("attached"))throw new AssertionError("detached token");events.add("hide");}}
+ interface Click {void run(Object x);}
+ static class Button {Click listener;boolean enabled=true;void setOnClickListener(Click c){listener=c;}void setEnabled(boolean b){enabled=b;}}
+ static class LinearLayout {static class LayoutParams {LayoutParams(int a,int b){}}void setPadding(int a,int b,int c,int d){}void addView(Object o){}void addView(Object o,Object p){}}
+ static class TextView {void setText(String s){}void setTextColor(int n){}}
+ static class EditText {String text;boolean enabled=true;void setText(String s){text=s;}String getText(){return text;}void setEnabled(boolean b){enabled=b;}Object getWindowToken(){return events.contains("dismiss")?"detached":"attached";}void clearFocus(){events.add("clear");}}
+ static class AlertDialog {
+  static final int BUTTON_POSITIVE=1,BUTTON_NEGATIVE=2;Click show;boolean cancelable=true;
+  static class Builder {
+   Builder(Activity a){}Builder setTitle(String t){return this;}Builder setView(Object v){return this;}
+   Builder setNegativeButton(String t,Object c){return this;}Builder setPositiveButton(String t,Object c){return this;}
+   AlertDialog create(){positive=new Button();negative=new Button();return new AlertDialog();}
+  }
+  void setOnShowListener(Click c){show=c;}Button getButton(int b){return b==1?positive:negative;}
+  void show(){show.run(null);}void dismiss(){events.add("dismiss");}void setCancelable(boolean b){cancelable=b;}
+ }
+ LinearLayout column(){return new LinearLayout();}int dp(int n){return n;}
+ EditText field(String d,boolean m){current=new EditText();return current;}
+ TextView text(String s,int n,int c){return new TextView();}
+ <T>void work(Callable<T> task,Consumer<T> ok,Runnable failed){
+  events.add("work");try{if(fail)throw new Exception("injected save failure");T r=task.call();ok.accept(r);}catch(Exception e){failed.run();}
+ }
+ /*ACTUAL*/
+ public static void main(String[] args){
+  String mode=args[0];EditorHarness h=new EditorHarness();
+  h.busy=mode.equals("busy");fail=mode.equals("failure");absentIme=mode.equals("no-ime");
+  h.editor("title","description",mode.equals("empty")?" ":"new text",false,v->{events.add("save");},()->events.add("refresh"));
+  if(mode.equals("busy")){if(positive!=null||!events.isEmpty())throw new AssertionError("busy changed");}
+  else if(mode.equals("cancel")){if(!events.isEmpty())throw new AssertionError("cancel changed");}
+  else{
+   positive.listener.run(null);
+   List<String> expected=mode.equals("empty")?List.of():fail?List.of("work"):absentIme?List.of("work","save","clear","dismiss","refresh"):List.of("work","save","hide","clear","dismiss","refresh");
+   if(!events.equals(expected))throw new AssertionError("IME/order "+events+" expected "+expected);
+   if((fail||mode.equals("empty"))&&(!current.enabled||!positive.enabled||!negative.enabled))throw new AssertionError("validation not editable");
+  }
+  System.out.println("PASS "+mode);
+ }
+}
+'''
+
+NOTICE_UI_HARNESS=r'''
+import java.util.*;import java.util.concurrent.*;import java.util.function.*;
+public class NoticeHarness {
+ static final int ERROR=1,MUTED=2;boolean closed,busy;Object root=new Object();
+ static class Status {String value;void setText(String v){value=v;}void setTextColor(int c){}}
+ Status status=new Status();
+ List<Runnable> jobs=new ArrayList<>(),ui=new ArrayList<>();
+ Executor io=jobs::add;
+ class Activity {void runOnUiThread(Runnable r){ui.add(r);}boolean isDestroyed(){return false;}}
+ Activity activity=new Activity();void pause(Object x){}void resume(){}
+ /*ACTUAL*/
+ public static void main(String[] a){
+  NoticeHarness h=new NoticeHarness();boolean newer=a[0].equals("newer");int[] success={0};
+  h.work(()->1,v->success[0]++,null);
+  if(newer)h.message("recreated-refusal",true);
+  if(h.jobs.size()!=1||!h.ui.isEmpty())throw new AssertionError("fixture scheduling");
+  h.jobs.remove(0).run();if(h.ui.size()!=1)throw new AssertionError("fixture completion");
+  h.ui.remove(0).run();
+  String expected=newer?"recreated-refusal":"已保存到本机";
+  if(!expected.equals(h.status.value)||success[0]!=1||h.busy)throw new AssertionError("notice overwritten "+h.status.value);
+ }
+}
+'''
+
+def result_ui_selftest():
+    """Current-source Java execution. Android, IME and DB are explicit doubles."""
+    import tempfile
+    def checked(args):
+        p=subprocess.run(args,capture_output=True,text=True,timeout=30)
+        assert p.returncode==0,(args,p.stdout,p.stderr)
+        return p
+    with tempfile.TemporaryDirectory() as tmp:
+        root=Path(tmp);(root/'Extract.java').write_text(RESULT_UI_EXTRACTOR)
+        compiler=['java','-m','jdk.compiler/com.sun.tools.javac.Main','-d',tmp]
+        checked(compiler+[str(root/'Extract.java')])
+        extracted={}
+        for filename,names in [('MainActivity.java','startupRefusal,finishDefaultStartup,onActivityResult,finishShare'),('TodayScreen.java','editor')]:
+            source=ROOT/'src/main/java/com/supercubegame/pockettodo'/filename
+            checked(['java','-cp',tmp,'Extract',str(source),str(root/'members.java'),names])
+            extracted[filename]=(root/'members.java').read_text()
+        def compile_run(members,template,cls,modes):
+            file=root/(cls+'.java');file.write_text(template.replace('/*ACTUAL*/',members))
+            checked(compiler+[str(file)])
+            return {mode:subprocess.run(['java','-cp',tmp,cls,mode],capture_output=True,text=True,timeout=10) for mode in modes}
+        main=extracted['MainActivity.java'];editor=extracted['TodayScreen.java']
+        scenarios=['ready','delayed','image','backup','import','unknown','destroyed','finishing','ticket']
+        results=compile_run(main,RESULT_UI_HARNESS,'Harness',scenarios)
+        assert all(p.returncode==0 for p in results.values()),{k:p.stderr for k,p in results.items() if p.returncode}
+        # Reintroduce the original whole-guard omission while keeping a ready witness.
+        start=main.index('        if(isDestroyed()||isFinishing())return;',main.index('onActivityResult('))
+        end=main.index('        if(request==EXPORT_NOTES){finishShare',start)
+        original=main[:start]+'        if(screen==null)return;\n'+main[end:]
+        old=compile_run(original,RESULT_UI_HARNESS,'Harness',['ready','delayed'])
+        assert old['ready'].returncode==0 and old['delayed'].returncode!=0 and 'lost_notice' in old['delayed'].stderr, 'original RED not witnessed'
+        mutants=[
+            ('startupRefusal=request;','startupRefusal=0;','delayed','lost_notice'),
+            ('int refused=startupRefusal;startupRefusal=0;','int refused=startupRefusal;','delayed','notice not consumed'),
+            ('if(isDestroyed()||isFinishing())return;','if(false)return;','destroyed','retired notice'),
+            ('pendingImage=null;\n            if(pendingShare!=null)','/* omitted */\n            if(pendingShare!=null)','ticket','consent retained'),
+        ]
+        for old,new,mode,reason in mutants:
+            assert main.count(old)==1,old
+            run=compile_run(main.replace(old,new,1),RESULT_UI_HARNESS,'Harness',['ready',mode])
+            assert run['ready'].returncode==0 and run[mode].returncode!=0 and reason in run[mode].stderr,(mode,run[mode].stderr)
+        modes=['success','empty','failure','cancel','busy','no-ime']
+        results=compile_run(editor,EDITOR_UI_HARNESS,'EditorHarness',modes)
+        assert all(p.returncode==0 for p in results.values()),{k:p.stderr for k,p in results.items() if p.returncode}
+        # Original editor success must fail while validation still behaves normally.
+        a=editor.index('                InputMethodManager ime=')
+        b=editor.index('dialog.dismiss();success.run();',a)
+        original=editor[:a]+editor[b:]
+        run=compile_run(original,EDITOR_UI_HARNESS,'EditorHarness',['empty','success'])
+        assert run['empty'].returncode==0 and run['success'].returncode!=0 and 'IME/order' in run['success'].stderr
+        for old,new in [('if(ime!=null)ime.hideSoftInputFromWindow(field.getWindowToken(),0);',''),
+                        ('field.clearFocus();',''),
+                        ('dialog.dismiss();success.run();','success.run();dialog.dismiss();')]:
+            assert editor.count(old)==1
+            run=compile_run(editor.replace(old,new,1),EDITOR_UI_HARNESS,'EditorHarness',['empty','success'])
+            assert run['empty'].returncode==0 and run['success'].returncode!=0 and 'IME/order' in run['success'].stderr,run['success'].stderr
+        checked(['java','-cp',tmp,'Extract',str(ROOT/'src/main/java/com/supercubegame/pockettodo/TodayScreen.java'),str(root/'notice.java'),'work,message,notice'])
+        notice=(root/'notice.java').read_text()
+        run=compile_run(notice,NOTICE_UI_HARNESS,'NoticeHarness',['normal','newer'])
+        assert all(p.returncode==0 for p in run.values()),{k:p.stderr for k,p in run.items()}
+        assert notice.count('if(notice==noticeAtStart)')==2
+        run=compile_run(notice.replace('if(notice==noticeAtStart)',''),NOTICE_UI_HARNESS,'NoticeHarness',['normal','newer'])
+        assert run['normal'].returncode==0 and run['newer'].returncode!=0 and 'notice overwritten' in run['newer'].stderr
+        extracted['TodayScreen.notice']=notice
+        print('RESULT_EDITOR_HOST cases=17 original_RED=2 witnessed_mutants=8 PASS ACTUAL_SOURCE_ANDROID_DB_IME_DOUBLES_ONLY',
+              {k:hashlib.sha256(v.encode()).hexdigest() for k,v in extracted.items()},flush=True)
+
+
 def parser_selftest():
+    result_ui_selftest()
+    todo_navigation_selftest()
     database_timeout_selftest()
     readiness_timeout_wiring_selftest()
     restore_picker_summary_selftest()
@@ -1247,7 +1602,7 @@ def _verify_native_ui(adb,nodes):
         (out/name).write_bytes(data)
         shots.append({'file':name,'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()})
     def named_todo(title):
-        n=find(text=title); assert n.get('class')=='android.widget.CheckBox' and n.get('content-desc','').startswith('todo-'),n.attrib
+        n=reveal_todo(nodes,swipe_summary,PKG,title)
         return n
     def add_todo(title):
         touch('新待办输入'); type_text(title); tap('添加'); ready(); return named_todo(title)

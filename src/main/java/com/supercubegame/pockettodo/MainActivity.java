@@ -33,6 +33,7 @@ public final class MainActivity extends Activity {
     @Override protected void onSaveInstanceState(Bundle out){if(screen!=null)screen.save(out);else if(startupSaved!=null)out.putAll(startupSaved);super.onSaveInstanceState(out);}
     @Override public void onBackPressed(){if(screen==null||!screen.back())super.onBackPressed();}
     @Override protected void onDestroy(){
+        startupRefusal=0;
         stopStartup();
         pendingImage=null;
         if(pendingShare!=null){pendingShare.close();pendingShare=null;}
@@ -64,6 +65,7 @@ public final class MainActivity extends Activity {
     private final StartupDelivery startupDelivery=new StartupDelivery();
     private Bundle startupSaved;
     private boolean startupStopped;
+    private int startupRefusal;
     /** Owns a background-opened connection until exactly one screen takes it.
      * Cancellation before/after offer is terminal. Close is scheduled by the
      * owner, never performed while holding this monitor or on the UI thread.
@@ -107,6 +109,10 @@ public final class MainActivity extends Activity {
             next=new TodayScreen(this,opened);
             next.show(startupSaved);
             screen=next;startupSaved=null;
+            int refused=startupRefusal;startupRefusal=0;
+            if(refused==EXPORT_NOTES)screen.message("页面已重建，请重新选择导出内容",true);
+            else if(refused==PICK_NOTE_IMAGE)screen.message("页面已重建，请重新选择图片；笔记未改变",true);
+            else if(refused==EXPORT_BACKUP||refused==IMPORT_BACKUP)screen.message("页面已重建，请重新选择备份或恢复操作；本机数据未改变",true);
         }catch(Exception e){
             screen=null;
             if(next!=null)next.close();else startupIo.execute(opened::close);
@@ -565,7 +571,15 @@ public final class MainActivity extends Activity {
      */
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
-        if(screen==null)return;
+        if(isDestroyed()||isFinishing())return;
+        if(screen==null){
+            // Only a bounded notice identity survives startup, never data/URI/consent.
+            if(request==EXPORT_NOTES||request==PICK_NOTE_IMAGE||request==EXPORT_BACKUP||request==IMPORT_BACKUP)
+                startupRefusal=request;
+            pendingImage=null;
+            if(pendingShare!=null){pendingShare.close();pendingShare=null;}
+            return;
+        }
         if(request==EXPORT_NOTES){finishShare(result,data);return;}
         if(request==PICK_NOTE_IMAGE){
             java.util.function.Consumer<Uri> callback=pendingImage;pendingImage=null;

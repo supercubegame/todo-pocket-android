@@ -1,4 +1,4 @@
-name: Recover exact ebd API34 original evidence
+name: Recover verified ebd API34 original evidence
 on:
   push:
     branches: [ci/shortcut-storage-preflight-4d8742]
@@ -14,17 +14,26 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - name: Recover original artifact without product writes or device reruns
+      - name: Restore byte-exact reader and recover original evidence only
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import ast,base64,hashlib,pathlib,zlib
-          raw=zlib.decompress(base64.b64decode("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"))
-          assert len(raw)==8761 and hashlib.sha256(raw).hexdigest()=="e1676e166d2f96ad4fc1651f5176cfd3e1c19407cdd7fcd2444f4eca13809b34"
-          ast.parse(raw)
-          pathlib.Path("recover.py").write_bytes(raw)
+          import ast,hashlib,urllib.request
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/88aa1ddd15588a02f834c496cde90b4e51a9ba59/.github/workflows/shortcut-storage.yml"
+          with urllib.request.urlopen(url,timeout=60) as response:raw=response.read(5765)
+          assert len(raw)==5764
+          assert hashlib.sha1(b"blob 5764\0"+raw).hexdigest()=="1e683bb5ccc4d7260a43c3bfd9916884ecf1daec"
+          for old,new in [(b"HRQp642IM6R6bsAR",b"HRQp642IM6RbsAR"),(b"gvghc1c1zMLL5",b"gvghc1zMLL5"),(b"T36cnkfE/LdUR",b"T36cnE/LdUR")]:
+              assert raw.count(old)==1
+              raw=raw.replace(old,new)
+          assert len(raw)==5759 and hashlib.sha256(raw).hexdigest()=="38e34e1bba962a931fb41976400ee483ecc584106c6beda65d97e02afcd6d87c"
+          body=raw.decode().split("          python3 - <<'PY'\n",1)[1].split("          PY\n",1)[0]
+          assert all(not line or line.startswith("          ") for line in body.splitlines())
+          source="\n".join(line[10:] for line in body.splitlines())+"\n"
+          ast.parse(source)
+          exec(compile(source,"verified-reader-loader","exec"))
           PY
           python3 recover.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

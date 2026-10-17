@@ -1272,7 +1272,283 @@ def result_ui_selftest():
               {k:hashlib.sha256(v.encode()).hexdigest() for k,v in extracted.items()},flush=True)
 
 
+"""Actual RelationEditor and restore-cancel caller tests, Android/DB doubles only."""
+RELATION_EXTRACTOR=r'''
+import java.nio.file.*;import java.util.*;import javax.tools.*;
+import com.sun.source.tree.*;import com.sun.source.util.*;
+public class ExtractRelation {
+ public static void main(String[] a)throws Exception {
+  String s=Files.readString(Path.of(a[0]));JavaCompiler c=ToolProvider.getSystemJavaCompiler();
+  DiagnosticCollector<JavaFileObject> d=new DiagnosticCollector<>();
+  try(StandardJavaFileManager fm=c.getStandardFileManager(d,null,null)){
+   JavacTask t=(JavacTask)c.getTask(null,fm,d,List.of("-proc:none"),null,fm.getJavaFileObjects(a[0]));
+   CompilationUnitTree u=t.parse().iterator().next();
+   if(d.getDiagnostics().stream().anyMatch(x->x.getKind()==Diagnostic.Kind.ERROR))throw new AssertionError("parse");
+   SourcePositions p=Trees.instance(t).getSourcePositions();Set<String> found=new HashSet<>();
+   for(Tree member:((ClassTree)u.getTypeDecls().get(0)).getMembers()){
+    String n=member instanceof ClassTree k?k.getSimpleName().toString():member instanceof MethodTree m?m.getName().toString():"";
+    if(n.equals("RelationEditor")||n.equals("renderDetail")){
+     if(!found.add(n))throw new AssertionError("duplicate");
+     Files.writeString(Path.of(a[1],n+".txt"),s.substring((int)p.getStartPosition(u,member),(int)p.getEndPosition(u,member)));
+     Files.writeString(Path.of(a[1],n+".ast"),member.toString());
+    }
+   }
+   if(found.size()!=2)throw new AssertionError("actual class/caller missing");
+  }
+ }
+}
+'''
+
+RELATION_HARNESS=r'''
+import java.util.*;import java.util.concurrent.*;import java.util.function.*;
+public class RelationHarness {
+ static List<String> events=new ArrayList<>();static Map<String,android.view.View> views=new HashMap<>();
+ static boolean noIme;static EditText field;
+ static class android {
+  static class content {static class Context {static String INPUT_METHOD_SERVICE="ime";}}
+  static class view {
+   static class View {
+    boolean attached=true,enabled=true;Consumer<View> listener;OnAttachStateChangeListener attach;String description="";
+    interface OnAttachStateChangeListener {void onViewAttachedToWindow(View v);void onViewDetachedFromWindow(View v);}
+    boolean isAttachedToWindow(){return attached;}boolean isEnabled(){return enabled;}
+    void setEnabled(boolean b){enabled=b;}void setContentDescription(String s){description=s;views.put(s,this);}
+    void setOnClickListener(Consumer<View> l){listener=l;}void click(){if(listener!=null)listener.accept(this);}
+    void addOnAttachStateChangeListener(OnAttachStateChangeListener l){attach=l;}
+    Object getWindowToken(){if(!attached)throw new AssertionError("detached token");return this;}
+    void clearFocus(){events.add("clear");}
+    void detach(){attached=false;if(attach!=null)attach.onViewDetachedFromWindow(this);}
+   }
+   static class inputmethod {static class InputMethodManager {
+    boolean hideSoftInputFromWindow(Object token,int flags){
+     if(token!=field||!field.attached)throw new AssertionError("wrong/detached input token");
+     events.add("hide");return true;
+    }
+   }}
+  }
+ }
+ static class TextView extends android.view.View {
+  String text="";void setText(String s){text=s;}String getText(){return text;}
+ }
+ static class EditText extends TextView {}
+ static class Button extends TextView {}
+ static class LinearLayout extends android.view.View {
+  static class LayoutParams {LayoutParams(int a,int b){}LayoutParams(int a,int b,int c){}}
+  void addView(android.view.View v){}void addView(android.view.View v,LayoutParams p){}
+ }
+ static class ScrollView extends LinearLayout {ScrollView(Activity a){}}
+ static class Activity {
+  boolean finishing,destroyed;
+  boolean isFinishing(){return finishing;}boolean isDestroyed(){return destroyed;}
+  Object getSystemService(String s){return noIme?null:new android.view.inputmethod.InputMethodManager();}
+ }
+ static class AppDatabase {
+  int prepares,confirms;boolean fail,stale;List<String> stored=List.of("Old");ActivityStringsPlan last;
+  static class ActivityStringsPlan {
+   boolean closed;long id=1;String title="Daily";List<String> values=List.of("Old");
+   long activityId(){return id;}String title(){return title;}List<String> values(){return values;}
+   void close(){closed=true;}
+  }
+  ActivityStringsPlan prepareActivityStrings(long id,boolean tags){
+   prepares++;last=new ActivityStringsPlan();if(stale)last.id=9;return last;
+  }
+  boolean confirmActivityStrings(ActivityStringsPlan p,List<String> v){
+   confirms++;if(fail||p.closed)throw new IllegalStateException("failed");
+   stored=new ArrayList<>(v);return true;
+  }
+ }
+ static class TodayScreen {
+  static int INK,MUTED,ERROR;Activity activity=new Activity();AppDatabase db=new AppDatabase();
+  ArrayDeque<Runnable> jobs=new ArrayDeque<>();String message="";
+  <T>void work(Callable<T> c,Consumer<T> ok,Runnable bad){
+   jobs.add(()->{T value;try{value=c.call();}catch(Exception e){if(bad!=null)bad.run();return;}ok.accept(value);});
+  }
+  void flush(){if(jobs.isEmpty())throw new AssertionError("missing actual work");jobs.remove().run();}
+  LinearLayout content(){return new LinearLayout();}LinearLayout column(){return new LinearLayout();}
+  TextView text(String s,int size,int color){TextView v=new TextView();v.setText(s);return v;}
+  EditText field(String s,boolean multi){field=new EditText();field.setContentDescription(s);return field;}
+  Button button(String s,Runnable r){Button b=new Button();b.setText(s);b.setOnClickListener(v->r.run());return b;}
+  void message(String s,boolean error){message=s;}
+ }
+ /*ACTUAL*/
+ static void check(boolean b,String s){if(!b)throw new AssertionError(s+" events="+events);}
+ public static void main(String[] a){
+  String mode=a[0];TodayScreen h=new TodayScreen();int[] backs={0};
+  Runnable back=()->{events.add("back");backs[0]++;field.attached=false;};
+  RelationEditor r=new RelationEditor(h,1,"Daily",mode.equals("tags"),List.of("Old"),back);
+  android.view.View anchor=new android.view.View();
+  if(mode.equals("finishing"))h.activity.finishing=true;
+  if(mode.equals("destroyed"))h.activity.destroyed=true;
+  if(mode.equals("stale"))h.db.stale=true;
+  r.open(anchor);
+  if(mode.equals("finishing")||mode.equals("destroyed")){
+   check(h.jobs.isEmpty()&&h.db.prepares==0&&events.isEmpty(),"retired open");return;
+  }
+  h.flush();
+  if(mode.equals("stale")){check(field==null&&h.db.last.closed&&events.isEmpty(),"stale open");return;}
+  check(field!=null&&r.active(),"actual open/render reached");
+  if(mode.equals("noime"))noIme=true;
+  field.setText(mode.equals("invalid")?"Home\n\nEnd":mode.equals("empty")?"":"Home\nDaily rewards");
+  if(mode.equals("cancel")){
+   views.get("relation-cancel").click();
+   check(h.db.confirms==0&&h.jobs.isEmpty()&&h.db.stored.equals(List.of("Old")),"cancel write");
+  }else{
+   if(mode.equals("failure")||mode.equals("failure-cancel"))h.db.fail=true;
+   views.get("relation-save").click();
+   if(mode.equals("invalid")){
+    check(h.jobs.isEmpty()&&h.db.confirms==0&&events.isEmpty()&&r.active()
+      &&views.get("relation-save").enabled&&((TextView)views.get("relation-validation")).text.length()>0,"invalid kept open");return;
+   }
+   check(h.jobs.size()==1&&!views.get("relation-save").enabled&&!views.get("relation-cancel").enabled&&events.isEmpty(),"no premature exit");
+   views.get("relation-save").click();views.get("relation-cancel").click();
+   check(h.jobs.size()==1&&events.isEmpty(),"one attempt");
+   if(mode.equals("detach")){r.root.detach();field.attached=false;}
+   h.flush();
+   if(mode.equals("detach")){
+    check(events.isEmpty()&&backs[0]==0&&h.db.last.closed&&h.db.stored.equals(List.of("Old")),"retired callback");return;
+   }
+   if(mode.equals("failure")||mode.equals("failure-cancel")){
+    check(events.isEmpty()&&backs[0]==0&&r.active()&&h.db.stored.equals(List.of("Old"))
+      &&views.get("relation-cancel").enabled&&h.db.last.closed,"failure kept visible");
+    if(mode.equals("failure"))return;
+    views.get("relation-cancel").click();
+   }else check(h.db.confirms==1&&h.db.stored.equals(mode.equals("empty")?List.of():List.of("Home","Daily rewards")),"exact ordered values");
+  }
+  check(events.equals(noIme?List.of("clear","back"):List.of("hide","clear","back")),"IME exit order");
+  check(backs[0]==1&&!r.active()&&r.plan==null&&h.db.last.closed,"closed once");
+  System.out.println("PASS "+mode+" "+events);
+ }
+}
+'''
+
+def relation_caller_contract(source):
+    """Execute the actual restore-cancel assertion and its current lookup caller."""
+    import ast,copy
+    tree=ast.parse(source)
+    native=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='_verify_native_ui')
+    funcs={n.name:n for n in native.body if isinstance(n,ast.FunctionDef)}
+    created={n.args[0].value for n in ast.walk(native) if isinstance(n,ast.Call)
+             and isinstance(n.func,ast.Name) and n.func.id=='add_todo' and n.args and isinstance(n.args[0],ast.Constant)}
+    assert created=={'Buy milk','Walk outside','After backup'},created
+    created.update(n.args[0].value for n in ast.walk(native) if isinstance(n,ast.Call)
+                   and isinstance(n.func,ast.Name) and n.func.id=='named_todo' and n.args and isinstance(n.args[0],ast.Constant))
+    blind=[n for n in ast.walk(native) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='find'
+           and any(k.arg=='text' and isinstance(k.value,ast.Constant) and k.value.value in created for k in n.keywords)]
+    assert not blind,'viewport-blind positive todo lookup'
+    label='canceling SAF restore preview makes no database write'
+    callers=[n for n in ast.walk(native) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='ok'
+             and len(n.args)>1 and isinstance(n.args[1],ast.Constant) and n.args[1].value==label]
+    assert len(callers)==1,'restore-cancel assertion omitted'
+    lookup=funcs['named_todo']
+    assert any(isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='reveal_todo' for n in ast.walk(lookup)), 'bounded lookup omitted'
+    # Both the native callsite and nested named_todo body execute, not a parallel reimplementation.
+    import xml.etree.ElementTree as ET
+    def run(visible,confirmation=False):
+        clock=[0.0];offset=[0];gestures=[]
+        def nodes():
+            clock[0]+=0.1
+            xml='<hierarchy><node class="android.widget.ScrollView" content-desc="todo-list-scroll" package="p" enabled="true" bounds="[18,288][302,522]"/>'
+            if visible and offset[0]>0:
+                xml+='<node text="After backup" class="android.widget.CheckBox" content-desc="todo-exact" package="p" enabled="true" bounds="[26,293][178,345]"/>'
+            return list(ET.fromstring(xml+'</hierarchy>').iter('node'))
+        def swipe(x,y,x2,end):
+            gestures.append((x,y,x2,end));offset[0]=max(0,offset[0]+(1 if y>end else -1))
+        def reveal(*args,**kwargs):
+            return reveal_todo(*args,**kwargs,clock=lambda:clock[0])
+        def ok(value,message):assert value,message
+        env=dict(reveal_todo=reveal,nodes=nodes,swipe_summary=swipe,PKG='p',absent=lambda s:not confirmation,ok=ok)
+        exec(compile(ast.fix_missing_locations(ast.Module(body=[copy.deepcopy(lookup)],type_ignores=[])),'actual-named-todo','exec'),env)
+        expr=ast.Expression(copy.deepcopy(callers[0]));ast.fix_missing_locations(expr)
+        eval(compile(expr,'actual-restore-cancel','eval'),env)
+        assert gestures and offset[0]>0,'actual caller did not navigate'
+    run(True)
+    for visible,confirmation in ((False,False),(True,True)):
+        try:run(visible,confirmation)
+        except (AssertionError,RuntimeError):pass
+        else:raise AssertionError('restore-cancel negative survived')
+    assert any(isinstance(n,ast.Constant) and n.value=='cancelled restore leaves exact new todo and old state independent'
+               for n in ast.walk(native)),'independent DB assertion omitted'
+    return tree
+
+def relation_ui_selftest(original_only=False):
+    import ast,copy,hashlib,subprocess,tempfile
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[1]
+    java=(root/'src/main/java/com/supercubegame/pockettodo/ActivitiesScreen.java')
+    source=Path(__file__).read_text()
+    def once(s,a,b):
+        assert s.count(a)==1,('mutation anchor',a)
+        return s.replace(a,b,1)
+    with tempfile.TemporaryDirectory(prefix='relation-actual-') as td:
+        d=Path(td);(d/'ExtractRelation.java').write_text(RELATION_EXTRACTOR)
+        def call(cmd):return subprocess.run(cmd,capture_output=True,text=True,timeout=40)
+        def good(p):assert p.returncode==0,(p.stdout,p.stderr)
+        good(call(['java','-m','jdk.compiler/com.sun.tools.javac.Main',str(d/'ExtractRelation.java')]))
+        good(call(['java','-cp',str(d),'ExtractRelation',str(java),str(d)]))
+        actual=(d/'RelationEditor.txt').read_text();caller=(d/'renderDetail.ast').read_text()
+        def wiring(c):
+            assert 'new RelationEditor(host, id, d.title, false, d.path, this::load)' in c,'path editor identity'
+            assert 'new RelationEditor(host, id, d.title, true, d.tags, this::load)' in c,'tag editor identity'
+            assert 'pathEditor.open(pathEdit)' in c and 'tagEditor.open(tagEdit)' in c,'actual open wiring'
+        wiring(caller)
+        def compile_actual(code):
+            (d/'RelationHarness.java').write_text(RELATION_HARNESS.replace('/*ACTUAL*/',code))
+            good(call(['java','-m','jdk.compiler/com.sun.tools.javac.Main',str(d/'RelationHarness.java')]))
+        def scenario(name,passed=True,reason='IME exit order'):
+            p=call(['java','-cp',str(d),'RelationHarness',name])
+            if passed:good(p)
+            else:assert p.returncode!=0 and reason in p.stderr,(name,p.stdout,p.stderr)
+        if original_only:
+            compile_actual(actual);scenario('invalid');scenario('success',False);scenario('cancel',False)
+            try:relation_caller_contract(source)
+            except AssertionError as e:assert 'viewport-blind' in str(e)
+            else:raise AssertionError('original caller unexpectedly passed')
+            print('RELATION_ORIGINAL_RED actual_class_sha256='+hashlib.sha256(actual.encode()).hexdigest()+' success_RED cancel_RED invalid_control_PASS restore_caller_RED ANDROID_DOUBLES_ONLY')
+            return
+        cases=('success','cancel','invalid','empty','failure','failure-cancel','detach','finishing','destroyed','stale','noime','tags')
+        compile_actual(actual)
+        for name in cases:scenario(name)
+        mutations=[
+            ('success-exit', 'if(present){dismissInput(input);back.run();}', 'if(present){back.run();}','success'),
+            ('cancel-exit', '{dismissInput(input);close();back.run();}', '{close();back.run();}','cancel'),
+            ('hide-call', 'ime.hideSoftInputFromWindow(input.getWindowToken(),0);', '{}','success'),
+            ('focus-call', 'input.clearFocus();', '{}','success'),
+            ('wrong-order', 'if(present){dismissInput(input);back.run();}', 'if(present){back.run();dismissInput(input);}','success'),
+        ]
+        for name,a,b,probe in mutations:
+            compile_actual(once(actual,a,b));scenario('invalid')
+            scenario(probe,False,'detached token' if name=='wrong-order' else 'IME exit order')
+        for needle in ('pathEditor.open(pathEdit)','tagEditor.open(tagEdit)'):
+            mutant=once(caller,needle,'System.nanoTime()')
+            try:wiring(mutant)
+            except AssertionError:pass
+            else:raise AssertionError('editor caller omission survived')
+        relation_caller_contract(source)
+        # The previous direct-find bug and deleted whole assertions must both fail the same contract.
+        mutant=once(source,"\n        ok(named_todo('After backup') is not None and absent('确认恢复'),","\n        ok(find(text='After backup') is not None and absent('确认恢复'),")
+        try:relation_caller_contract(mutant)
+        except AssertionError as e:assert 'viewport-blind' in str(e)
+        else:raise AssertionError('original direct-find survived')
+        parsed=ast.parse(source)
+        class Omit(ast.NodeTransformer):
+            def visit_Call(self,n):
+                if isinstance(n.func,ast.Name) and n.func.id=='ok' and len(n.args)>1 and isinstance(n.args[1],ast.Constant) and n.args[1].value=='canceling SAF restore preview makes no database write':
+                    return ast.Constant(None)
+                return self.generic_visit(n)
+        try:relation_caller_contract(ast.unparse(ast.fix_missing_locations(Omit().visit(parsed))))
+        except AssertionError as e:assert 'assertion omitted' in str(e)
+        else:raise AssertionError('whole restore assertion omission survived')
+        def registered(s):
+            p=next(n for n in ast.parse(s).body if isinstance(n,ast.FunctionDef) and n.name=='parser_selftest')
+            assert any(isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='relation_ui_selftest' for n in ast.walk(p)),'registration omitted'
+        registered(source)
+        try:registered(once(source,'    relation_ui_selftest()\n','    pass\n'))
+        except AssertionError:pass
+        else:raise AssertionError('selftest omission survived')
+        print('RELATION_UI_HOST cases='+str(len(cases))+' witnessed_java_mutants='+str(len(mutations))+' editor_caller_omissions=2 restore_positive=1 restore_negatives=2 original_direct_find_RED=1 whole_assertion_omission=1 registration_omission=1 PASS ACTUAL_SOURCE_ANDROID_DB_IME_DOUBLES_NOT_DEVICE')
+
+
 def parser_selftest():
+    relation_ui_selftest()
     result_ui_selftest()
     todo_navigation_selftest()
     database_timeout_selftest()
@@ -1745,7 +2021,7 @@ def _verify_native_ui(adb,nodes):
         add_todo('After backup'); shot('07-backup.png')
         import_backup('pocket-todo-backup.zip')
         tap('取消'); ready(); tap('今天'); ready()
-        ok(find(text='After backup') is not None and absent('确认恢复'),'canceling SAF restore preview makes no database write')
+        ok(named_todo('After backup') is not None and absent('确认恢复'),'canceling SAF restore preview makes no database write')
         stop()
         with sqlite3.connect(copy_db('before-restore.db')) as db:
             rows=db.execute('SELECT title,done FROM todos ORDER BY position').fetchall()

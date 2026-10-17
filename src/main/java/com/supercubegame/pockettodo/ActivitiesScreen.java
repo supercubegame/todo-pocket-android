@@ -490,6 +490,12 @@ public final class ActivitiesScreen {
             return alive&&root!=null&&root.isAttachedToWindow()&&!host.activity.isFinishing()&&!host.activity.isDestroyed();
         }
         private void close(){alive=false;if(plan!=null){plan.close();plan=null;}}
+        private void dismissInput(EditText input){
+            android.view.inputmethod.InputMethodManager ime=(android.view.inputmethod.InputMethodManager)
+                host.activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE);
+            if(ime!=null)ime.hideSoftInputFromWindow(input.getWindowToken(),0);
+            input.clearFocus();
+        }
         void open(android.view.View anchor){
             if(opening||!anchor.isAttachedToWindow()||!anchor.isEnabled()||host.activity.isFinishing()||host.activity.isDestroyed())return;
             opening=true;
@@ -515,7 +521,7 @@ public final class ActivitiesScreen {
             TextView validation=host.text("",14,TodayScreen.ERROR);validation.setContentDescription("relation-validation");fields.addView(validation);
             Button save=host.button("保存",()->{});save.setContentDescription("relation-save");
             Button cancel=host.button("取消",()->{});cancel.setContentDescription("relation-cancel");
-            cancel.setOnClickListener(v->{if(active()&&cancel.isEnabled()){close();back.run();}});
+            cancel.setOnClickListener(v->{if(active()&&cancel.isEnabled()){dismissInput(input);close();back.run();}});
             save.setOnClickListener(v->{
                 if(!active()||submitted||!save.isEnabled())return;
                 String value=input.getText().toString();List<String> values=new ArrayList<>();
@@ -525,7 +531,7 @@ public final class ActivitiesScreen {
                 submitted=true;save.setEnabled(false);cancel.setEnabled(false);input.setEnabled(false);
                 final AppDatabase.ActivityStringsPlan attempt=plan;
                 host.work(()->host.db.confirmActivityStrings(attempt,values),changed->{
-                    boolean present=active();close();if(present)back.run();
+                    boolean present=active();close();if(present){dismissInput(input);back.run();}
                 },()->{
                     attempt.close();
                     if(active()){validation.setText("未能保存；内容可能已变化，请取消后重新打开。");cancel.setEnabled(true);}

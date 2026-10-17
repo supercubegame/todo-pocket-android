@@ -1,45 +1,133 @@
-name: Recover verified ebd API34 original evidence
+name: Single pinned API34 relation input diagnostic
 on:
   push:
     branches: [ci/shortcut-storage-preflight-4d8742]
 permissions:
   contents: read
-  actions: read
   checks: write
 concurrency:
   group: shortcut-business-bridge-delivery
   cancel-in-progress: false
 jobs:
-  recover:
+  diagnose:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 75
+    env:
+      TEST_API: '34'
+      POCKET_STABLE_SIGNING: '1'
+      PRODUCT_SHA: ebd022b4581846ee03eec13ff0b067b9fd0eab66
     steps:
-      - name: Restore byte-exact reader and recover original evidence only
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ebd022b4581846ee03eec13ff0b067b9fd0eab66
+          persist-credentials: false
+      - name: Prepare exact temporary diagnostic and original script blocks
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          python3 - <<'PY'
+          import ast,base64,hashlib,pathlib,zlib
+          raw=zlib.decompress(base64.b64decode("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"))
+          assert len(raw)==9219 and hashlib.sha256(raw).hexdigest()=="09f6773e7b4a9d14b9d7309b28033a953cd868a78566312276320fcf6d342f3b"
+          ast.parse(raw)
+          pathlib.Path("prepare-diagnostic.py").write_bytes(raw)
+          PY
+          python3 prepare-diagnostic.py 2>&1 | tee prepare.log
+      - name: Original isolated tracing controls
+        run: bash relation-diagnostic/isolated_trace_setup.sh
+      - name: Initialize fixed signing directory
+        run: echo "POCKET_SIGNING_DIR=$RUNNER_TEMP/pocket-signing-34" >> "$GITHUB_ENV"
+      - name: Original fixed Android build setup
+        run: bash relation-diagnostic/upgrade_build_setup.sh
+      - name: Require fixed preview signing without fallback
+        env:
+          POCKET_PREVIEW_KEYSTORE_B64: ${{ secrets.POCKET_PREVIEW_KEYSTORE_B64 }}
+          POCKET_PREVIEW_STORE_PASSWORD: ${{ secrets.POCKET_PREVIEW_STORE_PASSWORD }}
+          POCKET_PREVIEW_KEY_ALIAS: ${{ secrets.POCKET_PREVIEW_KEY_ALIAS }}
+          POCKET_PREVIEW_KEY_PASSWORD: ${{ secrets.POCKET_PREVIEW_KEY_PASSWORD }}
+          POCKET_PREVIEW_CERT_SHA256: ${{ secrets.POCKET_PREVIEW_CERT_SHA256 }}
+        run: python3 tools/verify_upgrade.py prepare-signing
+      - name: Original build and lint
+        env:
+          BUILD_429_EXECUTE: 'true'
+          BUILD_LOG: build.log
+          BUILD_LINT: 'true'
+        run: GITHUB_SHA="$PRODUCT_SHA" bash relation-diagnostic/verified_build.sh
+      - name: One original command with diagnostic hooks, never acceptance
+        run: |
+          set -euo pipefail
+          export GITHUB_SHA="$PRODUCT_SHA"
+          set +e
+          python3 tools/verify_schema3.py android 2>&1 | tee ui.log
+          codes=("${PIPESTATUS[@]}")
+          rc=${codes[0]}
+          set -e
+          printf '{"attempts":1,"exit_code":%s,"scope":"DIAGNOSTIC_NOT_ACCEPTANCE"}\n' "$rc" > relation-diagnostic/device-exit.json
+          test "${codes[1]}" = 0
+          exit "$rc"
+      - name: Publish bounded exact diagnostic receipts
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import ast,hashlib,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/88aa1ddd15588a02f834c496cde90b4e51a9ba59/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as response:raw=response.read(5765)
-          assert len(raw)==5764
-          assert hashlib.sha1(b"blob 5764\0"+raw).hexdigest()=="1e683bb5ccc4d7260a43c3bfd9916884ecf1daec"
-          for old,new in [(b"HRQp642IM6R6bsAR",b"HRQp642IM6RbsAR"),(b"gvghc1c1zMLL5",b"gvghc1zMLL5"),(b"T36cnkfE/LdUR",b"T36cnE/LdUR")]:
-              assert raw.count(old)==1
-              raw=raw.replace(old,new)
-          assert len(raw)==5759 and hashlib.sha256(raw).hexdigest()=="38e34e1bba962a931fb41976400ee483ecc584106c6beda65d97e02afcd6d87c"
-          body=raw.decode().split("          python3 - <<'PY'\n",1)[1].split("          PY\n",1)[0]
-          assert all(not line or line.startswith("          ") for line in body.splitlines())
-          source="\n".join(line[10:] for line in body.splitlines())+"\n"
-          ast.parse(source)
-          exec(compile(source,"verified-reader-loader","exec"))
+          import hashlib,json,os,subprocess
+          from pathlib import Path
+          root=Path('relation-diagnostic');root.mkdir(exist_ok=True)
+          index=[]
+          def api(path,value=None):
+              assert path=='check-runs' or path.startswith('check-runs/')
+              args=['gh','api','repos/supercubegame/todo-pocket-android/'+path]
+              if value is not None:args+=['--method','POST','--input','-']
+              return json.loads(subprocess.run(args,input=None if value is None else json.dumps(value).encode(),
+                  capture_output=True,check=True,timeout=60).stdout)
+          def publish(name,text):
+              parts=[text[i:i+10000] for i in range(0,len(text),10000)] or ['']
+              assert len(parts)<=100 and ''.join(parts)==text
+              ids=[]
+              for i,part in enumerate(parts):
+                  output=dict(title='DIAGNOSTIC_ONLY_NOT_ACCEPTANCE',summary='Single API34 diagnostic; original ebd022 product unchanged; no phone, merge or release.',text=part)
+                  value=dict(name=name+' '+str(i+1)+'/'+str(len(parts)),head_sha=os.environ['GITHUB_SHA'],
+                             status='completed',conclusion='success',output=output)
+                  made=api('check-runs',value);seen=api('check-runs/'+str(made['id']))
+                  assert seen['head_sha']==value['head_sha'] and all(seen['output'][k]==v for k,v in output.items())
+                  ids.append(made['id'])
+              index.append(dict(name=name,bytes=len(text.encode()),sha256=hashlib.sha256(text.encode()).hexdigest(),checks=ids))
+              (root/'publication-index.json').write_text(json.dumps(index,indent=2))
+          manifest=[]
+          for p in sorted(root.rglob('*')):
+              if p.is_file():
+                  b=p.read_bytes();manifest.append(dict(path=str(p),bytes=len(b),sha256=hashlib.sha256(b).hexdigest()))
+          publish('Relation diagnostic manifest',json.dumps(manifest,indent=2))
+          for name in ('binding.json','device-exit.json','events.json'):
+              p=root/name
+              publish('Relation diagnostic '+name,p.read_text() if p.exists() else 'NOT_OBSERVED '+name)
+          for name in ('prepare.log','build.log','ui.log'):
+              p=Path(name)
+              if p.exists():
+                  b=p.read_bytes();text=b.decode('utf-8','replace')
+                  publish('Relation diagnostic '+name,json.dumps(dict(bytes=len(b),sha256=hashlib.sha256(b).hexdigest(),
+                      omitted_characters=max(0,len(text)-20000)))+'\n'+text[-20000:])
+          publish('Relation diagnostic publication index',json.dumps(index,indent=2))
+          assert (root/'events.json').exists(),'diagnostic target never observed'
           PY
-          python3 recover.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: original-ebd-api34
-          path: original-ebd-api34/
+          name: relation-input-api34-diagnostic
+          path: |
+            relation-diagnostic/
+            prepare.log
+            build.log
+            setup.log
+            ui.log
+            emulator.log
+            device-*.txt
+            device-result.json
+            native-ui/
           if-no-files-found: error
           retention-days: 14
+      - name: Remove temporary signing material
+        if: always()
+        run: python3 tools/verify_upgrade.py cleanup-signing

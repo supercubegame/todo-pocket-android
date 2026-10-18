@@ -1,133 +1,73 @@
-name: Single pinned API34 relation input diagnostic
-on:
+name: Relation whole editor scroll and exact input repair
+'on':
   push:
-    branches: [ci/shortcut-storage-preflight-4d8742]
+    branches:
+      - ci/shortcut-storage-preflight-4d8742
 permissions:
-  contents: read
+  contents: write
+  actions: write
   checks: write
 concurrency:
   group: shortcut-business-bridge-delivery
   cancel-in-progress: false
 jobs:
-  diagnose:
+  relation_scroll_delivery:
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
-    env:
-      TEST_API: '34'
-      POCKET_STABLE_SIGNING: '1'
-      PRODUCT_SHA: ebd022b4581846ee03eec13ff0b067b9fd0eab66
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ebd022b4581846ee03eec13ff0b067b9fd0eab66
           persist-credentials: false
-      - name: Prepare exact temporary diagnostic and original script blocks
+      - name: Restore pinned transport and approved scroll/input repair
         run: |
           set -euo pipefail
-          test "$GITHUB_RUN_ATTEMPT" = 1
           python3 - <<'PY'
-          import ast,base64,hashlib,pathlib,zlib
-          raw=zlib.decompress(base64.b64decode("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"))
-          assert len(raw)==9219 and hashlib.sha256(raw).hexdigest()=="09f6773e7b4a9d14b9d7309b28033a953cd868a78566312276320fcf6d342f3b"
-          ast.parse(raw)
-          pathlib.Path("prepare-diagnostic.py").write_bytes(raw)
+          import ast,base64,hashlib,json,lzma,os,pathlib,urllib.request
+          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/42f2ae2fc8bfd6de86a92aed21784da195aee31c/.github/workflows/shortcut-storage.yml"
+          with urllib.request.urlopen(url,timeout=60) as response:original=response.read(14885)
+          assert len(original)==14884 and hashlib.sha256(original).hexdigest()=="968ed9265fb35f7f1614e866da37e91159ea3865eb519ec49bbb1482007d5592"
+          body=original.decode().split("          python3 - <<'PY'\n",1)[1].split("          PY\n",1)[0]
+          assert all(not line or line.startswith("          ") for line in body.splitlines())
+          code="\n".join(line[10:] for line in body.splitlines())+"\n"
+          ast.parse(code);exec(compile(code,"pinned-transport-restore","exec"),{})
+          raw=lzma.decompress(base64.b64decode("/Td6WFoAAATm1rRGAgAhARYAAAB0L+Wj4GldHvBdAD2IikaUQa5OFl9QVmxmli03/JEi0VyNZQ0QF/BmG5+Ki61F/TVoMeL0Jvz9YB36LoEkVVAUtslROs7B+mAFWf+L4sTgwEoW4MpjuIr3rEpR7yBC3G6F5WKyoWmjcKffgvME7PZS2FjHnWCzrBEz5CRPG4PQ4530ZzgSdeWe5yhRAC1lLb9C2yPJ5nOtTpUo9BOTfH/mii5M9dW+dSMF6VexOpgVNIWs0bqv1G5b5e1vIWbA5JZOdL0Ukeku0HyGYO47NobQvR3colJnSIbjhPXWAvL1AISaQim93V0yz9DClz3UbXQTMdS+wkH1y8KTQxiAZ1uwX9X2uC2tsZcAhQgcYPRrQt0lvSQdqskjDbQ9LE9xfvBuyIo6zfjFzDgRawQVIpaTiz6CdnbPk87hoIEimyP6Xxx/KjsRAPUs7Y5/FBnNAYZjZnufUyH8jXk9hAuXeAdroJcpvRPaAS6E6hBPVj+MoheuzgBQWXYuO3IftVLqEjmTFmUSR/NYiew9WsFVKpuSGEqB+HUX0IEBktHPtwI5yR+2LmFdmfSb9FRjMna3PExr3pECZzugT2Yg3EF01liD/+DHolMEz76cOFjKXimX0jwbY/Kch2LphQ7zGquj9n2HPNFwLEohUPnNv/3QrOXXQF51gjVqoJ2obRqaGbcxXh7G9j9lMGEnOtiN4RR6m74IcTUMraWBnchTg7QPhWCVMDYM9VRdZQUfVNhkVZT39Vwo4QM2F00dwBZrIvekso1QWno19oxMaqWVHPzjR0PUqS3iOzXhsXnLbtVLczDnf6f4bCcbEpG/OON/jEXUQjmLHcSQdO2BB5NpQPDAinRxYOpAJlZZS1MtsDEpGbGoEqyAawZI/XcJxgUjF2TZkPxYrFiCQtf/gYhGG1LvqozT2JhkJOHFlFOZmqQ6sAq/4TFRUzq+crq8GFjqpBfuqImWGONCoJpiZYPOzXbrqqx7APPTurl9WCZV+1O2+WIxsUqEfTtoNO1KSAQPQ2NrolHo8XZaZu9HwABGk+fhAfLVkjAoqKgeXVETS8B/5M69fpyr8cg8MHv5r5W3lZwIYfvgiu9ZK+TtTr9F9jT4qy3u2ysjA4Jdz7AFccv2eMrmsm2w6K31M6xz/8nlx7sbxshUSG5ATFTlHFqdDWn85recFZCC19PeygMWERnkL9KJNjWA1pIJEkg15QbeIq0MtJTBlul5OY3cgoPRohNd+r8z6f6a0u6sPEZ7iDiFYrKc9nlQPJm7ONlxol4iHpB+4h8bvTw/US61Xr0Mip1g0J2yGh/6BWUhcSQZEE4OJZvNFlIF2ZrLpiFA+Ic2zafuYiguCq6I0PYWYaHydaSZAZNkgKjMJdZHbnRIbYrBpbXlvZWF5JuKJUm42Qton2HAc8aBww2O5MJTxq44Y61XHH26wRIQmrRUrW1AdDINhNiZ/l9+kEJ2jDUMb2cL9WXfG4MoaNsMUM6bFv45kAsXA0HUhOUCWbJJPkIBasYI0MciB5YU+NFUoGkkQfjuGYt0XdGukO7fIHI77DiojkkA0m0H7aHOxWrcbRhscMLRFhO0/Jv+b9Lt45KFW1KKuouuynfCdnoolW5nS9NsLalwne5v4k5Dhw2a4eUgxen1OqffPkyWKGssaT76/UgMTX48wUkTAjQbo11JvJ2XZdt9up3FMCYrx6o0FfPcNKS82/pHn9qLxweZeoyH6U5HW3K8e7Hx4p3QYgt+sVQZFKtbUyBEqakRVCnOhvZR4dWr1bCsNuYiu9UwIq5++d5jTq7Z9E6mtGGpG2/O57jFyjAvf3UiGj6WL2NdW858UF3J/j/iKfcHrjWuFeCPKQeR9Ds3gDL0LDVR+zN6NFFEfYRotHZwiyZ7tmNgTfAULz9MdCZynm9TVMtjVZIh2KV2D+lXQOm0S5TKBGzmYhkqQ8ipUGRfKW6G50+enaluBU40ED/GUfVT/P2HRZr/HLPslcLCFINNvGbIYAo7ycGAA8HAS8SjFeavbaAtqcwxo/2HT3n2fJWCjQXIXDkCKl2D6FoBvvwLNHhi0WD3/f/D4HXUPA16sNvxAf10MA8xkwuUuPresoIbRQpZgousHIjSMfDmZRnU0q8OoKSH69nKaX+n13ZqQKaW62nnbwIuUIP645DXx9JJVu5t1NYsm92fyMPhc12iJdj/718YKOlzRoXrZnbHqhJd8CKEl2BQgaD7aGsi7JDoE+5xyl+JTkWgwKul1R+yAQkIR/bmEwQPNzMo8Ri54E8MJlt8kUw/N0NP6xt4q1lJLyaxsPgHxdMQgz00zREy6LTG1duNjdKeK7ia+MTlTkaCPeRWoczKG3lIDCJ+zMdge8hXKfSIPKqS5nnn18Y4uHVhvs6sNOOC9QCsqBDQpnjHLGQV5+abuEGtTbNuDyVzoJaC495W4usgi6Kt6/F6smBBc+009eR7uc5SH4OSSfvy3S9k7D8ZD5omGE6tbEtbPjtPfG3D/sOBQMaS+dqDFPc7JNTtym+I2fcZGyItnMUshQaa0Flze/yEK+JHUzJOazpD7ZJhofeGvtKVw0//hapgI5CzS5SMtUAjZriq8tZy+3GqOejvqxDaLqHtE0ghNwZiI8uQQjc4B2MPNlivnjJnfanV7oBOBBCS0Pc8I0TfTqt6Xwue7QfctnOu33GKAvUaG9Bbfa1KLimNzZSTzmlLTokqAe4oLaUkArn/S5IuXwm5xBCPYfEpbu5CdPm0z+5aKN8FH2EgqzRyfHxw7zN8cunt5Ry2Rp3lppn5WVrW6z8VvxqCT9j+k652UyBPtF6k/PqvfthvlcA/2Jn7f+Z3CfR2kk5BFvDGeGvBsdQrLMdGXsmdgCyZnwNzP51Yb9MT/OpCet4o4d/GkvO+xSAS9QPSMRNcfXCXkQeEg3LPjWCNJkTZqPGtHvYsW++V12C1eM1/rYtOx6whfAI9wqOpQ6TenKSthogUQF4lCjA/IPE7QKpgt+9rl3ze77Bdbf0yr3RtNoRxjQWZm2OFH4KVBpECrzh4Z4wUNEJPZW+GaA+wwnu5MoNj/rOs/LGK4YjwbrdAvNC3dTXn6WldojWzVLpHrpJ5VqEVQOsErYAFG1Y0DeH/E1ealpL5D7yIhP87nBW1S28DfaN1qWnegDg4qLultYaXkQGnhD4H296kUPkGWv8vXazgkOq+spXPfKOj8dIhnJHBskZuefOSHH5yefqo+oU71IsZAUnIFb2SX1evIT8AOlxlgEz1RFV3zeJVHfaPgDnDVEbD9yZ4xGnGm7lKTfXl7Dmq9mvoVfVRd9PKpt8Q1pkSBzJ4eW5MK6VbDg6U7AXZ0Lu+ex4BjaVcRnvUGYmnDmqWFZ8ciOTpTD3unYxcBfUMxs/115+dfafBtFCW5qjz/6k5KA+tuv9Sa/+40Aa6uuPRNmXGF7l8jaFJudLTPJ+StzfOW5QVKhVBwSW1yBRQ5475gW8wzfYTqK6aL7Kz8S0mnB8sTJ8FZDCU1QeSmRsWgr24PWi4o6lyaw8TFRuASUqM+LaUt8tA2Bfv+y31QIVUP4FW2/ehdYwRDGqQpRPhAZB4H/l37KYr/lDDFs+1JT5q2gSV16pe+aFP5iO/Hlt8DTB3JcjFjZNdyP5fqXqQj9h3A2rAD3rn5a4kK/SwdtT0d46Ncvr3H+Gv7e3Zcr3yBDFr3hxR6/TT6EyTsLyfs9bJw/S+vtu6mdjwLhApq7+ErUFd4gkLW0lR/urEbUHpqaqAhCBbLiRX+/1LX7APlEtySW7gCVtEKSPJ458l0IDQF1RauhRET3xIrmMZPMGvgdLlPwe0FcY3NcFFIbmHyq0pugCMHoqnSf20LGQR6lviKfbnK8539MYVDGKtP90mv7Mdy2JQ7JLihEMpP3HcTCGRD9EDFnhAL8U7GDDc1piTCfLnkqhSvtUF4omNcxRb9syvxpnZvYLMY2DJzr9NFLBCEDFhxmvG+uNe5m6OvVjEhPP89cCTeBwGHRXNDr0Hfncebz9y4gdnoUvEPU9GWuXLcWSc8sfVt7wAZN7UC19sq+A/xDYp9mW5B6xYaGoR9lFwKReEzd+kIPWXlLumYA8S4Nzb2KiuMSv7z5lFHYayEc7TWOHL207jD3pyTwcVKlAAOzEDheZ88jXmF32ANTNTmbXerQk0Zzi4kQPzuCh+VO9l5pDIXc9l3Xz0T8EyPN3whBU2fCLoHuddcZeRcDCRMbHG+O3Ein7CUeKC0cR1s6FLA2kWZ0C4uZ1tJ5KOvIydnQOsJTsGJJqL/aRBD6aTquzrYD06hWtSv7eYZRhpKJx5GIRfkdCN4xufV1/zRM2akxjygZfuT92sFV4wcLrGzosaz4oVdfdiuc3dyau9Cr1ETneZofb2AVCpa9qFBEOe5A7kEmR7+ux3tu590SBil6RsCGJ6ktCkA6rR8II8XIIrQDOnt/TuqZxyR30EC4BtN2J1FPzPVS46/aDZMsg4oltRw0adEe/bnS6wWNrm0X/Pyack8lb57vjnQZMikSdCztN1yhfvUWHJlvP28Z9YmHKeLtM27GXAtwZy1f0vW52YY7IXGWkLaeQPOkOxWcVnjckE45OMFCjpTUpx2SDSWYrTwPHo8NK6emXJJruaVWCt9ZN8UzLHnBceb2vMhILcH8Q28fPwuEuvBGQpZ+syy3jLlNhc9OtHFGSnAMxVp+ciOgXTtr8l1pNj18nXIYhp+LYWM8lsW2UzebCfsZtkIoGsMrQbwv1rySGIzWZbgVh1uwo9midwWI0vepG2LSj4wOIkEECGIPkJnsApgEknNBe4W72BmT8GI2S8Bh52VfevA9359ck20rwOd1CfJPAxZ7TXIfcGNizYarH+x5uGGBdcGFv3hemHoX+mM6z98bKlHlTNlQwpv/gXf29RnLCfctE7KTqvtPu5zGP03jgW2QA0VgaK97D5ZNfeAm7IZvDxj3SMSe7C/tzWDR87CfnUo6T5Xmo368donQnibNoxqtgwU9dpGKY4JA4lGJz3soX+09x/npDBxnIU6puazWcjAK/dTz1sXgBsuBFRVxHvtCMdTIHXHWkK7QcEpSQg2BjQ2EA4iAT3KRwJH6uFyFDzQLZDsBOgVMz3iWaqLcMAPQCGFHcyWHllXDMVlO8seaBNQuWQhsI0umtGQw1tbHYpil7WJLg0BD6FBuQyXRWApHGRauYFylAzVsDbtEPRMUlPxWqCFez5TNWQ7F+Wb6EjUyBChwMotJNCoM8bPC8+GdRVhUqfsEUXN+0/pG1NWYIUOpiMSICtHmGjcklM9viKO3XsHpb1gvZ18vgOxAvoPxiHqo/2HGDqw3FKJXK6p/dvk2sq8FUJc5nLMBvk3QMplWkjZ5130TijJr7tHw9zUuOUn0R7Dm9pzootpU6HRC7WwZSUG6CS8uVEQEPqnC7b2JBwLBlrVthp1L504QXK+M0IKZiXqQF2n1p9Nu5s6wLF7F6RCx8WFpO1XWnfmN5sG4wGuKzqUyv1Frnx1GhrUwFkcsZ+9bWLVy5SECSFAey0XqYLMCFRqIBMscqc8cL19ifqouc9+EsiD5uR8n/GHAPTUvR5Wp4lqpeveaXQ3W+zyuRUKj3yKfuCMhE1xbD6+hPnDqb1D1rk3LqXctDv71qH/JuazUuuHbTJABkeAqegxo3rvw4V+YTO6ESvrtX53no10VQaZbEO7UCGEGM+UJCM3GR0ahPvbXPPZdDhtIQ+xTzpZq3L4kG9666Mwfh5hIrFhZimfQ/xUFh0+L2voXzl+2VR5oh4a3DQYGrZjdPVSXZwzwZHoosz1EmTKlpJPFT1boNBQ02ZCfKqRNvACRGxFDO+FD8az3DhBExivsLZLF2kiEJEJ51U4zydnAP443LD3oj//cBLtvuSN9PXwGUAnprH3hO5189L3cEEaPBdjK3ORi6SZnkJnRCEsnpsjNMNNzvAfgO4q8jfNN95YBd6mUY1KqgOmGLUimF4ZaU/tbUo8wIbQXSbMsN1oKGzliIK5EW5ks1K2vq/1boT9BeD9HUAxJdPTEMLjKxt3jHuPwkhyPdMl0ou4fNpcCavXs4H4e2HULAqTeLf1PlBsVH+PPPqiJUnRLiQEcIs0bq8VZrJu2CQ1RefmTbVB3cfrY9/Z0gxJw0WW3hBFswTHF8cu5EEoToBpAcSGIuOqYcP2BAWY6g8xCH5/RzIh1cZ+dVBf+T4fXzHE2mm6pqIdy+bJNRcqU9VQ5hR/NxDL6vpISJOjX0oaPN5p4oFVJAMhIod/ibwWES7fCpcahKuUgzqxGzWU7h2Pc5V9bZ3fn73BLznMtfRdmxT94QQttUUiM9O3YClFTmV0T6d0GMKKM8IEAXSjg4s+cJq3kB964b4V++bP0GvgqMQuCz+KV1o+js25QYx7lJ8mzWX+b0Sqzm18x9MdybIkvp0xPyN2I1n6tghruUD9qZv7msFOEgW+ecsVjLhTeLE+KOVw08q1pPNFXyx2ZYASF/yJdietzeENh8JAJ2rj8dLKXY2O9EdFQCOwEmdT7npugaqKi/vNDhbIhZwAJ/AGYxmx3FhwgL3pvINT/vbJMNxYZJzwS2Syo3NE2ODB50DXqcGqrs5K05xGkiE2s755VVQ+FCtW3rW6P8rJ2AuZdU+l1jK8u9WbB+2kALo8wq3HE/JiqzNeK1GgBPpX9MWUzBtBelr0uglhqrkLoBqx0YfImlq/H1pJ1VnvvrlVeJxbfAvvJ/oMsga/SVve9pemr2PAxtNtaaQxOgGTDsiIzzgZHgCDjf5c6ckCKMhAQJVan/qTqNSWcrZ/FmXaW4GZRlQ+9MRgS/iX7tyD9GNU09SibDHYkddTKr17jCvGuPAXSfdR2vMUeVHimuMRe4KYbn2ukQDtYlAu5xqRpO8JszvCJXzrweszpyZedJoGVV/ogyQKppqXmFJABpf9Rv9mX9D479KOog7c4b3RMR+D9b409Z8D5mca8mT+8dxzm0EIReTwNEuHVk+zVZ0KNDyLuO0YTRv7YLYvloSFgATba/bssnVjZm2vUZomR9jci+vS2OH7HdN6V/AwT6daTBR6ePyBxYINoI4XfY9/STBk09+6PMvmM3WC7/+q4yPtKKLZPJb8PsQjQYHs96hUNYxlnZfbK3YF+L6qEn5BNvikbUCbiZ7WhtGsF5buQvlaOwYBfHHhP3HoyEVEnU2p4NfoFSLOSyBR4q5HNd3XDwM3/KMgDKTzaUFcnb/XqonsTFG5L2Nb0nqfnc3Cn+EJ/YyYLdzS7g4/LfHalJ+xnsdbgl5MwEfEYGuyYDoCM+g5KLmhc0nVD/JIsxN5SGHZynhp3CMKUfUUHOKrhf5K9ppeZSYCT6q1OqnH6HX1/N2JpB4rc7RzVbnC8c81mpq0TOJ5jqouTjA1OHTPE/ViiXdeYw/NPqrQrrv+fDTCE854Oyg6/TvEr2MT9RXEEqy2u7IP8XkpZ7srk1/+DEE0qncVx03hWfyk7sy80XSMNI9A6omcTzmPWcLV2UQ+ZncbdYEBoqasoayJfXAKzWYgJBuI6nKQ3HoPLn0YVuh6SLtOFtGQuwm8/j9cziuWuSaitrfXdJVFUBL6gLCpGOeU8emSj9S2koqicNU7xgGcZn4frIV7UtFfU33e8RG6TumIZTrQfx6KpIszkqnAZL5Ll3q58m+PxgPqQx1W1pumd2NWB/YICSWgCKOZRBwgZqO9IYllcVW82xMo7weIudhsq/XNQmYzrbzcWyGlmuzkWTE19sbKa+SyamJS31fPjaAUsBxpHUpwzset/RTJvItAx3bseCwtNAD8kCvL1LfbRrlVi/ywtu9bQ0UlQG7p/fAM+DgYr1Bnt9aHbkJUMv0gsQmCLL6gMH+LXnCzPRLVqYP9yL69ZuHHNcSRk3oEVZ+3deT405+UEdHKnuty2WVKzmdfux31nV48KpmsBpU8c2hEmorVqM6TET0YeqwURoa7WSbv6PUQ3OGht//ml1NJEFlhyKx8u3r35CLWRFZ4MME/XAiaixtkjlzWtXqA/BrYYwWbUE8tsk86V9vo/h2ailzzeCs22MavPv48OTYhLZWL8Vct9XL4E8pEsbV12FNLopuQ5E06KaLmtUfVraLDw/twkHZnt2OsuA2JZmzZ1hRZtzqurBTUmmI7+9ZybC7rtqeoBprWO4bMuoLEvCuLDKkRY9NhuJVM9pNc4KrToQ+GtrAIQluGqhdevPvwquHI3+YTtU+NK1E7kk5R9u+aoDWYS8RRcn63q4aojjDXhFb/8Ix1gEY8oefRJZViXBiuRRdk0h29Prt+zZr1dZfgbia1FeCeUcZcOa4J0BkTQIooRvZ9x0FYvx+AyLGixofZDBbmZUgshT9qoSDBAMBC3izwjwYyPXQzlQqmTKMZF1gyIY9l9/C/soCO9k8sG0FWJh8bEazs+Zws35jvfAW/Vznt174lW3QITc7G8cFwgH51XfPlyBv+DmejF9R8f50bvej3MC3Gpnq58JlRfvJQL6ws2VlM0ykVfNXanuB6eZi+aJD/HOtQSil1ugG4RdCsZjQZ0ihfBAMUMPTOnR3CEqg8wUis1JryYNKvT5KW3pH/NRjEQqDFn4RYLfSe+qjIVfY8Txvu1zLYrqt7JPOTWExXwK05e8xkGmtpxkqeLJ7kKJC9VDTNl3LHfDca+ptnGEYqKEnSdW+ZLCDZI3GoeLwixf6x5Pk6o/iH45/nuIcZxYNMT2PD/b55Oa8SiaC7n0KOj6FIyY0iy7K9JMUlpfJDKU5GONSLs7P+0fAIaqZVS4xLcS+EOIBqA7XY4RKcM2Sn83GUUi2s5s7O+7iTGMzBKMRIGxK8aJE5p8p0XxnHrGpkDTn8xXXds+14+wYYZuZ6oMBti6qqdTzm+V+hLAWJB/MxyTnUMJnLhGdmezn2e/qRI9irILNPN5GoNZckybpQxY6nLi15xszRVU54Z6SxFwxQQGCt+gdT5TrSO1S3vuK+jt1+PRUEv1V+AX5G84evUyQhLTL9n8IoSPu0r6KDn3gii1kSxHXSwBBFNQNzzNkl53D5NV51bRFzEQ8pEpywrX05rqVaGltMcR5N/DEB/mieW1yEOx8N3ICWk6MrCc6p3BqNNkmlXNHg0D3Pc0sebV5QDdZDousBLm1dG1kJmElj+ybAqpbAWW+G/0q0AYWUunRlsWs/4zszefFQCoOu9VfqObBx9F76cgBvjVRypTOHVcf88tsxp2rtQB50WIQv9htXzZSiP+GwqFinMSO8TZYjIvkZPuC87taBQaXlnH1epmgF4NiRiu5x6+j3/ZEIZvesF5f4eoTr8xBTtFnlPEKa/dex9vgMfJ+IJMTgRIp40OYOin7zN1k6h2eRbtXskbMQbEyFy5/5WIqBoi0KDxxWrF2knhJA1wJbyehrIoib7k78aRvTTXe43/hZuSyuCrVyvYcOBOXEQ8s3xF0k+AeLj/Tnm0rsCOXUQtq6oBGKQaM501Ijx+YVATEM2IWgs8QDXpvRQKBn1Bx114uP+0oaL1GqewmLOnafQfDTVyqN0exr+t/dw/ks1+KJkCHQUXKwJqMaC7X9+tZ070eMaBvFivS4LnDidvQFQ31CWVn8B/1DNOQFzd3qXDcCHXQN1O/2Wa69INTTVgi5/D4pgGsttTIFsXnPQd4N1nO6/fwz6zvSMmE2fnSoy+cn9CwRwYXno7s84mUM7si2O9+KxoPDRBRRU+OZQGLtsDClr4wjuQ08OyOy0yuTvpWLOBMC7DZL4PXkK4XveTRsdRPOX+X/d0MRLTcaF9WkMcYCFFdlvYEb33CnX/V70IyUsBo/5AZXKTROwAx8I9/FsIBK1SofEvYwB/gFiF49URKdXigBczZP6AFXnRTlU4FZfK+EVeU9iMRQ9skAqxlKRNweEigVqUCCiNAGT/8lg1S4SxVgA5hI3ZZkfAj93FE6lNvGuV1IlEOxqEzFMxlzwuYnaGPExuNDd5dZxn8XYqrjbcVzjBcPD984Kio9sg7Zr0LjEjz3s/ZQ7WVe3/wL0CL1kyyEgBm07Vpt+F08jSpdPwqoAsQdH+q5EnVUjmNXHvFxeuK8LPIxeNyeBGHqbh6v0WGifQHGeBAW5RWRte5gA3ZieZwEVOHCxWSlnC0Ufln50cgEaWZUq/DoqYjqKx6uLI7Sf8WAKKaunlTKMQIYcleB/y6i0OR7bFM1ambL3YsTTyIIGoB6xXJGCH/MdPLaNmPByPrt3PuOR93qtP0vYxZQOhiasmQUC7f4R9J9UbavZWiUo6EAVNbYKyVj8DYDDqFaXEy0ONclQzeyANtSAH+idKgT9UBiDmaf4CdOOIo60S9EsibCIABF0MiiQOqhFXQTFdTxh19WPCCclR8jOWys357CTmHmo6fbPnAFz1LGgzxQKoOP2eyp0LFHnsyQgSu1xvBHB1D32ErBReOoQOIdQf3KY8ZvAL9PcgvF+WtE3diHpQxGCmGrO74eTfmC8E3JVAZkh4Sm8FXS2gtxr8Sz0WKtn/q2XmhsxdU0zjEerxTumn2WpyqDzZBx9cAseWTCMQEeo2VHXI4olIJF0kqdwffivvW2iweXmpZgGH0wC/91FQXSbDNwGyv2dtVhP7JRVluvf7c9TGwPjKFRguv+wAIMRQRfUItagABjD7e0gEALBir5bHEZ/sCAAAAAARZWg==",validate=True))
+          assert len(raw)==26974 and hashlib.sha256(raw).hexdigest()=="94faa5cd974daa8a71b4f0bddc277627675414befa94cabbbc19eb22b1487ff0"
+          bundle=json.loads(raw)
+          assert set(bundle)=={'gate_tests.py', 'gate_runtime.py', 'repair.py', 'catalog_patch.py', 'prepare.py', 'gate_patch.py'}
+          for name,code in bundle.items():
+              ast.parse(code);(pathlib.Path(os.environ["RUNNER_TEMP"])/name).write_text(code)
           PY
-          python3 prepare-diagnostic.py 2>&1 | tee prepare.log
-      - name: Original isolated tracing controls
-        run: bash relation-diagnostic/isolated_trace_setup.sh
-      - name: Initialize fixed signing directory
-        run: echo "POCKET_SIGNING_DIR=$RUNNER_TEMP/pocket-signing-34" >> "$GITHUB_ENV"
-      - name: Original fixed Android build setup
-        run: bash relation-diagnostic/upgrade_build_setup.sh
-      - name: Require fixed preview signing without fallback
+      - name: Java17 and actual adapted transport controls
         env:
-          POCKET_PREVIEW_KEYSTORE_B64: ${{ secrets.POCKET_PREVIEW_KEYSTORE_B64 }}
-          POCKET_PREVIEW_STORE_PASSWORD: ${{ secrets.POCKET_PREVIEW_STORE_PASSWORD }}
-          POCKET_PREVIEW_KEY_ALIAS: ${{ secrets.POCKET_PREVIEW_KEY_ALIAS }}
-          POCKET_PREVIEW_KEY_PASSWORD: ${{ secrets.POCKET_PREVIEW_KEY_PASSWORD }}
-          POCKET_PREVIEW_CERT_SHA256: ${{ secrets.POCKET_PREVIEW_CERT_SHA256 }}
-        run: python3 tools/verify_upgrade.py prepare-signing
-      - name: Original build and lint
-        env:
-          BUILD_429_EXECUTE: 'true'
-          BUILD_LOG: build.log
-          BUILD_LINT: 'true'
-        run: GITHUB_SHA="$PRODUCT_SHA" bash relation-diagnostic/verified_build.sh
-      - name: One original command with diagnostic hooks, never acceptance
+          ORIGINAL_DRIVER_SHA: cc83f9374afd35c87252fe189c6ea7afaf7e985cc8eb9a9c9dc48ffca3fed58c
         run: |
           set -euo pipefail
-          export GITHUB_SHA="$PRODUCT_SHA"
-          set +e
-          python3 tools/verify_schema3.py android 2>&1 | tee ui.log
-          codes=("${PIPESTATUS[@]}")
-          rc=${codes[0]}
-          set -e
-          printf '{"attempts":1,"exit_code":%s,"scope":"DIAGNOSTIC_NOT_ACCEPTANCE"}\n' "$rc" > relation-diagnostic/device-exit.json
-          test "${codes[1]}" = 0
-          exit "$rc"
-      - name: Publish bounded exact diagnostic receipts
-        if: always()
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+          python3 "$RUNNER_TEMP/prepare.py"
+          python3 "$RUNNER_TEMP/test-deliver-accepted.py"
+      - name: Full original21 once then atomic exact product delivery
+        id: delivery
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import hashlib,json,os,subprocess
-          from pathlib import Path
-          root=Path('relation-diagnostic');root.mkdir(exist_ok=True)
-          index=[]
-          def api(path,value=None):
-              assert path=='check-runs' or path.startswith('check-runs/')
-              args=['gh','api','repos/supercubegame/todo-pocket-android/'+path]
-              if value is not None:args+=['--method','POST','--input','-']
-              return json.loads(subprocess.run(args,input=None if value is None else json.dumps(value).encode(),
-                  capture_output=True,check=True,timeout=60).stdout)
-          def publish(name,text):
-              parts=[text[i:i+10000] for i in range(0,len(text),10000)] or ['']
-              assert len(parts)<=100 and ''.join(parts)==text
-              ids=[]
-              for i,part in enumerate(parts):
-                  output=dict(title='DIAGNOSTIC_ONLY_NOT_ACCEPTANCE',summary='Single API34 diagnostic; original ebd022 product unchanged; no phone, merge or release.',text=part)
-                  value=dict(name=name+' '+str(i+1)+'/'+str(len(parts)),head_sha=os.environ['GITHUB_SHA'],
-                             status='completed',conclusion='success',output=output)
-                  made=api('check-runs',value);seen=api('check-runs/'+str(made['id']))
-                  assert seen['head_sha']==value['head_sha'] and all(seen['output'][k]==v for k,v in output.items())
-                  ids.append(made['id'])
-              index.append(dict(name=name,bytes=len(text.encode()),sha256=hashlib.sha256(text.encode()).hexdigest(),checks=ids))
-              (root/'publication-index.json').write_text(json.dumps(index,indent=2))
-          manifest=[]
-          for p in sorted(root.rglob('*')):
-              if p.is_file():
-                  b=p.read_bytes();manifest.append(dict(path=str(p),bytes=len(b),sha256=hashlib.sha256(b).hexdigest()))
-          publish('Relation diagnostic manifest',json.dumps(manifest,indent=2))
-          for name in ('binding.json','device-exit.json','events.json'):
-              p=root/name
-              publish('Relation diagnostic '+name,p.read_text() if p.exists() else 'NOT_OBSERVED '+name)
-          for name in ('prepare.log','build.log','ui.log'):
-              p=Path(name)
-              if p.exists():
-                  b=p.read_bytes();text=b.decode('utf-8','replace')
-                  publish('Relation diagnostic '+name,json.dumps(dict(bytes=len(b),sha256=hashlib.sha256(b).hexdigest(),
-                      omitted_characters=max(0,len(text)-20000)))+'\n'+text[-20000:])
-          publish('Relation diagnostic publication index',json.dumps(index,indent=2))
-          assert (root/'events.json').exists(),'diagnostic target never observed'
-          PY
+          python3 "$RUNNER_TEMP/deliver-accepted.py" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/relation-scroll-delivery"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: evidence
         if: always()
         with:
-          name: relation-input-api34-diagnostic
-          path: |
-            relation-diagnostic/
-            prepare.log
-            build.log
-            setup.log
-            ui.log
-            emulator.log
-            device-*.txt
-            device-result.json
-            native-ui/
+          name: relation-scroll-delivery
+          path: ${{ runner.temp }}/relation-scroll-delivery/
           if-no-files-found: error
           retention-days: 14
-      - name: Remove temporary signing material
+      - name: Publish complete delivery receipt and failure tails
         if: always()
-        run: python3 tools/verify_upgrade.py cleanup-signing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
+          DELIVERY_OUTCOME: ${{ steps.delivery.outcome }}
+        run: |
+          set -euo pipefail
+          python3 "$RUNNER_TEMP/deliver-accepted.py" publish "$RUNNER_TEMP/relation-scroll-delivery"

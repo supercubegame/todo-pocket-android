@@ -1,0 +1,112 @@
+name: Independent shortcut storage verification
+on:
+  push:
+    branches: [feature/v1.2-activity-notes-ledger]
+  pull_request:
+    branches: [main, feature/v1.1-edit-backup]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  shortcut_host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Use Java 17
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+      - name: Exact Java codec, SQL, report refusal and wiring controls
+        run: |
+          set -euo pipefail
+          python3 tools/verify_shortcuts.py selftest 2>&1 | tee shortcut-host.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: shortcut-host
+          path: shortcut-host.log
+          if-no-files-found: error
+  shortcut_device:
+    needs: shortcut_host
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [26, 34]
+    env:
+      TEST_API: ${{ matrix.api }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Fixed disposable Android setup
+        run: |
+          set -euo pipefail
+          exec > >(tee shortcut-setup.log) 2>&1
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip.sha256 -o /tmp/gradle.sha256
+          echo "$(cat /tmp/gradle.sha256)  /tmp/gradle.zip" | sha256sum -c -
+          unzip -q /tmp/gradle.zip -d /tmp
+          echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+          sudo apt-get update
+          sudo apt-get install --yes strace
+      - name: Build isolated runner and restore original Gradle source
+        env:
+          BUILD_429_EXECUTE: "true"
+          BUILD_LOG: "shortcut-build.log"
+        run: |
+          set -euo pipefail
+          python3 tools/verify_shortcuts.py build 2>&1 | tee shortcut-build-driver.log
+      - name: Actual migration, guarded backup restore and separate-process persistence
+        run: |
+          set -euo pipefail
+          python3 tools/verify_shortcuts.py android 2>&1 | tee shortcut-android.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: shortcut-device-api-${{ matrix.api }}
+          path: |
+            shortcut-device/
+            shortcut-build.json
+            shortcut-build.log
+            shortcut-build-driver.log
+            shortcut-android.log
+            shortcut-setup.log
+            emulator.log
+          if-no-files-found: error
+          retention-days: 14
+  shortcut_report:
+    needs: [shortcut_host, shortcut_device]
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: shortcut-*
+          path: collected-shortcuts
+      - name: Publish both original device receipts, including failures
+        if: always()
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 tools/verify_shortcuts.py report 2>&1 | tee shortcut-report.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: independent-shortcut-report
+          path: |
+            shortcut-report.json
+            shortcut-report.log
+          if-no-files-found: error
+          retention-days: 14

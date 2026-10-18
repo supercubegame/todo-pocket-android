@@ -1,0 +1,420 @@
+package com.supercubegame.pockettodo;
+
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.content.res.ColorStateList;
+import android.database.Cursor;
+import android.graphics.Paint;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.os.Bundle;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.inputmethod.InputMethodManager;
+import android.widget.*;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.IdentityHashMap;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.function.Consumer;
+
+/** Native workbench, not the finished v1.2 product.
+ * Pocket notebook logic: a quiet green daily tab, generous readable rows, fixed
+ * navigation. No invented demo data, web content, photo or fake restore state.
+ * All DB work belongs to the single executor, including close after queued work.
+ */
+public final class TodayScreen {
+    static final int BG=0xfff5f9f7, INK=0xff203d35, MUTED=0xff5b726a;
+    static final int ACCENT=0xff21785f, TINT=0xffdceee5, WHITE=0xfffefffe, ERROR=0xffa33743;
+    final Activity activity;
+    final AppDatabase db;
+    private final ExecutorService io=Executors.newSingleThreadExecutor();
+    private LinearLayout root, content;
+    private TextView status;
+    private EditText input;
+    private int page, filter;
+    private String draft="";
+    private boolean busy, closed;
+    // UI-thread identity: an old load completion must not erase a newer result notice.
+    private Object notice=new Object();
+    private final Map<View,Boolean> paused=new IdentityHashMap<>();
+    final ActivitiesScreen activities;
+    private AppDatabase.RestorePlan pendingRestore;
+    private AppDatabase.TodoDeletionPlan pendingTodoDeletion;
+    private AppDatabase.TodoDeletionUndo todoUndo;
+    private TextView todoUndoHint;
+    private Button todoUndoButton;
+    private AlertDialog todoDialog;
+    private Object todoView=new Object();
+
+    private boolean todoViewCurrent(Object expected){
+        return !closed&&!activity.isDestroyed()&&!activity.isFinishing()&&page==0&&todoView==expected;
+    }
+    private void clearTodoUndo(){
+        AppDatabase.TodoDeletionUndo token=todoUndo;todoUndo=null;
+        clearTodoUndoControls();
+        if(token!=null)token.close();
+    }
+    private void clearTodoUndoControls(){
+        if(todoUndoHint!=null){todoUndoHint.setVisibility(View.GONE);todoUndoHint=null;}
+        if(todoUndoButton!=null){todoUndoButton.setVisibility(View.GONE);todoUndoButton=null;}
+    }
+    private void clearTodoPreview(){
+        AppDatabase.TodoDeletionPlan plan=pendingTodoDeletion;pendingTodoDeletion=null;
+        AlertDialog dialog=todoDialog;todoDialog=null;
+        if(dialog!=null)dialog.dismiss();
+        if(plan!=null)plan.close();
+    }
+    private void leaveTodoSession(){
+        todoView=new Object();clearTodoPreview();clearTodoUndo();
+    }
+    private void previewTodoDeletion(TodoRow item,Object expected){
+        if(busy||!todoViewCurrent(expected)||pendingTodoDeletion!=null)return;
+        rememberDraft();
+        work(()->db.prepareTodoDeletion(item.id),plan->{
+            if(!todoViewCurrent(expected)){plan.close();return;}
+            // Do not silently confirm an externally renamed or toggled row.
+            if(!item.title.equals(plan.title())||item.done!=plan.done()){
+                plan.close();message("待办已变化，请刷新后重新选择",true);loadTodos();return;
+            }
+            showTodoDeletion(plan,expected);
+        },null,AppDatabase.TodoDeletionPlan::close);
+    }
+    private void showTodoDeletion(AppDatabase.TodoDeletionPlan plan,Object expected){
+        if(!todoViewCurrent(expected)){plan.close();return;}
+        pendingTodoDeletion=plan;
+        LinearLayout body=column();body.setPadding(dp(20),dp(4),dp(20),dp(8));
+        TextView details=text(plan.title()+"\n状态："+(plan.done()?"已完成":"待办")+"\nID："+plan.todoId(),16,INK);
+        details.setContentDescription("todo-delete-details");body.addView(details);
+        TextView warning=text("仅删除这条普通待办。删除后可在当前界面撤销一次；继续修改数据、切换页面、重建界面或重启后不可撤销。",14,ERROR);
+        warning.setContentDescription("todo-undo-limit");body.addView(warning);
+        ScrollView scroll=new ScrollView(activity);scroll.addView(body);
+        AlertDialog dialog=new AlertDialog.Builder(activity).setTitle("删除这条待办？").setView(scroll).setNegativeButton("取消",null).setPositiveButton("确认删除",null).create();
+        todoDialog=dialog;
+        dialog.setOnDismissListener(unused->{
+            if(todoDialog==dialog)todoDialog=null;
+            if(pendingTodoDeletion==plan){pendingTodoDeletion=null;plan.close();}
+        });
+        dialog.setOnShowListener(unused->{
+            Button confirm=dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            confirm.setContentDescription("todo-delete-confirm");confirm.setMinHeight(dp(48));
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setContentDescription("todo-delete-cancel");
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setMinHeight(dp(48));
+            confirm.setOnClickListener(v->{
+                if(busy||pendingTodoDeletion!=plan||!todoViewCurrent(expected))return;
+                pendingTodoDeletion=null;clearTodoUndo();
+                dialog.setCancelable(false);confirm.setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);
+                work(()->db.confirmTodoDeletion(plan),token->{
+                    dialog.dismiss();
+                    if(!todoViewCurrent(expected)){token.close();return;}
+                    todoUndo=token;loadTodos();message("已删除，可在当前界面撤销一次",false);
+                },()->{dialog.dismiss();loadTodos();message("删除未完成，请刷新后重新选择",true);},AppDatabase.TodoDeletionUndo::close);
+            });
+        });
+        dialog.show();
+    }
+    private void renderTodoUndo(LinearLayout body){
+        clearTodoUndoControls();
+        final AppDatabase.TodoDeletionUndo token=todoUndo;
+        if(token==null)return;
+        final Object expected=todoView;
+        TextView hint=text("已删除："+token.title()+"\n撤销仅限当前界面一次，切页、重建或重启失效。",14,MUTED);
+        hint.setContentDescription("todo-undo-notice");todoUndoHint=hint;body.addView(hint);
+        Button undo=button("撤销删除",()->{
+            if(busy||todoUndo!=token||!todoViewCurrent(expected))return;
+            rememberDraft();todoUndo=null;clearTodoUndoControls();
+            work(()->{db.undoTodoDeletion(token);return true;},ignored->{loadTodos();message("已恢复原待办及原位置",false);},
+                ()->{loadTodos();message("无法撤销：数据可能已变化，原删除结果未覆盖",true);});
+        });
+        undo.setContentDescription("todo-undo-"+token.todoId());todoUndoButton=undo;body.addView(undo,new LinearLayout.LayoutParams(-1,-2));
+    }
+
+    // BEGIN_EXPLICIT_ACTIVATION_UI
+    private AppDatabase.ShortcutActivationPlan activationPlan,activationAttempt;
+    private AlertDialog activationDialog;
+    private Object activationView=new Object();
+    private boolean activationCurrent(Object expected){
+        return !closed&&!activity.isDestroyed()&&!activity.isFinishing()&&activationView==expected;
+    }
+    private MediaRepository activationMedia()throws java.io.IOException{
+        return new MediaRepository(activity.getFilesDir().toPath().resolve("media"),64L*1024*1024);
+    }
+    private void clearActivation(){
+        activationView=new Object();
+        AppDatabase.ShortcutActivationPlan plan=activationPlan;activationPlan=null;
+        AppDatabase.ShortcutActivationPlan attempt=activationAttempt;activationAttempt=null;
+        AlertDialog dialog=activationDialog;activationDialog=null;
+        if(plan!=null)plan.close();
+        if(attempt!=null)attempt.close();
+        if(dialog!=null)dialog.dismiss();
+    }
+    private void requestShortcutActivation(){
+        if(busy||closed||activity.isDestroyed()||activity.isFinishing()||activationDialog!=null)return;
+        rememberDraft();leaveTodoSession();
+        final Object expected=activationView;
+        work(()->{
+            int version=db.getReadableDatabase().getVersion();
+            if(version==4)return null;
+            if(version!=3)throw new IllegalStateException("Activation requires schema3");
+            return db.prepareShortcutActivation(activity.getFilesDir().toPath().resolve("activation-backups"),activationMedia());
+        },plan->{
+            if(!activationCurrent(expected)){if(plan!=null)plan.close();return;}
+            if(plan==null){message("分类快捷入口已启用，可在活动分类中设置",false);return;}
+            showShortcutActivation(plan,expected);
+        },()->message("未能创建并验证升级备份，未执行启用操作；请保留应用数据",true),
+          plan->{if(plan!=null)plan.close();});
+    }
+    private void showShortcutActivation(AppDatabase.ShortcutActivationPlan plan,Object expected){
+        if(!activationCurrent(expected)){plan.close();return;}
+        activationPlan=plan;
+        LinearLayout body=column();body.setPadding(dp(20),dp(8),dp(20),dp(8));
+        TextView detail=text("备份已创建并校验："+plan.backupName()+"\n启用后会升级本机数据格式，保留原有内容和关联，不会启动其他应用。",16,INK);
+        detail.setContentDescription("activation-backup-details");body.addView(detail);
+        TextView warning=text("这是应用内部的本机备份：卸载或清除数据会一并删除。建议先另行导出备份。启用后没有一键降级；旧版本不支持新格式。",15,ERROR);
+        warning.setContentDescription("activation-backup-warning");body.addView(warning);
+        CheckBox consent=new CheckBox(activity);consent.setText("我已了解备份位置与升级限制，确认启用");
+        consent.setContentDescription("activation-consent");consent.setMinHeight(dp(48));body.addView(consent);
+        TextView validation=text("",14,ERROR);validation.setContentDescription("activation-validation");body.addView(validation);
+        ScrollView scroll=new ScrollView(activity);scroll.addView(body);
+        AlertDialog dialog=new AlertDialog.Builder(activity).setTitle("启用分类快捷入口？").setView(scroll)
+            .setNegativeButton("暂不启用",null).setPositiveButton("确认启用",null).create();
+        activationDialog=dialog;
+        dialog.setOnDismissListener(unused->{
+            if(activationDialog==dialog)activationDialog=null;
+            if(activationPlan==plan){activationPlan=null;plan.close();message("已取消启用；校验备份保留，未升级数据格式",false);}
+        });
+        dialog.setOnShowListener(unused->{
+            Button confirm=dialog.getButton(AlertDialog.BUTTON_POSITIVE),cancel=dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
+            confirm.setContentDescription("activation-confirm");cancel.setContentDescription("activation-cancel");
+            confirm.setMinHeight(dp(48));cancel.setMinHeight(dp(48));
+            confirm.setOnClickListener(v->{
+                if(busy||activationPlan!=plan||!activationCurrent(expected))return;
+                if(!consent.isChecked()){validation.setText("请先勾选确认，未勾选不会升级");return;}
+                activationPlan=null;activationAttempt=plan;
+                dialog.setCancelable(false);confirm.setEnabled(false);cancel.setEnabled(false);consent.setEnabled(false);
+                work(()->{db.confirmShortcutActivation(plan,activationMedia());return true;},ignored->{
+                    activationAttempt=null;dialog.dismiss();
+                    if(!activationCurrent(expected))return;
+                    ((MainActivity)activity).restartAfterShortcutActivation(this);
+                },()->{
+                    activationAttempt=null;plan.close();dialog.dismiss();
+                    // A failure after transaction commit/connection close cannot
+                    // be described as "data unchanged". Retire this facade.
+                    ((MainActivity)activity).activationNeedsRestart(this);
+                });
+            });
+        });
+        dialog.show();
+    }
+    // END_EXPLICIT_ACTIVATION_UI
+
+    public TodayScreen(Activity activity) {
+        this(activity,AppDatabase.openSchema3(activity,"pocket-v12.db"));
+    }
+    TodayScreen(Activity activity,AppDatabase database){
+        this.activity=activity;db=database;activities=new ActivitiesScreen(this);
+    }
+    public void show(Bundle saved) {
+        leaveTodoSession();
+        if(saved!=null){page=saved.getInt("page",0);filter=saved.getInt("filter",0);draft=saved.getString("draft","");activities.selected=saved.getLong("activity",0);}
+        activity.getWindow().setStatusBarColor(BG);
+        activity.getWindow().setNavigationBarColor(BG);
+        activity.getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        root=column();root.setPadding(dp(18),dp(12),dp(18),dp(10));root.setBackgroundColor(BG);root.setFocusableInTouchMode(true);
+        activity.setContentView(root);root.requestFocus();
+        TextView label=text("口袋待办  /  1.2 开发预览",14,ACCENT);label.setContentDescription("v12-home");root.addView(label);
+        TextView heading=text("把今天，放进口袋",28,INK);heading.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));heading.setPadding(0,dp(8),0,dp(8));root.addView(heading);
+        Button activate=button("启用分类快捷入口",this::requestShortcutActivation);
+        activate.setContentDescription("activation-entry");root.addView(activate);
+        status=text("正在读取本机数据…",14,MUTED);status.setContentDescription("v12-status");status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);root.addView(status);
+        content=column();LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,0,1);cp.topMargin=dp(12);root.addView(content,cp);
+        LinearLayout nav=new LinearLayout(activity);
+        nav.addView(button("今天",()->navigate(0)),new LinearLayout.LayoutParams(0,dp(52),1));
+        nav.addView(button("活动",()->navigate(1)),new LinearLayout.LayoutParams(0,dp(52),1));
+        nav.addView(button("导出笔记",()->{leaveTodoSession();((MainActivity)activity).openNoteShare();}),new LinearLayout.LayoutParams(0,dp(52),1));root.addView(nav);
+        refresh();
+    }
+    private void navigate(int next){if(busy)return;rememberDraft();leaveTodoSession();page=next;refresh();}
+    void refresh(){if(page==1)activities.load();else loadTodos();}
+    LinearLayout content(){todoView=new Object();clearTodoPreview();if(page!=0)clearTodoUndo();input=null;content.removeAllViews();return content;}
+    private void rememberDraft(){if(input!=null)draft=input.getText().toString();}
+    private static final class TodoRow {
+        final String id,title;final boolean done;
+        TodoRow(Cursor c){id=c.getString(0);title=c.getString(1);done=c.getInt(2)!=0;}
+    }
+    private void loadTodos() {
+        rememberDraft();
+        work(()->{
+            List<TodoRow> rows=new ArrayList<>();
+            try(Cursor c=db.getReadableDatabase().rawQuery("SELECT id,title,done FROM todos ORDER BY position",null)){while(c.moveToNext())rows.add(new TodoRow(c));}
+            return rows;
+        },this::renderTodos,null);
+    }
+    private void renderTodos(List<TodoRow> todos) {
+        LinearLayout body=content();int remaining=0;for(TodoRow row:todos)if(!row.done)remaining++;
+        final Object renderedTodoView=todoView;
+        List<String> ids=new ArrayList<>();for(TodoRow item:todos)ids.add(item.id);
+        final List<String> renderedOrder=java.util.Collections.unmodifiableList(ids);
+        TextView summary=text("还剩 "+remaining+" 件 / 共 "+todos.size()+" 件",20,INK);summary.setPadding(dp(14),dp(12),dp(14),dp(12));summary.setBackground(shape(TINT,16));body.addView(summary);
+        LinearLayout tabs=new LinearLayout(activity);String[] labels={"全部","待办","已完成"};
+        for(int i=0;i<labels.length;i++){final int choice=i;Button b=button(labels[i],()->{filter=choice;loadTodos();});if(i==filter){b.setBackgroundTintList(ColorStateList.valueOf(ACCENT));b.setTextColor(WHITE);}tabs.addView(b,new LinearLayout.LayoutParams(0,dp(48),1));}
+        body.addView(tabs);
+        ScrollView scroll=new ScrollView(activity);scroll.setContentDescription("todo-list-scroll");scroll.setFillViewport(true);LinearLayout rows=column();scroll.addView(rows);body.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        int visible=0;
+        for(TodoRow item:todos){
+            if((filter==1&&item.done)||(filter==2&&!item.done))continue;visible++;
+            LinearLayout row=new LinearLayout(activity);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(8),dp(5),dp(4),dp(5));row.setBackground(shape(WHITE,14));
+            CheckBox box=new CheckBox(activity);box.setText(item.title);box.setTextSize(17);box.setTextColor(item.done?MUTED:INK);box.setMinHeight(dp(52));box.setButtonTintList(ColorStateList.valueOf(ACCENT));box.setContentDescription("todo-"+item.id);box.setChecked(item.done);
+            if(item.done)box.setPaintFlags(box.getPaintFlags()|Paint.STRIKE_THRU_TEXT_FLAG);
+            box.setOnCheckedChangeListener((b,checked)->{clearTodoUndo();work(()->{db.editTodo(item.id,item.title,checked);return true;},ignored->loadTodos(),this::loadTodos);});
+            row.addView(box,new LinearLayout.LayoutParams(0,-2,1));
+            Button edit=button("编辑",()->{clearTodoUndo();editor("编辑待办","编辑待办输入",item.title,false,value->db.editTodo(item.id,value,item.done),this::loadTodos);});edit.setContentDescription("edit-"+item.id);row.addView(edit,new LinearLayout.LayoutParams(dp(60),dp(52)));
+            Button delete=button("删除",()->previewTodoDeletion(item,renderedTodoView));delete.setContentDescription("delete-"+item.id);row.addView(delete,new LinearLayout.LayoutParams(dp(60),dp(52)));
+            LinearLayout card=column();card.addView(row);
+            renderTodoOrder(card,item,renderedOrder,renderedTodoView);addRow(rows,card);
+        }
+        if(visible==0){TextView empty=text(filter==2?"完成的事会留在这里":filter==1?"这一页已经清空，真不错":"先放进一件小事。\n活动和打卡，在「活动」里。",18,MUTED);empty.setPadding(dp(12),dp(28),dp(12),dp(16));rows.addView(empty);}
+        renderTodoUndo(body);
+        LinearLayout composer=new LinearLayout(activity);composer.setGravity(Gravity.CENTER_VERTICAL);
+        input=field("新待办输入",false);input.setHint("下一件小事…");input.setText(draft);input.setBackground(shape(WHITE,12));input.setPadding(dp(12),dp(8),dp(12),dp(8));
+        composer.addView(input,new LinearLayout.LayoutParams(0,dp(56),1));
+        composer.addView(button("添加",this::addTodo),new LinearLayout.LayoutParams(dp(68),dp(56)));body.addView(composer);
+    }
+    /** All-tab ordering only. Consume the rendered identity before enqueueing so
+     * old or sibling callbacks cannot replay even after a failed save.
+     */
+    private void requestTodoMove(String id,Object expected,List<String> order,int to,View source){
+        if(busy||filter!=0||!todoViewCurrent(expected)||!source.isAttachedToWindow()||!source.isEnabled())return;
+        int from=order.indexOf(id);
+        if(from<0||to<0||to>=order.size()||from==to)return;
+        final List<String> owned=new ArrayList<>(order);
+        rememberDraft();clearTodoPreview();clearTodoUndo();
+        todoView=new Object();final Object submitted=todoView;
+        work(()->db.moveTodo(id,owned,to),changed->{
+            if(!todoViewCurrent(submitted))return;
+            loadTodos();message(changed?"已调整待办顺序":"待办顺序未改变",false);
+        },()->{
+            if(!todoViewCurrent(submitted))return;
+            loadTodos();message("未能调整待办顺序；列表可能已变化，已重新读取。",true);
+        });
+    }
+    private void renderTodoOrder(LinearLayout card,TodoRow item,List<String> order,Object expected){
+        if(filter!=0)return;
+        int index=order.indexOf(item.id);
+        LinearLayout controls=new LinearLayout(activity);
+        Button up=button("上移",()->{}),down=button("下移",()->{});
+        up.setContentDescription("todo-up-"+item.id);down.setContentDescription("todo-down-"+item.id);
+        up.setEnabled(index>0);down.setEnabled(index>=0&&index<order.size()-1);
+        up.setOnClickListener(v->requestTodoMove(item.id,expected,order,index-1,v));
+        down.setOnClickListener(v->requestTodoMove(item.id,expected,order,index+1,v));
+        controls.addView(up,new LinearLayout.LayoutParams(0,dp(48),1));
+        controls.addView(down,new LinearLayout.LayoutParams(0,dp(48),1));
+        card.addView(controls,new LinearLayout.LayoutParams(-1,-2));
+    }
+    private void addTodo(){
+        if(busy)return;String title=input.getText().toString().trim();
+        if(title.isEmpty()){message("内容不能为空",true);return;}
+        clearTodoUndo();
+        final String id=UUID.randomUUID().toString();
+        work(()->{db.addTodo(id,title);return true;},ignored->{
+            ((InputMethodManager)activity.getSystemService(Activity.INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(input.getWindowToken(),0);
+            input.setText("");draft="";filter=0;loadTodos();
+        },null);
+    }
+    /** Dialog validation stays visible; save button cannot enqueue duplicate writes. */
+    void editor(String title,String description,String initial,boolean multiline,Consumer<String> save,Runnable success){
+        if(busy)return;
+        LinearLayout body=column();body.setPadding(dp(20),dp(4),dp(20),dp(8));
+        EditText field=field(description,multiline);field.setText(initial);body.addView(field,new LinearLayout.LayoutParams(-1,-2));
+        TextView validation=text(multiline?"每行一步，按顺序保存；留空可清空路径。":"名称可随时修改。",14,MUTED);body.addView(validation);
+        AlertDialog dialog=new AlertDialog.Builder(activity).setTitle(title).setView(body).setNegativeButton("取消",null).setPositiveButton("保存",null).create();
+        dialog.setOnShowListener(unused->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+            String value=field.getText().toString().trim();
+            if(!multiline&&value.isEmpty()){validation.setText("内容不能为空");validation.setTextColor(ERROR);return;}
+            dialog.setCancelable(false);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);field.setEnabled(false);
+            work(()->{save.accept(value);return true;},ignored->{
+                InputMethodManager ime=(InputMethodManager)activity.getSystemService(Activity.INPUT_METHOD_SERVICE);
+                if(ime!=null)ime.hideSoftInputFromWindow(field.getWindowToken(),0);
+                field.clearFocus();
+                dialog.dismiss();success.run();
+            },()->{
+                dialog.setCancelable(true);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);field.setEnabled(true);validation.setText("未能保存，请检查内容后重试");validation.setTextColor(ERROR);
+            });
+        }));
+        dialog.show();
+    }
+
+    void exportBackup(Path temp)throws IOException{db.exportBackup(temp,new MediaRepository(activity.getFilesDir().toPath().resolve("media"),64L*1024*1024));}
+    void backupExported(){activity.runOnUiThread(()->{message("备份已保存到你选的位置",false);content();activities.load();});}
+    void backupCancelled(){activity.runOnUiThread(()->message("已取消，没有改变本机数据",false));}
+    void backupFailed(Exception e){activity.runOnUiThread(()->message("备份或恢复未完成，本机数据保持原样",true));}
+    /** The returned plan is shown in one dialog and consumed at most once.
+     * Rotation/process death currently discards this in-memory plan; the user must
+     * choose the file again. Persistent abandoned-plan cleanup remains pending.
+     */
+    void previewRestore(Path chosen)throws IOException{
+        AppDatabase.RestorePlan plan;
+        try{plan=db.prepareRestore(chosen,activity.getCacheDir().toPath().resolve("restore-stage"),64L*1024*1024);}
+        finally{Files.deleteIfExists(chosen);}
+        activity.runOnUiThread(()->showRestorePlan(plan));
+    }
+    private void showRestorePlan(AppDatabase.RestorePlan plan){
+        pendingRestore=plan;
+        LinearLayout body=column();body.setPadding(dp(20),dp(4),dp(20),dp(8));
+        TextView warning=text("恢复会替换本机当前所有内容，不是合并。",17,ERROR);body.addView(warning);
+        Map<String,Long> current=plan.currentCounts(),incoming=plan.incomingCounts();
+        StringBuilder rows=new StringBuilder();
+        String[] labels={"activities:活动","todos:普通待办","ledger:账目","checkins:打卡","notes:笔记","media:媒体文件"};
+        for(String pair:labels){String[] parts=pair.split(":");rows.append(parts[1]).append("：本机 ").append(current.get(parts[0])).append(" → 备份 ").append(incoming.get(parts[0])).append('\n');}
+        rows.append("恢复后暂无撤销按钮；可先返回导出当前备份。");
+        TextView counts=text(rows.toString(),15,INK);counts.setContentDescription("restore-counts");body.addView(counts);
+        CheckBox consent=new CheckBox(activity);consent.setText("我明白会替换本机数据");consent.setTextSize(16);consent.setTextColor(INK);consent.setContentDescription("restore-consent");body.addView(consent);
+        TextView validation=text("",14,ERROR);validation.setContentDescription("restore-validation");body.addView(validation);
+        AlertDialog dialog=new AlertDialog.Builder(activity).setTitle("确认恢复备份？").setView(body).setNegativeButton("取消",null).setPositiveButton("确认恢复",null).create();
+        dialog.setOnShowListener(unused->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+            if(!consent.isChecked()){validation.setText("请先勾选：我明白会替换本机数据");return;}
+            dialog.setCancelable(false);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);consent.setEnabled(false);
+            work(()->{db.confirmRestore(plan,new MediaRepository(activity.getFilesDir().toPath().resolve("media"),64L*1024*1024));return true;},ignored->{pendingRestore=null;dialog.dismiss();activities.selected=0;refresh();},()->dialog.dismiss());
+        }));
+        dialog.setOnDismissListener(unused->{if(pendingRestore==plan){pendingRestore=null;try{plan.close();}catch(IOException ignored){}}});
+        dialog.show();
+    }
+    <T> void work(Callable<T> action,Consumer<T> success,Runnable failure){
+        work(action,success,failure,ignored->{});
+    }
+    <T> void work(Callable<T> action,Consumer<T> success,Runnable failure,Consumer<T> abandoned){
+        if(closed||busy)return;
+        busy=true;pause(root);message("正在读取或保存…",false);
+        final Object noticeAtStart=notice;
+        io.execute(()->{
+            try{T result=action.call();activity.runOnUiThread(()->{
+                if(closed||activity.isDestroyed()){abandoned.accept(result);return;}busy=false;resume();if(notice==noticeAtStart)message("已保存到本机",false);success.accept(result);
+            });}catch(Exception e){activity.runOnUiThread(()->{
+                if(closed||activity.isDestroyed())return;busy=false;resume();if(notice==noticeAtStart)message("未能保存或读取，原始数据未清空",true);if(failure!=null)failure.run();
+            });}
+        });
+    }
+    void message(String value,boolean error){notice=new Object();status.setText(value);status.setTextColor(error?ERROR:MUTED);}
+    private void pause(View v){paused.put(v,v.isEnabled());v.setEnabled(false);if(v instanceof ViewGroup){ViewGroup g=(ViewGroup)v;for(int i=0;i<g.getChildCount();i++)pause(g.getChildAt(i));}}
+    private void resume(){for(Map.Entry<View,Boolean> state:paused.entrySet())state.getKey().setEnabled(state.getValue());paused.clear();}
+    void addRow(LinearLayout parent,View view){LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.bottomMargin=dp(10);parent.addView(view,p);}
+    LinearLayout column(){LinearLayout v=new LinearLayout(activity);v.setOrientation(LinearLayout.VERTICAL);return v;}
+    TextView text(String value,int size,int color){TextView v=new TextView(activity);v.setText(value);v.setTextSize(size);v.setTextColor(color);return v;}
+    EditText field(String description,boolean multiline){EditText v=new EditText(activity);v.setContentDescription(description);v.setTextSize(17);v.setTextColor(INK);v.setSingleLine(!multiline);if(multiline){v.setMinLines(3);v.setMaxLines(6);v.setGravity(Gravity.TOP);v.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);}return v;}
+    Button button(String value,Runnable action){Button b=new Button(activity);b.setText(value);b.setTextSize(14);b.setAllCaps(false);b.setTextColor(ACCENT);b.setMinWidth(0);b.setMinimumWidth(0);b.setMinHeight(dp(48));b.setPadding(dp(5),0,dp(5),0);b.setBackgroundTintList(ColorStateList.valueOf(TINT));b.setOnClickListener(v->{if(!busy)action.run();});return b;}
+    GradientDrawable shape(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
+    int dp(int value){return Math.round(value*activity.getResources().getDisplayMetrics().density);}
+    boolean awaitShortcutClose()throws InterruptedException{return io.awaitTermination(10,java.util.concurrent.TimeUnit.SECONDS);}
+    public void save(Bundle out){rememberDraft();out.putInt("page",page);out.putInt("filter",filter);out.putString("draft",draft);out.putLong("activity",activities.selected);}
+    public boolean back(){if(busy)return true;if(page==1&&activities.selected!=0){activities.selected=0;activities.load();return true;}return false;}
+    public void close(){if(closed)return;closed=true;clearActivation();leaveTodoSession();io.execute(db::close);io.shutdown();}
+}

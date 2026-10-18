@@ -1,21 +1,85 @@
-# Pocket Todo development
+# Pocket Todo v1.2 development
 
-- Native Java Android app. No network permissions, accounts, telemetry or cloud resources.
-- Gate first: `python3 tools/verify.py core`; Android: `python3 tools/verify.py build`.
-- Emulator: `python3 tools/ui_test.py` only on a disposable GitHub Actions emulator.
-- Core model and BackupCodec are Android-free and deterministic. File I/O belongs to the Activity.
-- Keep existing storage v1 compatible. Never silently reset damaged storage or import into unhealthy storage.
-- State limit 500 tasks / 200 UTF-16 code units; file limit BackupCodec.MAX_BYTES.
-- Backup v1 is an unencrypted ASCII envelope with canonical state and SHA-256 damage detection, not authentication.
-- Import requires a validated preview and explicit replace confirmation. Store pre-import snapshot in the same commit.
-- Undo is single-level, survives restart, and ends on any subsequent normal mutation or another import.
-- Use the system document picker; never request broad storage permission. Bound reads and perform provider I/O off the UI thread.
-- Preview package is com.supercubegame.pockettodo.safe.preview, separate from accepted com.supercubegame.pockettodo.
-- Stable package com.supercubegame.pockettodo.safe is reserved, not delivered until durable signing is configured.
-- Never publish signing keys or pretend disposable preview signatures support future in-place upgrades.
-- Min SDK 26 / target 34 must agree with APK assertions; version 1.1 code 2. No store-ready claim.
-- Preserve real exit codes. Publish preview release only after the core, build, lint and emulator checks pass.
-- Reports land on evidence branch with source SHA/run ID and are read back byte-for-byte.
-- Keep this file byte-identical to CLAUDE.md and no more than 200 lines.
-- Missing evidence is NOT_TESTED. v1.0 phone acceptance does not cover v1.1 or durable upgrades.
-- Cloud document-provider behavior, disk-full fault injection, rotation during I/O and vendor behavior need separate tests.
+- Approved32 project paths: docs/V1_2_PLAN.md. One writer; no merge/main/old-release changes. All public fixtures synthetic.
+- Native Java Android, SQLiteOpenHelper schema2, FK/WAL, explicit1-to2 additive migration. No destructive migration/unknown-version reset.
+- Fast gate python3 tools/verify.py v12: actual JDK17 legacy/domain/file checks. Preserve assertions; Android code validated by Gradle/device jobs, not host Python.
+- Device gate: gradle --no-daemon --console=plain assembleDebug assembleDebugAndroidTest lintDebug then TEST_API26/34 python3 tools/emulator_gate.py on isolated CI runner.
+- Internal package com.supercubegame.pockettodo.v12.preview,1.2/code3,min26/target34/compile35;AGP8.7.3,Gradle8.9,JDK17,desugar_jdk_libs2.1.5 pinned.
+- MainActivity delegates to native TodayScreen/ActivitiesScreen/CalendarScreen plus a backup-tab restore slice nested in TodayScreen: todo/category/manual-path/today-mark, activity-specific multi-date ledger and guarded restore preview/confirm, NOT complete v1.2. No deliverable APK. python3 tools/verify.py build intentionally blocks product delivery; replace with real product gates, never merely remove guard. Historical error text is coupled to the negative guard.
+- Native SQLite uses a single background executor, stable IDs/prior disabled-control states, duplicate-save blocking and queued close. UI pocket-v12.db is separate from fixtures and old preferences.
+- Native gate uses real taps/text/nodes, force-stop/relaunch, screencap and independent stopped Android SQLite/WAL read. No fixture seeding into UI DB or hidden product test entrypoints; the restore fixture exports the stopped UI DB read-only and re-enters only through the real SAF picker. Preserve tools/ui_test.py SAF/FINGER helpers.
+- Date selection ONLY filters, not a batch write. Empty selection zero, missing days not confirmed zero; expense/refund/income/planned separate, integer cents/checked arithmetic. Exact repeat saves no-op, latest untouched ledger batch only undo, tombstones prevent replay.
+- Calendar selection is ephemeral and activity-specific; future actual dates currently allowed. Cross-month/31st/leap-month/large-font/lifecycle/navigation not yet UI-verified; ledger edit/delete/undo and global UI pending. Current native43 fixture covers Sep2026, not all calendar boundaries.
+- seed/reopen use separate instrumentation with force-stop/no-pid between. Process persistence is NOT mid-write death/reboot/powerloss testing.
+- Fields preserve IDs on rename, archive retains values/notes and blocks new values/note associations. Existing notes separately editable. Ordinary todos remain separate; no invented activity/date/money.
+- No inherited500/200 quotas for new records, but resource/cursor limits apply. Lists and ledger totals still materialize all rows; no scale proof.
+- Legacy import validates then transactionally APPENDS with source-hash journal/remapped IDs; exact retry no-op, changed backup can append similar rows. Import UI/consent/undo pending. Legacy TodoModel/BackupCodec/CoreTest unchanged.
+- V1 migration fixture freezes old DDL but not every old table. Domain remains Android/I/O/clock free; adapters own IDs/timestamps. Today uses Asia/Shanghai and separate Instant, no auto-check-in.
+- Media immutable content IDs, same-dir ATOMIC_MOVE, JVM+persistent OS lock and absence check inside lock. Never unlink lock/overwrite. Cooperating private writers only, not public SAF directories. Byte checks are not image decoding.
+- BackupArchive is transport; AppDatabase semantic schema2 codec has fixed magic/version/tables/columns/types, strict UTF8/length/end checks. No archive SQL/DDL. Exact user-table set; unknown table refuses export.
+- Snapshot preserves IDs/order/privacy/revision/batch payloads/tombstones/import journal. Decode trusted fresh in-memory schema, validate SQL/FKs/domain/historical archived values/date/order/journal, then canonical byte readback. Wrap invalid-state exceptions with cause, not acceptance/retry.
+- Exact media registry/file set/sizes/hashes; consistent export transaction. STATE_LIMIT and META_LIMIT both8MiB, provisional resource protection not capacity proof. Schema changes require codec/migration/independent-fixture evolution.
+- Raw restoreBackup remains a lower-level replacement adapter. The backup tab uses only prepareRestore, visible per-table counts and explicit confirmRestore, never raw restoreBackup. Successful todo/dialog writes close an open plan and disable confirmation until a fresh preview; other screens' writes rely on the final full-state guard. Restore undo and abandoned-plan crash cleanup pending.
+- RestorePlan freezes validated source/state/assets in private staging; immutable current/incoming counts for all18 tables. No live DB mutation/media publication during preview. Caller owns close on cancellation/lifecycle abandonment; helper close invalidates session but does not clean abandoned plans. Crash cleanup still pending.
+- Plans are bound to exact helper/session, in-memory and single-attempt. Cancel/success/confirmation failure invalidates; retry needs a fresh preview and consent. Source path changes after preview cannot substitute data. Summary maps are immutable, not a UI-consent proof.
+- Staleness compares complete canonical current state, including revision, not revision alone. Early check avoids unnecessary copies; FINAL compare and replacement MUST share one write transaction. Preserve both checks. No-op retries should not invalidate unchanged state.
+- Confirmation revalidates staged media bytes, closes staging BEFORE commit, copies rows and compares canonical result in one transaction. No restore undo yet. Raw adapter old checks remain unchanged.
+- Failure never deletes old media. New unreachable immutable blobs MAY remain after copy/DB failure, including damaged-stage rejection; do not blindly remove as another writer might reference them. Safe GC pending. No physical-folder equality or powerloss guarantee.
+- Device fixture covers all18 nonempty tables, independent wire encoding, actual ZIP/assets, malformed valid-ZIP rejection, exact late SQLite trigger rollback, repeated restores, restart/journal usability. Guarded suite adds cancel, counts, owner, stale normal/second-connection same-revision writes, damaged stage, frozen source, failure/success replay and real no-op.
+- Guarded coverage report reads FULL phase files, requires named checks plus consistent totals/normal instrumentation exit, and runs parser positive/missing-check/failure/bad-exit self-tests. Publish reports/restore-plan-<SHA>-<run>.json with readback. Backend evidence pairs with native-gate SAF picker preview/visible counts/stale-write disable/explicit replace/corrupt rejection; the final report step also rejects missing SAF restore coverage. Restore undo NOT tested.
+- Historical test-first7203/35619172618 missing exportState directly observed API26 only; API34 retrieved tail truncated. Invalid-date24801 normalized candidate errors, no relaxed validation. Native7daac867 missing v12-home;3d929587 lint numeric style fixed with Typeface.NORMAL. Calendar0af0a4ba missing entrypoint;33f24be3 month clearing guard fixed by removing redundant hint, exact cause not independently isolated. RestoreUI89e236e compile failed on cross-class private access and AutoCloseable-not-Closeable; RestoreScreen folded into TodayScreen nested class, no new project path.
+- Earlier hardlink denial fixed by locked rename; boot timeout retries only within original240s deadline. No product assertion retry/skip. Read exact source/run reports before claiming verification.
+- Pending: restore undo/lifecycle-race hardening and safe blob GC; real photos/decode/thumbnail/crop/opaque redaction; illustrated notes; app/field UI; PDF/segmented-image/Markdown assets sharing; drag categories, schedules/shortcuts/templates/search/archive, todo delete/reorder, check-in history/backdate/unrecorded, lifecycle/large-font/scale/phone/stable signing.
+- Reports distinguish schema2 DB/media, guarded restore backend, native slice and full product. release_ready=false. No pixel audit merely from screenshot hashes;05-selected-dates is applied ledger page, not calendar dialog. No real user data or keys in public evidence/source/log. AGENTS.md==CLAUDE.md <=200lines.
+
+- Authorized opt-in shortcut storage stage adds Schema4Store.java, Schema4DeviceTest.java, tools/verify_shortcuts.py and .github/workflows/shortcut-storage.yml. No live UI switch or phone migration; Schema4Store refuses pocket-v12.db. Existing AppDatabase/TodayScreen remain schema3.
+- Schema4 only adds category_shortcuts(category_id,application_id), stable references not new activities. Live migration accepts v3 only; strict old schema2/schema3 backups normalize to empty shortcuts. New wire3/schema4 wraps canonical wire2/schema3 plus lexicographically sorted unique positive IDs; unknown versions/tables fail closed.
+- Shortcut stage fast gate: python3 tools/verify_shortcuts.py selftest (actual extracted Java codec, host SQLite, syntax/API-shape stubs and evidence refusal, not Android). Slow gate runs isolated API26/34 seed/reopen instrumentation, exact installed APK reads and independent stopped DB/media snapshots. Existing full-project gates remain mandatory.
+- Shortcut stage report is reports/shortcuts-<SHA>-<run>-<attempt>.json on the evidence branch. Preserve original logs/failures and one device attempt; no UI, stable-signature release, phone restore exactness, power-loss, concurrency-history or full-v1.2 claim. These new-stage rules supersede older schema/UI progress descriptions above only for this opt-in adapter.
+
+- Opt-in business bridge uses AppDatabase.openSchema4 with one Schema4Store connection and a borrowed Schema3 note adapter; pocket-v12.db remains refused. Schema2/3 codecs and live UI remain unchanged. Internal v4 comparisons include sorted typed shortcut keys without inventing rowids.
+- Bridge gate: exact Java rename-transform behavior keeps schema2/3 witnesses, refuses omitted v4 relations and trailing bytes; device checks exercise notes, fields, catalog/path/archive, todo undo, stale plans, rollback and guarded backup restore. Reports bind AppDatabase and the separate business DB readbacks to the same source/run/API. No UI, phone migration, durable-upgrade or original-directory-255 fix claim.
+
+## Isolated shortcut UI acceptance
+Normal startup remains schema3 pocket-v12.db; only an in-process instrumentation flag selects fixed schema4-ui.db, never intent extras or phone migration. Preserve all original commands/budgets and separate storage seed/reopen processes. Shortcut UI manages one stable category/application relation; navigation revalidates full-state owner/session/connection tokens and never creates activities, records money/check-ins, or launches external apps. Device acceptance uses actual native DOWN/UP events and typed stopped-database replay, not host Java guard checks. Independently replay both business and UI databases in the report. UI screenshots are evidence, not visual/usability acceptance. No commercial release or general crash/ABA/phone-upgrade claim.
+
+## Explicit shortcut activation integration
+These rules supersede earlier schema3-only startup and isolated-only activation statements above.
+Normal startup opens existing schema3 without upgrading; existing schema4 resumes on its original connection. Corrupt, future, symlink or changed schemas fail closed without clearing data.
+Only explicit preview, verified internal backup, checked consent and confirmation can activate schema4. Backup is retained on cancel/failure; uninstall or clear-data loses internal backups. No automatic migration, external app launch or one-click downgrade.
+Activation plans are owner/session-bound and single-attempt. Closing retires callbacks and queues connection close. Preserve all prior host and Android checks, original deadlines and negative controls.
+Post-DDL observer captures the existing connection before confirmation; never re-enter the schema3 facade after DDL. The original guard-exception RED and actual-source guard harness remain mandatory.
+Isolated acceptance: 7920bbe315a61cdfd7c8af78cc54f30cee254da8, run38884051157, original21 hosts once plus actual API26/API34 seed/reopen and independent database replay. This is not final product, stable overwrite, phone, power-loss or commercial acceptance.
+Product delivery requires new same-commit device and stable-signature overwrite results. Keep release_ready=false; full v1.2 and historical ADB255 diagnosis remain incomplete. AGENTS.md and CLAUDE.md must stay identical and at most200 lines.
+
+## Pagination startup readiness and database timeout evidence
+Pagination waits for a live nonbusy screen on the main thread before its first snapshot. The 10000ms observation cap and 50ms interval are liveness guards, not a startup performance claim; the original 180s instrumentation deadline is unchanged.
+Idle observation, readiness and initial snapshot are inside the Activity cleanup block. Database references are captured on the main thread; exportState remains off main. Normal product startup and all original 29 backend / 22 preview assertions remain unchanged.
+Database seed/reopen still execute once each with their original 180s commands. TimeoutExpired partial streams are preserved byte-exact in device-*-timeout-*.txt, with captured/type/hash metadata in device-*-timeout.txt, and the original exception is rethrown. An absent stream is not proof of no device error.
+Permanent host tests compile actual Java helper bytes with Android doubles, reject witnessed mutations and caller omissions, and exercise a real host child timeout. These do not establish API34 timeout root cause or Android acceptance.
+Require full original21 host commands and same-final-commit API26/API34 plus overwrite-upgrade results before delivery. Old green runs, this diagnostic repair and rebuilt-old-source overwrite are not phone-certificate or commercial acceptance. Keep release_ready=false.
+
+## Recreated result notices and native editor viewport
+Async startup may retain only one recognized result-code notice, never a URI, Intent, payload, operation or consent. Consume it after screen attachment; refuse retired owners and clear on destroy. Initial background-load completion must not erase a newer notice.
+Editor success hides the IME using the still-attached field token, then clears focus, dismisses and refreshes. Validation/save failure remains editable; no synthetic Back key hides the symptom.
+Todo lookup requires the unique todo-list-scroll viewport and an exact enabled checkbox with a nonempty todo identity. Gestures stay strictly inside current bounds; search both directions within one 20s deadline and at most8 gestures each direction, failing explicitly when absent.
+Permanent parser selftests execute current JDK-extracted runtime methods with explicit Android/DB/IME doubles, original RED and witnessed mutants; geometry uses synthetic frames, not Android touch physics. Full original21/300s/once and same-final-SHA API26/API34/overwrite acceptance remain mandatory. No phone, merge, release or historical-timeout-fix claim.
+
+## Dedicated relation editor and restore-cancel caller coverage
+Path/tag editing uses ActivitiesScreen.RelationEditor, not TodayScreen.editor. On active success or explicit cancel hide IME with the still-attached input token, clear focus before navigation; retain validation/failure visibility, retired-owner guards and one consent attempt.
+Parser selftest extracts the whole current RelationEditor via JDK AST, executes actual open/render/save/cancel callbacks with explicit Android/DB/IME doubles and checks renderDetail wiring. Original success/cancel RED, valid invalid-input control, witnessed hide/focus/exit/order mutations and caller omissions must remain executable.
+Native positive todo lookups, including restore cancel after returning to Today, use named_todo and its bounded identity/viewport lookup. Discover literal add/named todo titles from the actual native caller; reject direct find for that population. Execute the actual restore assertion/callee and keep the subsequent independent exact SQLite readback. Host doubles do not establish Android keyboard timing or restore correctness.
+Original21 commands run once each at300s, before atomic non-force publication and exact remote tree/blob readback. API26/API34 full regression and overwrite remain tied to the final submitted commit; no phone, merge or release.
+The existing catalog relation harness keeps23 backend/17 UI checks and11 mutations. Its extended IME doubles must compile current RelationEditor, observe attached-token hide/clear/navigation order and reject five API omissions plus two witnessed silent-event mutants. Do not skip the old harness when runtime gains Android APIs.
+
+## Relation editor keyboard viewport
+All relation editor content, including title, identity, input, validation and actions, shares one scroll viewport; fixed siblings must not starve the input after adjustResize. Preserve legitimate empty clear, single-attempt plans, ownership and attached-token IME exit.
+The native caller verifies visible focused EditText identity and exact text after each input command, including newline, before navigating to Save inside current relation-editor-scroll bounds. Observation is bounded; never retry typing, synthesize Back, bypass UI with setText or relax final ordered SQLite readback.
+Actual-source host hierarchy tests reject the original split layout and witnessed misplaced-action/identity mutations. Their structural and synthetic-frame controls are not Android measurement or keyboard proof. Preserve all old catalog23/backend17UI/11mutants and IME controls.
+Original21 commands each once/300s, exact non-force remote publication, and same-final-commit API26/API34 plus overwrite acceptance remain required. No phone, merge, release, historical disconnect fix or whole-product acceptance claim.
+
+## Activity-list viewport navigation
+The category activity ScrollView is identified as activity-list-scroll. Native first-image creation locates its exact title only within this viewport, then reopens by the captured positive numeric activity ID, never by title substitution.
+Navigate within one20s deadline and bounded gestures inside current viewport; require visible enabled clickable Button geometry, reject ambiguity and malformed identity. Do not retry writes, type again, inject Back or relax existing image/media assertions.
+After force-stop, independently assert exact saved activity ID/category/null application/title/archive from SQLite before image-first tests. Preserve original103-prefix assertions and all existing downstream checks. Synthetic host navigation, caller omissions and row mutations are not Android scroll proof.
+Keep original21 once/300s, four existing product files plus isolated workflow only, exact remote tree verification and same-final-SHA API26/API34/overwrite acceptance. No phone operation, merge, release or historical disconnect fix claim.

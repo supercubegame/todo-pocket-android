@@ -513,9 +513,10 @@ public final class ActivitiesScreen {
                 @Override public void onViewAttachedToWindow(android.view.View v){}
                 @Override public void onViewDetachedFromWindow(android.view.View v){close();}
             });
-            root.addView(host.text(tags?"编辑标签":"编辑操作路径",24,TodayScreen.INK));
-            TextView identity=host.text(title+" · #"+id,16,TodayScreen.MUTED);identity.setContentDescription("relation-identity");root.addView(identity);
-            ScrollView scroll=new ScrollView(host.activity);LinearLayout fields=host.column();scroll.addView(fields);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+            ScrollView scroll=new ScrollView(host.activity);scroll.setContentDescription("relation-editor-scroll");
+            LinearLayout fields=host.column();scroll.addView(fields);root.addView(scroll,new LinearLayout.LayoutParams(-1,-1));
+            fields.addView(host.text(tags?"编辑标签":"编辑操作路径",24,TodayScreen.INK));
+            TextView identity=host.text(title+" · #"+id,16,TodayScreen.MUTED);identity.setContentDescription("relation-identity");fields.addView(identity);
             fields.addView(host.text(tags?"每行一个标签，重复标签保留首次出现的位置。清空全部文字可移除标签。":"每行一步，顺序和重复步骤保留。清空全部文字可移除路径。",15,TodayScreen.MUTED));
             EditText input=host.field(tags?"活动标签":"活动路径",true);input.setText(String.join("\n",plan.values()));fields.addView(input,new LinearLayout.LayoutParams(-1,-2));
             TextView validation=host.text("",14,TodayScreen.ERROR);validation.setContentDescription("relation-validation");fields.addView(validation);
@@ -537,7 +538,7 @@ public final class ActivitiesScreen {
                     if(active()){validation.setText("未能保存；内容可能已变化，请取消后重新打开。");cancel.setEnabled(true);}
                 });
             });
-            root.addView(save,new LinearLayout.LayoutParams(-1,-2));root.addView(cancel,new LinearLayout.LayoutParams(-1,-2));
+            fields.addView(save,new LinearLayout.LayoutParams(-1,-2));fields.addView(cancel,new LinearLayout.LayoutParams(-1,-2));
         }
     }
 

@@ -1308,7 +1308,7 @@ public class RelationHarness {
   static class content {static class Context {static String INPUT_METHOD_SERVICE="ime";}}
   static class view {
    static class View {
-    boolean attached=true,enabled=true;Consumer<View> listener;OnAttachStateChangeListener attach;String description="";
+    View parent;List<View> children=new ArrayList<>();int height=-2;boolean attached=true,enabled=true;Consumer<View> listener;OnAttachStateChangeListener attach;String description="";
     interface OnAttachStateChangeListener {void onViewAttachedToWindow(View v);void onViewDetachedFromWindow(View v);}
     boolean isAttachedToWindow(){return attached;}boolean isEnabled(){return enabled;}
     void setEnabled(boolean b){enabled=b;}void setContentDescription(String s){description=s;views.put(s,this);}
@@ -1332,8 +1332,9 @@ public class RelationHarness {
  static class EditText extends TextView {}
  static class Button extends TextView {}
  static class LinearLayout extends android.view.View {
-  static class LayoutParams {LayoutParams(int a,int b){}LayoutParams(int a,int b,int c){}}
-  void addView(android.view.View v){}void addView(android.view.View v,LayoutParams p){}
+  static class LayoutParams {int height;LayoutParams(int a,int b){height=b;}LayoutParams(int a,int b,int c){height=b;}}
+  void addView(android.view.View v){if(v.parent!=null)throw new AssertionError("duplicate parent");v.parent=this;children.add(v);}
+  void addView(android.view.View v,LayoutParams p){v.height=p.height;addView(v);}
  }
  static class ScrollView extends LinearLayout {ScrollView(Activity a){}}
  static class Activity {
@@ -1374,7 +1375,7 @@ public class RelationHarness {
  public static void main(String[] a){
   String mode=a[0];TodayScreen h=new TodayScreen();int[] backs={0};
   Runnable back=()->{events.add("back");backs[0]++;field.attached=false;};
-  RelationEditor r=new RelationEditor(h,1,"Daily",mode.equals("tags"),List.of("Old"),back);
+  RelationEditor r=new RelationEditor(h,1,"Daily",(mode.equals("tags")||mode.equals("layout-tags")),List.of("Old"),back);
   android.view.View anchor=new android.view.View();
   if(mode.equals("finishing"))h.activity.finishing=true;
   if(mode.equals("destroyed"))h.activity.destroyed=true;
@@ -1386,6 +1387,17 @@ public class RelationHarness {
   h.flush();
   if(mode.equals("stale")){check(field==null&&h.db.last.closed&&events.isEmpty(),"stale open");return;}
   check(field!=null&&r.active(),"actual open/render reached");
+  if(mode.equals("layout")||mode.equals("layout-tags")){
+   check(r.root.children.size()==1&&r.root.children.get(0) instanceof ScrollView,"one whole editor viewport");
+   android.view.View scroll=r.root.children.get(0);
+   check(scroll.height==-1&&scroll.description.equals("relation-editor-scroll")&&scroll.children.size()==1,"viewport identity and allocation");
+   android.view.View fields=scroll.children.get(0);
+   check(fields.children.size()==7&&fields.children.get(0) instanceof TextView,"complete editor content");
+   check(field.parent==fields&&views.get("relation-identity").parent==fields&&views.get("relation-validation").parent==fields
+     &&views.get("relation-save").parent==fields&&views.get("relation-cancel").parent==fields,"all content scrolls");
+   check(h.db.confirms==0&&h.jobs.isEmpty()&&r.active(),"layout readonly ownership");
+   System.out.println("LAYOUT_PASS actual rendered hierarchy only, not Android measurement");return;
+  }
   if(mode.equals("noime"))noIme=true;
   field.setText(mode.equals("invalid")?"Home\n\nEnd":mode.equals("empty")?"":"Home\nDaily rewards");
   if(mode.equals("cancel")){
@@ -1504,7 +1516,7 @@ def relation_ui_selftest(original_only=False):
             else:raise AssertionError('original caller unexpectedly passed')
             print('RELATION_ORIGINAL_RED actual_class_sha256='+hashlib.sha256(actual.encode()).hexdigest()+' success_RED cancel_RED invalid_control_PASS restore_caller_RED ANDROID_DOUBLES_ONLY')
             return
-        cases=('success','cancel','invalid','empty','failure','failure-cancel','detach','finishing','destroyed','stale','noime','tags')
+        cases=('success','cancel','invalid','empty','failure','failure-cancel','detach','finishing','destroyed','stale','noime','tags','layout','layout-tags')
         compile_actual(actual)
         for name in cases:scenario(name)
         mutations=[
@@ -1517,6 +1529,12 @@ def relation_ui_selftest(original_only=False):
         for name,a,b,probe in mutations:
             compile_actual(once(actual,a,b));scenario('invalid')
             scenario(probe,False,'detached token' if name=='wrong-order' else 'IME exit order')
+        for a,b,reason in [
+            ('fields.addView(save,new LinearLayout.LayoutParams(-1,-2))','root.addView(save,new LinearLayout.LayoutParams(-1,-2))','one whole editor viewport'),
+            ('fields.addView(identity)','root.addView(identity)','one whole editor viewport'),
+            ('scroll.setContentDescription("relation-editor-scroll")','scroll.setContentDescription("wrong-scroll")','viewport identity'),
+        ]:
+            compile_actual(once(actual,a,b));scenario('layout',False,reason)
         for needle in ('pathEditor.open(pathEdit)','tagEditor.open(tagEdit)'):
             mutant=once(caller,needle,'System.nanoTime()')
             try:wiring(mutant)
@@ -1547,7 +1565,156 @@ def relation_ui_selftest(original_only=False):
         print('RELATION_UI_HOST cases='+str(len(cases))+' witnessed_java_mutants='+str(len(mutations))+' editor_caller_omissions=2 restore_positive=1 restore_negatives=2 original_direct_find_RED=1 whole_assertion_omission=1 registration_omission=1 PASS ACTUAL_SOURCE_ANDROID_DB_IME_DOUBLES_NOT_DEVICE')
 
 
+def relation_control(nodes,swipe,package,description,*,clock=time.monotonic):
+    """One bounded viewport search; no typing, back key or command replay."""
+    deadline=clock()+20
+    for direction in (1,-1):
+        for attempt in range(9):
+            if clock()>=deadline:raise AssertionError('relation navigation deadline')
+            frame=nodes()
+            scrolls=[n for n in frame if n.get('package')==package and
+                     n.get('class')=='android.widget.ScrollView' and
+                     n.get('content-desc')=='relation-editor-scroll' and n.get('enabled')=='true']
+            assert len(scrolls)==1,'relation viewport identity'
+            def box(n):
+                raw=n.get('bounds','')
+                assert re.fullmatch(r'\[-?\d+,-?\d+\]\[-?\d+,-?\d+\]',raw),'relation bounds syntax'
+                return tuple(map(int,re.findall(r'-?\d+',raw)))
+            x1,y1,x2,y2=box(scrolls[0])
+            assert x2-x1>=16 and y2-y1>=16,'relation viewport collapsed'
+            targets=[n for n in frame if n.get('package')==package and n.get('content-desc')==description]
+            assert len(targets)<=1,'duplicate relation target'
+            if targets:
+                n=targets[0];a,b,c,d=box(n)
+                cls='android.widget.EditText' if description in ('活动路径','活动标签') else 'android.widget.Button'
+                minimum=16 if cls.endswith('EditText') else 40
+                if n.get('class')==cls and n.get('enabled')=='true' and n.get('clickable')=='true' and x1<=a<c<=x2 and y1<=b<d<=y2 and d-b>=minimum:
+                    return n
+            if attempt==8:break
+            x=(x1+x2)//2;top=y1+max(2,(y2-y1)//5);bottom=y2-max(2,(y2-y1)//5)
+            swipe(x,bottom if direction==1 else top,x,top if direction==1 else bottom)
+    raise AssertionError('relation target absent or clipped: '+description)
+
+def relation_input(nodes,package,expected,*,clock=time.monotonic,sleep=time.sleep):
+    """Observe the exact focused field; fail closed without retrying input."""
+    deadline=clock()+20;last=[]
+    while clock()<deadline:
+        last=nodes()
+        fields=[n for n in last if n.get('package')==package and n.get('content-desc')=='活动路径']
+        assert len(fields)<=1,'duplicate relation input'
+        if fields:
+            n=fields[0]
+            scrolls=[v for v in last if v.get('package')==package and v.get('class')=='android.widget.ScrollView' and v.get('content-desc')=='relation-editor-scroll']
+            if len(scrolls)==1:
+                def box(v):return tuple(map(int,re.findall(r'-?\d+',v.get('bounds',''))))
+                a=box(n);b=box(scrolls[0])
+                if len(a)==len(b)==4 and a[2]>a[0] and a[3]-a[1]>=16 and b[0]<=a[0]<a[2]<=b[2] and b[1]<=a[1]<a[3]<=b[3] and n.get('class')=='android.widget.EditText' and n.get('focused')=='true' and n.get('enabled')=='true' and n.get('text')==expected:
+                    print('RELATION_INPUT_OBSERVED '+repr(n.attrib),flush=True)
+                    return n
+        sleep(.1)
+    raise AssertionError('relation focused exact input missing: '+repr(expected)+' actual='+repr([n.attrib for n in last]))
+
+def enter_relation_path(nodes,swipe,package,tap_node,type_text,shell):
+    tap_node(relation_control(nodes,swipe,package,'活动路径'))
+    relation_input(nodes,package,'')
+    type_text('Home');relation_input(nodes,package,'Home')
+    shell('input','keyevent','KEYCODE_ENTER');relation_input(nodes,package,'Home\n')
+    type_text('Daily rewards');relation_input(nodes,package,'Home\nDaily rewards')
+    tap_node(relation_control(nodes,swipe,package,'relation-save'))
+
+def relation_input_selftest():
+    """Execute current caller/helpers with synthetic frames; never Android proof."""
+    import ast,copy,inspect,xml.etree.ElementTree as ET
+    def exercise(mode,caller=enter_relation_path):
+        tick=[0.0];state=dict(focused=False,text='',scrolled=False);commands=[];saved=[]
+        def clock():tick[0]+=.05;return tick[0]
+        def sleep(seconds):tick[0]+=seconds
+        def node(**a):return ET.Element('node',dict(package='p',enabled='true',clickable='true',**a))
+        def nodes():
+            tick[0]+=.1
+            if mode=='missing-scroll':return []
+            viewport='[18,198][302,343]' if state['focused'] else '[18,198][302,578]'
+            rows=[node(**{'class':'android.widget.ScrollView','content-desc':'relation-editor-scroll','bounds':viewport})]
+            if mode=='collapsed':rows[0].set('bounds','[18,255][302,255]')
+            if mode=='duplicate-scroll':rows.append(copy.deepcopy(rows[0]))
+            if state['scrolled']:
+                if mode!='missing-save':
+                    rows.append(node(**{'class':'android.widget.Button','content-desc':'relation-save','bounds':'[18,240][302,288]'}))
+            else:
+                rows.append(node(**{'class':'android.widget.EditText','content-desc':'活动路径','text':state['text'],'focused':str(state['focused'] and mode!='focus').lower(),'bounds':'[18,218][302,302]'}))
+            return rows
+        def tap(n):
+            if n.get('content-desc')=='relation-save':
+                saved.append(state['text']);return
+            state['focused']=True
+        def swipe(x,y,x2,y2):
+            assert 18<x<302 and x==x2 and 198<y<343 and 198<y2<343,'gesture left viewport'
+            state['scrolled']=True
+        def type_text(value):
+            commands.append(value)
+            if mode==('home' if value=='Home' else 'second'):return
+            state['text']+=value
+        def shell(*args):
+            assert args==('input','keyevent','KEYCODE_ENTER')
+            commands.append('ENTER')
+            if mode!='enter':state['text']+='\n'
+        env=dict(caller.__globals__)
+        env['relation_control']=lambda *a:relation_control(*a,clock=clock)
+        env['relation_input']=lambda *a:relation_input(*a,clock=clock,sleep=sleep)
+        import types
+        actual=types.FunctionType(caller.__code__,env)
+        failure=None
+        try:actual(nodes,swipe,'p',tap,type_text,shell)
+        except AssertionError as e:failure=e
+        if mode=='ok':
+            assert failure is None,repr(failure)
+            assert commands==['Home','ENTER','Daily rewards'] and saved==['Home\nDaily rewards']
+        else:
+            assert failure is not None and not saved,('negative escaped',mode,commands,saved)
+            expected={'focus':[],'home':['Home'],'enter':['Home','ENTER'],'second':['Home','ENTER','Daily rewards']}
+            if mode in expected:assert commands==expected[mode],('late refusal',mode,commands)
+        return failure
+    for mode in ('ok','focus','home','enter','second','missing-scroll','duplicate-scroll','collapsed','missing-save'):
+        exercise(mode)
+    original=inspect.getsource(enter_relation_path)
+    for value,mode in (("''",'focus'),("'Home'",'home'),("'Home\\n'",'enter'),("'Home\\nDaily rewards'",'second')):
+        needle='relation_input(nodes,package,'+value+')'
+        assert original.count(needle)==1,needle
+        source=original.replace(needle,'None',1);env=dict(globals());exec(source,env)
+        exercise('ok',env['enter_relation_path'])
+        try:exercise(mode,env['enter_relation_path'])
+        except AssertionError:pass
+        else:raise AssertionError('input observation mutant survived '+mode)
+    source=Path(__file__).read_text();tree=ast.parse(source)
+    def wiring(t):
+        native=next(n for n in t.body if isinstance(n,ast.FunctionDef) and n.name=='_verify_native_ui')
+        calls=[n for n in ast.walk(native) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='enter_relation_path']
+        assert len(calls)==1 and [ast.unparse(a) for a in calls[0].args]==['nodes','swipe_summary','PKG','tap_node','type_text','shell'],'relation actual caller omitted'
+        labels={n.value for n in ast.walk(native) if isinstance(n,ast.Constant) and isinstance(n.value,str)}
+        assert 'ordered multiline manual path displays without collapse' in labels,'visible path assertion omitted'
+        assert 'independent SQLite read preserves path order' in labels,'exact DB assertion omitted'
+        parser=next(n for n in t.body if isinstance(n,ast.FunctionDef) and n.name=='parser_selftest')
+        assert any(isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='relation_input_selftest' for n in ast.walk(parser)),'relation selftest omitted'
+    wiring(tree)
+    for name in ('enter_relation_path','relation_input_selftest'):
+        t=copy.deepcopy(tree)
+        for n in ast.walk(t):
+            if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id==name:n.func.id='omitted'
+        try:wiring(t)
+        except AssertionError:pass
+        else:raise AssertionError('whole caller omission survived '+name)
+    for label in ('ordered multiline manual path displays without collapse','independent SQLite read preserves path order'):
+        t=copy.deepcopy(tree)
+        for n in ast.walk(t):
+            if isinstance(n,ast.Constant) and n.value==label:n.value='omitted'
+        try:wiring(t)
+        except AssertionError:pass
+        else:raise AssertionError('assertion omission survived')
+    print('RELATION_INPUT_HOST positive=1 negatives=8 witnessed_observation_mutants=4 caller_assertion_omissions=4 PASS SYNTHETIC_FRAMES_NOT_ANDROID')
+
+
 def parser_selftest():
+    relation_input_selftest()
     relation_ui_selftest()
     result_ui_selftest()
     todo_navigation_selftest()
@@ -1942,7 +2109,7 @@ def _verify_native_ui(adb,nodes):
         ok(find(text='Checkins') is not None and absent('Daily'),'category rename updates visible label')
         touch('category-add-1'); touch('活动名称'); type_text('Daily reward'); tap('保存'); ready()
         ok(desc('activity-1').get('text')=='Daily reward','activity created under selected category')
-        touch('activity-1'); ready(); swipe_up(); tap('编辑路径'); touch('活动路径'); type_text('Home'); shell('input','keyevent','KEYCODE_ENTER'); type_text('Daily rewards'); tap('保存'); ready(); swipe_up()
+        touch('activity-1'); ready(); swipe_up(); tap('编辑路径'); enter_relation_path(nodes,swipe_summary,PKG,tap_node,type_text,shell); ready(); swipe_up()
         ok(find(text='1. Home') is not None and find(text='2. Daily rewards') is not None,'ordered multiline manual path displays without collapse')
         tap('标记完成'); ready(); ok(find(text='今天：已完成') is not None,'daily check-in writes visible done state')
         tap('标记完成'); ready(); ok(find(text='今天：已完成') is not None,'repeated daily mark remains one visible day')

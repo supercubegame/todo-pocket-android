@@ -61,7 +61,7 @@ public final class ActivitiesScreen {
         top.addView(host.button("应用目录",()->{if(categoryCurrent(session,top))new AppCatalog(host,0,this::load).open(top);}),new LinearLayout.LayoutParams(0,host.dp(48),1));
         Button archived=host.button("已归档",()->{archivePanel=true;historyPanel=false;load();});
         archived.setContentDescription("archived-activities");top.addView(archived,new LinearLayout.LayoutParams(0,host.dp(48),1));body.addView(top);
-        ScrollView scroll=new ScrollView(host.activity);LinearLayout list=host.column();scroll.addView(list);body.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        ScrollView scroll=new ScrollView(host.activity);scroll.setContentDescription("activity-list-scroll");LinearLayout list=host.column();scroll.addView(list);body.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         if(categories.isEmpty()){TextView empty=host.text("建一个自己的分类。\n例如：每日打卡、农场、提现。",18,TodayScreen.MUTED);empty.setPadding(0,host.dp(24),0,0);list.addView(empty);}
         for(int index=0;index<categories.size();index++){
             Category cat=categories.get(index);final int position=index;

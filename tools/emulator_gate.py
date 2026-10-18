@@ -1713,7 +1713,184 @@ def relation_input_selftest():
     print('RELATION_INPUT_HOST positive=1 negatives=8 witnessed_observation_mutants=4 caller_assertion_omissions=4 PASS SYNTHETIC_FRAMES_NOT_ANDROID')
 
 
+def reveal_activity(read_nodes, swipe, package, *, title=None, identity=None, clock=time.monotonic):
+    """One20s bounded navigation; no writes, Back, typing or input retries."""
+    assert (title is None) != (identity is None), 'one activity selector required'
+    if identity is not None:
+        assert re.fullmatch(r'activity-[1-9]\d*',identity), 'invalid requested activity identity'
+    deadline=clock()+20
+    history=[]
+    def bounds(node):
+        match=re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]',node.get('bounds',''))
+        assert match, 'malformed activity bounds'
+        a,b,c,d=map(int,match.groups())
+        assert c>a and d>b, 'empty activity bounds'
+        return a,b,c,d
+    for direction in (-1,1):
+        previous=None
+        for attempt in range(9):
+            assert clock()<deadline, 'activity navigation deadline; history='+repr(history)
+            frame=list(read_nodes())
+            assert clock()<deadline, 'activity observation exceeded deadline'
+            views=[n for n in frame if n.get('content-desc')=='activity-list-scroll']
+            assert len(views)==1, 'missing/duplicate activity viewport'
+            view=views[0]
+            assert view.get('package')==package and view.get('class')=='android.widget.ScrollView' and view.get('enabled')=='true', 'invalid activity viewport owner/type'
+            left,top,right,bottom=bounds(view)
+            assert right-left>=16 and bottom-top>=48, 'collapsed activity viewport'
+            matches=[n for n in frame if (n.get('text')==title if title is not None else n.get('content-desc')==identity)]
+            assert len(matches)<=1, 'ambiguous activity selector'
+            if matches:
+                n=matches[0]
+                assert n.get('package')==package and n.get('class')=='android.widget.Button' and n.get('enabled')=='true' and n.get('clickable')=='true', 'invalid activity target owner/type/state'
+                found=n.get('content-desc','')
+                assert re.fullmatch(r'activity-[1-9]\d*',found), 'invalid activity identity'
+                a,b,c,d=bounds(n)
+                if left<=a<c<=right and top<=b<d<=bottom and d-b>=40:
+                    print('ACTIVITY_VIEWPORT_FOUND '+json.dumps(dict(title=n.get('text'),identity=found,bounds=[a,b,c,d],history=history),ensure_ascii=False),flush=True)
+                    return n
+            signature=tuple(tuple(n.get(k,'') for k in ('package','content-desc','text','bounds','class')) for n in frame)
+            if signature==previous:break
+            previous=signature
+            if attempt<8:
+                x,start,_,end=summary_gesture((left,top,right,bottom))
+                if direction==-1:start,end=end,start
+                history.append(dict(direction=direction,attempt=attempt,viewport=[left,top,right,bottom],gesture=[x,start,x,end]))
+                swipe(x,start,x,end)
+    raise AssertionError('activity absent or clipped at navigation bound; history='+repr(history))
+
+def verify_first_activity(rows, identity):
+    """Independent stopped-process SQLite rows, not success-toast inference."""
+    assert type(identity) is int and identity>1, 'new activity identity required'
+    matches=[row for row in rows if row[0]==identity]
+    assert matches==[(identity,1,None,'Image first',0)], 'saved activity identity/category/title/archive differs'
+    assert [row[0] for row in rows if row[3]=='Image first']==[identity], 'new activity title is ambiguous'
+
+
+def activity_navigation_selftest():
+    import ast,copy,inspect,types
+    package='fixture.activity'
+    view={'package':package,'class':'android.widget.ScrollView','enabled':'true','content-desc':'activity-list-scroll','bounds':'[18,279][302,578]'}
+    target={'package':package,'class':'android.widget.Button','enabled':'true','clickable':'true','text':'Image first','content-desc':'activity-2','bounds':'[30,480][290,528]'}
+    def exercise(fn,mode,by_id=False):
+        offset=0;ticks=0;gestures=[]
+        def read():
+            v=dict(view);n=dict(target)
+            if mode=='missing-view':return []
+            if mode=='foreign-view':v['package']='foreign'
+            if mode=='wrong-view-class':v['class']='android.widget.LinearLayout'
+            if mode=='disabled-view':v['enabled']='false'
+            if mode=='bad-bounds':v['bounds']='broken'
+            if mode=='collapsed':v['bounds']='[18,341][302,343]'
+            if mode=='empty-view':v['bounds']='[18,279][18,578]'
+            if mode=='duplicate-view':return [v,v]
+            if mode=='absent' or (mode=='below' and offset==0):return [v]
+            if mode=='clipped' and offset==0:n['bounds']='[30,570][290,578]'
+            if mode=='outside':n['bounds']='[30,600][290,648]'
+            if mode=='foreign-target':n['package']='foreign'
+            if mode=='wrong-class':n['class']='android.widget.TextView'
+            if mode=='disabled':n['enabled']='false'
+            if mode=='unclickable':n['clickable']='false'
+            if mode=='bad-id':n['content-desc']='activity-0'
+            if mode=='wrong-id':n['content-desc']='activity-3'
+            if mode=='duplicate-target':return [v,n,n]
+            return [v,n]
+        def swipe(x,a,y,b):
+            nonlocal offset
+            assert 18<x<302 and x==y and 279<a<578 and 279<b<578, 'gesture outside activity viewport'
+            gestures.append((x,a,y,b));offset=max(0,offset+(1 if a>b else -1))
+            assert len(gestures)<=16, 'unbounded activity gestures'
+        def clock():
+            nonlocal ticks
+            ticks+=1
+            return ticks*21 if mode=='deadline' else ticks*.001
+        args={'identity':'activity-2'} if by_id else {'title':'Image first'}
+        result=fn(read,swipe,package,clock=clock,**args)
+        if mode in ('ready','below','clipped'):assert result==target
+        if mode in ('below','clipped'):assert len(gestures)==2
+        return result
+    for mode in ('ready','below','clipped'):
+        exercise(reveal_activity,mode);exercise(reveal_activity,mode,True)
+    negatives=('missing-view','foreign-view','wrong-view-class','disabled-view','bad-bounds','collapsed','empty-view','duplicate-view','absent','outside','foreign-target','wrong-class','disabled','unclickable','bad-id','duplicate-target','deadline')
+    for mode in negatives:
+        try:exercise(reveal_activity,mode)
+        except AssertionError:pass
+        else:raise AssertionError('activity negative survived '+mode)
+    try:exercise(reveal_activity,'wrong-id',True)
+    except AssertionError:pass
+    else:raise AssertionError('same title substituted wrong identity')
+    source=inspect.getsource(reveal_activity)
+    mutations=[
+        ("view.get('package')==package","True",'foreign-view'),
+        ("n.get('class')=='android.widget.Button'","True",'wrong-class'),
+        ("n.get('clickable')=='true'","True",'unclickable'),
+        ("re.fullmatch(r'activity-[1-9]\\d*',found)","True",'bad-id'),
+        ("left<=a<c<=right and top<=b<d<=bottom and d-b>=40","True",'outside'),
+        ("clock()<deadline","True",'deadline'),
+    ]
+    for old,new,mode in mutations:
+        assert old in source
+        env=dict(globals());exec(compile(source.replace(old,new),'<activity-mutant>','exec'),env)
+        exercise(env['reveal_activity'],'ready')
+        exercise(env['reveal_activity'],mode)
+    rows=[(1,1,None,'Daily reward',0),(2,1,None,'Image first',0)]
+    verify_first_activity(rows,2)
+    badrows=[rows[:1],rows+[rows[1]],rows+[(3,1,None,'Image first',0)]]
+    for i,value in [(0,3),(1,2),(2,4),(3,'wrong'),(4,1)]:
+        row=list(rows[1]);row[i]=value;badrows.append([rows[0],tuple(row)])
+    for rows_bad in badrows:
+        try:verify_first_activity(rows_bad,2)
+        except AssertionError:pass
+        else:raise AssertionError('activity saved-row negative survived')
+    dbsource=inspect.getsource(verify_first_activity)
+    for needle,bad in [
+        ("assert matches==[(identity,1,None,'Image first',0)], 'saved activity identity/category/title/archive differs'",badrows[0]),
+        ("assert [row[0] for row in rows if row[3]=='Image first']==[identity], 'new activity title is ambiguous'",badrows[2]),
+    ]:
+        # Each omission must survive good rows and admit its specific bad rows.
+        assert needle in dbsource
+        env=dict(globals());exec(dbsource.replace(needle,'pass',1),env)
+        env['verify_first_activity'](rows,2)
+        witness=bad if bad is not badrows[0] else [(1,1,None,'Daily reward',0),(2,2,None,'Image first',0)]
+        env['verify_first_activity'](witness,2)
+    module=ast.parse(Path(__file__).read_text())
+    def wiring(tree):
+        funcs={n.name:n for n in tree.body if isinstance(n,ast.FunctionDef)}
+        native=funcs['_verify_native_ui']
+        calls=[ast.unparse(n) for n in ast.walk(native) if isinstance(n,ast.Call)]
+        assert "reveal_activity(nodes, swipe_summary, PKG, title='Image first')" in calls, 'activity creation lookup omitted'
+        screen=next(n for n in ast.walk(native) if isinstance(n,ast.FunctionDef) and n.name=='first_screen')
+        assert "tap_node(reveal_activity(nodes, swipe_summary, PKG, identity=first_desc))" in [ast.unparse(n) for n in ast.walk(screen) if isinstance(n,ast.Call)], 'activity stable navigation omitted'
+        assert "verify_first_activity(first_base['activities'], first_activity)" in calls, 'saved activity assertion omitted'
+        assert "activity_navigation_selftest()" in [ast.unparse(n) for n in ast.walk(funcs['parser_selftest']) if isinstance(n,ast.Call)], 'activity tests not registered'
+        assert "find(text='Image first')" not in calls and "touch(first_desc)" not in calls, 'unbounded first activity lookup remains'
+    wiring(module)
+    omissions=0
+    for call in ("reveal_activity(nodes, swipe_summary, PKG, title='Image first')","tap_node(reveal_activity(nodes, swipe_summary, PKG, identity=first_desc))","verify_first_activity(first_base['activities'], first_activity)","activity_navigation_selftest()"):
+        class Remove(ast.NodeTransformer):
+            def visit_Call(self,n):
+                if ast.unparse(n)==call:return ast.Constant(None)
+                return self.generic_visit(n)
+        mutant=Remove().visit(copy.deepcopy(module))
+        try:wiring(mutant)
+        except AssertionError:omissions+=1
+        else:raise AssertionError('activity whole call omission survived')
+    # Execute actual first_screen, not a parallel handwritten caller.
+    native=next(n for n in module.body if isinstance(n,ast.FunctionDef) and n.name=='_verify_native_ui')
+    screen=next(n for n in ast.walk(native) if isinstance(n,ast.FunctionDef) and n.name=='first_screen')
+    events=[]
+    def reveal(*a,**kw):
+        assert kw=={'identity':'activity-2'};events.append('identity');return target
+    env=dict(start=lambda:events.append('start'),tap=lambda s:events.append(s),ready=lambda:None,
+             tap_node=lambda n:events.append(n['content-desc']),reveal_activity=reveal,nodes=lambda:[],
+             swipe_summary=lambda *a:None,PKG=package,first_desc='activity-2')
+    exec(compile(ast.Module(body=[screen],type_ignores=[]),'<actual-first-screen>','exec'),env);env['first_screen']()
+    assert events==['start','活动','identity','activity-2','笔记']
+    print('ACTIVITY_NAVIGATION_HOST positive=6 negative='+str(len(negatives)+1)+' witnessed_navigation_mutants='+str(len(mutations))+' saved_row_negatives='+str(len(badrows))+' saved_row_omissions=2 caller_omissions='+str(omissions)+' PASS SYNTHETIC_GEOMETRY_NOT_ANDROID')
+
+
 def parser_selftest():
+    activity_navigation_selftest()
     relation_input_selftest()
     relation_ui_selftest()
     result_ui_selftest()
@@ -2402,16 +2579,17 @@ public class ImageImportFixture {
         for name in ('pocket-first.jpg','pocket-pixel-limit.png','pocket-pixel-over.png'):
             run([adb,'-s',SERIAL,'push',fixture_dir/name,'/sdcard/Download/'+name])
         start();tap('活动');ready();touch('category-add-1');touch('活动名称');type_text('Image first');tap('保存');ready()
-        first_desc=find(text='Image first').get('content-desc','')
+        first_desc=reveal_activity(nodes,swipe_summary,PKG,title='Image first').get('content-desc','')
         assert re.fullmatch(r'activity-\d+',first_desc) and first_desc!='activity-1','new visible activity must have an independent identity'
         first_activity=int(first_desc.split('-')[1]);stop()
         def state_read(name):
             with sqlite3.connect(copy_db(name)) as db:
                 return {t:db.execute('SELECT * FROM '+t+' ORDER BY rowid').fetchall() for t in TABLES}
         first_base=state_read('first-image-base.db')
+        verify_first_activity(first_base['activities'],first_activity)
         ok(not any(row[1]==first_activity for row in first_base['notes']),'new image-first activity has no existing note in independent SQLite read')
         def first_screen():
-            start();tap('活动');ready();touch(first_desc);ready();tap('笔记');ready()
+            start();tap('活动');ready();tap_node(reveal_activity(nodes,swipe_summary,PKG,identity=first_desc));ready();tap('笔记');ready()
         first_screen();ok(find(text='写点什么，或加一张图。') is not None,'image-first activity shows genuine empty note before any import')
         pick_image()
         ok(find(text='pocket-first.jpg').get('package','').endswith('documentsui'),'first-image cancellation waits for a visible system picker before pressing Back')

@@ -54,10 +54,11 @@ jobs:
                   if up or j["name"]=="database (34)":
                       log=gh("repos/"+R+"/actions/jobs/"+str(j["id"])+"/logs",extra=("--allow-escape-sequences",)).decode("utf-8","replace")
                       (out/("job-"+str(j["id"])+".log")).write_text(log)
-                      rx=re.compile(r"upgrade|versionCode|signer|sha256|PASS|FAIL" if up else r"artifact|\.apk|preview|Package tested|upload",re.I)
-                      lines=[l[:260] for l in log.splitlines() if rx.search(l)]
+                      rows=[l[:200] for l in log.splitlines()]
                       row["log_bytes"]=len(log)
-                      row["matched"]=lines[:90]+["..."]+lines[-50:] if len(lines)>140 else lines
+                      row["tail"]=rows[-40:]
+                      rx=re.compile(r"UPGRADE|versionCode|overwrite|signer|apk_sha|Package tested|internal-preview",re.I)
+                      row["matched"]=[l for l in rows[:-40] if rx.search(l)][:30]
               rep["stage"]="done"
           try:
               work()

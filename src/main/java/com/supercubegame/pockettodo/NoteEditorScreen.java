@@ -511,7 +511,7 @@ public final class NoteEditorScreen {
             if(dragging)canvas.drawRect(Math.min(downX,moveX),Math.min(downY,moveY),Math.max(downX,moveX),Math.max(downY,moveY),frame);
         }
     }
-    /** Accurate user text for derivative refusals. Unknown failures stay generic and never claim a state change. */
+    /** Accurate user text for derivative refusals. Unknown failures stay generic and never claim a state change; refusals happen before any write. */
     static String derivativeFailure(Throwable failure,boolean saving){
         String m=failure==null||failure.getMessage()==null?"":failure.getMessage();
         if(m.contains("Only PNG/JPEG up to 1 million pixels"))return "原图过大或格式不支持：裁剪/遮挡仅支持不超过 100 万像素、单边 2048 的 PNG/JPEG；原图未改动";

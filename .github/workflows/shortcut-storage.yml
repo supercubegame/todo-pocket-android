@@ -20,58 +20,75 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import hashlib,io,json,os,pathlib,re,subprocess,zipfile
+          import hashlib,io,json,os,pathlib,re,subprocess,sys,traceback,zipfile
           R="supercubegame/todo-pocket-android"
           RUN=39123038507
           HEAD="271d1fe5d7ce239b516f18cbb9528f030ac581ab"
           APK="d22b5b3161b51b63891568401ec3b09e44b0a93f5feb0fd6ae76066a25fc5c18"
           out=pathlib.Path("recovery-271d1fe")
           out.mkdir()
+          rep={"run":RUN,"head":HEAD,"expected_apk_sha256":APK,"stage":"start","error":None,"artifacts":[],"apk_members":[],"saved_apk":None,"jobs":[]}
           def gh(*args,data=None):
-              p=subprocess.run(["gh","api",*args],check=True,capture_output=True,timeout=600,input=data)
+              p=subprocess.run(["gh","api",*args],capture_output=True,timeout=600,input=data)
+              if p.returncode:
+                  raise RuntimeError("gh api "+" ".join(args)+" exit "+str(p.returncode)+": "+p.stderr.decode("utf-8","replace")[-1500:])
               return p.stdout
-          base="repos/"+R+"/actions/runs/"+str(RUN)
-          run=json.loads(gh(base))
-          assert run["head_sha"]==HEAD and run["run_attempt"]==1 and run["conclusion"]=="success"
-          rep={"run":RUN,"head":HEAD,"expected_apk_sha256":APK,"artifacts":[],"apk_members":[],"saved_apk":None,"jobs":[]}
-          for a in json.loads(gh(base+"/artifacts?per_page=100"))["artifacts"]:
-              assert a["expired"] is False
-              raw=gh("repos/"+R+"/actions/artifacts/"+str(a["id"])+"/zip")
-              digest=hashlib.sha256(raw).hexdigest()
-              assert a["digest"]=="sha256:"+digest,a["name"]
-              (out/(a["name"]+".zip")).write_bytes(raw)
-              z=zipfile.ZipFile(io.BytesIO(raw))
-              assert z.testzip() is None
-              names=[]
-              for i in z.infolist():
-                  if i.is_dir():
-                      continue
-                  names.append([i.filename,i.file_size])
-                  if i.filename.lower().endswith(".apk"):
-                      data=z.read(i)
-                      h=hashlib.sha256(data).hexdigest()
-                      rep["apk_members"].append([a["name"],i.filename,len(data),h])
-                      if h==APK:
-                          (out/"PocketTodo-v1.2-preview-271d1fe5d7ce.apk").write_bytes(data)
-                          rep["saved_apk"]={"artifact":a["name"],"member":i.filename,"bytes":len(data),"sha256":h}
-              rep["artifacts"].append({"name":a["name"],"id":a["id"],"bytes":len(raw),"sha256":digest,"members":names[:60],"member_count":len(names)})
-          for j in json.loads(gh(base+"/jobs?per_page=100"))["jobs"]:
-              row={"name":j["name"],"id":j["id"],"conclusion":j["conclusion"]}
-              up=j["name"].startswith("upgrade")
-              if up or j["name"]=="database (34)":
-                  log=gh("repos/"+R+"/actions/jobs/"+str(j["id"])+"/logs").decode("utf-8","replace")
-                  (out/("job-"+str(j["id"])+".log")).write_text(log)
-                  rx=re.compile(r"upgrade|versionCode|signer|sha256|PASS|FAIL" if up else r"artifact|\.apk|preview",re.I)
-                  lines=[l[:260] for l in log.splitlines() if rx.search(l)]
-                  row["log_bytes"]=len(log)
-                  row["matched"]=lines[:90]+["..."]+lines[-50:] if len(lines)>140 else lines
-              rep["jobs"].append(row)
+          def work():
+              base="repos/"+R+"/actions/runs/"+str(RUN)
+              rep["stage"]="run"
+              run=json.loads(gh(base))
+              rep["run_facts"]={k:run.get(k) for k in ("head_sha","run_attempt","status","conclusion")}
+              assert run["head_sha"]==HEAD and run["run_attempt"]==1 and run["conclusion"]=="success"
+              rep["stage"]="artifacts"
+              for a in json.loads(gh(base+"/artifacts?per_page=100"))["artifacts"]:
+                  row={"name":a["name"],"id":a["id"],"expired":a["expired"],"listed_digest":a["digest"]}
+                  rep["artifacts"].append(row)
+                  assert a["expired"] is False
+                  raw=gh("repos/"+R+"/actions/artifacts/"+str(a["id"])+"/zip")
+                  digest=hashlib.sha256(raw).hexdigest()
+                  row.update(bytes=len(raw),sha256=digest,digest_match=a["digest"]=="sha256:"+digest)
+                  (out/(a["name"]+".zip")).write_bytes(raw)
+                  z=zipfile.ZipFile(io.BytesIO(raw))
+                  assert z.testzip() is None
+                  names=[]
+                  for i in z.infolist():
+                      if i.is_dir():
+                          continue
+                      names.append([i.filename,i.file_size])
+                      if i.filename.lower().endswith(".apk"):
+                          data=z.read(i)
+                          h=hashlib.sha256(data).hexdigest()
+                          rep["apk_members"].append([a["name"],i.filename,len(data),h])
+                          if h==APK:
+                              (out/"PocketTodo-v1.2-preview-271d1fe5d7ce.apk").write_bytes(data)
+                              rep["saved_apk"]={"artifact":a["name"],"member":i.filename,"bytes":len(data),"sha256":h}
+                  row.update(members=names[:60],member_count=len(names))
+              rep["stage"]="jobs"
+              for j in json.loads(gh(base+"/jobs?per_page=100"))["jobs"]:
+                  row={"name":j["name"],"id":j["id"],"conclusion":j["conclusion"]}
+                  rep["jobs"].append(row)
+                  up=j["name"].startswith("upgrade")
+                  if up or j["name"]=="database (34)":
+                      log=gh("repos/"+R+"/actions/jobs/"+str(j["id"])+"/logs").decode("utf-8","replace")
+                      (out/("job-"+str(j["id"])+".log")).write_text(log)
+                      rx=re.compile(r"upgrade|versionCode|signer|sha256|PASS|FAIL" if up else r"artifact|\.apk|preview",re.I)
+                      lines=[l[:260] for l in log.splitlines() if rx.search(l)]
+                      row["log_bytes"]=len(log)
+                      row["matched"]=lines[:90]+["..."]+lines[-50:] if len(lines)>140 else lines
+              rep["stage"]="done"
+          try:
+              work()
+          except BaseException:
+              rep["error"]=traceback.format_exc()[-3000:]
           text=json.dumps(rep,indent=1,ensure_ascii=False)
           (out/"report.json").write_text(text)
           found="APK_FOUND" if rep["saved_apk"] else "APK_NOT_FOUND"
-          body={"name":"Recovery 271d1fe evidence","head_sha":os.environ["GITHUB_SHA"],"status":"completed","conclusion":"success","output":{"title":found,"summary":"Read-only recovery; no product, device or phone change.","text":"```json\n"+text[:60000]+"\n```"}}
+          if rep["error"]:
+              found="RECOVERY_ERROR_AT_"+rep["stage"]
+          body={"name":"Recovery 271d1fe evidence","head_sha":os.environ["GITHUB_SHA"],"status":"completed","conclusion":"neutral" if rep["error"] else "success","output":{"title":found,"summary":"Read-only recovery; no product, device or phone change.","text":"```json\n"+text[:60000]+"\n```"}}
           gh("repos/"+R+"/check-runs","-X","POST","--input","-",data=json.dumps(body).encode())
           print(found,flush=True)
+          sys.exit(1 if rep["error"] else 0)
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()

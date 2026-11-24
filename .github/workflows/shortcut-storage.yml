@@ -1,83 +1,127 @@
-name: Read-only recovery of 271d1fe acceptance evidence
+name: Rebuild signed preview APK from 271d1fe
 on:
   push:
     branches: [ci/shortcut-storage-preflight-4d8742]
 permissions:
   contents: read
-  actions: read
   checks: write
 concurrency:
   group: shortcut-business-bridge-delivery
   cancel-in-progress: false
 jobs:
-  recover:
+  rebuild:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 45
+    env:
+      TEST_API: '34'
+      POCKET_STABLE_SIGNING: '1'
     steps:
-      - name: Read artifacts and logs of run 39123038507 only
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 271d1fe5d7ce239b516f18cbb9528f030ac581ab
+          persist-credentials: false
+      - name: Initialize fixed signing directory
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"])
+          assert root.is_absolute() and root.is_dir(), "valid runner temp required"
+          folder = root / "pocket-signing-34"
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as stream:
+              stream.write("POCKET_SIGNING_DIR=" + str(folder) + "\n")
+          PY
+      - name: Fixed Android build setup
+        run: |
+          set -euo pipefail
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip.sha256 -o /tmp/gradle.sha256
+          echo "$(cat /tmp/gradle.sha256)  /tmp/gradle.zip" | sha256sum -c -
+          unzip -q /tmp/gradle.zip -d /tmp
+          echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+      - name: Require fixed preview signing without fallback
+        env:
+          POCKET_PREVIEW_KEYSTORE_B64: ${{ secrets.POCKET_PREVIEW_KEYSTORE_B64 }}
+          POCKET_PREVIEW_STORE_PASSWORD: ${{ secrets.POCKET_PREVIEW_STORE_PASSWORD }}
+          POCKET_PREVIEW_KEY_ALIAS: ${{ secrets.POCKET_PREVIEW_KEY_ALIAS }}
+          POCKET_PREVIEW_KEY_PASSWORD: ${{ secrets.POCKET_PREVIEW_KEY_PASSWORD }}
+          POCKET_PREVIEW_CERT_SHA256: ${{ secrets.POCKET_PREVIEW_CERT_SHA256 }}
+        run: python3 tools/verify_upgrade.py prepare-signing
+      - name: Build the debug preview APK once
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --console=plain assembleDebug 2>&1 | tee build.log
+      - name: Verify, package and publish identity
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import hashlib,io,json,os,pathlib,re,subprocess,sys,traceback,zipfile
-          R="supercubegame/todo-pocket-android"
-          RUN=39123038507
-          HEAD="271d1fe5d7ce239b516f18cbb9528f030ac581ab"
-          APK="d22b5b3161b51b63891568401ec3b09e44b0a93f5feb0fd6ae76066a25fc5c18"
-          out=pathlib.Path("recovery-271d1fe")
-          out.mkdir()
-          rep={"run":RUN,"head":HEAD,"expected_apk_sha256":APK,"stage":"start","error":None,"artifacts":[],"apk_members":[],"saved_apk":None,"jobs":[]}
-          # first recovery run 45319227076 already verified every listed artifact digest and found no APK member
-          def gh(*args,data=None,extra=()):
-              p=subprocess.run(["gh","api",*extra,*args],capture_output=True,timeout=600,input=data)
-              if p.returncode:
-                  raise RuntimeError("gh api "+" ".join(args)+" exit "+str(p.returncode)+": "+p.stderr.decode("utf-8","replace")[-1500:])
-              return p.stdout
+          import hashlib,json,os,re,shutil,subprocess,sys,traceback
+          from pathlib import Path
+          TESTED="d22b5b3161b51b63891568401ec3b09e44b0a93f5feb0fd6ae76066a25fc5c18"
+          COMMIT="271d1fe5d7ce239b516f18cbb9528f030ac581ab"
+          rep={"commit":COMMIT,"tested_apk_sha256":TESTED,"error":None}
           def work():
-              base="repos/"+R+"/actions/runs/"+str(RUN)
-              rep["stage"]="run"
-              run=json.loads(gh(base))
-              rep["run_facts"]={k:run.get(k) for k in ("head_sha","run_attempt","status","conclusion")}
-              assert run["head_sha"]==HEAD and run["run_attempt"]==1 and run["conclusion"]=="success"
-              rep["stage"]="artifacts"
-              for a in json.loads(gh(base+"/artifacts?per_page=100"))["artifacts"]:
-                  row={"name":a["name"],"id":a["id"],"expired":a["expired"],"listed_digest":a["digest"]}
-                  rep["artifacts"].append(row)
-                  assert a["expired"] is False
-                  rep["apk_members"].append([a["name"],a["size_in_bytes"]])
-              rep["stage"]="jobs"
-              for j in json.loads(gh(base+"/jobs?per_page=100"))["jobs"]:
-                  row={"name":j["name"],"id":j["id"],"conclusion":j["conclusion"]}
-                  rep["jobs"].append(row)
-                  up=j["name"].startswith("upgrade")
-                  if up or j["name"]=="database (34)":
-                      log=gh("repos/"+R+"/actions/jobs/"+str(j["id"])+"/logs",extra=("--allow-escape-sequences",)).decode("utf-8","replace")
-                      (out/("job-"+str(j["id"])+".log")).write_text(log)
-                      rows=[l[:200] for l in log.splitlines()]
-                      row["log_bytes"]=len(log)
-                      row["tail"]=rows[-40:]
-                      rx=re.compile(r"UPGRADE|versionCode|overwrite|signer|apk_sha|Package tested|internal-preview",re.I)
-                      row["matched"]=[l for l in rows[:-40] if rx.search(l)][:30]
-              rep["stage"]="done"
+              assert os.environ["GITHUB_SHA"]!=COMMIT and subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip()==COMMIT
+              apks=list(Path("build/outputs/apk/debug").glob("*.apk"))
+              assert len(apks)==1
+              source=apks[0]
+              tools=Path(os.environ["ANDROID_HOME"])/"build-tools/35.0.0"
+              def output(args):
+                  return subprocess.check_output(list(map(str,args)),text=True)
+              package=output([tools/"aapt","dump","badging",source])
+              permissions=output([tools/"aapt","dump","permissions",source])
+              signature=output([tools/"apksigner","verify","--verbose","--print-certs",source])
+              assert "name='com.supercubegame.pockettodo.v12.preview'" in package
+              assert "versionCode='3'" in package and "versionName='1.2'" in package and "sdkVersion:'26'" in package
+              assert "uses-permission:" not in permissions
+              certs=re.findall(r"^Signer #1 certificate SHA-256 digest: ([0-9a-f]+)$",signature,re.M)
+              assert len(certs)==1 and len(certs[0])==64
+              signing=json.loads((Path(os.environ["POCKET_SIGNING_DIR"])/"credentials.json").read_text())
+              assert certs[0]==signing["certificate"],"fixed preview certificate mismatch"
+              folder=Path("preview-rebuilt")
+              folder.mkdir()
+              name="PocketTodo-v1.2-preview-"+COMMIT[:12]+"-rebuilt.apk"
+              target=folder/name
+              shutil.copyfile(source,target)
+              data=target.read_bytes()
+              assert data==source.read_bytes()
+              digest=hashlib.sha256(data).hexdigest()
+              rep.update(apk=name,bytes=len(data),sha256=digest,same_bytes_as_tested=digest==TESTED,certificate_sha256=certs[0],package="com.supercubegame.pockettodo.v12.preview",version_name="1.2",version_code=3,release_ready=False,durable_upgrade_ready=False)
+              (folder/"SHA256SUMS.txt").write_text(digest+"  "+name+"\n")
+              (folder/"signature.txt").write_text(signature)
+              (folder/"package.txt").write_text(package+"\n"+permissions)
+              (folder/"preview.json").write_text(json.dumps(rep,indent=2)+"\n")
+              (folder/"README.txt").write_text("Pocket Todo v1.2 stage preview rebuilt from commit 271d1fe. Not a full release. Fixed preview signature. Back up before any overwrite install; never uninstall an old preview that holds data. Install only the .apk. Same source as the CI-tested build, see preview.json for whether the bytes match the tested hash.\n",encoding="utf-8")
           try:
               work()
           except BaseException:
-              rep["error"]=traceback.format_exc()[-3000:]
+              rep["error"]=traceback.format_exc()[-2500:]
           text=json.dumps(rep,indent=1,ensure_ascii=False)
-          (out/"report.json").write_text(text)
-          found="APK_FOUND" if rep["saved_apk"] else "APK_NOT_FOUND"
-          if rep["error"]:
-              found="RECOVERY_ERROR_AT_"+rep["stage"]
-          body={"name":"Recovery 271d1fe evidence","head_sha":os.environ["GITHUB_SHA"],"status":"completed","conclusion":"neutral" if rep["error"] else "success","output":{"title":found,"summary":"Read-only recovery; no product, device or phone change.","text":"```json\n"+text[:60000]+"\n```"}}
-          gh("repos/"+R+"/check-runs","-X","POST","--input","-",data=json.dumps(body).encode())
-          print(found,flush=True)
+          title="REBUILT_APK_READY" if not rep["error"] else "REBUILD_ERROR"
+          body={"name":"Rebuilt preview APK 271d1fe","head_sha":os.environ["GITHUB_SHA"],"status":"completed","conclusion":"neutral" if rep["error"] else "success","output":{"title":title,"summary":"Rebuild only; no product, device or phone change.","text":"```json\n"+text+"\n```"}}
+          subprocess.run(["gh","api","repos/"+os.environ["GITHUB_REPOSITORY"]+"/check-runs","-X","POST","--input","-"],input=json.dumps(body).encode(),check=True)
+          print(title,flush=True)
           sys.exit(1 if rep["error"] else 0)
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: PocketTodo-v1.2-preview-271d1fe5d7ce-rebuilt
+          path: preview-rebuilt/
+          retention-days: 90
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: recovery-271d1fe
-          path: recovery-271d1fe/
-          if-no-files-found: error
-          retention-days: 14
+          name: rebuild-build-log
+          path: build.log
+          retention-days: 30
+          if-no-files-found: ignore
+      - name: Remove temporary signing material
+        if: always()
+        run: python3 tools/verify_upgrade.py cleanup-signing

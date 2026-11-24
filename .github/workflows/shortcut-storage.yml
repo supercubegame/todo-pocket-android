@@ -1,73 +1,82 @@
-name: Activity list viewport navigation repair
-'on':
+name: Read-only recovery of 271d1fe acceptance evidence
+on:
   push:
-    branches:
-      - ci/shortcut-storage-preflight-4d8742
+    branches: [ci/shortcut-storage-preflight-4d8742]
 permissions:
-  contents: write
-  actions: write
+  contents: read
+  actions: read
   checks: write
 concurrency:
   group: shortcut-business-bridge-delivery
   cancel-in-progress: false
 jobs:
-  activity_viewport_delivery:
+  recover:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: c1c3b632cc96da3ef9e97a67c9131b58ebec1424
-          persist-credentials: false
-      - name: Restore pinned transport and approved activity navigation repair
+      - name: Read artifacts and logs of run 39123038507 only
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import ast,base64,hashlib,json,lzma,os,pathlib,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/42f2ae2fc8bfd6de86a92aed21784da195aee31c/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as response:original=response.read(14885)
-          assert len(original)==14884 and hashlib.sha256(original).hexdigest()=="968ed9265fb35f7f1614e866da37e91159ea3865eb519ec49bbb1482007d5592"
-          body=original.decode().split("          python3 - <<'PY'\n",1)[1].split("          PY\n",1)[0]
-          assert all(not line or line.startswith("          ") for line in body.splitlines())
-          code="\n".join(line[10:] for line in body.splitlines())+"\n"
-          ast.parse(code);exec(compile(code,"pinned-transport-restore","exec"),{})
-          raw=lzma.decompress(base64.b64decode("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",validate=True))
-          assert len(raw)==20375 and hashlib.sha256(raw).hexdigest()=="65fabe49469d59a8641a7f9c12e52a508193a26716388b9707548620fdc81031"
-          bundle=json.loads(raw)
-          assert set(bundle)=={'tests.py', 'prepare.py', 'repair.py', 'runtime.py'}
-          for name,code in bundle.items():
-              ast.parse(code);(pathlib.Path(os.environ["RUNNER_TEMP"])/name).write_text(code)
+          import hashlib,io,json,os,pathlib,re,subprocess,zipfile
+          R="supercubegame/todo-pocket-android"
+          RUN=39123038507
+          HEAD="271d1fe5d7ce239b516f18cbb9528f030ac581ab"
+          APK="d22b5b3161b51b63891568401ec3b09e44b0a93f5feb0fd6ae76066a25fc5c18"
+          out=pathlib.Path("recovery-271d1fe")
+          out.mkdir()
+          def gh(*args,data=None):
+              p=subprocess.run(["gh","api",*args],check=True,capture_output=True,timeout=600,input=data)
+              return p.stdout
+          base="repos/"+R+"/actions/runs/"+str(RUN)
+          run=json.loads(gh(base))
+          assert run["head_sha"]==HEAD and run["run_attempt"]==1 and run["conclusion"]=="success"
+          rep={"run":RUN,"head":HEAD,"expected_apk_sha256":APK,"artifacts":[],"apk_members":[],"saved_apk":None,"jobs":[]}
+          for a in json.loads(gh(base+"/artifacts?per_page=100"))["artifacts"]:
+              assert a["expired"] is False
+              raw=gh("repos/"+R+"/actions/artifacts/"+str(a["id"])+"/zip")
+              digest=hashlib.sha256(raw).hexdigest()
+              assert a["digest"]=="sha256:"+digest,a["name"]
+              (out/(a["name"]+".zip")).write_bytes(raw)
+              z=zipfile.ZipFile(io.BytesIO(raw))
+              assert z.testzip() is None
+              names=[]
+              for i in z.infolist():
+                  if i.is_dir():
+                      continue
+                  names.append([i.filename,i.file_size])
+                  if i.filename.lower().endswith(".apk"):
+                      data=z.read(i)
+                      h=hashlib.sha256(data).hexdigest()
+                      rep["apk_members"].append([a["name"],i.filename,len(data),h])
+                      if h==APK:
+                          (out/"PocketTodo-v1.2-preview-271d1fe5d7ce.apk").write_bytes(data)
+                          rep["saved_apk"]={"artifact":a["name"],"member":i.filename,"bytes":len(data),"sha256":h}
+              rep["artifacts"].append({"name":a["name"],"id":a["id"],"bytes":len(raw),"sha256":digest,"members":names[:60],"member_count":len(names)})
+          for j in json.loads(gh(base+"/jobs?per_page=100"))["jobs"]:
+              row={"name":j["name"],"id":j["id"],"conclusion":j["conclusion"]}
+              up=j["name"].startswith("upgrade")
+              if up or j["name"]=="database (34)":
+                  log=gh("repos/"+R+"/actions/jobs/"+str(j["id"])+"/logs").decode("utf-8","replace")
+                  (out/("job-"+str(j["id"])+".log")).write_text(log)
+                  rx=re.compile(r"upgrade|versionCode|signer|sha256|PASS|FAIL" if up else r"artifact|\.apk|preview",re.I)
+                  lines=[l[:260] for l in log.splitlines() if rx.search(l)]
+                  row["log_bytes"]=len(log)
+                  row["matched"]=lines[:90]+["..."]+lines[-50:] if len(lines)>140 else lines
+              rep["jobs"].append(row)
+          text=json.dumps(rep,indent=1,ensure_ascii=False)
+          (out/"report.json").write_text(text)
+          found="APK_FOUND" if rep["saved_apk"] else "APK_NOT_FOUND"
+          body={"name":"Recovery 271d1fe evidence","head_sha":os.environ["GITHUB_SHA"],"status":"completed","conclusion":"success","output":{"title":found,"summary":"Read-only recovery; no product, device or phone change.","text":"```json\n"+text[:60000]+"\n```"}}
+          gh("repos/"+R+"/check-runs","-X","POST","--input","-",data=json.dumps(body).encode())
+          print(found,flush=True)
           PY
-      - name: Java17 and actual adapted transport controls
-        env:
-          ORIGINAL_DRIVER_SHA: cc83f9374afd35c87252fe189c6ea7afaf7e985cc8eb9a9c9dc48ffca3fed58c
-        run: |
-          set -euo pipefail
-          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
-          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
-          python3 "$RUNNER_TEMP/prepare.py"
-          python3 "$RUNNER_TEMP/test-deliver-accepted.py"
-      - name: Full original21 once then atomic exact product delivery
-        id: delivery
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          python3 "$RUNNER_TEMP/deliver-accepted.py" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/activity-viewport-delivery"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        id: evidence
         if: always()
         with:
-          name: activity-viewport-delivery
-          path: ${{ runner.temp }}/activity-viewport-delivery/
+          name: recovery-271d1fe
+          path: recovery-271d1fe/
           if-no-files-found: error
           retention-days: 14
-      - name: Publish complete delivery receipt and failure tails
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
-          DELIVERY_OUTCOME: ${{ steps.delivery.outcome }}
-        run: |
-          set -euo pipefail
-          python3 "$RUNNER_TEMP/deliver-accepted.py" publish "$RUNNER_TEMP/activity-viewport-delivery"

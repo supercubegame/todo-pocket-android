@@ -1900,6 +1900,11 @@ HARDENING_LABELS=[
  'oversize source refusal and cancel leave every table and every original byte unchanged',
  'late derivative save failure shows the exact visible message',
  'late derivative save failure and cancel leave every table and every original byte unchanged',
+ 'JPEG source imports into the first note as one exact block with exact private bytes and registry',
+ 'JPEG derivative dialog shows actual decoded JPEG dimensions with empty selection',
+ 'JPEG touch crop and opaque mask save one derived PNG recording the exact JPEG original',
+ 'independent ImageIO decode proves exact cropped pixels and opaque mask for the JPEG source',
+ 'JPEG original derived PNG and every table survive stopped-process restart exactly',
 ]
 def jpeg_with_orientation(jpeg,orientation):
     """Insert one big-endian EXIF primary-IFD orientation APP1 right after SOI."""
@@ -1973,7 +1978,7 @@ def derivative_java_contract(source):
     assert source.count(DERIVE_PREVIEW_GENERIC_MESSAGE)==1,'generic preview failure only remains the fallback'
     assert 'ignored->{dialog.dismiss();load();},()->dialog.dismiss());' not in source,'silent save failure path remains'
 def hardening_wiring_check(source):
-    """The native stage must register exactly the expected ten checks outside the fixed ok() contract."""
+    """The native stage must register exactly the declared checks outside the fixed ok() contract."""
     import ast
     tree=ast.parse(source)
     fn=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='_verify_native_ui']
@@ -1983,8 +1988,53 @@ def hardening_wiring_check(source):
     seen=[n.args[1].value for n in sorted(calls,key=lambda n:(n.lineno,n.col_offset))]
     assert seen==HARDENING_LABELS,'hardening labels differ: '+repr(seen)
     text=ast.get_source_segment(source,fn[0])
-    for needle in ('hard_checks.append(label)','derivative_hardening={'):
+    for needle in ('hard_checks.append(label)','derivative_hardening={','derivative_jpeg_tools()','make_derivative_jpeg(fixture_dir)',"'VerifyDerivative',jsrc"):
         assert text.count(needle)>=1,'missing hardening wiring '+needle
+
+DERIVATIVE_JPEG_JAVA={'MakeDerivativeJpegs.java':'''import java.awt.image.BufferedImage;
+import java.io.File;
+import javax.imageio.IIOImage;
+import javax.imageio.ImageIO;
+import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageWriter;
+import javax.imageio.stream.ImageOutputStream;
+public class MakeDerivativeJpegs {
+ public static void main(String[] a) throws Exception {
+  int w=640,h=320;
+  BufferedImage img=new BufferedImage(w,h,BufferedImage.TYPE_INT_RGB);
+  for(int y=0;y<h;y++)for(int x=0;x<w;x++){int v=40+(((x/16)*5+(y/16)*3)%9)*20;img.setRGB(x,y,(v<<16)|(v<<8)|v);}
+  ImageWriter writer=ImageIO.getImageWritersByFormatName("jpeg").next();
+  ImageWriteParam param=writer.getDefaultWriteParam();
+  param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);param.setCompressionQuality(1.0f);
+  File file=new File(new File(a[0]),"pocket-derive-source.jpg");
+  try(ImageOutputStream output=ImageIO.createImageOutputStream(file)){writer.setOutput(output);writer.write(null,new IIOImage(img,null,null),param);}
+  writer.dispose();
+  BufferedImage back=ImageIO.read(file);
+  if(back==null||back.getWidth()!=w||back.getHeight()!=h||back.getType()!=BufferedImage.TYPE_3BYTE_BGR) throw new AssertionError("fixture must decode as a 3-channel 640x320 JPEG");
+  for(int by=0;by<h/8;by++)for(int bx=0;bx<w/8;bx++){
+   int first=back.getRGB(bx*8,by*8);
+   if(((first>>16)&255)!=((first>>8)&255)||((first>>8)&255)!=(first&255)) throw new AssertionError("decoded fixture must stay neutral gray");
+   for(int y=0;y<8;y++)for(int x=0;x<8;x++) if(back.getRGB(bx*8+x,by*8+y)!=first) throw new AssertionError("each 8x8 block must be flat so every JPEG decoder agrees");
+  }
+  System.out.println("DERIVATIVE_JPEG_FIXTURE_PASS 640x320 flat-gray-blocks");
+ }
+}
+'''}
+def derivative_jpeg_tools():
+    """Compile the synthetic JPEG fixture writer and prove its flat-block decode before slow UI work."""
+    helper=Path('build/ci-note-image-jpeg');helper.mkdir(parents=True,exist_ok=True)
+    for name,text in DERIVATIVE_JPEG_JAVA.items():(helper/name).write_text(text)
+    run(['javac','-d',helper]+[helper/name for name in DERIVATIVE_JPEG_JAVA],timeout=60)
+    return 'JPEG_FIXTURE_WRITER_COMPILED'
+def make_derivative_jpeg(directory):
+    directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
+    helper=Path('build/ci-note-image-jpeg')
+    made=run(['java','-Djava.awt.headless=true','-cp',helper,'MakeDerivativeJpegs',directory],timeout=60,capture=True).stdout.strip()
+    assert made=='DERIVATIVE_JPEG_FIXTURE_PASS 640x320 flat-gray-blocks',made
+    data=(directory/'pocket-derive-source.jpg').read_bytes()
+    assert data[:2]==b'\xff\xd8' and len(data)<8*1024*1024 and 640*320<=1000000 and b'Exif\x00\x00' not in data[:64]
+    jpeg_orientation_model(data)
+    return data
 
 def derivative_hardening_selftest():
     import inspect
@@ -2427,6 +2477,7 @@ def _verify_native_ui(adb,nodes):
     try:
         pixel_oracle=derivative_checker()
         (out/'derivative-oracle.json').write_text(json.dumps({'status':'PASS','evidence':pixel_oracle}))
+        jpeg_oracle=derivative_jpeg_tools()
         start()
         ok(find(text='还剩 0 件 / 共 0 件') is not None,'new UI database starts empty without fabricated activities')
         tap('添加'); ok(find(text='内容不能为空') is not None,'blank todo rejected visibly')
@@ -3026,11 +3077,12 @@ public class ImageImportFixture {
         with sqlite3.connect(copy_db('schema3-final.db')) as db:
             origins=db.execute('SELECT id,original_asset_id FROM blocks WHERE original_asset_id IS NOT NULL').fetchall()
             ok(db.execute('PRAGMA user_version').fetchone()==(3,) and db.execute('SELECT count(*) FROM blocks').fetchone()[0]>0 and origins==[(derive_block,derive_source_id)],'native schema3 survives SAF restore and all ordinary edits without invented image origins')
-        # Stage20: accurate derivative refusals and a visible late save failure. It persists nothing:
-        # no new note, block, media file or derivative, so the later share phase still sees exactly
-        # the one native derivative fixture and the original private sibling. Recorded beside, never
-        # inside, the fixed 186-label native contract; own stop and directory-trace lists keep every
-        # older evidence list untouched.
+        # Stage20: accurate derivative refusals, a visible late save failure, then one persistent
+        # JPEG-source derivative with an independent decode oracle. The refusal parts persist nothing;
+        # the JPEG part adds exactly one imported JPEG block in the first note and its derived PNG, which
+        # the share phase now expects (PNG and JPEG derivative fixtures). Recorded beside, never inside,
+        # the fixed 186-label native contract; own stop and directory-trace lists keep every older
+        # evidence list untouched.
         hard_stops=[];hard_traces=[]
         hard_runner=isolated_directory_runner(adb,SERIAL,PKG,hard_traces)
         geometry_start=len(derive_geometry)
@@ -3073,10 +3125,73 @@ public class ImageImportFixture {
             subprocess.check_output([str(adb),'-s',SERIAL,'shell','run-as',PKG,'mv',held+'.held',held],timeout=30)
         hard_stop()
         okh(hard_state('hardening-save-failed.db')==saved and hard_media()==media_before and private_bytes(derived_id)==derivative_bytes and private_bytes(derive_source_id)==derive_input and private_bytes(chosen_id)==chosen,'late derivative save failure and cancel leave every table and every original byte unchanged')
+        # Persistent JPEG-source derivative. A flat 8x8-block gray JPEG decodes identically in every
+        # baseline decoder, so the host ImageIO oracle can demand exact pixels from the Android output.
+        jpeg_input=make_derivative_jpeg(fixture_dir);jpeg_id=hashlib.sha256(jpeg_input).hexdigest()
+        assert jpeg_id not in (chosen_id,derive_source_id,derived_id)
+        jpeg_path=fixture_dir/'pocket-derive-source.jpg';jpeg_path.write_bytes(jpeg_input)
+        run([adb,'-s',SERIAL,'push',jpeg_path,'/sdcard/Download/pocket-derive-source.jpg'])
+        jpeg_base=hard_state('hardening-jpeg-base.db')
+        assert jpeg_base==saved,'JPEG stage must start from the exact accepted native state'
+        note_screen();pick_image('pocket-derive-source.jpg');ready();hard_stop()
+        jpeg_new=hard_state('hardening-jpeg-import.db')
+        jpeg_rows=[row for row in jpeg_new['blocks'] if row not in jpeg_base['blocks']]
+        shell('rm','/sdcard/Download/pocket-derive-source.jpg')
+        okh(len(jpeg_rows)==1 and jpeg_rows[0][0]==selected_blocks[2][0] and jpeg_rows[0][3]=='IMAGE' and jpeg_rows[0][4:]==('',jpeg_id,'',0,None) and
+            all(row in jpeg_new['blocks'] for row in jpeg_base['blocks']) and
+            [row for row in jpeg_new['media'] if row not in jpeg_base['media']]==[(jpeg_id,'image/jpeg',len(jpeg_input))] and
+            private_bytes(jpeg_id)==jpeg_input and
+            all(jpeg_new[t]==jpeg_base[t] for t in TABLES if t not in ('revision','blocks','media')),
+            'JPEG source imports into the first note as one exact block with exact private bytes and registry')
+        derive_note='1. Daily reward';derive_block=jpeg_rows[0][1]
+        daily_note();(jw,jh),drag=open_derive()
+        okh((jw,jh)==(640,320) and desc('derive-crop').get('text')=='未选择裁剪区域' and desc('derive-masks').get('text')=='遮挡 0 处',
+            'JPEG derivative dialog shows actual decoded JPEG dimensions with empty selection')
+        drag(96,64,544,256);jl,jt,jr,jb=wait_crop()
+        assert abs(jl-96)<=4 and abs(jt-64)<=4 and abs(jr-544)<=4 and abs(jb-256)<=4,'JPEG touch crop must map onto the intended source rectangle'
+        tap('遮挡模式');drag(240,112,400,208)
+        deadline=time.monotonic()+20;jpeg_mask_text=''
+        while time.monotonic()<deadline:
+            jpeg_mask_text=desc('derive-masks').get('text') or ''
+            if jpeg_mask_text.startswith('遮挡 1 处'):break
+            time.sleep(.25)
+        jpeg_masks=re.findall(r'(\d+),(\d+) → (\d+),(\d+)',jpeg_mask_text)
+        assert jpeg_mask_text.startswith('遮挡 1 处') and len(jpeg_masks)==1,'JPEG redact mode must report exactly one mask'
+        jml,jmt,jmr,jmb=map(int,jpeg_masks[0])
+        derive_geometry[-1]['observed_mask']=[jml,jmt,jmr,jmb]
+        assert abs(jml-240)<=4 and abs(jmt-112)<=4 and abs(jmr-400)<=4 and abs(jmb-208)<=4,'JPEG touch mask must map onto the intended source rectangle'
+        tap('预览');find(text='保存')
+        jpeg_output=re.fullmatch(r'派生预览 (\d+) × (\d+)',reveal('derive-output').get('text') or '')
+        assert jpeg_output and tuple(map(int,jpeg_output.groups()))==(jr-jl,jb-jt) and reveal('derive-result').get('class')=='android.widget.ImageView','JPEG preview must render the exact reported output size'
+        tap('保存');gone('保存');ready();hard_stop()
+        jpeg_saved=hard_state('hardening-jpeg-saved.db')
+        jpeg_target=[row for row in jpeg_saved['blocks'] if row[1]==derive_block]
+        assert len(jpeg_target)==1,'JPEG derived block identity lost'
+        jpeg_derived_row=jpeg_target[0];jpeg_derived_id=jpeg_derived_row[5]
+        jpeg_derived_bytes=private_bytes(jpeg_derived_id)
+        okh(re.fullmatch(r'[0-9a-f]{64}',jpeg_derived_id) is not None and jpeg_derived_id not in (jpeg_id,derive_source_id,derived_id) and
+            jpeg_derived_row[0]==jpeg_rows[0][0] and jpeg_derived_row[2:5]==jpeg_rows[0][2:5] and jpeg_derived_row[6:]==('',0,jpeg_id) and
+            [row for row in jpeg_saved['media'] if row not in jpeg_new['media']]==[(jpeg_derived_id,'image/png',len(jpeg_derived_bytes))] and
+            all(row in jpeg_saved['blocks'] for row in jpeg_new['blocks'] if row[1]!=derive_block) and len(jpeg_saved['blocks'])==len(jpeg_new['blocks']) and
+            all(jpeg_saved[t]==jpeg_new[t] for t in TABLES if t not in ('revision','blocks','media')) and
+            private_bytes(jpeg_id)==jpeg_input and private_bytes(derive_source_id)==derive_input and private_bytes(chosen_id)==chosen and private_bytes(derived_id)==derivative_bytes,
+            'JPEG touch crop and opaque mask save one derived PNG recording the exact JPEG original')
+        jsrc=(out/'hardening-jpeg-source.jpg').resolve();jsrc.write_bytes(jpeg_input)
+        jout=(out/'hardening-jpeg-derived.png').resolve();jout.write_bytes(jpeg_derived_bytes)
+        jpeg_pixels=run(['java','-Djava.awt.headless=true','-cp',helper,'VerifyDerivative',jsrc,jout,str(jl),str(jt),str(jr),str(jb),str(jml),str(jmt),str(jmr),str(jmb)],timeout=60,capture=True).stdout.strip()
+        okh(jpeg_pixels=='DERIVATIVE_PIXELS_PASS '+str(jr-jl)+'x'+str(jb-jt),'independent ImageIO decode proves exact cropped pixels and opaque mask for the JPEG source')
+        daily_note()
+        assert reveal('note-image-'+derive_block).get('class')=='android.widget.ImageView' and reveal('note-image-derive-'+derive_block).get('enabled')=='true','JPEG derived image must render with a working entry after restart'
+        hard_stop()
+        okh(hard_state('hardening-jpeg-restart.db')==jpeg_saved and private_bytes(jpeg_derived_id)==jpeg_derived_bytes and private_bytes(jpeg_id)==jpeg_input and
+            private_bytes(derive_source_id)==derive_input and private_bytes(derived_id)==derivative_bytes and private_bytes(chosen_id)==chosen,
+            'JPEG original derived PNG and every table survive stopped-process restart exactly')
         assert hard_checks==HARDENING_LABELS,'hardening stage must record exactly its declared checks'
         hardening_geometry=[dict(entry) for entry in derive_geometry[geometry_start:]]
         del derive_geometry[geometry_start:]
-        assert len(hardening_geometry)==2 and [e.get('source') for e in hardening_geometry]==[[1536,768],[640,320]],'hardening geometry must stay separate from the one native 1280x640 fixture'
+        assert [e.get('source') for e in hardening_geometry]==[[1536,768],[640,320],[640,320],[640,320]],'hardening geometry must stay separate from the one native 1280x640 fixture'
+        assert hardening_geometry[2].get('observed_crop')==(jl,jt,jr,jb) and hardening_geometry[3].get('observed_mask')==[jml,jmt,jmr,jmb],'JPEG geometry entries must carry the observed rectangles'
+        jpeg_summary={'source':[jw,jh],'crop':[jl,jt,jr,jb],'mask':[jml,jmt,jmr,jmb],'pixels':jpeg_pixels,'source_sha256':jpeg_id,'derived_sha256':jpeg_derived_id,'derived_bytes':len(jpeg_derived_bytes)}
         result={'status':'PASS','scope':'NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE','ledger_calendar':'NATIVE_MULTI_DATE_LEDGER_PASS','saf_restore':'NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS','checkin_history':'NATIVE_CHECKIN_HISTORY_BACKDATE_PASS','note_editor':'NATIVE_TEXT_IMAGE_NOTE_PASS','api':API,'count':len(checks),'checks':checks,'screenshots':shots,'infra_retries':infra_retries,'restore_undo':'NOT_IMPLEMENTED','restore_preview_lifecycle':'NOT_TESTED','checkin_schedules':'NOT_IMPLEMENTED','real_photo_selection':'NOT_IMPLEMENTED','photos':'NOT_TESTED','sharing':'NOT_TESTED','release_ready':False}
         result.update(real_photo_selection='NATIVE_SAF_PNG_PASS',photos='SYNTHETIC_PNG_ONLY',image_picker_lifecycle='CANCEL_AND_RESTART_ONLY',jpeg='NOT_TESTED',camera='NOT_IMPLEMENTED')
         result.update(real_photo_selection='NATIVE_SAF_PNG_JPEG_PASS',photos='SYNTHETIC_PNG_JPEG_ONLY',jpeg='NATIVE_SAF_EXACT_PRIVATE_COPY_PASS',image_first_note='CANCEL_REJECT_CREATE_RESTART_PASS',image_pixel_budget='20000000_ACCEPTED_20005000_REJECTED',exif_orientation='NOT_TESTED',whole_note_memory='NOT_TESTED')
@@ -3084,7 +3199,7 @@ public class ImageImportFixture {
         result.update(nonfirst_image='APPEND_ISOLATION_RESTART_PASS',image_metadata='CAPTION_PRIVATE_CANCEL_EDIT_CLEAR_RESTART_PASS',private_sharing='NOT_TESTED')
         result.update(default_app_schema=3,default_schema3_ui='NATIVE_SCHEMA3_UI_PASS')
         result.update(derivative_ui='NATIVE_CROP_MASK_UI_SAVE_CANCEL_RESTART_PASS')
-        result.update(derivative_hardening={'status':'PASS','scope':'NATIVE_ACCURATE_REFUSALS_AND_LATE_SAVE_FAILURE_NO_NEW_DERIVATIVE_PERSISTED','count':len(hard_checks),'checks':list(hard_checks),'geometry':hardening_geometry,'process_stops':hard_stops,'directory_traces':hard_traces,'not_tested':['native_rotated_jpeg_import','jpeg_source_derivative_save','rotation_during_edit','large_font_scale','low_storage_publication','camera','real_photos','multi_touch_device_cancel']})
+        result.update(derivative_hardening={'status':'PASS','scope':'NATIVE_REFUSALS_LATE_SAVE_FAILURE_AND_PERSISTED_JPEG_SOURCE_DERIVATIVE','count':len(hard_checks),'checks':list(hard_checks),'geometry':hardening_geometry,'jpeg_source_derivative':jpeg_summary,'fixture_writer':jpeg_oracle,'process_stops':hard_stops,'directory_traces':hard_traces,'not_tested':['native_rotated_jpeg_import','rotation_during_edit','large_font_scale','low_storage_publication','camera','real_photos','multi_touch_device_cancel']})
         result.update(derivative_geometry=derive_geometry,pixel_oracle=pixel_oracle,process_stops=process_stops)
         result['restore_picker_traces']=restore_picker_traces
         result['summary_navigation_traces']=summary_navigation_traces

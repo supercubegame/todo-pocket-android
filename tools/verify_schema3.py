@@ -890,8 +890,12 @@ def native_share_ui(adb, gate):
     try:
         assert os.environ.get("GITHUB_ACTIONS") == "true" and shell("getprop","ro.kernel.qemu").strip() == "1"
         stop();initial, original_media = snapshot()
-        derived = [r for r in initial["blocks"] if r[8] is not None]
-        assert len(derived) == 1, "expected actual native derivative fixture"
+        derived_all = [r for r in initial["blocks"] if r[8] is not None]
+        media_mime = {r[0]:r[1] for r in initial["media"]}
+        derived = [r for r in derived_all if media_mime.get(r[8]) == "image/png"]
+        jpeg_derived = [r for r in derived_all if media_mime.get(r[8]) == "image/jpeg"]
+        assert len(derived_all) == 2 and len(derived) == 1 and len(jpeg_derived) == 1, "expected actual native PNG and JPEG derivative fixtures"
+        assert jpeg_derived[0][0] != derived[0][0] and jpeg_derived[0][7] == 0, "JPEG derivative fixture must live outside the shared note and stay public"
         row = derived[0];note, block = row[0], row[1]
         siblings = [r for r in initial["blocks"] if r[0] == note and r[3] == "IMAGE" and r[1] != block]
         assert len(siblings) == 1 and siblings[0][7] == 0 and row[7] == 0
@@ -909,9 +913,19 @@ def native_share_ui(adb, gate):
         shell("input","text","PRIVATE_SHARE_SENTINEL");touch("image-private");tap("保存");ready();stop()
         baseline, media = snapshot()
         expected = list(private);expected[6]="PRIVATE_SHARE_SENTINEL";expected[7]=1
-        ok(baseline["blocks"] == [tuple(expected) if r==private else r for r in initial["blocks"]] and
-           all(baseline[t]==initial[t] for t in initial if t not in ("blocks","revision")) and media==original_media,
-           "share private fixture changes only chosen image metadata")
+        expected_blocks = [tuple(expected) if r==private else r for r in initial["blocks"]]
+        private_change_ok = (baseline["blocks"] == expected_blocks and
+           all(baseline[t]==initial[t] for t in initial if t not in ("blocks","revision")) and media==original_media)
+        if not private_change_ok:
+            # Bounded diagnostics: the first mismatch must name its table and rows in the job log.
+            diff = {"blocks_only_expected":[repr(r)[:240] for r in expected_blocks if r not in baseline["blocks"]][:4],
+                    "blocks_only_actual":[repr(r)[:240] for r in baseline["blocks"] if r not in expected_blocks][:4],
+                    "blocks_lengths":[len(expected_blocks),len(baseline["blocks"])],
+                    "tables":{t:[len(initial[t]),len(baseline.get(t,[]))] for t in initial if t not in ("blocks","revision") and baseline.get(t)!=initial[t]},
+                    "media_only_before":sorted(set(original_media)-set(media))[:4],"media_only_after":sorted(set(media)-set(original_media))[:4],
+                    "private":repr(private)[:240],"note_labels":sorted(note_labels.values())}
+            print("SHARE_PRIVATE_DIFF "+json.dumps(diff,ensure_ascii=False)[:3500],flush=True)
+        ok(private_change_ok, "share private fixture changes only chosen image metadata")
         assert not file_paths(), "preexisting share output would mask failed publication"
         start();choose_note(duplicates[0][0])
         find(**{"content-desc":"v12-status","text":"这篇笔记没有非私有内容可导出"})

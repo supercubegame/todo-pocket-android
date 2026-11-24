@@ -511,6 +511,15 @@ public final class NoteEditorScreen {
             if(dragging)canvas.drawRect(Math.min(downX,moveX),Math.min(downY,moveY),Math.max(downX,moveX),Math.max(downY,moveY),frame);
         }
     }
+    /** Accurate user text for derivative refusals. Unknown failures stay generic and never claim a state change. */
+    static String derivativeFailure(Throwable failure,boolean saving){
+        String m=failure==null||failure.getMessage()==null?"":failure.getMessage();
+        if(m.contains("Only PNG/JPEG up to 1 million pixels"))return "原图过大或格式不支持：裁剪/遮挡仅支持不超过 100 万像素、单边 2048 的 PNG/JPEG；原图未改动";
+        if(m.contains("must be normalized"))return "原图带旋转或 EXIF 方向信息，需先在相册里转正并另存，暂不支持裁剪或遮挡；原图未改动";
+        if(m.contains("EXIF")||m.contains("orientation"))return "无法确认原图的 EXIF 方向，暂不支持裁剪或遮挡；原图未改动";
+        if(m.contains("Database changed"))return "笔记已在别处变化，请关闭后重新选择；原图未改动";
+        return saving?"保存未完成：笔记和原图未改动，请重新打开后再试":"预览失败：原图可能已变化，请重新选择";
+    }
     /** Touch selection feeding the accepted guarded backend. Original bytes, caption,
      * privacy and siblings stay untouched; abandoned previews never write. */
     private void deriveImage(State s,NoteDocument.Block block){
@@ -543,7 +552,8 @@ public final class NoteEditorScreen {
         dialog.setOnShowListener(unused->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
             if(session.preview!=null){
                 dialog.setCancelable(false);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);
-                host.work(()->{session.editor.confirm(session.preview);return true;},ignored->{dialog.dismiss();load();},()->dialog.dismiss());
+                final java.util.concurrent.atomic.AtomicReference<Throwable> saveFailure=new java.util.concurrent.atomic.AtomicReference<>();
+                host.work(()->{try{session.editor.confirm(session.preview);return true;}catch(IOException|RuntimeException failure){saveFailure.set(failure);throw failure;}},ignored->{dialog.dismiss();load();},()->{dialog.dismiss();load();host.message(derivativeFailure(saveFailure.get(),true),true);});
                 return;
             }
             Rect area=view.crop();
@@ -561,13 +571,16 @@ public final class NoteEditorScreen {
             final Rect target=area;
             final int[][] maskArray=translated.toArray(new int[0][]);
             dialog.setCancelable(false);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);view.setLocked(true);
+            final java.util.concurrent.atomic.AtomicReference<Throwable> prepareFailure=new java.util.concurrent.atomic.AtomicReference<>();
             host.work(()->{
-                session.editor=new Editor(host.db,s.media);
-                session.preview=session.editor.prepare(s.noteId,block.id,target.left,target.top,target.right,target.bottom,maskArray);
-                byte[] png=session.preview.png();
-                android.graphics.Bitmap decoded=android.graphics.BitmapFactory.decodeByteArray(png,0,png.length);
-                if(decoded==null)throw new IOException("派生预览解码失败");
-                return decoded;
+                try{
+                    session.editor=new Editor(host.db,s.media);
+                    session.preview=session.editor.prepare(s.noteId,block.id,target.left,target.top,target.right,target.bottom,maskArray);
+                    byte[] png=session.preview.png();
+                    android.graphics.Bitmap decoded=android.graphics.BitmapFactory.decodeByteArray(png,0,png.length);
+                    if(decoded==null)throw new IOException("派生预览解码失败");
+                    return decoded;
+                }catch(IOException|RuntimeException failure){prepareFailure.set(failure);throw failure;}
             },decoded->{
                 dialog.setCancelable(true);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);
                 output.setText("派生预览 "+decoded.getWidth()+" × "+decoded.getHeight());
@@ -578,7 +591,7 @@ public final class NoteEditorScreen {
             },()->{
                 dialog.setCancelable(true);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);view.setLocked(false);
                 session.close();
-                validation.setText("预览失败：原图可能已变化，请重新选择");validation.setTextColor(TodayScreen.ERROR);
+                validation.setText(derivativeFailure(prepareFailure.get(),false));validation.setTextColor(TodayScreen.ERROR);
             });
         }));
         dialog.show();

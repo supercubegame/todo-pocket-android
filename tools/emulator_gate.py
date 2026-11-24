@@ -1889,8 +1889,215 @@ def activity_navigation_selftest():
     print('ACTIVITY_NAVIGATION_HOST positive=6 negative='+str(len(negatives)+1)+' witnessed_navigation_mutants='+str(len(mutations))+' saved_row_negatives='+str(len(badrows))+' saved_row_omissions=2 caller_omissions='+str(omissions)+' PASS SYNTHETIC_GEOMETRY_NOT_ANDROID')
 
 
+DERIVE_OVERSIZE_MESSAGE='原图过大或格式不支持：裁剪/遮挡仅支持不超过 100 万像素、单边 2048 的 PNG/JPEG；原图未改动'
+DERIVE_ROTATED_MESSAGE='原图带旋转或 EXIF 方向信息，需先在相册里转正并另存，暂不支持裁剪或遮挡；原图未改动'
+DERIVE_EXIF_UNCONFIRMED_MESSAGE='无法确认原图的 EXIF 方向，暂不支持裁剪或遮挡；原图未改动'
+DERIVE_CHANGED_MESSAGE='笔记已在别处变化，请关闭后重新选择；原图未改动'
+DERIVE_SAVE_FAILED_MESSAGE='保存未完成：笔记和原图未改动，请重新打开后再试'
+DERIVE_PREVIEW_GENERIC_MESSAGE='预览失败：原图可能已变化，请重新选择'
+HARDENING_LABELS=[
+ 'oversize source with a legal selection names the real pixel limit instead of generic preview failure',
+ 'oversize source refusal and cancel leave every table and every original byte unchanged',
+ 'EXIF-rotated JPEG preview is refused with the exact orientation message and no save offer',
+ 'rotated JPEG refusal and cancel leave every table and the exact original JPEG unchanged',
+ 'late derivative save failure shows the exact visible message',
+ 'late derivative save failure and cancel leave every table and every original byte unchanged',
+]
+def jpeg_with_orientation(jpeg,orientation):
+    """Insert one big-endian EXIF primary-IFD orientation APP1 right after SOI."""
+    import struct
+    assert jpeg[:2]==b'\xff\xd8' and orientation in range(1,9)
+    tiff=b'MM\x00*\x00\x00\x00\x08'+struct.pack('>H',1)+struct.pack('>HHIHH',274,3,1,orientation,0)+b'\x00\x00\x00\x00'
+    payload=b'Exif\x00\x00'+tiff
+    return jpeg[:2]+b'\xff\xe1'+struct.pack('>H',len(payload)+2)+payload+jpeg[2:]
+def jpeg_orientation_model(b):
+    """Port of ShareExporter.jpegOrientation; refusal text equals the Java IOException text."""
+    def u16(p,little):return (b[p]|(b[p+1]<<8)) if little else ((b[p]<<8)|b[p+1])
+    def u32(p,little):return ((u16(p+2,True)<<16)|u16(p,True)) if little else ((u16(p,False)<<16)|u16(p+2,False))
+    if len(b)<4 or b[0]!=255 or b[1]!=216:raise IOError('Invalid JPEG')
+    p=2;exif=0
+    while p<len(b):
+        if b[p]!=255:raise IOError('Invalid JPEG marker')
+        p+=1
+        while p<len(b) and b[p]==255:p+=1
+        if p>=len(b):raise IOError('Truncated JPEG marker')
+        marker=b[p];p+=1
+        if marker in (218,217):return
+        if marker==1 or 208<=marker<=215:continue
+        if marker==0 or marker==216 or p>len(b)-2:raise IOError('Invalid JPEG segment')
+        n=u16(p,False)
+        if n<2 or n>len(b)-p:raise IOError('Truncated JPEG segment')
+        start=p+2;end=p+n
+        if marker==225 and end-start>=6 and b[start:start+6]==b'Exif\x00\x00':
+            exif+=1
+            if exif!=1:raise IOError('Ambiguous JPEG EXIF')
+            t=start+6
+            if end-t<8:raise IOError('Truncated TIFF header')
+            little=b[t:t+2]==b'II'
+            if not little and b[t:t+2]!=b'MM':raise IOError('Invalid TIFF byte order')
+            if u16(t+2,little)!=42:raise IOError('Invalid TIFF header')
+            offset=u32(t+4,little)
+            if offset<8 or offset>end-t-2:raise IOError('Invalid primary IFD')
+            ifd=t+offset;count=u16(ifd,little)
+            if ifd+2+12*count+4>end:raise IOError('Truncated primary IFD')
+            seen=False;q=ifd+2
+            for _ in range(count):
+                if u16(q,little)==274:
+                    if seen or u16(q+2,little)!=3 or u32(q+4,little)!=1:raise IOError('Ambiguous primary orientation')
+                    seen=True
+                    if u16(q+8,little)!=1:raise IOError('Image orientation must be normalized before editing')
+                q+=12
+            if not seen:raise IOError('EXIF orientation cannot be confirmed')
+        p=end
+    raise IOError('Incomplete JPEG header')
+def derivative_failure_model(message,saving):
+    """Port of NoteEditorScreen.derivativeFailure; unknown failures stay generic."""
+    m=message or ''
+    if 'Only PNG/JPEG up to 1 million pixels' in m:return DERIVE_OVERSIZE_MESSAGE
+    if 'must be normalized' in m:return DERIVE_ROTATED_MESSAGE
+    if 'EXIF' in m or 'orientation' in m:return DERIVE_EXIF_UNCONFIRMED_MESSAGE
+    if 'Database changed' in m:return DERIVE_CHANGED_MESSAGE
+    return DERIVE_SAVE_FAILED_MESSAGE if saving else DERIVE_PREVIEW_GENERIC_MESSAGE
+def derivative_java_contract(source):
+    """Static contract for the two failure paths in NoteEditorScreen source text."""
+    import re
+    head='static String derivativeFailure(Throwable failure,boolean saving){'
+    assert source.count(head)==1,'single derivativeFailure mapping'
+    a=source.index(head);b=source.index('\n    }\n',a)
+    literals=re.findall(r'"((?:[^"\\]|\\.)*)"',source[a:b])
+    expected=['','Only PNG/JPEG up to 1 million pixels',DERIVE_OVERSIZE_MESSAGE,'must be normalized',DERIVE_ROTATED_MESSAGE,
+              'EXIF','orientation',DERIVE_EXIF_UNCONFIRMED_MESSAGE,'Database changed',DERIVE_CHANGED_MESSAGE,
+              DERIVE_SAVE_FAILED_MESSAGE,DERIVE_PREVIEW_GENERIC_MESSAGE]
+    assert literals==expected,'Java message mapping differs from native expectations: '+repr(literals)
+    for needle in ('prepareFailure.set(failure);throw failure;','derivativeFailure(prepareFailure.get(),false)',
+                   'saveFailure.set(failure);throw failure;','host.message(derivativeFailure(saveFailure.get(),true),true)'):
+        assert source.count(needle)==1,'missing derivative failure wiring: '+needle
+    assert source.count(DERIVE_PREVIEW_GENERIC_MESSAGE)==1,'generic preview failure only remains the fallback'
+    assert 'ignored->{dialog.dismiss();load();},()->dialog.dismiss());' not in source,'silent save failure path remains'
+def hardening_wiring_check(source):
+    """The native stage must register exactly the expected ten checks outside the fixed ok() contract."""
+    import ast
+    tree=ast.parse(source)
+    fn=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='_verify_native_ui']
+    assert len(fn)==1,'native function present'
+    calls=[n for n in ast.walk(fn[0]) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='okh'
+           and len(n.args)>1 and isinstance(n.args[1],ast.Constant)]
+    seen=[n.args[1].value for n in sorted(calls,key=lambda n:(n.lineno,n.col_offset))]
+    assert seen==HARDENING_LABELS,'hardening labels differ: '+repr(seen)
+    text=ast.get_source_segment(source,fn[0])
+    for needle in ('hard_checks.append(label)','derivative_hardening={','derivative_jpeg_tools()','make_derivative_jpegs(fixture_dir)'):
+        assert text.count(needle)>=1,'missing hardening wiring '+needle
+DERIVATIVE_JPEG_JAVA={'MakeDerivativeJpegs.java':'''import java.awt.image.BufferedImage;
+import java.awt.image.Raster;
+import java.awt.image.WritableRaster;
+import java.io.File;
+import javax.imageio.ImageIO;
+public class MakeDerivativeJpegs {
+ public static void main(String[] a) throws Exception {
+  File f=new File(new File(a[0]),"pocket-derive-rotated-base.jpg");
+  int w=640,h=320;
+  BufferedImage image=new BufferedImage(w,h,BufferedImage.TYPE_BYTE_GRAY);
+  WritableRaster raster=image.getRaster();
+  for(int y=0;y<h;y++) for(int x=0;x<w;x++) raster.setSample(x,y,0,x<w/2?70:190);
+  if(!ImageIO.write(image,"jpeg",f)) throw new AssertionError("JPEG encoder missing");
+  BufferedImage back=ImageIO.read(f);
+  if(back==null||back.getWidth()!=w||back.getHeight()!=h||back.getRaster().getNumBands()!=1) throw new AssertionError("gray JPEG fixture readback differs");
+  Raster r=back.getRaster();
+  if(Math.abs(r.getSample(w/4,h/2,0)-70)>4||Math.abs(r.getSample(3*w/4,h/2,0)-190)>4) throw new AssertionError("gray JPEG halves are not distinguishable");
+  System.out.println("DERIVATIVE_JPEG_FIXTURE_PASS rotated-base=640x320");
+ }
+}
+'''}
+def derivative_jpeg_tools():
+    """Compile the host JDK fixture writer before slow native UI work."""
+    helper=Path('build/ci-note-image');helper.mkdir(parents=True,exist_ok=True)
+    for name,text in DERIVATIVE_JPEG_JAVA.items():(helper/name).write_text(text)
+    run(['javac','-d',helper]+[helper/name for name in DERIVATIVE_JPEG_JAVA],timeout=60)
+    return 'JPEG_FIXTURE_WRITER_COMPILED'
+def make_derivative_jpegs(directory):
+    """Independent host JDK fixture with an EXIF-orientation-6 refusal variant."""
+    helper=Path('build/ci-note-image')
+    directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
+    made=run(['java','-Djava.awt.headless=true','-cp',helper,'MakeDerivativeJpegs',directory],timeout=60,capture=True).stdout.strip()
+    assert made=='DERIVATIVE_JPEG_FIXTURE_PASS rotated-base=640x320',made
+    base=(directory/'pocket-derive-rotated-base.jpg').read_bytes()
+    rotated=jpeg_with_orientation(base,6)
+    (directory/'pocket-derive-rotated.jpg').write_bytes(rotated)
+    assert base[:2]==rotated[:2]==b'\xff\xd8' and len(rotated)<8*1024*1024 and 640*320<=1000000
+    jpeg_orientation_model(base)
+    try:jpeg_orientation_model(rotated)
+    except IOError as refusal:assert 'must be normalized' in str(refusal)
+    else:raise AssertionError('rotated fixture must trigger the exact orientation refusal')
+    return rotated
+
+def derivative_hardening_selftest():
+    import inspect
+    jfif=b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00'
+    base=jfif+b'\xff\xda\x00\x02'
+    jpeg_orientation_model(base)
+    for value in range(1,9):
+        candidate=jpeg_with_orientation(base,value)
+        assert candidate!=base and candidate[:2]==b'\xff\xd8'
+        if value==1:jpeg_orientation_model(candidate)
+        else:
+            try:jpeg_orientation_model(candidate)
+            except IOError as refusal:assert str(refusal)=='Image orientation must be normalized before editing',str(refusal)
+            else:raise AssertionError('orientation '+str(value)+' was accepted')
+    try:jpeg_orientation_model(jpeg_with_orientation(jpeg_with_orientation(base,1),1))
+    except IOError as refusal:assert str(refusal)=='Ambiguous JPEG EXIF'
+    else:raise AssertionError('duplicate EXIF accepted')
+    source=inspect.getsource(jpeg_orientation_model)
+    mutated=source.replace("if u16(q+8,little)!=1:raise IOError('Image orientation must be normalized before editing')","pass",1)
+    assert mutated!=source
+    scope={};exec(compile(mutated,'orientation-mutant','exec'),scope)
+    scope['jpeg_orientation_model'](jpeg_with_orientation(base,6))
+    cases=[('Only PNG/JPEG up to 1 million pixels and edge 2048 can be edited',False,DERIVE_OVERSIZE_MESSAGE),
+           ('Image orientation must be normalized before editing',False,DERIVE_ROTATED_MESSAGE),
+           ('PNG EXIF must be normalized before editing',False,DERIVE_ROTATED_MESSAGE),
+           ('EXIF orientation cannot be confirmed',False,DERIVE_EXIF_UNCONFIRMED_MESSAGE),
+           ('Ambiguous primary orientation',False,DERIVE_EXIF_UNCONFIRMED_MESSAGE),
+           ('Database changed; review image again',False,DERIVE_CHANGED_MESSAGE),
+           ('Image digest differs',False,DERIVE_PREVIEW_GENERIC_MESSAGE),
+           ('Image digest differs',True,DERIVE_SAVE_FAILED_MESSAGE),
+           (None,True,DERIVE_SAVE_FAILED_MESSAGE),(None,False,DERIVE_PREVIEW_GENERIC_MESSAGE)]
+    for message,saving,expected in cases:assert derivative_failure_model(message,saving)==expected,(message,saving)
+    messages=[DERIVE_OVERSIZE_MESSAGE,DERIVE_ROTATED_MESSAGE,DERIVE_EXIF_UNCONFIRMED_MESSAGE,DERIVE_CHANGED_MESSAGE,DERIVE_SAVE_FAILED_MESSAGE,DERIVE_PREVIEW_GENERIC_MESSAGE]
+    assert len(set(messages))==6 and all(m for m in messages)
+    java=(ROOT/'src/main/java/com/supercubegame/pockettodo/NoteEditorScreen.java').read_text(encoding='utf-8')
+    derivative_java_contract(java)
+    mutations=[
+        ('prepareFailure.set(failure);throw failure;','throw failure;'),
+        ('derivativeFailure(prepareFailure.get(),false)','"预览失败：原图可能已变化，请重新选择"'),
+        ('saveFailure.set(failure);throw failure;','throw failure;'),
+        ('host.message(derivativeFailure(saveFailure.get(),true),true);','/*silent*/'),
+        ('if(m.contains("must be normalized"))return "'+DERIVE_ROTATED_MESSAGE+'";','if(false)return "'+DERIVE_ROTATED_MESSAGE+'";'),
+        (DERIVE_OVERSIZE_MESSAGE,DERIVE_OVERSIZE_MESSAGE+'!'),
+        ('()->{dialog.dismiss();load();host.message(derivativeFailure(saveFailure.get(),true),true);}','()->dialog.dismiss()'),
+    ]
+    for old,new in mutations:
+        assert java.count(old)>=1,old
+        mutant=java.replace(old,new,1)
+        try:derivative_java_contract(mutant)
+        except AssertionError:pass
+        else:raise AssertionError('Java contract survived mutation '+old[:60])
+    gate=(ROOT/'tools/emulator_gate.py').read_text(encoding='utf-8')
+    hardening_wiring_check(gate)
+    first=HARDENING_LABELS[0]
+    index=gate.rindex("'"+first+"'")
+    broken=gate[:index]+"'"+first+" '"+gate[index+len(first)+2:]
+    try:hardening_wiring_check(broken)
+    except AssertionError:pass
+    else:raise AssertionError('hardening label drift survived')
+    index=gate.rindex('hard_checks.append(label)')
+    omitted=gate[:index]+'pass'+gate[index+len('hard_checks.append(label)'):]
+    try:hardening_wiring_check(omitted)
+    except AssertionError:pass
+    else:raise AssertionError('hardening recording omission survived')
+    print('DERIVATIVE_HARDENING_SELFTEST_PASS orientations=8 messages=6 java_mutants=%d fixed_native_labels_untouched'%len(mutations),flush=True)
+
 def parser_selftest():
     activity_navigation_selftest()
+    derivative_hardening_selftest()
     relation_input_selftest()
     relation_ui_selftest()
     result_ui_selftest()
@@ -2165,6 +2372,7 @@ def _verify_native_ui(adb,nodes):
     restore_picker_traces = []
     summary_navigation_traces = []
     directory_traces = []
+    hard_checks = []
     directory_runner = isolated_directory_runner(adb, SERIAL, PKG, directory_traces)
     def shell(*args):
         return subprocess.check_output([str(adb), '-s', SERIAL, 'shell', *args], text=True, timeout=40)
@@ -2263,6 +2471,7 @@ def _verify_native_ui(adb,nodes):
     try:
         pixel_oracle=derivative_checker()
         (out/'derivative-oracle.json').write_text(json.dumps({'status':'PASS','evidence':pixel_oracle}))
+        jpeg_oracle=derivative_jpeg_tools()
         start()
         ok(find(text='还剩 0 件 / 共 0 件') is not None,'new UI database starts empty without fabricated activities')
         tap('添加'); ok(find(text='内容不能为空') is not None,'blank todo rejected visibly')
@@ -2862,6 +3071,70 @@ public class ImageImportFixture {
         with sqlite3.connect(copy_db('schema3-final.db')) as db:
             origins=db.execute('SELECT id,original_asset_id FROM blocks WHERE original_asset_id IS NOT NULL').fetchall()
             ok(db.execute('PRAGMA user_version').fetchone()==(3,) and db.execute('SELECT count(*) FROM blocks').fetchone()[0]>0 and origins==[(derive_block,derive_source_id)],'native schema3 survives SAF restore and all ordinary edits without invented image origins')
+        # Stage20: accurate derivative refusals and a visible late save failure. Nothing here
+        # persists a new derivative, so later share checks still see the one native fixture.
+        # Recorded beside, never inside, the fixed 186-label native contract; own stop and
+        # directory-trace lists keep every older evidence list untouched.
+        hard_stops=[];hard_traces=[]
+        hard_runner=isolated_directory_runner(adb,SERIAL,PKG,hard_traces)
+        geometry_start=len(derive_geometry)
+        def okh(condition,label):
+            assert condition,label
+            hard_checks.append(label);print('UI_PASS_HARDENING '+label,flush=True)
+        def hard_stop():
+            return stop_verified(adb,SERIAL,PKG,emit=hard_stops.append)
+        def hard_state(name):
+            local=out/name
+            local.write_bytes(subprocess.check_output([str(adb),'-s',SERIAL,'exec-out','run-as',PKG,'cat','databases/pocket-v12.db'],timeout=30))
+            if 'pocket-v12.db-wal' in database_directory(adb,SERIAL,PKG,runner=hard_runner).splitlines():
+                Path(str(local)+'-wal').write_bytes(subprocess.check_output([str(adb),'-s',SERIAL,'exec-out','run-as',PKG,'cat','databases/pocket-v12.db-wal'],timeout=30))
+            with sqlite3.connect(local) as db:
+                return {t:db.execute('SELECT * FROM '+t+' ORDER BY rowid').fetchall() for t in TABLES}
+        rotated_jpeg=make_derivative_jpegs(fixture_dir)
+        rotated_id=hashlib.sha256(rotated_jpeg).hexdigest()
+        assert rotated_id!=jpeg_id
+        run([adb,'-s',SERIAL,'push',fixture_dir/'pocket-derive-rotated.jpg','/sdcard/Download/pocket-derive-rotated.jpg'])
+        # A 1536x768 source exceeds the codec pixel limit even when the selection is small.
+        derive_note='1. Daily reward';derive_block=selected_blocks[2][1]
+        daily_note();(sw,sh),drag=open_derive()
+        assert (sw,sh)==(1536,768),'oversize-source fixture dimensions must be decoded, not guessed'
+        drag(0,0,sw//2,sh//2);ol,ot,orr,ob=wait_crop()
+        assert 0<(orr-ol)*(ob-ot)<=1000000,'oversize-source selection itself must stay within the output budget'
+        tap('预览')
+        okh(find(text=DERIVE_OVERSIZE_MESSAGE) is not None and find(text='预览') is not None,'oversize source with a legal selection names the real pixel limit instead of generic preview failure')
+        tap('取消');hard_stop()
+        okh(hard_state('hardening-oversize.db')==saved and private_bytes(chosen_id)==chosen and private_bytes(derived_id)==derivative_bytes,'oversize source refusal and cancel leave every table and every original byte unchanged')
+        note_screen();tap('新建笔记');touch('笔记标题');type_text('Derive checks');tap('创建');ready()
+        pick_image('pocket-derive-rotated.jpg');ready();hard_stop()
+        rotated_state=hard_state('hardening-rotated-import.db')
+        rotated_rows=[row for row in rotated_state['blocks'] if row not in saved['blocks']]
+        assert len(rotated_rows)==1 and rotated_rows[0][2:]==(0,'IMAGE','',rotated_id,'',0,None),'rotated JPEG must append exactly one public image block to the new note'
+        assert [row for row in rotated_state['media'] if row not in saved['media']]==[(rotated_id,'image/jpeg',len(rotated_jpeg))] and private_bytes(rotated_id)==rotated_jpeg,'rotated JPEG registry or private copy differs'
+        shell('rm','/sdcard/Download/pocket-derive-rotated.jpg')
+        derive_note='4. Derive checks';derive_block=rotated_rows[0][1]
+        daily_note();(rw,rh),drag=open_derive()
+        assert (rw,rh)==(640,320),'rotated JPEG raw dimensions must be decoded, not guessed'
+        drag(100,50,500,250);wait_crop();tap('预览')
+        okh(find(text=DERIVE_ROTATED_MESSAGE) is not None and find(text='预览') is not None,'EXIF-rotated JPEG preview is refused with the exact orientation message and no save offer')
+        tap('取消');hard_stop()
+        okh(hard_state('hardening-rotated-cancel.db')==rotated_state and private_bytes(rotated_id)==rotated_jpeg,'rotated JPEG refusal and cancel leave every table and the exact original JPEG unchanged')
+        # Hold the current image file after a valid preview, so the final save fails before any commit.
+        derive_note='2. Second note';derive_block=derived_row[1]
+        daily_note();(dw,dh),drag=open_derive()
+        drag(0,0,dw//2,dh//2);wait_crop();tap('预览');find(text='保存')
+        held='files/media/'+derived_id
+        subprocess.check_output([str(adb),'-s',SERIAL,'shell','run-as',PKG,'mv',held,held+'.held'],timeout=30)
+        try:
+            tap('保存')
+            okh(find(**{'content-desc':'v12-status','text':DERIVE_SAVE_FAILED_MESSAGE}) is not None,'late derivative save failure shows the exact visible message')
+        finally:
+            subprocess.check_output([str(adb),'-s',SERIAL,'shell','run-as',PKG,'mv',held+'.held',held],timeout=30)
+        hard_stop()
+        okh(hard_state('hardening-save-failed.db')==rotated_state and private_bytes(derived_id)==derivative_bytes and private_bytes(derive_source_id)==derive_input and private_bytes(chosen_id)==chosen and private_bytes(rotated_id)==rotated_jpeg,'late derivative save failure and cancel leave every table and every original byte unchanged')
+        assert hard_checks==HARDENING_LABELS,'hardening stage must record exactly its declared checks'
+        hardening_geometry=[dict(entry) for entry in derive_geometry[geometry_start:]]
+        del derive_geometry[geometry_start:]
+        assert len(hardening_geometry)==3 and all(entry.get('source') in ([1536,768],[640,320]) for entry in hardening_geometry),'hardening geometry must stay separate from the one native 1280x640 fixture'
         result={'status':'PASS','scope':'NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE','ledger_calendar':'NATIVE_MULTI_DATE_LEDGER_PASS','saf_restore':'NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS','checkin_history':'NATIVE_CHECKIN_HISTORY_BACKDATE_PASS','note_editor':'NATIVE_TEXT_IMAGE_NOTE_PASS','api':API,'count':len(checks),'checks':checks,'screenshots':shots,'infra_retries':infra_retries,'restore_undo':'NOT_IMPLEMENTED','restore_preview_lifecycle':'NOT_TESTED','checkin_schedules':'NOT_IMPLEMENTED','real_photo_selection':'NOT_IMPLEMENTED','photos':'NOT_TESTED','sharing':'NOT_TESTED','release_ready':False}
         result.update(real_photo_selection='NATIVE_SAF_PNG_PASS',photos='SYNTHETIC_PNG_ONLY',image_picker_lifecycle='CANCEL_AND_RESTART_ONLY',jpeg='NOT_TESTED',camera='NOT_IMPLEMENTED')
         result.update(real_photo_selection='NATIVE_SAF_PNG_JPEG_PASS',photos='SYNTHETIC_PNG_JPEG_ONLY',jpeg='NATIVE_SAF_EXACT_PRIVATE_COPY_PASS',image_first_note='CANCEL_REJECT_CREATE_RESTART_PASS',image_pixel_budget='20000000_ACCEPTED_20005000_REJECTED',exif_orientation='NOT_TESTED',whole_note_memory='NOT_TESTED')
@@ -2869,6 +3142,7 @@ public class ImageImportFixture {
         result.update(nonfirst_image='APPEND_ISOLATION_RESTART_PASS',image_metadata='CAPTION_PRIVATE_CANCEL_EDIT_CLEAR_RESTART_PASS',private_sharing='NOT_TESTED')
         result.update(default_app_schema=3,default_schema3_ui='NATIVE_SCHEMA3_UI_PASS')
         result.update(derivative_ui='NATIVE_CROP_MASK_UI_SAVE_CANCEL_RESTART_PASS')
+        result.update(derivative_hardening={'status':'PASS','scope':'NATIVE_ACCURATE_REFUSALS_AND_LATE_SAVE_FAILURE_NO_NEW_DERIVATIVE_PERSISTED','count':len(hard_checks),'checks':list(hard_checks),'geometry':hardening_geometry,'process_stops':hard_stops,'directory_traces':hard_traces,'fixture_writer':jpeg_oracle,'not_tested':['jpeg_source_derivative_save','rotation_during_edit','large_font_scale','low_storage_publication','camera','real_photos','multi_touch_device_cancel']})
         result.update(derivative_geometry=derive_geometry,pixel_oracle=pixel_oracle,process_stops=process_stops)
         result['restore_picker_traces']=restore_picker_traces
         result['summary_navigation_traces']=summary_navigation_traces
@@ -2879,6 +3153,7 @@ public class ImageImportFixture {
         result['summary_navigation_traces']=summary_navigation_traces
         result['database_directory_traces']=directory_traces
         if 'derive_geometry' in locals():result['derivative_geometry']=derive_geometry
+        result['derivative_hardening_partial']=list(hard_checks)
         if 'pixel_oracle' in locals():result['pixel_oracle']=pixel_oracle
         try: shot('failure.png')
         except Exception: pass

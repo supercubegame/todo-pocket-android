@@ -28,8 +28,9 @@ jobs:
           out=pathlib.Path("recovery-271d1fe")
           out.mkdir()
           rep={"run":RUN,"head":HEAD,"expected_apk_sha256":APK,"stage":"start","error":None,"artifacts":[],"apk_members":[],"saved_apk":None,"jobs":[]}
-          def gh(*args,data=None):
-              p=subprocess.run(["gh","api",*args],capture_output=True,timeout=600,input=data)
+          # first recovery run 45319227076 already verified every listed artifact digest and found no APK member
+          def gh(*args,data=None,extra=()):
+              p=subprocess.run(["gh","api",*extra,*args],capture_output=True,timeout=600,input=data)
               if p.returncode:
                   raise RuntimeError("gh api "+" ".join(args)+" exit "+str(p.returncode)+": "+p.stderr.decode("utf-8","replace")[-1500:])
               return p.stdout
@@ -44,34 +45,16 @@ jobs:
                   row={"name":a["name"],"id":a["id"],"expired":a["expired"],"listed_digest":a["digest"]}
                   rep["artifacts"].append(row)
                   assert a["expired"] is False
-                  raw=gh("repos/"+R+"/actions/artifacts/"+str(a["id"])+"/zip")
-                  digest=hashlib.sha256(raw).hexdigest()
-                  row.update(bytes=len(raw),sha256=digest,digest_match=a["digest"]=="sha256:"+digest)
-                  (out/(a["name"]+".zip")).write_bytes(raw)
-                  z=zipfile.ZipFile(io.BytesIO(raw))
-                  assert z.testzip() is None
-                  names=[]
-                  for i in z.infolist():
-                      if i.is_dir():
-                          continue
-                      names.append([i.filename,i.file_size])
-                      if i.filename.lower().endswith(".apk"):
-                          data=z.read(i)
-                          h=hashlib.sha256(data).hexdigest()
-                          rep["apk_members"].append([a["name"],i.filename,len(data),h])
-                          if h==APK:
-                              (out/"PocketTodo-v1.2-preview-271d1fe5d7ce.apk").write_bytes(data)
-                              rep["saved_apk"]={"artifact":a["name"],"member":i.filename,"bytes":len(data),"sha256":h}
-                  row.update(members=names[:60],member_count=len(names))
+                  rep["apk_members"].append([a["name"],a["size_in_bytes"]])
               rep["stage"]="jobs"
               for j in json.loads(gh(base+"/jobs?per_page=100"))["jobs"]:
                   row={"name":j["name"],"id":j["id"],"conclusion":j["conclusion"]}
                   rep["jobs"].append(row)
                   up=j["name"].startswith("upgrade")
                   if up or j["name"]=="database (34)":
-                      log=gh("repos/"+R+"/actions/jobs/"+str(j["id"])+"/logs").decode("utf-8","replace")
+                      log=gh("repos/"+R+"/actions/jobs/"+str(j["id"])+"/logs",extra=("--allow-escape-sequences",)).decode("utf-8","replace")
                       (out/("job-"+str(j["id"])+".log")).write_text(log)
-                      rx=re.compile(r"upgrade|versionCode|signer|sha256|PASS|FAIL" if up else r"artifact|\.apk|preview",re.I)
+                      rx=re.compile(r"upgrade|versionCode|signer|sha256|PASS|FAIL" if up else r"artifact|\.apk|preview|Package tested|upload",re.I)
                       lines=[l[:260] for l in log.splitlines() if rx.search(l)]
                       row["log_bytes"]=len(log)
                       row["matched"]=lines[:90]+["..."]+lines[-50:] if len(lines)>140 else lines

@@ -914,13 +914,15 @@ def native_share_ui(adb, gate):
         baseline, media = snapshot()
         expected = list(private);expected[6]="PRIVATE_SHARE_SENTINEL";expected[7]=1
         expected_blocks = [tuple(expected) if r==private else r for r in initial["blocks"]]
-        private_change_ok = (baseline["blocks"] == expected_blocks and
+        # The app rewrites a note's blocks on save, so that note's rows may move after rows of notes
+        # inserted later. Row identity and content are the contract, not cross-note rowid order.
+        private_change_ok = (sorted(baseline["blocks"], key=repr) == sorted(expected_blocks, key=repr) and
            all(baseline[t]==initial[t] for t in initial if t not in ("blocks","revision")) and media==original_media)
         if not private_change_ok:
             # Bounded diagnostics: the first mismatch must name its table and rows in the job log.
             diff = {"blocks_only_expected":[repr(r)[:240] for r in expected_blocks if r not in baseline["blocks"]][:4],
                     "blocks_only_actual":[repr(r)[:240] for r in baseline["blocks"] if r not in expected_blocks][:4],
-                    "blocks_lengths":[len(expected_blocks),len(baseline["blocks"])],
+                    "blocks_lengths":[len(expected_blocks),len(baseline["blocks"])],"blocks_same_order":baseline["blocks"]==expected_blocks,
                     "tables":{t:[len(initial[t]),len(baseline.get(t,[]))] for t in initial if t not in ("blocks","revision") and baseline.get(t)!=initial[t]},
                     "media_only_before":sorted(set(original_media)-set(media))[:4],"media_only_after":sorted(set(media)-set(original_media))[:4],
                     "private":repr(private)[:240],"note_labels":sorted(note_labels.values())}

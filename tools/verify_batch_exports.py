@@ -1375,7 +1375,7 @@ def selftest():
 def native(adb, gate):
     """Fixtures originate in visible UI. A verified external helper changes one
     privacy flag at the same revision while DocumentsUI holds a reviewed ticket."""
-    from verify_paged_exports import format_button
+    from verify_paged_exports import format_button,consent_checkbox
     from verify_process_control import stop_verified
     from verify_schema3 import cancel_share_picker
     source, run_id = os.environ["GITHUB_SHA"], os.environ["GITHUB_RUN_ID"]
@@ -1440,12 +1440,10 @@ def native(adb, gate):
         c = checked()
         assert [n.get("text") for n in c] == block_labels
         assert all(n.get("checked") == "false" for n in c)
-    def consent():
+    def consent(kind):
         for _ in range(8):
-            c = [n for n in nodes() if n.get("text") == "我已核对内容与图片，可保存此包"]
-            if c:
-                assert len(c) == 1 and c[0].get("checked") == "false"
-                click(c[0]); return
+            n=consent_checkbox(nodes(),kind,gate.PKG)
+            if n is not None:click(n);return
             shell("input", "swipe", "160", "440", "160", "190", "350")
         raise AssertionError("batch consent unreachable")
     def downloads():
@@ -1856,7 +1854,7 @@ def native(adb, gate):
             tap(chosen[1]); tap(chosen[0]); tap("生成预览"); find(text=title+"预览")
             tap("选择保存位置"); find(text=title+"预览")
             assert not any("documentsui" in n.get("package", "") for n in nodes())
-            ok("unchecked_save_blocked_"+kind); consent(); tap("选择保存位置")
+            ok("unchecked_save_blocked_"+kind); consent(kind); tap("选择保存位置")
             assert find(text=filename).get("package") in ("com.android.documentsui", "com.google.android.documentsui")
             assert find(text="SAVE").get("package") in ("com.android.documentsui", "com.google.android.documentsui")
             trace = []
@@ -1871,7 +1869,7 @@ def native(adb, gate):
                 button = format_button(nodes(), "Markdown", gate.PKG); assert button is not None
                 click(button); tap(title)
             tap(chosen[1]); tap(chosen[0]); tap("生成预览"); find(text=title+"预览")
-            consent(); tap("选择保存位置")
+            consent(kind); tap("选择保存位置")
             assert find(text=filename).get("package") in ("com.android.documentsui", "com.google.android.documentsui")
             assert find(text="SAVE").get("package") in ("com.android.documentsui", "com.google.android.documentsui")
             tap("SAVE"); find(**{"content-desc": "v12-status", "text": title+"已保存，逐字节回读一致"})
@@ -1905,7 +1903,7 @@ def native(adb, gate):
                 button = format_button(nodes(), "Markdown", gate.PKG); assert button is not None
                 click(button); tap(title)
             tap(chosen[1]); tap(chosen[0]); tap("生成预览"); find(text=title+"预览")
-            consent(); tap("选择保存位置")
+            consent(kind); tap("选择保存位置")
             assert find(text=filename).get("package") in ("com.android.documentsui", "com.google.android.documentsui")
             assert find(text="SAVE").get("package") in ("com.android.documentsui", "com.google.android.documentsui")
             digest = external_privacy(1, 0)

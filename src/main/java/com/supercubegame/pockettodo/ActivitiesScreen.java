@@ -309,7 +309,9 @@ public final class ActivitiesScreen {
     }
 
     private void renderBackup(){
-        LinearLayout body=host.content();body.addView(host.text("备份与恢复",24,TodayScreen.INK));
+        LinearLayout page=host.content(),body=host.column();ScrollView scroll=new ScrollView(host.activity);
+        scroll.addView(body);page.addView(scroll,new LinearLayout.LayoutParams(-1,-1));
+        body.addView(host.text("备份与恢复",24,TodayScreen.INK));
         TextView note=host.text("完整备份包含私有内容，且没有加密；只保存到自己信任的位置。恢复会先显示替换数量，勾选明白后才会确认。",15,TodayScreen.MUTED);note.setPadding(0,host.dp(8),0,host.dp(16));body.addView(note);
         body.addView(host.button("导出完整备份",()->{
             Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/zip");intent.putExtra(Intent.EXTRA_TITLE,"pocket-todo-backup.zip");
@@ -319,8 +321,127 @@ public final class ActivitiesScreen {
             Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/zip");
             host.activity.startActivityForResult(intent,MainActivity.IMPORT_BACKUP);
         }));
+        Button append=host.button("追加旧版待办",()->{});
+        append.setOnClickListener(v->LegacyPicker.open(this,append));body.addView(append);
         body.addView(host.button("返回活动",()->{backupPanel=false;load();}));
     }
+    /** A dedicated platform Fragment owns only the append picker result. It has no
+     * entry in the manifest and never receives the full-backup request code. The
+     * native Activity uses framework fragments (no new UI library or permissions).
+     * A restored fragment has no owner/anchor and cannot resume a former consent. */
+    @SuppressWarnings("deprecation")
+    public static final class LegacyPicker extends android.app.Fragment implements android.view.View.OnAttachStateChangeListener {
+        private static final String TAG="pocket.append.legacy";
+        private static final int PICK=1;
+        private ActivitiesScreen owner;
+        private Button anchor;
+        private boolean waiting,retired,removalQueued;
+        private Picked pending;
+        private AlertDialog dialog;
+        public LegacyPicker(){} // Framework recreation deliberately does not restore an owner.
+        private static final class Picked implements AutoCloseable {
+            final LegacyImport.AppendReview source;final long existing;final boolean already;
+            Picked(LegacyImport.AppendReview source,long existing,boolean already){this.source=source;this.existing=existing;this.already=already;}
+            @Override public void close(){source.close();}
+        }
+        static void open(ActivitiesScreen owner,Button anchor){
+            android.app.Activity a=owner.host.activity;
+            if(!owner.backupPanel||!anchor.isAttachedToWindow()||!anchor.isEnabled()||a.isFinishing()||a.isDestroyed())return;
+            android.app.FragmentManager manager=a.getFragmentManager();
+            if(manager.isStateSaved()||manager.findFragmentByTag(TAG)!=null)return;
+            LegacyPicker picker=new LegacyPicker();picker.owner=owner;picker.anchor=anchor;
+            anchor.addOnAttachStateChangeListener(picker);
+            try{
+                manager.beginTransaction().add(picker,TAG).commitNow();
+                picker.waiting=true;
+                Intent intent=new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*");
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                picker.startActivityForResult(intent,PICK);
+            }catch(android.content.ActivityNotFoundException|SecurityException|IllegalStateException failure){
+                picker.retire(true);owner.host.message("无法打开旧版待办选择器，未追加任何内容。",true);
+            }
+        }
+        private boolean live(){
+            return !retired&&owner!=null&&anchor!=null&&owner.backupPanel&&anchor.isAttachedToWindow()
+                &&isAdded()&&getActivity()==owner.host.activity&&!getActivity().isDestroyed()&&!getActivity().isFinishing();
+        }
+        private void removeWhenPossible(){
+            android.app.FragmentManager m=getFragmentManager();
+            if(!removalQueued&&isAdded()&&!isRemoving()&&m!=null&&!m.isDestroyed()&&!m.isStateSaved()){
+                removalQueued=true;m.beginTransaction().remove(this).commit();
+            }
+        }
+        private void retire(boolean remove){
+            retired=true;waiting=false;
+            if(anchor!=null)anchor.removeOnAttachStateChangeListener(this);
+            anchor=null;owner=null;
+            Picked read=pending;pending=null;if(read!=null)read.close();
+            AlertDialog open=dialog;dialog=null;
+            if(open!=null){open.setOnDismissListener(null);open.dismiss();}
+            if(remove)removeWhenPossible();
+        }
+        @Override public void onViewAttachedToWindow(android.view.View v){}
+        @Override public void onViewDetachedFromWindow(android.view.View v){retire(true);}
+        @Override public void onResume(){super.onResume();if(owner==null||retired){retire(true);return;}showIfReady();}
+        @Override public void onDestroy(){retire(false);super.onDestroy();}
+        @Override public void onActivityResult(int code,int result,Intent data){
+            super.onActivityResult(code,result,data);
+            if(code!=PICK||!waiting)return;
+            waiting=false;
+            if(!live()){retire(true);return;}
+            final TodayScreen host=owner.host;
+            if(result!=android.app.Activity.RESULT_OK){retire(true);host.message("已取消旧版待办迁入，未追加。",false);return;}
+            android.net.Uri uri=data==null?null:data.getData();
+            if(uri==null||!"content".equals(uri.getScheme())||!anchor.isEnabled()){
+                retire(true);host.message("请重新选择一份可读取的旧版待办文件，未追加。",true);return;
+            }
+            final android.content.ContentResolver resolver=host.activity.getApplicationContext().getContentResolver();
+            host.work(()->{
+                LegacyImport.AppendReview read=LegacyImport.readForAppend(resolver.openInputStream(uri));
+                try{
+                    final Picked value;
+                    try(Cursor c=host.db.getReadableDatabase().rawQuery("SELECT (SELECT COUNT(*) FROM todos), EXISTS(SELECT 1 FROM legacy_imports WHERE source_id=?)",new String[]{read.sourceId()})){
+                        if(!c.moveToFirst())throw new IllegalStateException("Missing legacy summary");
+                        value=new Picked(read,c.getLong(0),c.getInt(1)!=0);
+                    }
+                    return value;
+                }catch(RuntimeException failure){read.close();throw failure;}
+            },value->{
+                if(!live()){value.close();retire(true);return;}
+                pending=value;host.message("旧版待办预览：尚未追加。",false);showIfReady();
+            },()->{
+                boolean active=live();retire(true);if(active)host.message("未能读取有效的旧版待办，未追加。完整备份 ZIP 请使用单独的恢复入口。",true);
+            },Picked::close);
+            // A read-only preview must not emit work()'s generic success notice.
+            host.message("正在读取旧版待办，仅预览。",false);
+        }
+        private void showIfReady(){
+            final Picked value=pending;
+            if(value==null||dialog!=null||!live()||!isResumed()||getFragmentManager().isStateSaved())return;
+            final TodayScreen host=owner.host;final Button entry=anchor;
+            String summary="本机已有 "+value.existing+" 条普通待办。\n文件共 "+value.source.total()+" 条：已完成 "+value.source.completed()+" 条，未完成 "+(value.source.total()-value.source.completed())+" 条。\n只追加普通待办，不替换已有内容，不生成活动、打卡或账目。";
+            boolean canAppend=!value.already&&value.source.total()>0;
+            if(value.already)summary+="\n这份文件已在本机迁入，不会重复追加。";
+            else if(!canAppend)summary+="\n这份文件没有待办，无需追加。";
+            else summary+="\n同一份文件只迁入一次；改过的文件会作为新来源。";
+            try{
+                AlertDialog.Builder builder=new AlertDialog.Builder(host.activity).setTitle("预览旧版待办").setMessage(summary).setNegativeButton(canAppend?"取消":"关闭",null);
+                if(canAppend)builder.setPositiveButton("确认追加",null);
+                final AlertDialog shown=builder.create();dialog=shown;
+                shown.setOnDismissListener(unused->{if(dialog==shown)retire(true);});
+                if(canAppend)shown.setOnShowListener(unused->shown.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+                    if(!live()||!isResumed()||!shown.isShowing()||!v.isAttachedToWindow()||dialog!=shown||pending!=value||!entry.isEnabled())return;
+                    // Move the one-shot review to the serial database writer before dismissing.
+                    pending=null;retire(true);
+                    host.work(()->{try(Picked owned=value){return owned.source.appendOnce(host.db::importLegacy);}},n->{
+                        if(entry.isAttachedToWindow()&&!host.activity.isFinishing())host.message(n==0?"这份文件已迁入，没有重复追加。":"已追加 "+n+" 条普通待办。",false);
+                    },()->{if(entry.isAttachedToWindow()&&!host.activity.isFinishing())host.message("追加未完成，请重新选择文件核对。",true);});
+                }));
+                shown.show();
+            }catch(android.view.WindowManager.BadTokenException|IllegalStateException failure){retire(true);if(!host.activity.isFinishing()&&!host.activity.isDestroyed())host.message("页面已变化，请重新选择旧版待办文件。",true);}
+        }
+    }
+
     private void loadDetail(long id){
         host.work(()->{
             // One consistent read transaction, no revision changes or image decoding.

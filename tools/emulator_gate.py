@@ -1119,6 +1119,7 @@ public class Harness extends Base {
   TodayScreen(Harness owner,AppDatabase d){db=d;}
   void show(Object saved){message="已保存到本机";}
   void close(){}void message(String s,boolean error){message=s;notices++;}
+  void runBackupExport(Callable<Boolean> save){throw new AssertionError("backup must not replay");}
   void backupCancelled(){throw new AssertionError("backup must not replay");}
   void exportBackup(Path p){throw new AssertionError("backup must not replay");}
   void backupExported(){}void previewRestore(Path p){throw new AssertionError("restore must not replay");}
@@ -1166,6 +1167,32 @@ public class Harness extends Base {
   if(writes!=0||readbacks!=0)throw new AssertionError("side effects");
   System.out.println("PASS "+scenario+" no_URI_no_write");
  }
+}
+'''
+
+BACKUP_SAF_HARNESS=r'''
+import java.io.*;import java.nio.file.*;import java.util.*;import java.util.concurrent.Callable;import java.util.function.Consumer;
+class Base {static final int RESULT_OK=-1;protected void onActivityResult(int x,int y,Intent z){}}
+class Uri {String getScheme(){return BackupProbe.mode.equals("bad-scheme")?"other":"content";}}
+class Intent {final Uri dest=new Uri();Uri getData(){return dest;}}
+public class BackupProbe extends Base {
+ static final int EXPORT_BACKUP=41,IMPORT_BACKUP=42,PICK_NOTE_IMAGE=43,EXPORT_NOTES=44;
+ static final byte[] fixture=new byte[32785];static {for(int i=0;i<fixture.length;i++)fixture[i]=(byte)(11+37*i);}
+ static Path scratch;static String mode;static int success,failure,readbacks,output,writeClose,readClose,writes,notices,queued;static boolean worker,ioOnMain;static byte[] persisted;
+ static class TodayScreen {boolean busy,closed;/*DISPATCH*/void backupCancelled(){throw new AssertionError("cancel inside positive flow");}void exportBackup(Path p)throws IOException{if(!worker)ioOnMain=true;Files.write(p,fixture,StandardOpenOption.CREATE_NEW);}void previewRestore(Path p){throw new AssertionError();}void backupExported(){success++;}void backupFailed(Exception e){failure++;}void message(String s,boolean err){notices++;if(err){if(!(s.contains("另选位置")||s.contains("页面正忙")))throw new AssertionError("misleading failure: "+s);failure++;}}
+  <T>void work(Callable<T> op,Consumer<T> done,Runnable fail){queued++;try{T t;worker=true;try{t=op.call();}finally{worker=false;}done.accept(t);}catch(Exception e){fail.run();}}}
+ TodayScreen screen=new TodayScreen();int startupRefusal;Consumer<Uri> pendingImage;static class Ticket{void close(){}}Ticket pendingShare;
+ boolean isDestroyed(){return false;}boolean isFinishing(){return false;}void finishShare(int r,Intent i){throw new AssertionError();}File getCacheDir(){return scratch.toFile();}
+ OutputStream openDestination(Uri u)throws IOException{if(!worker)ioOnMain=true;output++;if(mode.equals("open-write-fail"))throw new IOException("no destination");return new OutputStream(){ByteArrayOutputStream b=new ByteArrayOutputStream();public void write(int x){b.write(x);}public void write(byte[] a,int off,int n)throws IOException{writes++;if(mode.equals("write-fail"))throw new IOException("test write refused");b.write(a,off,n);}public void close()throws IOException{writeClose++;if(mode.equals("close-write-fail"))throw new IOException("test close refused");persisted=b.toByteArray();if(mode.equals("truncated"))persisted=Arrays.copyOf(persisted,persisted.length-1);if(mode.equals("extended"))persisted=Arrays.copyOf(persisted,persisted.length+1);if(mode.equals("changed"))persisted[16384]^=1;}};}
+ static class Resolver {InputStream openInputStream(Uri u)throws IOException{if(!worker)ioOnMain=true;readbacks++;if(writeClose!=1)throw new AssertionError("read before writer closed");if(mode.equals("no-read"))throw new IOException("no readback");if(mode.equals("null-read"))return null;return new InputStream(){int at;public int read(){return at==persisted.length?-1:persisted[at++]&255;}public int read(byte[] a,int off,int n)throws IOException{if(mode.equals("read-fail")&&at>0)throw new IOException("test stale target");if(mode.equals("stalled"))return 0;if(at==persisted.length)return -1;int c=Math.min(Math.min(n,503),persisted.length-at);System.arraycopy(persisted,at,a,off,c);at+=c;return c;}public void close()throws IOException{readClose++;if(mode.equals("close-read-fail"))throw new IOException("test read close");}};}}
+ Resolver getContentResolver(){return new Resolver();}
+ /*ACTUAL*/
+ public static void main(String[] args)throws Exception {mode=args[0];scratch=Files.createTempDirectory("backup-readback-");try{BackupProbe h=new BackupProbe();h.screen.busy=mode.equals("busy");h.onActivityResult(EXPORT_BACKUP,RESULT_OK,new Intent());
+ System.out.println(mode+" success="+success+" failure="+failure+" actual="+(persisted==null?-1:persisted.length)+" reads="+readbacks+" expected="+fixture.length+" queued="+queued+" ioOnMain="+ioOnMain);
+ boolean good=mode.equals("ok");if(good){if(success!=1||failure!=0||!Arrays.equals(persisted,fixture))throw new AssertionError("valid copy lost");}else if(success!=0||failure!=1)throw new AssertionError("INVALID_COPY_REPORTED_AS_SAVED:"+mode);
+ if(mode.equals("busy")||mode.equals("bad-scheme")){if(output!=0||readbacks!=0||queued!=(mode.equals("busy")?0:1))throw new AssertionError("must refuse before IO");}
+ else {boolean pre=mode.equals("open-write-fail")||mode.equals("write-fail")||mode.equals("close-write-fail");if(queued!=1||ioOnMain||output!=1||readbacks!=(pre?0:1)||writeClose!=(mode.equals("open-write-fail")?0:1)||readClose!=(pre||mode.equals("no-read")||mode.equals("null-read")?0:1))throw new AssertionError("wrong ownership close order or reads");}
+ try(var all=Files.list(scratch)){if(all.findAny().isPresent())throw new AssertionError("private temp leftovers");} }finally{try(var s=Files.walk(scratch)){for(Path p:s.sorted(Comparator.reverseOrder()).toList())Files.delete(p);}} }
 }
 '''
 
@@ -1252,7 +1279,7 @@ def result_ui_selftest():
         compiler=['java','-m','jdk.compiler/com.sun.tools.javac.Main','-d',tmp]
         checked(compiler+[str(root/'Extract.java')])
         extracted={}
-        for filename,names in [('MainActivity.java','startupRefusal,finishDefaultStartup,onActivityResult,finishShare'),('TodayScreen.java','editor')]:
+        for filename,names in [('MainActivity.java','startupRefusal,finishDefaultStartup,onActivityResult,finishShare,writeVerifiedBackup'),('TodayScreen.java','editor')]:
             source=ROOT/'src/main/java/com/supercubegame/pockettodo'/filename
             checked(['java','-cp',tmp,'Extract',str(source),str(root/'members.java'),names])
             extracted[filename]=(root/'members.java').read_text()
@@ -1261,6 +1288,19 @@ def result_ui_selftest():
             checked(compiler+[str(file)])
             return {mode:subprocess.run(['java','-cp',tmp,cls,mode],capture_output=True,text=True,timeout=10) for mode in modes}
         main=extracted['MainActivity.java'];editor=extracted['TodayScreen.java']
+        source=ROOT/'src/main/java/com/supercubegame/pockettodo'
+        checked(['java','-cp',tmp,'Extract',str(source/'MainActivity.java'),str(root/'backup.java'),'onActivityResult,writeVerifiedBackup'])
+        checked(['java','-cp',tmp,'Extract',str(source/'TodayScreen.java'),str(root/'backup-ui.java'),'runBackupExport'])
+        backup=(root/'backup.java').read_text(); backup_harness=BACKUP_SAF_HARNESS.replace('/*DISPATCH*/',(root/'backup-ui.java').read_text())
+        modes=['ok','truncated','changed','extended','no-read','null-read','stalled','read-fail','close-read-fail','open-write-fail','write-fail','close-write-fail','busy','bad-scheme']
+        reports=compile_run(backup,backup_harness,'BackupProbe',modes)
+        assert all(x.returncode==0 for x in reports.values()),{k:(v.stdout,v.stderr) for k,v in reports.items() if v.returncode}
+        mutants=[('if(left[at+i]!=right[i])','if(false)','changed'),('if(got.read()!=-1)','if(false)','extended'),('if(count<=0||count>n-at)','if(count<0)break; if(count==0||count>n-at)','truncated')]
+        for old,new,case in mutants:
+            assert backup.count(old)==1,old
+            result=compile_run(backup.replace(old,new,1),backup_harness,'BackupProbe',['ok',case])
+            assert result['ok'].returncode==0 and result[case].returncode!=0 and 'INVALID_COPY_REPORTED_AS_SAVED' in result[case].stderr,(case,result[case].stderr)
+        print('BACKUP_SAF_HOST 14 scenarios and 3 witnessed wrong-success mutants: REAL CALLBACK, SYNTHETIC PROVIDER, NOT DEVICE',flush=True)
         scenarios=['ready','delayed','image','backup','import','unknown','destroyed','finishing','ticket']
         results=compile_run(main,RESULT_UI_HARNESS,'Harness',scenarios)
         assert all(p.returncode==0 for p in results.values()),{k:p.stderr for k,p in results.items() if p.returncode}

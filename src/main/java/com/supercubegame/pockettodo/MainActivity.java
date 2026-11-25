@@ -628,18 +628,8 @@ public final class MainActivity extends Activity {
         Uri uri=data.getData();
         try{
             if(request==EXPORT_BACKUP){
-                // The archive writer deliberately refuses an existing destination, so the
-                // temporary path must not exist yet. The validated archive is streamed to
-                // the SAF destination only after it has been fully written and closed.
-                Path dir=Files.createTempDirectory(getCacheDir().toPath(),"export-");
-                Path temp=dir.resolve("backup.zip");
-                try{
-                    screen.exportBackup(temp);
-                    try(InputStream in=Files.newInputStream(temp);java.io.OutputStream out=openDestination(uri)){
-                        byte[] buffer=new byte[16384];int n;while((n=in.read(buffer))!=-1){if(n==0)throw new IOException("备份读取未取得进展");out.write(buffer,0,n);}
-                    }
-                    screen.backupExported();
-                }finally{Files.deleteIfExists(temp);Files.deleteIfExists(dir);}
+                final TodayScreen owner=screen;
+                owner.runBackupExport(()->{writeVerifiedBackup(owner,uri);return true;});
             }else if(request==IMPORT_BACKUP){
                 Path chosen=Files.createTempFile(getCacheDir().toPath(),"chosen-",".zip");boolean success=false;
                 try(InputStream in=getContentResolver().openInputStream(uri)){
@@ -648,6 +638,34 @@ public final class MainActivity extends Activity {
                 }finally{if(!success)Files.deleteIfExists(chosen);}
             }
         }catch(Exception e){screen.backupFailed(e);}
+    }
+    /** Check the actual SAF file after closing its writer. Never buffer the entire backup,
+     * delete an external destination, or confuse a provider acknowledgement with byte identity. */
+    private void writeVerifiedBackup(TodayScreen owner,Uri uri)throws IOException{
+        if(uri==null||!"content".equals(uri.getScheme()))throw new IOException("Invalid backup destination");
+        Path dir=Files.createTempDirectory(getCacheDir().toPath(),"export-");
+        Path staged=dir.resolve("backup.zip");
+        try(java.io.Closeable cleanup=()->{try{Files.deleteIfExists(staged);}finally{Files.deleteIfExists(dir);}}){
+            owner.exportBackup(staged);
+            if(Files.size(staged)==0)throw new IOException("Empty staged backup");
+            byte[] left=new byte[16384],right=new byte[16384];
+            try(InputStream src=Files.newInputStream(staged);java.io.OutputStream out=openDestination(uri)){
+                int n;while((n=src.read(left))!=-1){if(n<=0)throw new IOException("Backup copy stalled");out.write(left,0,n);}
+            }
+            try(InputStream src=Files.newInputStream(staged);InputStream got=getContentResolver().openInputStream(uri)){
+                if(got==null)throw new IOException("Backup readback unavailable");
+                int n;while((n=src.read(left))!=-1){
+                    if(n<=0)throw new IOException("Staged backup stalled");
+                    for(int at=0;at<n;){
+                        int count=got.read(right,0,n-at);
+                        if(count<=0||count>n-at)throw new IOException("Backup readback truncated or stalled");
+                        for(int i=0;i<count;i++)if(left[at+i]!=right[i])throw new IOException("Backup readback differs");
+                        at+=count;
+                    }
+                }
+                if(got.read()!=-1)throw new IOException("Backup destination has trailing bytes");
+            }
+        }
     }
     private java.io.OutputStream openDestination(Uri uri)throws IOException{
         java.io.OutputStream out=getContentResolver().openOutputStream(uri,"wt");

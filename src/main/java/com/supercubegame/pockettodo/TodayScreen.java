@@ -353,6 +353,11 @@ public final class TodayScreen {
         dialog.show();
     }
 
+    void runBackupExport(Callable<Boolean> save){
+        if(closed)return;
+        if(busy){message("页面正忙，本次未保存备份；请稍后重新选择保存位置。",true);return;}
+        work(save,ignored->backupExported(),()->message("未能确认备份已保存：目标文件可能不完整或无法回读。请保留本机数据，另选位置重新备份。",true));
+    }
     void exportBackup(Path temp)throws IOException{db.exportBackup(temp,new MediaRepository(activity.getFilesDir().toPath().resolve("media"),64L*1024*1024));}
     void backupExported(){activity.runOnUiThread(()->{message("备份已保存到你选的位置",false);content();activities.load();});}
     void backupCancelled(){activity.runOnUiThread(()->message("已取消，没有改变本机数据",false));}

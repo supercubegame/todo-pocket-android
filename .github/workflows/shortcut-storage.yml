@@ -1,4 +1,4 @@
-name: Receiver acknowledgement delivery
+name: Verified full backup export delivery
 on:
   push:
     branches: [ci/shortcut-storage-preflight-4d8742]
@@ -10,8 +10,8 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with: {ref: f3b74983d58126a7a37cda0830311fddbf25defe, persist-credentials: false}
-      - name: Exact receiver test-only delta
+        with: {ref: 27aed32cf2bbc99f59ba6247b49dd370dd676f0b, persist-credentials: false}
+      - name: Pin previous transport and the three reviewed backup file deltas
         env:
           ORIGINAL_DRIVER_SHA: cc83f9374afd35c87252fe189c6ea7afaf7e985cc8eb9a9c9dc48ffca3fed58c
         run: |
@@ -24,24 +24,60 @@ jobs:
           u='https://raw.githubusercontent.com/supercubegame/todo-pocket-android/4a5ce09fac1cf2e3c9473f05fb2d7dd7d4abb710/.github/workflows/shortcut-storage.yml'
           b=urllib.request.urlopen(u,timeout=60).read(7084);assert len(b)==7083 and hashlib.sha256(b).hexdigest()=='308cc48f0f64c58495260e1e0c469111d228de07bb1f0d56d6bba7b34ad60c4d';code=textwrap.dedent(b.decode().split("          python3 - <<'PY'\n",1)[1].split('          PY\n',1)[0]);exec(compile(code,'pinned-restore','exec'),{})
           PY
-          # One test file: atomic host ack, separate sender refusal reasons, bound partial receipts, host controls.
-          cat > ack.b64 <<'B64'
-          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
+          # The payload is only JSON line edits to the three files below. No downloaded APK or cached product output is used.
+          cat > backup-deltas.b64 <<'B64'
+          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
+          scRn+wIAAAAABFla
           B64
-          python3 - <<'PY'
-          import ast,base64,zlib,hashlib,os
+          cat > repair.py <<'PY'
           from pathlib import Path
-          b=zlib.decompress(base64.b64decode(b''.join(Path('ack.b64').read_bytes().split()),validate=True));assert len(b)==3801 and hashlib.sha256(b).hexdigest()=='da01bb386463f1aaca1ef6699fad3852e613f7b18308450d0a5c22921fd240c7';ast.parse(b);Path('repair.py').write_bytes(b)
-          import repair
-          repair.candidates(os.environ['GITHUB_WORKSPACE']);p=Path('prepare.py');p.write_text(p.read_text().replace('APPROVED_SHARE_BLOCK_ORDER_FIX','RECEIVER_ATOMIC_ACK_TEST_ONLY').replace('test: compare share block rows by identity not rowid order','test: publish receiver ack atomically and distinguish sender failures').replace('Share block order delivery','Receiver ack delivery'))
+          import base64,hashlib,json,lzma
+          BASE='27aed32cf2bbc99f59ba6247b49dd370dd676f0b'
+          J='src/main/java/com/supercubegame/pockettodo/'
+          PINS={J+'MainActivity.java':'590507ca372804ff56ae4b32b7a8ed9fa942366d',J+'TodayScreen.java':'e1f13eaa04747f5a1de273499209ea9745382b06','tools/emulator_gate.py':'c77c85752bd7d31f81d819a3c1f1edf7f6c49cfb'}
+          FINAL={J+'MainActivity.java':'c9b6cc4388788950f6b4214c998badcafbd4332a',J+'TodayScreen.java':'03d9cb75d189ca93ecdf2cdb9558418ec3a11b5b','tools/emulator_gate.py':'189e41bbc3c01446bcc31c296b30d83179922331'}
+          def blob(b):return hashlib.sha1(b'blob %d\0'%len(b)+b).hexdigest()
+          def candidates(root):
+              packed=base64.b64decode(b''.join(Path(__file__).with_name('backup-deltas.b64').read_bytes().split()),validate=True)
+              assert len(packed)==3612 and hashlib.sha256(packed).hexdigest()=='fa97a60e9d3fc123c65b0e8c3306ce02afe7cfda2d429c2b6afaac044c01c153'
+              raw=lzma.decompress(packed);assert len(raw)==9818;d=json.loads(raw);assert set(d)==set(PINS)==set(FINAL);out={}
+              for p,edits in d.items():
+                  f=Path(root)/p;b=f.read_bytes();assert not f.is_symlink() and blob(b)==PINS[p];lines=b.decode().splitlines(True)
+                  for lo,hi,s in reversed(edits):
+                      assert type(lo)==type(hi)==int and 0<=lo<=hi<=len(lines) and type(s)==str;lines[lo:hi]=[s]
+                  out[p]=''.join(lines).encode();assert blob(out[p])==FINAL[p]
+              return out
+          PY
+          python3 - <<'PY'
+          import repair,os
+          from pathlib import Path
+          repair.candidates(os.environ['GITHUB_WORKSPACE']);p=Path('prepare.py');s=p.read_text()
+          for a,b in [('APPROVED_SHARE_BLOCK_ORDER_FIX','VERIFIED_FULL_BACKUP_SAF'),('test: compare share block rows by identity not rowid order','fix: verify full backup bytes at the chosen document before reporting success'),('Share block order delivery','Full backup readback delivery')]:
+              assert s.count(a)==1;s=s.replace(a,b)
+          p.write_text(s)
           PY
           python3 prepare.py
           python3 - <<'PY'
@@ -49,16 +85,16 @@ jobs:
           p=Path('test-deliver-accepted.py');s=p.read_text();i=s.index('patch.object(repair,"candidates",return_value=');j=s.index('),patch.object(m,"device_evidence"',i);p.write_text(s[:i]+'patch.object(repair,"candidates",return_value=data'+s[j:])
           PY
           python3 test-deliver-accepted.py
-      - name: Original 21 once and same-commit device dispatches
+      - name: Original 21 once then exact product commit and two device dispatches
         id: delivery
         env: {GH_TOKEN: '${{ github.token }}'}
-        run: python3 "$RUNNER_TEMP/deliver-accepted.py" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/ack-delivery"
+        run: python3 "$RUNNER_TEMP/deliver-accepted.py" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/backup-delivery"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: evidence
         if: always()
         with:
-          name: receiver-ack-delivery
-          path: ${{ runner.temp }}/ack-delivery/
+          name: verified-backup-delivery
+          path: ${{ runner.temp }}/backup-delivery/
           if-no-files-found: error
           retention-days: 14
       - name: Publish bound delivery summary
@@ -67,4 +103,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
           DELIVERY_OUTCOME: ${{ steps.delivery.outcome }}
-        run: python3 "$RUNNER_TEMP/deliver-accepted.py" publish "$RUNNER_TEMP/ack-delivery"
+        run: python3 "$RUNNER_TEMP/deliver-accepted.py" publish "$RUNNER_TEMP/backup-delivery"

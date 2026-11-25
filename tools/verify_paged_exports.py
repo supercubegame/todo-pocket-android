@@ -235,6 +235,42 @@ public final class PagedContractTest {
    System.out.println("PAGED_PREVIEW_RESULT 22/22 PASS ACTUAL_DIALOG_AND_INTERCEPTED_SAF_NOT_PROVIDER_E2E");
   }finally{onUi(inst,activity::finish);inst.waitForIdleSync();}
  }
+ static android.widget.Button findSend(android.view.View v,String text){
+  if(v instanceof android.widget.Button && text.contentEquals(((android.widget.Button)v).getText()))return (android.widget.Button)v;
+  if(v instanceof android.view.ViewGroup){android.view.ViewGroup g=(android.view.ViewGroup)v;for(int i=0;i<g.getChildCount();i++){android.widget.Button b=findSend(g.getChildAt(i),text);if(b!=null)return b;}}return null;
+ }
+ static void receiverUi(android.app.Instrumentation inst,File root,String filename,String nonce)throws Exception{
+  if(!nonce.matches("[0-9a-f]{32}")||!Arrays.asList("paged.pdf","picture.zip","paged.zip").contains(filename))throw new AssertionError("fixture identity");
+  boolean pdf=filename.endsWith(".pdf");Class<?> cl=Class.forName("com.supercubegame.pockettodo.MainActivity");
+  android.app.Activity a=inst.startActivitySync(new android.content.Intent().setClassName(inst.getTargetContext(),cl.getName()).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+  try{awaitPreviewScreen(inst,a);byte[] current=state(inst,a),bytes=read(new File(root,filename));
+   java.lang.reflect.Method preview=privateMethod(cl,"previewShare",byte[][].class,int.class);
+   final String label=pdf?"发送 PDF":"按页发送图片";
+   final java.util.concurrent.atomic.AtomicInteger forbidden=new java.util.concurrent.atomic.AtomicInteger();
+   android.app.Instrumentation.ActivityMonitor guard=new android.app.Instrumentation.ActivityMonitor(){
+    @Override public android.app.Instrumentation.ActivityResult onStartActivity(android.content.Intent i){if(android.content.Intent.ACTION_CHOOSER.equals(i.getAction())){forbidden.incrementAndGet();return new android.app.Instrumentation.ActivityResult(android.app.Activity.RESULT_CANCELED,null);}return null;}};
+   inst.addMonitor(guard);
+   try{
+    final byte[] stale=current.clone();stale[0]^=1;
+    for(boolean expired:new boolean[]{false,true}){
+     onUi(inst,()->{preview.invoke(a,new byte[][]{expired?stale:current,bytes},pdf?1:2);android.app.AlertDialog d=(android.app.AlertDialog)((List<?>)field(a,"shareDialogs")).get(0);
+      android.view.View decor=d.getWindow().getDecorView();List<android.widget.CheckBox> cb=new ArrayList<>();collect(decor,new ArrayList<>(),cb);android.widget.Button send=findSend(decor,label);
+      if(send==null||cb.size()!=1||cb.get(0).isChecked())throw new AssertionError("fresh consent");
+      if(expired){cb.get(0).setChecked(true);send.performClick();}else{send.performClick();if(!d.isShowing())throw new AssertionError("unchecked send dismissed preview");d.cancel();}});
+     awaitPreviewScreen(inst,a);if(expired)onUi(inst,()->{android.widget.TextView status=(android.widget.TextView)field(field(a,"screen"),"status");if(!status.getText().toString().contains("未能完成分享"))throw new AssertionError("stale ticket refusal missing");});if(forbidden.get()!=0)throw new AssertionError("cancelled or stale share launched chooser");
+    }
+   }finally{inst.removeMonitor(guard);}
+   onUi(inst,()->{preview.invoke(a,new byte[][]{current,bytes},pdf?1:2);List<?> ds=(List<?>)field(a,"shareDialogs");if(ds.size()!=1)throw new AssertionError("one preview");android.app.AlertDialog d=(android.app.AlertDialog)ds.get(0);android.view.View decor=d.getWindow().getDecorView();List<android.widget.CheckBox> boxes=new ArrayList<>();collect(decor,new ArrayList<>(),boxes);android.widget.Button send=findSend(decor,pdf?"发送 PDF":"按页发送图片");if(boxes.size()!=1||boxes.get(0).isChecked()||send==null)throw new AssertionError("initial send controls");send.performClick();if(!d.isShowing())throw new AssertionError("unchecked send");boxes.get(0).setChecked(true);send.performClick();});
+   long end=android.os.SystemClock.elapsedRealtime()+20000;boolean picked=false;
+   while(android.os.SystemClock.elapsedRealtime()<end&&!picked){android.view.accessibility.AccessibilityNodeInfo top=inst.getUiAutomation().getRootInActiveWindow();if(top!=null){String owner=String.valueOf(top.getPackageName());if(Arrays.asList("android","com.android.intentresolver","com.google.android.intentresolver").contains(owner)){
+     List<android.view.accessibility.AccessibilityNodeInfo> options=top.findAccessibilityNodeInfosByText("PocketTodo CI Receiver");android.view.accessibility.AccessibilityNodeInfo target=null;
+     for(android.view.accessibility.AccessibilityNodeInfo n:options){if(!"PocketTodo CI Receiver".contentEquals(String.valueOf(n.getText()))||!owner.contentEquals(String.valueOf(n.getPackageName())))continue;if(target!=null)throw new AssertionError("ambiguous synthetic receiver");target=n;}
+     if(target!=null){while(target!=null&&!target.isClickable())target=target.getParent();if(target==null||!owner.contentEquals(String.valueOf(target.getPackageName()))||!target.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK))throw new AssertionError("receiver choice refused");picked=true;}
+   }}if(!picked)android.os.SystemClock.sleep(200);}
+   if(!picked)throw new AssertionError("synthetic receiver not visible in system sharesheet");File ack=new File(root,"ack-"+nonce);long endAck=android.os.SystemClock.elapsedRealtime()+35000;while(!ack.exists()&&android.os.SystemClock.elapsedRealtime()<endAck)android.os.SystemClock.sleep(150);
+   if(!ack.exists()||!"checked".equals(new String(read(ack),java.nio.charset.StandardCharsets.US_ASCII))||!Arrays.equals(current,state(inst,a)))throw new AssertionError("independent receipt or unchanged state missing");System.out.println("SEND_PROBE "+nonce);
+  }finally{onUi(inst,a::finish);}
+ }
  public static void verify(String[] args,android.app.Instrumentation inst)throws Exception{
    File root=new File(args[0]);
    renderer=Class.forName("com.supercubegame.pockettodo.PagedNoteRenderer");
@@ -312,7 +348,8 @@ public final class PagedInstrumentation extends Instrumentation {
    System.out.println("PAGED_TARGET "+getTargetContext().getPackageName()+" "+android.os.Process.myUid());
    if("diagnostic".equals(args.getString("mode")))throw new AssertionError("paged_diagnostic_sentinel");
    File root=new File(getTargetContext().getCacheDir(),args.getString("folder"));
-   PagedContractTest.verify(new String[]{root.getAbsolutePath(),args.getString("expectedApi")},this);
+   if("send".equals(args.getString("mode")))PagedContractTest.receiverUi(this,root,args.getString("payload"),args.getString("nonce"));
+   else PagedContractTest.verify(new String[]{root.getAbsolutePath(),args.getString("expectedApi")},this);
    code=-1;
   }catch(Throwable e){System.err.println("PAGED_FAILED");e.printStackTrace(System.err);}
   finally{
@@ -706,6 +743,59 @@ def paged_signing_selftest():
     print("PAGED_SIGNING_HOST " + str(len(labels)) + " controls " + str(killed) +
           " implementation mutants; 2 caller wiring checks PASS NOT_GRADLE_OR_ANDROID", flush=True)
 
+RECEIVER_JAVA = 'package com.supercubegame.pockettodo.exportprobe;\n\nimport android.app.Activity;\nimport android.content.ClipData;\nimport android.content.Intent;\nimport android.content.pm.PackageManager;\nimport android.database.Cursor;\nimport android.net.Uri;\nimport android.os.Bundle;\nimport android.os.Process;\nimport android.provider.OpenableColumns;\nimport org.json.JSONArray;\nimport org.json.JSONObject;\nimport java.io.*;\nimport java.nio.charset.StandardCharsets;\nimport java.nio.file.*;\nimport java.security.MessageDigest;\nimport java.util.*;\n\n/** Synthetic CI receiver only; never part of the production APK. Expected outputs are\n * seeded separately into this receiver\'s private directory by the fixture runner, not\n * provided in extras by the sender. Receipt contains metadata, not file contents. */\npublic final class ReceiverActivity extends Activity {\n    private static void need(boolean ok,String msg)throws IOException { if(!ok)throw new IOException(msg); }\n    private static String hex(byte[] data){StringBuilder s=new StringBuilder();for(byte b:data)s.append(String.format(Locale.ROOT,"%02x",b&255));return s.toString();}\n    @Override public void onCreate(Bundle saved){super.onCreate(saved);\n        final Intent received=getIntent();final Path root=getFilesDir().toPath(), result=root.resolve("receipt.json");\n        new Thread(()->{JSONObject out=new JSONObject();boolean ok=false;\n            try {\n                need(!Files.exists(result),"old receipt");Path ready=root.resolve("expected.json");\n                need(Files.isRegularFile(ready) && Files.size(ready)>0 && Files.size(ready)<65536,"missing bounded receiver-side expectation");\n                JSONObject e=new JSONObject(new String(Files.readAllBytes(ready),StandardCharsets.UTF_8));\n                String pkg=e.getString("sender"), mime=e.getString("mime"),nonce=e.getString("nonce");\n                need(e.getInt("api")==android.os.Build.VERSION.SDK_INT && nonce.matches("[0-9a-f]{32}") && e.getString("source").matches("[0-9a-f]{40}") && e.getString("run").matches("[0-9]+"),"wrong acceptance identity");\n                out.put("source",e.getString("source"));out.put("run",e.getString("run"));out.put("nonce",nonce);out.put("api",android.os.Build.VERSION.SDK_INT);\n                // The fixture runner records the sender UID independently when seeding expected.json.\n                need(Process.myUid()!=e.getInt("sender_uid"),"receiver must have a different UID");\n                need(("application/pdf".equals(mime)||"image/png".equals(mime)) && mime.equals(received.getType()),"wrong MIME");\n                JSONArray items=e.getJSONArray("files");int count=items.length();need(count>=1&&count<=64&&(!"application/pdf".equals(mime)||count==1),"invalid count");\n                boolean single=count==1;need((single?Intent.ACTION_SEND:Intent.ACTION_SEND_MULTIPLE).equals(received.getAction()),"wrong action");\n                int flags=received.getFlags();need((flags&Intent.FLAG_GRANT_READ_URI_PERMISSION)!=0 && (flags&(Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION|Intent.FLAG_GRANT_PREFIX_URI_PERMISSION))==0,"not a temporary exact read grant");\n                List<Uri> uris=single?Collections.singletonList((Uri)received.getParcelableExtra(Intent.EXTRA_STREAM)):received.getParcelableArrayListExtra(Intent.EXTRA_STREAM);\n                ClipData clip=received.getClipData();need(uris!=null && uris.size()==count && clip!=null && clip.getItemCount()==count,"stream/clip count");\n                JSONArray observed=new JSONArray();long total=0;\n                for(int i=0;i<count;i++){\n                    JSONObject w=items.getJSONObject(i);Uri uri=uris.get(i);\n                    need(uri!=null && uri.equals(clip.getItemAt(i).getUri()) && "content".equals(uri.getScheme()) && (pkg+".exports").equals(uri.getAuthority()),"unexpected stream or clip");\n                    need(checkUriPermission(uri,Process.myPid(),Process.myUid(),Intent.FLAG_GRANT_READ_URI_PERMISSION)==PackageManager.PERMISSION_GRANTED && checkUriPermission(uri,Process.myPid(),Process.myUid(),Intent.FLAG_GRANT_WRITE_URI_PERMISSION)!=PackageManager.PERMISSION_GRANTED,"wrong actual grant");\n                    Uri sibling=uri.buildUpon().appendPath("unlisted-synthetic").build();\n                    need(checkUriPermission(sibling,Process.myPid(),Process.myUid(),Intent.FLAG_GRANT_READ_URI_PERMISSION)!=PackageManager.PERMISSION_GRANTED,"unexpected sibling grant");\n                    need(mime.equals(getContentResolver().getType(uri)),"provider MIME mismatch");String canonical="application/pdf".equals(mime)?"PocketTodo-notes.pdf":String.format(Locale.ROOT,"page-%03d.png",i+1);\n                    need(canonical.equals(w.getString("name")),"bad independent name");long bytes=w.getLong("bytes");need(bytes>0&&bytes<=16777216-total,"invalid expected size");\n                    try(Cursor c=getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME,OpenableColumns.SIZE},null,null,null)){\n                        need(c!=null&&c.moveToFirst()&&canonical.equals(c.getString(0))&&c.getLong(1)==bytes&&!c.moveToNext(),"provider name or size mismatch");}\n                    MessageDigest hash=MessageDigest.getInstance("SHA-256");long read=0;\n                    try(InputStream in=getContentResolver().openInputStream(uri)){need(in!=null,"receiver could not open stream");byte[] buf=new byte[16384];int n;while((n=in.read(buf))!=-1){need(n>0&&n<=bytes-read,"receiver length mismatch");hash.update(buf,0,n);read+=n;}}\n                    String sha=hex(hash.digest());need(read==bytes && sha.equals(w.getString("sha256")),"receiver byte identity mismatch");total+=read;\n                    observed.put(new JSONObject().put("name",canonical).put("bytes",read).put("sha256",sha));\n                }\n                out.put("observed",observed);out.put("scope","SYNTHETIC_DISTINCT_UID_RECEIVER_NOT_REAL_APP_UX");out.put("status","PASS");ok=true;\n            } catch(Exception failure){try{out.put("status","FAIL");out.put("error",failure.getClass().getSimpleName()+": "+failure.getMessage());}catch(Exception ignored){}}\n            // Exclusive create; even on duplicate invocation the original first receipt survives.\n            // The host reads only after the independent checksum completion marker exists.\n            try {byte[] body=out.toString().getBytes(StandardCharsets.UTF_8);\n                Files.write(result,body,StandardOpenOption.CREATE_NEW,StandardOpenOption.WRITE);\n                String checksum=hex(MessageDigest.getInstance("SHA-256").digest(body));\n                Files.write(root.resolve("receipt.complete"),checksum.getBytes(StandardCharsets.US_ASCII),StandardOpenOption.CREATE_NEW,StandardOpenOption.WRITE);\n            }catch(Exception publication){ok=false;}\n            final boolean success=ok;runOnUiThread(()->{setResult(success?RESULT_OK:RESULT_CANCELED);finish();});\n        },"read-export-probe").start();\n    }\n}\n'
+RECEIVER_MANIFEST = '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.supercubegame.pockettodo.exportprobe">\n  <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34" />\n  <application android:label="PocketTodo CI Receiver" android:allowBackup="false" android:debuggable="true">\n    <activity android:name=".ReceiverActivity" android:exported="true">\n      <intent-filter><action android:name="android.intent.action.SEND"/><category android:name="android.intent.category.DEFAULT"/><data android:mimeType="application/pdf"/><data android:mimeType="image/png"/></intent-filter>\n      <intent-filter><action android:name="android.intent.action.SEND_MULTIPLE"/><category android:name="android.intent.category.DEFAULT"/><data android:mimeType="image/png"/></intent-filter>\n    </activity>\n  </application>\n</manifest>\n'
+
+def test_receiver_cases(folder,prefix,gate,work,root,args,component,cache):
+    """Only the generated receiver on a disposable emulator. No user media, implicit recipient or phone."""
+    import secrets,time,io
+    assert os.environ.get('GITHUB_ACTIONS')=='true' and gate.API in (26,34) and 'emulator-5554' in prefix
+    pkg='com.supercubegame.pockettodo.exportprobe'; project=work/'receiver-project'; src=project/'src/main'; (src/'java').mkdir(parents=True)
+    (project/'settings.gradle').write_bytes((root/'settings.gradle').read_bytes());(project/'build.gradle').write_text("plugins { id 'com.android.application' version '8.7.3' }\nandroid { namespace '"+pkg+"'; compileSdk 35; defaultConfig { applicationId '"+pkg+"'; minSdk 26; targetSdk 34 } }\n")
+    (src/'AndroidManifest.xml').write_text(RECEIVER_MANIFEST.replace(' package="'+pkg+'"',''));(src/'java/ReceiverActivity.java').write_text(RECEIVER_JAVA)
+    run(['gradle','--no-daemon','--console=plain','-p',project,'assembleDebug'],timeout=300)
+    apks=list((project/'build/outputs/apk/debug').glob('*.apk'));assert len(apks)==1
+    run([*prefix,'install','-t',apks[0]],timeout=120)
+    def shell(*v):return run([*prefix,'shell',*v]).strip()
+    def uid(p):return int(shell('run-as',p,'id','-u'))
+    sender_uid=uid(gate.PKG);receiver_uid=uid(pkg);assert receiver_uid!=sender_uid
+    def seed(p,path,raw):
+        cmd='run-as '+shlex.quote(p)+' sh -c '+shlex.quote('umask 077; cat > '+shlex.quote(path));subprocess.run([*prefix,'shell',cmd],input=raw,check=True,timeout=20)
+        assert read(p,path)==raw
+    def read(p,path):return subprocess.check_output([*prefix,'exec-out','run-as',p,'cat',path],timeout=20)
+    receipts=[];shell('run-as',pkg,'mkdir','-p','files')
+    for filename in ('paged.pdf','picture.zip','paged.zip'):
+        raw=(folder/filename).read_bytes(); pdf=filename.endswith('.pdf'); nonce=secrets.token_hex(16)
+        if pdf:parts=[('PocketTodo-notes.pdf',raw)]
+        else:
+            with zipfile.ZipFile(io.BytesIO(raw)) as z:
+                names=z.namelist();assert names==['pages/page-%03d.png'%i for i in range(1,1+len(names))];parts=[(n.split('/')[1],z.read(n)) for n in names]
+        assert len(parts)==(3 if filename=='paged.zip' else 1)
+        e={'nonce':nonce,'source':os.environ['GITHUB_SHA'],'run':os.environ['GITHUB_RUN_ID'],'api':gate.API,'sender':gate.PKG,'sender_uid':sender_uid,'mime':'application/pdf' if pdf else 'image/png','files':[dict(name=n,bytes=len(v),sha256=hashlib.sha256(v).hexdigest()) for n,v in parts]}
+        for n in ('receipt.complete','receipt.json'):
+            shell('run-as',pkg,'rm','-f','files/'+n)
+        seed(pkg,'files/expected.json',json.dumps(e).encode());marker=cache+'/ack-'+nonce
+        with tempfile.TemporaryFile() as out:
+            proc=subprocess.Popen([*map(str,args),'-e','mode','send','-e','payload',filename,'-e','nonce',nonce,component],stdout=out,stderr=subprocess.STDOUT)
+            try:
+                deadline=time.monotonic()+65
+                while True:
+                    assert proc.poll() is None,'send instrumentation ended before receiver receipt'
+                    listed=shell('run-as',pkg,'ls','files').splitlines()
+                    if 'receipt.complete' in listed:break
+                    if time.monotonic()>=deadline:raise TimeoutError('receiver first receipt missing: '+filename)
+                    time.sleep(.3)
+                actual=read(pkg,'files/receipt.json');assert read(pkg,'files/receipt.complete')==hashlib.sha256(actual).hexdigest().encode();r=json.loads(actual)
+                assert r.get('status')=='PASS' and all(r[k]==e[k] for k in ('nonce','source','run','api')) and r['observed']==e['files'],r
+                seed(gate.PKG,marker,b'checked');assert proc.wait(timeout=20)==0
+                out.seek(0);output=out.read().decode(errors='replace');assert 'SEND_PROBE '+nonce in output and 'INSTRUMENTATION_CODE: -1' in output and 'PAGED_FAILED' not in output,output
+                receipts.append(dict(r,sender_uid=sender_uid,receiver_uid=receiver_uid))
+            finally:
+                if proc.poll() is None:proc.kill();proc.wait()
+                out.seek(0);print('RECEIVER_INSTRUMENTATION',filename,out.read()[-4000:].decode(errors='replace'),flush=True)
+    return receipts
+
+
 def instrumentation(folder,prefix,gate):
     """Normal target-app startup initializes fonts; never patch hidden framework APIs."""
     from verify_schema3 import certificate, require_registration
@@ -777,6 +867,7 @@ def instrumentation(folder,prefix,gate):
             data=subprocess.check_output([*prefix,"exec-out","run-as",gate.PKG,"cat",cache+"/unmarked.pdf"],timeout=30)
             assert 0<len(data)<=16777216
             (folder/"unmarked.pdf").write_bytes(data)
+            receiver_receipts=test_receiver_cases(folder,prefix,gate,work,root,args,component,cache)
             assert installed_app()==before
         finally:
             assert backup.read_bytes()==saved
@@ -784,7 +875,7 @@ def instrumentation(folder,prefix,gate):
             test.write_bytes(saved)
             require_registration(prefix[0],gate,"paged-restored","V12DeviceTest")
             assert app.read_bytes()==before and test.read_bytes()==saved
-    return labels,{"runtime":"TARGET_APP_INSTRUMENTATION","diagnostic_failure_rejected":True,
+    return labels,{"runtime":"TARGET_APP_INSTRUMENTATION","diagnostic_failure_rejected":True,"external_receiver":receiver_receipts,
                    "product_apk_sha256":hashlib.sha256(before).hexdigest(),
                    "product_apk_bytes":len(before),
                    "installed_product_readback":"EXACT_BEFORE_AND_AFTER",

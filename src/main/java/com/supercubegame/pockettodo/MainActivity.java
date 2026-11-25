@@ -26,6 +26,9 @@ public final class MainActivity extends Activity {
     private static final String[] SHARE_FORMATS={"Markdown图片包","PDF","分段PNG图片包"};
     private final java.util.List<android.app.AlertDialog> shareDialogs=new java.util.ArrayList<>();
     private boolean sharing;
+    private final Object sendOwner=new Object();
+    private long sendEpoch;
+    @Override protected void onPause(){synchronized(sendOwner){sendEpoch++;}super.onPause();}
     @Override public void onCreate(Bundle saved){super.onCreate(saved);if(isolatedShortcutTest){
         screen=new TodayScreen(this,AppDatabase.openSchema4(this,"schema4-ui.db"));
         Bundle isolated=new Bundle();isolated.putInt("page",1);screen.show(isolated);
@@ -512,11 +515,45 @@ public final class MainActivity extends Activity {
         body.addView(screen.text(format==0?"以上是实际包内Markdown源码和图片缩略图。仅导出所选非私有内容；图片重新编码不等于自动脱敏。完整备份、账目和原图文件不在包内。":
             "以上是实际导出文件的全部分页缩略图，不是重新生成的示意图。仅含所选非私有内容；请核对遮挡效果。完整备份、账目和原图文件不在其中。",14,TodayScreen.MUTED));
         android.widget.CheckBox consent=new android.widget.CheckBox(this);consent.setText("我已核对内容与图片，可保存此包");body.addView(consent);
+        final int pages=images.size();
+        final boolean[] sending={false};
+        android.widget.Button send=null;
+        if(format!=0){
+            body.addView(screen.text("发送会打开系统分享面板。附件以临时只读方式提供，接收方可保留副本。",14,TodayScreen.MUTED));
+            send=new android.widget.Button(this);send.setText(format==1?"发送 PDF":"按页发送图片");body.addView(send);
+        }
         android.widget.ScrollView scroll=new android.widget.ScrollView(this);scroll.addView(body);
         android.app.AlertDialog d=new android.app.AlertDialog.Builder(this).setTitle(SHARE_FORMATS[format]+"预览").setView(scroll)
             .setNegativeButton("取消",null).setPositiveButton("选择保存位置",null).create();
         shareDialogs.add(d);
-        d.setOnDismissListener(unused->{shareDialogs.remove(d);if(pendingShare!=ticket)ticket.close();for(android.graphics.Bitmap b:images)b.recycle();});
+        if(send!=null)send.setOnClickListener(view->{
+            if(!consent.isChecked()){screen.message("请先核对并勾选确认",true);return;}
+            if(sending[0]||pendingShare!=null)return;
+            sending[0]=true;long epoch; synchronized(sendOwner){epoch=sendEpoch;}
+            d.dismiss();
+            screen.work(()->{
+                FinalShareAttachments.Batch batch=null;boolean launched=false;
+                try{
+                    synchronized(screen.db){
+                        android.database.sqlite.SQLiteDatabase sql=screen.db.getWritableDatabase();sql.beginTransaction();
+                        try{
+                            byte[] bytes=ticket.take(screen.db.exportState());
+                            Path root=PagedShareProvider.outbox(this);PagedShareProvider.prune(root);
+                            batch=FinalShareAttachments.stage(root,format,pages,bytes,FinalShareAttachments.digest(prepared[1]));
+                            Intent chooser=PagedShareIntent.chooser(getPackageName(),batch.mime,PagedShareProvider.makeReady(this,batch));
+                            synchronized(sendOwner){
+                                if(epoch!=sendEpoch||isFinishing()||isDestroyed())throw new IOException("Share owner expired");
+                                startActivity(chooser);launched=true;
+                            }
+                            sql.setTransactionSuccessful();
+                        }finally{sql.endTransaction();}
+                    }
+                    return true;
+                }finally{ticket.close();if(!launched&&batch!=null)batch.close();}
+            },ignored->screen.message("已打开系统分享面板，是否发送由你决定",false),
+                ()->screen.message("未能完成分享，请重新核对预览后再试",true));
+        });
+        d.setOnDismissListener(unused->{shareDialogs.remove(d);if(!sending[0]&&pendingShare!=ticket)ticket.close();for(android.graphics.Bitmap b:images)b.recycle();});
         d.setOnShowListener(unused->d.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
             if(!consent.isChecked()){screen.message("请先核对并勾选确认",true);return;}
             if(pendingShare!=null)return;

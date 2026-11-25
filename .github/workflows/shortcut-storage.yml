@@ -1,8 +1,7 @@
-name: Share block order delivery
-'on':
+name: Two export fixture consumers delivery
+on:
   push:
-    branches:
-      - ci/shortcut-storage-preflight-4d8742
+    branches: [ci/shortcut-storage-preflight-4d8742]
 permissions:
   contents: write
   actions: write
@@ -11,63 +10,130 @@ concurrency:
   group: shortcut-business-bridge-delivery
   cancel-in-progress: false
 jobs:
-  share_block_order_delivery:
+  deliver:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: fc7dc65bbae9726311f8c2b4ece7c7d232cdde33
+          ref: 7d3cb1986c2c4674b1bf429d4ea636b407fe972b
           persist-credentials: false
-      - name: Restore pinned transport and approved share block order repair
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import ast,base64,hashlib,json,lzma,os,pathlib,urllib.request
-          url="https://raw.githubusercontent.com/supercubegame/todo-pocket-android/42f2ae2fc8bfd6de86a92aed21784da195aee31c/.github/workflows/shortcut-storage.yml"
-          with urllib.request.urlopen(url,timeout=60) as response:original=response.read(14885)
-          assert len(original)==14884 and hashlib.sha256(original).hexdigest()=="968ed9265fb35f7f1614e866da37e91159ea3865eb519ec49bbb1482007d5592"
-          body=original.decode().split("          python3 - <<'PY'\n",1)[1].split("          PY\n",1)[0]
-          assert all(not line or line.startswith("          ") for line in body.splitlines())
-          code="\n".join(line[10:] for line in body.splitlines())+"\n"
-          ast.parse(code);exec(compile(code,"pinned-transport-restore","exec"),{})
-          raw=lzma.decompress(base64.b64decode("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",validate=True))
-          assert len(raw)==7304 and hashlib.sha256(raw).hexdigest()=="b67d8df4e77352a9d706d0a1a6953fc2b73353adec382fce50edfcaa279c6e5a"
-          bundle=json.loads(raw)
-          assert set(bundle)=={'prepare.py', 'repair.py'}
-          for name,code in bundle.items():
-              ast.parse(code);(pathlib.Path(os.environ["RUNNER_TEMP"])/name).write_text(code)
-          PY
-      - name: Java17 and actual adapted transport controls
+      - name: Restore pinned delivery driver, without product credentials
         env:
           ORIGINAL_DRIVER_SHA: cc83f9374afd35c87252fe189c6ea7afaf7e985cc8eb9a9c9dc48ffca3fed58c
         run: |
           set -euo pipefail
           echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
           echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
-          python3 "$RUNNER_TEMP/prepare.py"
-          python3 "$RUNNER_TEMP/test-deliver-accepted.py"
-      - name: Full original21 once then atomic exact product delivery
+          python3 - <<'PY'
+          import hashlib, urllib.request, textwrap
+          url='https://raw.githubusercontent.com/supercubegame/todo-pocket-android/4a5ce09fac1cf2e3c9473f05fb2d7dd7d4abb710/.github/workflows/shortcut-storage.yml'
+          data=urllib.request.urlopen(url,timeout=60).read(7084)
+          assert len(data)==7083 and hashlib.sha256(data).hexdigest()=='308cc48f0f64c58495260e1e0c469111d228de07bb1f0d56d6bba7b34ad60c4d'
+          code=textwrap.dedent(data.decode().split("          python3 - <<'PY'\n",1)[1].split('          PY\n',1)[0]);exec(compile(code,'pinned-restore','exec'),{})
+          PY
+          cd "$RUNNER_TEMP"
+          cat > helper.txt <<'SOURCE'
+          def share_png_fixture(data, hardening):
+              """Resolve the old public PNG share target without removing the independently verified JPEG."""
+              registry = {r[0]: r for r in data["media"]}
+              rows = [r for r in data["blocks"] if r[8] is not None]
+              assert len(rows) == 2, "expected both persisted derivative fixtures"
+              for row in rows:
+                  assert row[3] == "IMAGE" and row[7] == 0 and row[5] != row[8], "unexpected derivative privacy, type or identity"
+                  assert row[8] in registry and row[5] in registry and registry[row[5]][1] == "image/png", "missing source or published PNG"
+              png = [r for r in rows if registry[r[8]][1] == "image/png"]
+              jpeg = [r for r in rows if registry[r[8]][1] == "image/jpeg"]
+              assert len(png) == len(jpeg) == 1, "expected exactly one derivative per source MIME"
+              p, j = png[0], jpeg[0]
+              assert p[0] != j[0], "JPEG control cannot be in the note selected for PNG export"
+              assert hardening.get("status") == "PASS", "missing prior native hardening acceptance"
+              proof = hardening["jpeg_source_derivative"]
+              assert (j[8], j[5], registry[j[5]][2]) == (proof["source_sha256"], proof["derived_sha256"], proof["derived_bytes"]), "JPEG source or derived identity differs from native evidence"
+              siblings = [r for r in data["blocks"] if r[0] == p[0] and r[1] != p[1] and r[3] == "IMAGE" and r[7] == 1 and r[6] == "PRIVATE_SHARE_SENTINEL"]
+              assert len(siblings) == 1, "PNG target must belong to the note with the exact private sentinel sibling"
+              return p
+
+
+          def share_png_fixture_selftest():
+              from copy import deepcopy
+              a,b,c,d,e = [hashlib.sha256(v.encode()).hexdigest() for v in ("p-src","p-out","j-src","j-out","private")]
+              p=("s","image-p",0,"IMAGE","",b,"",0,a); j=("f","image-j",0,"IMAGE","",d,"",0,c)
+              witness=("s","sibling",1,"IMAGE","",e,"PRIVATE_SHARE_SENTINEL",1,None)
+              media=[(a,"image/png",200),(b,"image/png",180),(c,"image/jpeg",250),(d,"image/png",170),(e,"image/png",160)]
+              h={"status":"PASS","jpeg_source_derivative":{"source_sha256":c,"derived_sha256":d,"derived_bytes":170}}
+              build=lambda rs,ms: {"blocks":list(rs),"media":list(ms)}
+              for rows in ((p,j,witness),(j,witness,p)):
+                  assert share_png_fixture(build(rows,media),h) == p
+              def edit(row,i,val):
+                  out=row[:i]+(val,)+row[i+1:]; assert out!=row; return out
+              def wrong_proof(key,value):
+                  broken=deepcopy(h); broken["jpeg_source_derivative"][key]=value; assert broken!=h;return broken
+              cases=[((p,witness),media,h),((j,witness),media,h),((p,j,j,witness),media,h),
+                     ((p,edit(j,0,p[0]),witness),media,h),((edit(p,7,1),j,witness),media,h),
+                     ((p,edit(j,7,1),witness),media,h),((p,edit(j,5,c),witness),media,h),
+                     ((p,j,edit(witness,6,"other")),media,h),((p,j,witness),media[1:],h),
+                     ((p,j,witness),[edit(m,1,"image/png") if m[0]==c else m for m in media],h),
+                     ((p,j,witness),media,wrong_proof("source_sha256",a)),
+                     ((p,j,witness),media,wrong_proof("derived_sha256",b)),
+                     ((p,j,witness),media,wrong_proof("derived_bytes",171)),
+                     ((p,j,witness),media,dict(h,status="FAIL"))]
+              for rows,ms,proof in cases:
+                  try:share_png_fixture(build(rows,ms),proof)
+                  except AssertionError:pass
+                  else:raise AssertionError("invalid derivative fixture was accepted")
+              return {"positive":2,"negative":len(cases)}
+          SOURCE
+          cat > repair.py <<'SOURCE'
+          from pathlib import Path
+          import ast,hashlib
+          BASE='7d3cb1986c2c4674b1bf429d4ea636b407fe972b'
+          P='tools/verify_paged_exports.py'; B='tools/verify_batch_exports.py'
+          PINS={P:'ff8e3864ee6978bb4c9dfaa969e6fbf055057698',B:'5bd6447324bd50aa9308f822362a6c811cb545a6'}
+          FINAL={P:'dae81e2d185a4816f6251cbc1f5ced4485fe8e6b',B:'099676851ab430cc81745d1fe6a3116eb6e08bc6'}
+          def blob(b):return hashlib.sha1(b'blob %d\0'%len(b)+b).hexdigest()
+          def once(s,a,b):
+              assert s.count(a)==1,a
+              return s.replace(a,b)
+          def candidates(root):
+              data={f:(Path(root)/f).read_bytes() for f in PINS};assert {f:blob(b) for f,b in data.items()}==PINS
+              helper=Path(__file__).with_name('helper.txt').read_text().rstrip('\n')+'\n\n\n'
+              p=once(data[P].decode(),'def selftest():\n    paged_readiness_selftest()',helper+'def selftest():\n    print("PAGED_SHARE_FIXTURE_HOST", share_png_fixture_selftest(), flush=True)\n    paged_readiness_selftest()')
+              p=once(p,'        derivatives=[r for r in data["blocks"] if r[8] is not None];assert len(derivatives)==1\n        note=derivatives[0][0]','        derivative=share_png_fixture(data,parent["derivative_hardening"])\n        note=derivative[0]')
+              p=once(p,'shell,note_label,derivatives[0],set_filename)','shell,note_label,derivative,set_filename)')
+              b=once(data[B].decode(),'        derivatives = [r for r in before[0]["blocks"] if r[8] is not None]; assert len(derivatives) == 1\n        first = derivatives[0][0]','        from verify_paged_exports import share_png_fixture\n        derivative = share_png_fixture(before[0],prior["derivative_hardening"])\n        first = derivative[0]')
+              ast.parse(p);ast.parse(b);data={P:p.encode(),B:b.encode()};assert {f:blob(v) for f,v in data.items()}==FINAL
+              return data
+          SOURCE
+          python3 - <<'PY'
+          import os,repair
+          from pathlib import Path
+          repair.candidates(os.environ['GITHUB_WORKSPACE'])
+          p=Path('prepare.py');s=p.read_text().replace('APPROVED_SHARE_BLOCK_ORDER_FIX','APPROVED_TWO_EXPORT_FIXTURE_CONSUMERS').replace('test: compare share block rows by identity not rowid order','test: bind paged and batch exports to both verified derivative fixtures').replace('Share block order delivery','Two export consumers delivery');p.write_text(s)
+          PY
+          python3 prepare.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('test-deliver-accepted.py');s=p.read_text();start=s.index('patch.object(repair,"candidates",return_value=');end=s.index('),patch.object(m,"device_evidence"',start);s=s[:start]+'patch.object(repair,"candidates",return_value=data'+s[end:];p.write_text(s)
+          PY
+          python3 test-deliver-accepted.py
+      - name: Original 21 once, exact remote verification, dispatch both suites
         id: delivery
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          python3 "$RUNNER_TEMP/deliver-accepted.py" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/share-order-delivery"
+        run: python3 "$RUNNER_TEMP/deliver-accepted.py" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/two-export-delivery"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: evidence
         if: always()
         with:
-          name: share-order-delivery
-          path: ${{ runner.temp }}/share-order-delivery/
+          name: two-export-delivery
+          path: ${{ runner.temp }}/two-export-delivery/
           if-no-files-found: error
           retention-days: 14
-      - name: Publish complete delivery receipt and failure tails
+      - name: Publish complete delivery receipt
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
           DELIVERY_OUTCOME: ${{ steps.delivery.outcome }}
-        run: |
-          set -euo pipefail
-          python3 "$RUNNER_TEMP/deliver-accepted.py" publish "$RUNNER_TEMP/share-order-delivery"
+        run: python3 "$RUNNER_TEMP/deliver-accepted.py" publish "$RUNNER_TEMP/two-export-delivery"

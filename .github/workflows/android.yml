@@ -1,9 +1,9 @@
-name: Android APK verification
+name: V1.2 staged verification
 on:
   push:
-    branches: [main, feature/first-apk, feature/v1.1-edit-backup]
+    branches: [feature/v1.2-activity-notes-ledger]
   pull_request:
-    branches: [main]
+    branches: [main, feature/v1.1-edit-backup]
   workflow_dispatch:
 permissions:
   contents: read
@@ -17,92 +17,1936 @@ jobs:
         run: |
           echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
           echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
-      - name: Core gate
+      - name: Stable upgrade host and independent wiring controls
         run: |
-          set -o pipefail
-          python3 tools/verify.py core 2>&1 | tee core.log
+          set -euo pipefail
+          python3 tools/verify_upgrade.py selftest
+          python3 tools/verify_upgrade.py workflow-selftest
+      - name: Legacy, domain and real JVM file boundary contracts
+        run: |
+          set -euo pipefail
+          python3 tools/verify_process_control.py selftest 2>&1 | tee core.log
+          python3 tools/verify_ui_observer.py selftest 2>&1 | tee -a core.log
+          python3 tools/verify_adb_transfer.py 2>&1 | tee -a core.log
+          python3 tools/verify_evidence.py 2>&1 | tee -a core.log
+          python3 tools/verify.py v12 2>&1 | tee -a core.log
+          python3 tools/verify_schema3.py selftest 2>&1 | tee -a core.log
+      - name: Isolated stop tracing dependency and host gates
+        run: &isolated_trace_setup |
+          set -euo pipefail
+          exec > >(tee isolated-trace-host.log) 2>&1
+          if ! command -v strace >/dev/null 2>&1; then
+            timeout 90s sudo apt-get -o Acquire::Retries=0 update
+            timeout 60s sudo apt-get -o Acquire::Retries=0 install --no-install-recommends -y strace
+          fi
+          strace --version
+          python3 tools/verify_process_control.py server-log-selftest
+          python3 tools/verify_process_control.py isolated-selftest
+          python3 tools/verify_process_control.py absence-selftest
+          python3 tools/verify_process_control.py isolated-real-selftest
+      - name: Verify unfinished delivery cannot be mislabeled
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' 2>&1 | tee -a core.log
+          import subprocess
+          result = subprocess.run(['python3','tools/verify.py','build'],capture_output=True,text=True)
+          assert result.returncode != 0, 'Unfinished delivery gate must fail'
+          assert 'V1.2 Android phase is not wired' in result.stderr, 'Unexpected failure is not proof of release guard'
+          print('PASS unfinished V1.2 delivery explicitly blocked')
+          PY
+      - name: Current-source export image navigation host controls
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' 2>&1 | tee -a core.log
+          import ast,subprocess,tempfile
+          from pathlib import Path
+          text=Path('.github/workflows/android.yml').read_text()
+          marker='          cat > "$RUNNER_TEMP/export_native_probe.py" <<'+"'PY'"+'\n'
+          assert text.count(marker)==1,'one canonical native export driver required'
+          body=text.split(marker,1)[1].split('          PY\n',1)[0]
+          lines=body.splitlines()
+          assert all(not line or line.startswith('          ') for line in lines)
+          source='\n'.join(line[10:] if line else '' for line in lines)+'\n'
+          def wiring(source):
+              tree=ast.parse(source)
+              native=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='standalone_native')
+              calls=[n for n in ast.walk(native) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='reveal_image_control']
+              assert len(calls)==1,'real native fixture must reveal its exact second image'
+              expected=ast.parse('reveal_image_control("note-image-edit-"+images[1][1],gate.PKG,images[1][0],nodes,shell,navigation)',mode='eval').body
+              assert ast.dump(calls[0])==ast.dump(expected),'navigation must use exact fixture image and note identities'
+          wiring(source)
+          fixture='def standalone_native(adb,gate):\n    reveal_image_control("note-image-edit-"+images[1][1],gate.PKG,images[1][0],nodes,shell,navigation)\n'
+          wiring(fixture)
+          for bad in (fixture.replace('    reveal_image_control','    # reveal_image_control'),
+                      fixture.replace('images[1][1]','images[0][1]'),
+                      fixture.replace('images[1][0]','images[0][0]'),
+                      fixture.replace('gate.PKG','"foreign"')):
+              if bad.splitlines()[-1].lstrip().startswith('#'):bad+='    pass\n'
+              assert bad!=fixture
+              compile(bad,'wiring-negative-fixture','exec')
+              try:wiring(bad)
+              except AssertionError:pass
+              else:raise AssertionError('navigation caller omission or wrong identity survived')
+          print('IMAGE_NAVIGATION_WIRING_CONTROLS 1 positive 4 negative HOST_ONLY',flush=True)
+          with tempfile.TemporaryDirectory() as folder:
+              path=Path(folder)/'export_native_probe.py';path.write_text(source)
+              subprocess.run(['python3',str(path)],check=True,timeout=30)
+          print('CURRENT_SOURCE_IMAGE_NAVIGATION_WIRING PASS; HOST_ONLY_NOT_DEVICE_ACCEPTANCE',flush=True)
+          PY
+      - name: Require approved full-regression budget
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' 2>&1 | tee -a core.log
+          from pathlib import Path
+          def budget(text):
+              # Scoped to canonical job-level YAML, never inline script/comment text.
+              values=[]; in_job=False
+              for line in text.splitlines():
+                  code=line.split('#',1)[0].rstrip()
+                  if code.startswith('  ') and not code.startswith('   '):
+                      in_job=code=='  database:'
+                  if in_job and code.startswith('    timeout-minutes:'):
+                      value=code.split(':',1)[1].strip()
+                      assert value.isascii() and value.isdecimal(), 'numeric full-regression budget required'
+                      values.append(int(value))
+              assert values==[75], 'full-regression budget must be exactly 75 minutes'
+          good='  database:\n    timeout-minutes: 75\n'
+          budget(good)
+          for bad in (good.replace('75','55'),good.replace('75','750'),good.replace('75','true'),
+                      good.replace('    timeout-minutes:','    # timeout-minutes:'),
+                      good.replace('  database:','  other:'),good+'    timeout-minutes: 75\n'):
+              try: budget(bad)
+              except AssertionError: pass
+              else: raise AssertionError('budget negative control survived')
+          budget(Path('.github/workflows/android.yml').read_text())
+          print('BUDGET_HOST_CONTROLS 1 positive 6 negative; actual workflow 75 minutes; NOT_ANDROID_ACCEPTANCE')
+          # Canonical YAML-layout guard, separate from the artifact upload it guards.
+          # This proves collection wiring, NOT independent Android artifact acceptance.
+          observer_paths=[
+              'native-ui/full-observer/binding.json',
+              'native-ui/full-observer/phase.json',
+              'native-ui/full-observer/observer.json',
+              'native-ui/full-observer/observer-last.xml',
+              'native-ui/full-observer/observer-stderr.log',
+              'native-ui/full-observer/observer-*/PocketUiObserver.java',
+              'native-ui/full-observer/observer-*/dex/classes.dex']
+          artifact_name='          name: database-api-'+'$'+'{{ matrix.api }}'
+          def observer_collection(text):
+              import re
+              lines=[]; active=False
+              for line in text.splitlines():
+                  if not line.strip() or line.lstrip().startswith('#'):continue
+                  if re.match(r'^  [A-Za-z_][A-Za-z0-9_]*:',line):
+                      active=line=='  database:'
+                  if active:lines.append(line)
+              steps=[]; current=[]
+              for line in lines:
+                  if line.startswith('      - '):
+                      if current:steps.append(current)
+                      current=[]
+                  current.append(line)
+              if current:steps.append(current)
+              selected=[s for s in steps if artifact_name in s]
+              assert len(selected)==1,'one full-native evidence uploader required'
+              step=selected[0]
+              assert step[0]=='      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02','fixed artifact action'
+              assert step.count('        if: always()')==1,'failed native evidence must upload'
+              assert step.count('          if-no-files-found: error')==1,'missing upload cannot be ignored'
+              assert step.count('          path: |')==1,'one explicit artifact path block'
+              start=step.index('          path: |')+1;paths=[]
+              for line in step[start:]:
+                  if not line.startswith('            '):break
+                  paths.append(line.strip())
+              assert all(paths.count(p)==1 for p in observer_paths),'required observer artifact omitted or duplicated'
+          fixture='  database:\n      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02\n        if: always()\n        with:\n'+artifact_name+'\n          path: |\n'+''.join('            '+p+'\n' for p in observer_paths)+'          if-no-files-found: error\n'
+          observer_collection(fixture)
+          invalid=[fixture.replace('            '+p+'\n','',1) for p in observer_paths]
+          invalid += [
+              fixture.replace('  database:','  other:'),
+              fixture.replace('        if: always()','        if: success()'),
+              fixture.replace('          path: |','          # path: |'),
+              fixture.replace('          if-no-files-found: error','          if-no-files-found: warn'),
+              fixture.replace('            '+observer_paths[0]+'\n',('            '+observer_paths[0]+'\n')*2)]
+          for changed in invalid:
+              assert changed!=fixture,'collection fixture did not change'
+              try:observer_collection(changed)
+              except AssertionError:pass
+              else:raise AssertionError('collection omission survived')
+          observer_collection(Path('.github/workflows/android.yml').read_text())
+          print('FULL_OBSERVER_COLLECTION_CONTROLS 1 positive '+str(len(invalid))+' negative; WIRING_ONLY_NOT_ARTIFACT_ACCEPTANCE')
+          PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: core-evidence
-          path: core.log
+          path: |
+            core.log
+            isolated-trace-host.log
           if-no-files-found: error
-  android:
+  export_probe:
     needs: core
     if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [26, 34]
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    permissions:
-      contents: write
-    outputs:
-      apk: ${{ steps.apk.outcome }}
-      emulator: ${{ steps.emulator.outcome }}
+    timeout-minutes: 35
+    env:
+      TEST_API: ${{ matrix.api }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - name: Java and fixed build tools
+      - name: Require isolated stop tracing before export device work
+        run: *isolated_trace_setup
+      - name: Fixed Android build setup for independent export probe
         run: |
           set -euo pipefail
-          exec > >(tee setup.log) 2>&1
+          exec > >(tee export-probe-setup.log) 2>&1
           echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
           echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
-          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
           curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
           curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip.sha256 -o /tmp/gradle.sha256
           echo "$(cat /tmp/gradle.sha256)  /tmp/gradle.zip" | sha256sum -c -
           unzip -q /tmp/gradle.zip -d /tmp
           echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
-      - name: Build, lint and verify signature
-        id: apk
-        run: |
-          set -o pipefail
-          python3 tools/verify.py build 2>&1 | tee build.log
-      - name: Emulator behavior and screenshots
-        id: emulator
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          python3 tools/emulator_gate.py 2>&1 | tee ui.log
-      - name: Publish verified preview APK and real screenshots
-        if: steps.emulator.outcome == 'success'
+      - name: Build the current-source disposable APKs
         env:
-          GH_TOKEN: ${{ github.token }}
+          BUILD_429_EXECUTE: 'true'
+          BUILD_LOG: export-probe-build.log
+        run: &verified_build |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, re, subprocess, time
+          from pathlib import Path
+
+          def rate_limited_configuration(text):
+              # Retry dependency configuration only. Never replay a task, lint, or device test.
+              if text.count("* What went wrong:") != 1 or text.count("* Try:") != 1:
+                  return False
+              if re.search(r"(?m)^> Task |^.*(?:error:|AssertionError|OutOfMemoryError)", text):
+                  return False
+              body = text.split("* What went wrong:", 1)[1].split("* Try:", 1)[0]
+              lines = [line.strip() for line in body.splitlines() if line.strip()]
+              if not lines or not re.fullmatch(r"A problem occurred configuring root project '[^'\n]+'\.", lines[0]):
+                  return False
+              url = r"https://(?:repo1\.maven\.org/maven2|repo\.maven\.apache\.org/maven2|plugins\.gradle\.org/m2)/[A-Za-z0-9_./+-]+"
+              leaf = r"> Could not (?:GET|HEAD) '" + url + r"'\. Received status code 429 from server: Too Many Requests"
+              containers = (
+                  r"> Could not resolve all (?:artifacts|files) for configuration ':classpath'\.",
+                  r"> Could not resolve [A-Za-z0-9_.+-]+:[A-Za-z0-9_.+-]+:[A-Za-z0-9_.+-]+\.",
+                  r"> Could not get resource '" + url + r"'\.",
+                  r"Required by:", r"project : > [A-Za-z0-9_.:+> -]+",
+                  r"> There are [1-9][0-9]* more failures with identical causes\.",
+              )
+              found = 0
+              for line in lines[1:]:
+                  if re.fullmatch(leaf, line):
+                      found += 1
+                  elif not any(re.fullmatch(pattern, line) for pattern in containers):
+                      return False
+              return found > 0 and re.search(r"(?m)^BUILD FAILED in .+$", text) is not None
+
+          def execute_build(command, invoke, pause, emit):
+              attempts = []
+              for number in range(1, 4):
+                  code, text = invoke(command, number)
+                  retryable = code != 0 and rate_limited_configuration(text)
+                  wait = (60, 180)[number - 1] if retryable and number < 3 else 0
+                  attempts.append({"attempt": number, "returncode": code,
+                                   "dependency_429_only": retryable, "retry_wait_seconds": wait})
+                  if code == 0 or not wait:
+                      emit(attempts)
+                      return code
+                  pause(wait)
+              raise AssertionError("unreachable retry exit")
+
+          def selftest():
+              good = """FAILURE: Build failed with an exception.
+          * What went wrong:
+          A problem occurred configuring root project 'fixture'.
+          > Could not resolve all artifacts for configuration ':classpath'.
+             > Could not resolve org.example:example:1.0.
+               Required by:
+                   project : > org.example:plugin:1.0
+                > Could not get resource 'https://repo.maven.apache.org/maven2/org/example/example/1.0/example-1.0.pom'.
+                   > Could not GET 'https://repo.maven.apache.org/maven2/org/example/example/1.0/example-1.0.pom'. Received status code 429 from server: Too Many Requests
+          * Try:
+          > Run with --stacktrace option to get the stack trace.
+          BUILD FAILED in 2m 18s
+          """
+              assert rate_limited_configuration(good)
+              bad = ["", good.replace("429", "403"), good.replace("429", "500"),
+                     good.replace("repo.maven.apache.org", "untrusted.example"),
+                     good.replace("A problem occurred configuring root project 'fixture'.", "Execution failed for task ':compileDebugJavaWithJavac'."),
+                     good + "> Task :compileDebugJavaWithJavac FAILED\n",
+                     good + "error: cannot find symbol\n", good + "AssertionError\n",
+                     good.replace("* What went wrong:", "missing section"),
+                     good.replace("* Try:", "missing boundary"),
+                     good.replace("BUILD FAILED", "BUILD SUCCESSFUL"),
+                     good.replace("   > Could not resolve org.example:example:1.0.", "   > Could not resolve org.example:example:1.0.\n      > Permission denied"),
+                     good + good]
+              for text in bad:
+                  assert text != good and not rate_limited_configuration(text)
+              cases = [
+                  ([(0, "BUILD SUCCESSFUL")], 0, []),
+                  ([(1, good), (0, "BUILD SUCCESSFUL")], 0, [60]),
+                  ([(1, good)] * 3, 1, [60, 180]),
+                  ([(7, "compile error")], 7, []),
+                  ([(1, good), (9, "compile error")], 9, [60]),
+              ] + [([(2, text)], 2, []) for text in bad]
+              for answers, expected, waits in cases:
+                  calls = []; sleeps = []; receipts = []
+                  def invoke(command, number):
+                      assert command == ["gradle", "assembleDebug"] and number == len(calls) + 1
+                      calls.append(number)
+                      return answers[number - 1]
+                  assert execute_build(["gradle", "assembleDebug"], invoke, sleeps.append, receipts.append) == expected
+                  assert len(calls) == len(answers) and sleeps == waits
+                  assert len(receipts) == 1 and [v["returncode"] for v in receipts[0]] == [v[0] for v in answers]
+              print("BUILD_429_CONTROLS", 1, "positive", len(bad), "negative", len(cases), "execution_cases HOST_ONLY", flush=True)
+
+          selftest()
+          if os.environ.get("BUILD_429_EXECUTE") == "true":
+              log = Path(os.environ["BUILD_LOG"])
+              command = ["gradle", "--no-daemon", "--console=plain", "assembleDebug", "assembleDebugAndroidTest"]
+              if os.environ.get("BUILD_LINT") == "true":
+                  command.append("lintDebug")
+              def invoke(command, number):
+                  result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                  raw = result.stdout
+                  with log.open("ab") as stream:
+                      stream.write(("\nBUILD_ATTEMPT " + str(number) + "\n").encode() + raw)
+                  print(raw.decode("utf-8", errors="replace"), flush=True)
+                  return result.returncode, raw.decode("utf-8", errors="replace")
+              def emit(attempts):
+                  record = {"scope": "BUILD_CONFIGURATION_RETRY_NOT_DEVICE_RETRY",
+                            "commit": os.environ["GITHUB_SHA"], "run_id": os.environ["GITHUB_RUN_ID"],
+                            "api": int(os.environ["TEST_API"]), "attempts": attempts}
+                  line = "BUILD_ATTEMPTS " + json.dumps(record) + "\n"
+                  with log.open("a") as stream:
+                      stream.write(line)
+                  print(line, flush=True)
+              raise SystemExit(execute_build(command, invoke, time.sleep, emit))
+          PY
+      - name: Prepare independent synthetic native fixture driver
         run: |
           set -euo pipefail
-          gh release create "preview-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" delivery/* \
-            --target "$GITHUB_SHA" --prerelease \
-            --title "Pocket Todo 1.1 isolated preview" \
-            --notes "Editing and file backup preview. Android 8.0+. Separate preview package, no automatic access to old app data. Disposable debug signature, NOT a durable upgrade channel. Core, build, lint and emulator gates passed; see evidence branch for exact report. Backup files are not encrypted. Keep the original app installed."
+          cat > "$RUNNER_TEMP/export_native_probe.py" <<'PY'
+          import subprocess
+          import time
+
+          def wait_old_absent(prefix, package, pid, record, invoke=None, clock=None, pause=None):
+              """Read-only post-signal observation; command errors never mean absence."""
+              invoke = subprocess.run if invoke is None else invoke
+              clock = time.monotonic if clock is None else clock
+              pause = time.sleep if pause is None else pause
+              command = prefix + ["shell", "-n", "-T", "pidof", package]
+              probes = record["absence_probes"] = []
+              traces = record["absence_commands"] = []
+              deadline = clock() + 30
+              def text(value):
+                  return value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
+              while True:
+                  remaining = deadline - clock()
+                  if remaining <= 0:
+                      raise TimeoutError("old process absence not verified within 30 seconds")
+                  trace = {"command": command[:], "stdin": "DEVNULL", "timeout_seconds": min(10, remaining)}
+                  traces.append(trace)
+                  try:
+                      p = invoke(command, capture_output=True, text=True, timeout=trace["timeout_seconds"],
+                                 stdin=subprocess.DEVNULL)
+                  except (subprocess.TimeoutExpired, OSError) as exc:
+                      trace.update(error=repr(exc), stdout=text(getattr(exc, "stdout", None)),
+                                   stderr=text(getattr(exc, "stderr", None)))
+                      raise
+                  trace.update(returncode=p.returncode, stdout=p.stdout, stderr=p.stderr)
+                  probes.append({"returncode": p.returncode, "stdout": p.stdout.strip()})
+                  if p.returncode not in (0, 1):
+                      raise subprocess.CalledProcessError(p.returncode, command, output=p.stdout, stderr=p.stderr)
+                  if p.stderr != "":
+                      raise RuntimeError("pidof stderr prevents absence proof: " + repr(trace))
+                  if clock() >= deadline:
+                      raise TimeoutError("pidof completed outside absence observation budget: " + repr(trace))
+                  if p.returncode == 1 and not p.stdout.strip():
+                      return
+                  if p.returncode != 0 or p.stdout.strip() != pid:
+                      raise RuntimeError("unexpected post-signal process observation: " + repr(trace))
+                  pause(.25)
+
+          def absence_selftest(observer=wait_old_absent):
+              prefix = ["fixture-adb", "-s", "emulator-5554"]
+              package = "fixture.package"
+              expected_command = prefix + ["shell", "-n", "-T", "pidof", package]
+              def answer(code, out="", err=""):
+                  return subprocess.CompletedProcess(expected_command, code, out, err)
+              # Explicit expected outputs are independent of the observation implementation.
+              cases = [
+                  ([answer(1)], None),
+                  ([answer(0, "123\n"), answer(1, "\n")], None),
+                  ([answer(255)], subprocess.CalledProcessError),
+                  ([answer(2, "partial", "transport")], subprocess.CalledProcessError),
+                  ([answer(1, "123")], RuntimeError),
+                  ([answer(1, "", "warning")], RuntimeError),
+                  ([answer(0, "123", "warning")], RuntimeError),
+                  ([answer(0, "456")], RuntimeError),
+                  ([answer(0, "123 456")], RuntimeError),
+                  ([answer(0, "")], RuntimeError),
+                  ([subprocess.TimeoutExpired(expected_command, 10, output=b"partial", stderr=b"timeout")],
+                   subprocess.TimeoutExpired),
+                  ([OSError("fixture unavailable")], OSError),
+              ]
+              for answers, failure in cases:
+                  calls = []; sleeps = []; record = {}
+                  def invoke(command, **kwargs):
+                      assert command == expected_command
+                      assert kwargs == dict(capture_output=True, text=True, timeout=10, stdin=subprocess.DEVNULL)
+                      assert len(calls) < len(answers), "unexpected command retry"
+                      value = answers[len(calls)]; calls.append(value)
+                      if isinstance(value, Exception):
+                          raise value
+                      return value
+                  caught = None
+                  try:
+                      observer(prefix, package, "123", record, invoke, lambda: 0, sleeps.append)
+                  except (subprocess.CalledProcessError, RuntimeError, subprocess.TimeoutExpired, OSError) as exc:
+                      caught = exc
+                  assert (caught is None) if failure is None else type(caught) is failure, repr(record)
+                  assert len(calls) == len(answers) and sleeps == ([.25] if len(answers) == 2 else [])
+                  assert len(record["absence_commands"]) == len(answers)
+                  for value, trace in zip(answers, record["absence_commands"]):
+                      assert trace["command"] == expected_command and trace["stdin"] == "DEVNULL"
+                      if isinstance(value, Exception):
+                          assert trace["error"] == repr(value)
+                          if isinstance(value, subprocess.TimeoutExpired):
+                              assert trace["stdout"] == "partial" and trace["stderr"] == "timeout"
+                              assert caught is value
+                      else:
+                          assert (trace["returncode"], trace["stdout"], trace["stderr"]) == (value.returncode, value.stdout, value.stderr)
+                  if isinstance(caught, subprocess.CalledProcessError):
+                      assert (caught.cmd, caught.returncode, caught.stdout, caught.stderr) == (
+                          expected_command, answers[-1].returncode, answers[-1].stdout, answers[-1].stderr)
+                  if failure is None:
+                      assert record["absence_probes"] == (
+                          [{"returncode": 1, "stdout": ""}] if len(answers) == 1 else
+                          [{"returncode": 0, "stdout": "123"}, {"returncode": 1, "stdout": ""}])
+              for times, answers in (
+                  ([0, 31], []),
+                  ([0, 0, 31], [answer(1)]),
+                  ([0, 0, 0, 31], [answer(0, "123")]),
+              ):
+                  ticks = iter(times); calls = []; record = {}
+                  def invoke(command, **kwargs):
+                      assert command == expected_command and kwargs["stdin"] == subprocess.DEVNULL
+                      value = answers[len(calls)]; calls.append(value); return value
+                  try:
+                      observer(prefix, package, "123", record, invoke, lambda: next(ticks), lambda _: None)
+                  except TimeoutError:
+                      pass
+                  else:
+                      raise AssertionError("unbounded or late absence accepted")
+                  assert len(calls) == len(answers)
+              print("ABSENCE_ADAPTER_CONTROLS 2 positive 13 negative HOST_ONLY", flush=True)
+
+          def reveal_image_control(desc, package, note_id, read_nodes, shell, record, clock=None, pause=None):
+              """Navigate only this two-image fixture; never retry a failed command or tap."""
+              import re
+              import time
+              clock = time.monotonic if clock is None else clock
+              pause = time.sleep if pause is None else pause
+              assert isinstance(desc, str) and desc.startswith("note-image-edit-") and len(desc) > len("note-image-edit-")
+              assert isinstance(note_id, str) and note_id
+              deadline = clock() + 20
+              record.update(target=desc, note_id=note_id, swipes=[], status="SEARCHING", budget_seconds=20)
+              previous = None
+              current = []
+              def bounds(node):
+                  match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
+                  assert match is not None, "invalid navigation bounds"
+                  x1, y1, x2, y2 = map(int, match.groups())
+                  assert x2 > x1 and y2 > y1, "empty navigation bounds"
+                  return x1, y1, x2, y2
+              while clock() < deadline:
+                  current = read_nodes()
+                  if clock() >= deadline:
+                      raise TimeoutError("image observation exceeded original 20 second budget")
+                  record["last_nodes"] = [dict(n.attrib) for n in current]
+                  owners = [n for n in current if n.get("content-desc") == "note-selected-id"]
+                  assert len(owners) == 1 and owners[0].get("package") == package and owners[0].get("text") == note_id, "image navigation note owner changed"
+                  found = [n for n in current if n.get("content-desc") == desc]
+                  assert len(found) <= 1, "ambiguous image navigation target"
+                  scrolls = [n for n in current if n.get("class") == "android.widget.ScrollView" and n.get("package") == package]
+                  assert len(scrolls) == 1 and scrolls[0].get("enabled") == "true", "one enabled note scroll container required"
+                  x1, y1, x2, y2 = bounds(scrolls[0])
+                  if found:
+                      n = found[0]
+                      assert n.get("package") == package and n.get("enabled") == "true" and n.get("clickable") == "true", "image target cannot be clicked"
+                      a, b, c, d = bounds(n)
+                      assert x1 <= a < c <= x2 and y1 <= b < d <= y2, "image target outside note viewport"
+                      record["status"] = "VISIBLE"
+                      return n
+                  assert scrolls[0].get("scrollable") == "true", "missing target in non-scrollable note"
+                  fingerprint = tuple(tuple(sorted(n.attrib.items())) for n in current)
+                  if fingerprint == previous:
+                      pause(min(.25, max(0, deadline - clock())))
+                      continue
+                  # Finite navigation, not assertion retry: only swipe when the target is absent.
+                  assert len(record["swipes"]) < 6, "image navigation swipe limit reached"
+                  assert x2-x1 >= 8 and y2-y1 >= 8, "note viewport too small for safe swipe"
+                  x = (x1+x2)//2
+                  top = y1+(y2-y1)//4
+                  bottom = y2-(y2-y1)//4
+                  remaining = deadline-clock()
+                  if remaining <= 0:
+                      raise TimeoutError("image navigation exceeded original 20 second budget")
+                  action = {"args": ["input", "swipe", str(x), str(bottom), str(x), str(top), "350"],
+                            "timeout_seconds": remaining}
+                  record["swipes"].append(action)
+                  shell(*action["args"], timeout=remaining)
+                  previous = fingerprint
+                  pause(min(.25, max(0, deadline-clock())))
+              raise AssertionError("missing image target within 20 seconds: "+repr(record))
+
+
+          def image_navigation_selftest(navigate=reveal_image_control, mutations=True):
+              """Host XML/command doubles only; device acceptance stays in the export matrix."""
+              import ast
+              import inspect
+              import subprocess
+              import textwrap
+              from xml.etree.ElementTree import Element
+              package = "fixture.package"
+              desc = "note-image-edit-second"
+              def node(**values):
+                  return Element("node", dict(values))
+              owner = node(**{"content-desc": "note-selected-id", "package": package, "text": "note-exact"})
+              scroll = node(**{"class": "android.widget.ScrollView", "package": package, "enabled": "true",
+                               "scrollable": "true", "bounds": "[18,288][302,578]"})
+              target = node(**{"content-desc": desc, "package": package, "enabled": "true", "clickable": "true",
+                               "bounds": "[136,296][214,344]"})
+              sibling = node(**dict(target.attrib, **{"content-desc": "note-image-edit-first"}))
+              def changed(n, **attrs):
+                  return node(**dict(n.attrib, **attrs))
+              def exercise(frames, expected_swipes, failure=None, shell_error=None, read_delay=0):
+                  ticks = [0.0]; commands = []; reads = [0]; record = {}
+                  def read():
+                      ticks[0] += read_delay
+                      # Visibility changes only after an actual issued swipe, not after a poll.
+                      frame = frames[min(len(commands), len(frames)-1)]
+                      reads[0] += 1
+                      assert reads[0] <= 100, "unbounded navigation reads"
+                      return frame
+                  def send(*args, **kwargs):
+                      assert args == ("input", "swipe", "160", "506", "160", "360", "350"), "wrong viewport-derived swipe"
+                      assert 0 < kwargs["timeout"] <= 20
+                      commands.append(args)
+                      if shell_error is not None:
+                          raise shell_error
+                  def sleep(seconds):
+                      assert 0 <= seconds <= .25
+                      ticks[0] += seconds
+                  caught = None; value = None
+                  try:
+                      value = navigate(desc, package, "note-exact", read, send, record, lambda: ticks[0], sleep)
+                  except (AssertionError, TimeoutError, subprocess.CalledProcessError) as exc:
+                      caught = exc
+                  if failure is None:
+                      assert caught is None, repr(caught)
+                      assert value is target and record["status"] == "VISIBLE", "wrong image returned"
+                  else:
+                      assert type(caught) is failure, "expected "+failure.__name__+" but got "+repr(caught)
+                      if shell_error is not None:
+                          assert caught is shell_error, "original command failure replaced"
+                  assert len(commands) == expected_swipes, "wrong action count"
+                  return record
+              # These independent fixtures include the exact failed 320x640 viewport geometry.
+              exercise([[owner, scroll, sibling, target]], 0)
+              exercise([[owner, scroll, sibling], [owner, scroll, target]], 1)
+              exercise([[owner, scroll, sibling],
+                        [owner, scroll, changed(sibling, text="middle")], [owner, scroll, target]], 2)
+              positives = 3
+              negatives = 0
+              bad_frames = [
+                  [owner, scroll, target, target],
+                  [changed(owner, text="other-note"), scroll, target],
+                  [owner, owner, scroll, target],
+                  [changed(owner, package="foreign"), scroll, target],
+                  [scroll, target],
+                  [owner, scroll, changed(target, enabled="false")],
+                  [owner, scroll, changed(target, clickable="false")],
+                  [owner, scroll, changed(target, package="foreign")],
+                  [owner, scroll, changed(target, bounds="[1,1][1,20]")],
+                  [owner, scroll, changed(target, bounds="[-1,296][214,344]")],
+                  [owner, scroll, changed(target, bounds="[136,280][214,344]")],
+                  [owner, scroll, scroll, target],
+                  [owner, target],
+                  [owner, changed(scroll, enabled="false"), target],
+                  [owner, changed(scroll, bounds="broken"), target],
+                  [owner, changed(scroll, scrollable="false"), sibling],
+                  [owner, changed(scroll, bounds="[18,288][20,290]"), sibling],
+              ]
+              for frame in bad_frames:
+                  exercise([frame], 0, AssertionError); negatives += 1
+              exercise([[owner, scroll, sibling]], 1, AssertionError); negatives += 1
+              exercise([[owner, scroll, sibling],
+                        [changed(owner, text="other-note"), scroll, target]], 1, AssertionError); negatives += 1
+              exercise([[owner, scroll, target]], 0, TimeoutError, read_delay=20); negatives += 1
+              failure = subprocess.CalledProcessError(255, ["fixture-adb"], output="original", stderr="transport")
+              exercise([[owner, scroll, sibling]], 1, subprocess.CalledProcessError, shell_error=failure); negatives += 1
+              moving = [[owner, scroll, changed(sibling, text=str(i))] for i in range(7)]
+              exercise(moving, 6, AssertionError); negatives += 1
+              assert positives == 3 and negatives == 22
+              if mutations:
+                  source = textwrap.dedent(inspect.getsource(navigate))
+                  variants = [
+                      ('if fingerprint == previous:', 'if True:'),
+                      ('len(found) <= 1', 'len(found) <= 2'),
+                      ('owners[0].get("text") == note_id', 'True'),
+                      ('n.get("enabled") == "true"', 'True'),
+                  ]
+                  for old, new in variants:
+                      assert source.count(old) == 1, "mutation anchor ambiguous"
+                      changed_source = source.replace(old, new, 1)
+                      namespace = {}
+                      exec(compile(ast.parse(changed_source), "compiled-image-navigation-mutant", "exec"), namespace)
+                      mutant = namespace["reveal_image_control"]
+                      # A valid visible target must still succeed before the mutant is rejected.
+                      commands = []
+                      assert mutant(desc, package, "note-exact", lambda: [owner, scroll, target],
+                                    lambda *a, **kw: commands.append(a), {}, lambda: 0, lambda _: None) is target
+                      assert commands == []
+                      try:
+                          image_navigation_selftest(mutant, mutations=False)
+                      except AssertionError:
+                          pass
+                      else:
+                          raise AssertionError("compiled navigation mutation survived")
+                  print("IMAGE_NAVIGATION_CONTROLS 3 positive 22 negative 4 compiled witnessed mutants HOST_ONLY", flush=True)
+
+
+          def standalone_native(adb,gate):
+              """Fresh synthetic UI fixture; actual DocumentsUI, no product reflection/DB writes."""
+              import hashlib,json,os,re,sqlite3,subprocess,time,zipfile,io
+              from pathlib import Path
+              import xml.etree.ElementTree as ET
+              from verify_paged_exports import format_button
+              from verify_schema3 import signal_target_identity,signal_identity_selftest
+              from verify_schema3 import exception_evidence,native_failure_evidence,diagnostics_selftest
+              from verify_process_control import stop_verified,capture_crash_logs,isolated_stop_runner,isolated_export_identity
+              from verify_process_control import capture_existing_server_log
+              from verify_ui_observer import Observer
+              out=Path("export-native");out.mkdir()
+              prefix=[str(adb),"-s",gate.SERIAL]
+              result={"status":"FAIL","commit":os.environ["GITHUB_SHA"],"run_id":os.environ["GITHUB_RUN_ID"],
+                  "api":gate.API,"scope":"SYNTHETIC_NATIVE_IMAGE_MULTIPAGE_SAF_WITH_PROCESS_LOSS_NOT_RECEIVER",
+                  "labels":[],"outputs":{},"process_loss":{},"process_stops":[],"process_query_traces":[],"release_ready":False}
+              stop_runner=isolated_stop_runner(adb,gate.SERIAL,gate.PKG,result["process_query_traces"])
+              identity_command=isolated_export_identity(adb,gate.SERIAL,gate.PKG,result)
+              serial=0
+              def command(*args,binary=False,timeout=40):
+                  return subprocess.check_output(prefix+list(args),text=not binary,stderr=subprocess.PIPE,timeout=timeout,stdin=subprocess.DEVNULL)
+              def shell(*args,**kwargs):return command("shell","-n","-T",*args,**kwargs)
+              def nodes():
+                  return list(ET.fromstring(observer.dump()).iter("node"))
+              def find(**attrs):
+                  deadline=time.monotonic()+20;current=[]
+                  while time.monotonic()<deadline:
+                      current=nodes()
+                      found=[n for n in current if all(n.get(k)==v for k,v in attrs.items())]
+                      assert len(found)<=1,"ambiguous export control "+repr(attrs)
+                      if found:return found[0]
+                      time.sleep(.25)
+                  raise AssertionError("missing "+repr(attrs)+" actual="+repr([n.attrib for n in current]))
+              def click(n):
+                  assert n.get("enabled")=="true"
+                  x1,y1,x2,y2=map(int,re.findall(r"\d+",n.get("bounds")))
+                  assert x2>x1 and y2>y1
+                  shell("input","tap",str((x1+x2)//2),str((y1+y2)//2))
+              def tap(text):click(find(text=text))
+              def touch(desc):click(find(**{"content-desc":desc}))
+              def ready():find(**{"content-desc":"v12-status","text":"已保存到本机"})
+              def stop():
+                  return stop_verified(adb,gate.SERIAL,gate.PKG,runner=stop_runner,emit=result["process_stops"].append)
+              def start():
+                  shell("am","start","-W","-n",gate.PKG+"/com.supercubegame.pockettodo.MainActivity");ready()
+              def state():
+                  nonlocal serial
+                  serial+=1;local=out/("state-"+str(serial)+".db")
+                  local.write_bytes(command("exec-out","run-as",gate.PKG,"cat","databases/pocket-v12.db",binary=True))
+                  if "pocket-v12.db-wal" in shell("run-as",gate.PKG,"ls","databases").splitlines():
+                      Path(str(local)+"-wal").write_bytes(command("exec-out","run-as",gate.PKG,"cat","databases/pocket-v12.db-wal",binary=True))
+                  with sqlite3.connect(local) as db:
+                      tables=[r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
+                      data={t:db.execute('SELECT * FROM "'+t+'" ORDER BY rowid').fetchall() for t in tables}
+                  media={}
+                  if shell("run-as",gate.PKG,"sh","-c","'test ! -d files/media || ls files/media'").strip():
+                      for name in shell("run-as",gate.PKG,"ls","files/media").splitlines():
+                          assert re.fullmatch(r"[0-9a-f]{64}",name)
+                          raw=command("exec-out","run-as",gate.PKG,"cat","files/media/"+name,binary=True)
+                          assert hashlib.sha256(raw).hexdigest()==name
+                          media[name]={"sha256":name,"bytes":len(raw)}
+                  return data,media
+              def ok(label):
+                  result["labels"].append(label);print("EXPORT_NATIVE_PASS "+label,flush=True)
+              def note():
+                  stop();start();tap("活动");ready();touch(activity);ready();tap("笔记");ready()
+              def text(value):
+                  tap("加入文字");touch("文字内容")
+                  lines=value.split("\n")
+                  assert all(re.fullmatch(r"[A-Za-z0-9_]+",line) for line in lines)
+                  script="set -e; "+"; input keyevent KEYCODE_ENTER; ".join("input text "+line for line in lines)
+                  shell(script,timeout=180);tap("保存");ready()
+              def format_select(title):
+                  deadline=time.monotonic()+20
+                  while time.monotonic()<deadline:
+                      n=format_button(nodes(),"Markdown",gate.PKG)
+                      if n is not None:click(n);break
+                  else:raise AssertionError("format button not found")
+                  tap(title)
+              def consent():
+                  for attempt in range(16):
+                      current=nodes()
+                      for n in current:
+                          if n.get("text")=="我已核对内容与图片，可保存此包":
+                              b=list(map(int,re.findall(r"\d+",n.get("bounds"))))
+                              if b[2]>b[0] and b[3]>b[1]:
+                                  assert n.get("checked")=="false";click(n);return
+                      shell("input","swipe","160","440","160","190","350")
+                  raise AssertionError("multipage consent unreachable")
+              def lost_owner(kind,title,filename):
+                  record={"status":"FAIL","injection":"CI_APP_UID_SIGKILL_NOT_LMK","labels":[]}
+                  result["process_loss"][kind]=record
+                  def step(label):record["labels"].append(label)
+                  uid=identity_command("shell","-n","-T","run-as",gate.PKG,"id","-u").strip()
+                  def identity(phase):
+                      trace={"phase":phase,"uid":uid,"stage":"PID_READ"}
+                      record.setdefault("identity_reads",[]).append(trace)
+                      pid=identity_command("shell","-n","-T","pidof",gate.PKG).strip()
+                      trace.update(pid=pid,stage="CMDLINE_READ")
+                      assert re.fullmatch(r"[1-9][0-9]*",pid) and int(pid)>1
+                      raw=identity_command("exec-out","run-as",gate.PKG,"cat","/proc/"+pid+"/cmdline",binary=True)
+                      trace.update(cmdline_bytes=len(raw),cmdline_sha256=hashlib.sha256(raw).hexdigest(),stage="STATUS_READ")
+                      status=identity_command("shell","-n","-T","run-as",gate.PKG,"cat","/proc/"+pid+"/status")
+                      observed=signal_target_identity(pid,raw,uid,status,gate.PKG)
+                      trace.update(stage="IDENTITY_CHECK",observed=observed)
+                      assert observed["status"]=="PASS","unverified process identity"
+                      return observed
+                  old=identity("old");record["old_identity"]=old;step("exact_old_identity")
+                  assert find(text="SAVE").get("package") in ("com.android.documentsui","com.google.android.documentsui")
+                  shell("run-as",gate.PKG,"kill","-9",old["pid"])
+                  wait_old_absent(prefix,gate.PKG,old["pid"],record,invoke=stop_runner)
+                  save=find(text="SAVE");record["picker_package"]=save.get("package")
+                  assert record["picker_package"] in ("com.android.documentsui","com.google.android.documentsui")
+                  step("old_process_absent_picker_retained")
+                  click(save);find(**{"content-desc":"v12-status","text":"页面已重建，请重新选择导出内容"})
+                  paths=shell("find","/sdcard/Download","-type","f","-name",filename).splitlines()
+                  assert not paths or (paths==["/sdcard/Download/"+filename] and command("exec-out","cat",paths[0],binary=True)==b"")
+                  record["stale_output_bytes"]=0;step("stale_owner_no_nonempty_output")
+                  new=identity("new");assert new["pid"]!=old["pid"]
+                  record["new_identity"]=new;step("exact_new_identity")
+                  stop();assert state()==baseline;step("loss_preserves_all_tables_media")
+                  if paths:
+                      destination="/sdcard/Download/loss-empty-"+filename
+                      assert not shell("find","/sdcard/Download","-type","f","-name","loss-empty-"+filename).splitlines()
+                      shell("mv",paths[0],destination)
+                  assert not shell("find","/sdcard/Download","-type","f","-name",filename).splitlines()
+                  start();tap("导出笔记");tap("1. Probe_note / Probe_note");find(text="勾选内容（私有项已排除）")
+                  choices=[n for n in nodes() if n.get("class")=="android.widget.CheckedTextView"]
+                  assert [n.get("text") for n in choices]==expected and all(n.get("checked")=="false" for n in choices)
+                  format_select(title);tap(expected[0]);tap(expected[1]);tap("生成预览");find(text=title+"预览")
+                  consent();tap("选择保存位置")
+                  assert find(text=filename).get("package") in ("com.android.documentsui","com.google.android.documentsui")
+                  assert find(text="SAVE").get("package") in ("com.android.documentsui","com.google.android.documentsui")
+                  step("fresh_explicit_selection_and_consent")
+              started=time.monotonic()
+              result["ui_observer"]={}
+              observer=Observer(adb,gate.SERIAL,gate.SDK,out,result["ui_observer"])
+              result["server_log_before"]=capture_existing_server_log(adb,gate.SERIAL)
+              try:
+                  assert os.environ.get("GITHUB_ACTIONS")=="true" and shell("getprop","ro.kernel.qemu").strip()=="1"
+                  observer.start()
+                  result["signal_identity_controls"]=signal_identity_selftest()
+                  result["failure_diagnostic_controls"]=diagnostics_selftest()
+                  stop();empty=state()
+                  assert not empty[0]["notes"] and not empty[0]["activities"] and not empty[0]["blocks"] and not empty[1]
+                  ok("fresh_ui_database")
+                  start();tap("活动");ready();tap("新建分类");touch("分类名称");shell("input","text","Export_probe");tap("保存");ready()
+                  matches=[n for n in nodes() if n.get("content-desc","").startswith("category-add-")]
+                  assert len(matches)==1;click(matches[0]);touch("活动名称");shell("input","text","Probe_note");tap("保存");ready()
+                  activity=find(text="Probe_note").get("content-desc");assert re.fullmatch(r"activity-\d+",activity)
+                  touch(activity);ready();tap("笔记");ready()
+                  for i in range(2):tap("加入图片");tap("加入合成图");ready()
+                  stop();images=state()[0]["blocks"]
+                  assert len(images)==2 and all(r[3]=="IMAGE" and r[7]==0 for r in images)
+                  note()
+                  navigation={}
+                  result["image_navigation"]=navigation
+                  control=reveal_image_control("note-image-edit-"+images[1][1],gate.PKG,images[1][0],
+                                               nodes,shell,navigation)
+                  click(control);touch("image-caption");shell("input","text","PRIVATE_EXPORT_SENTINEL")
+                  touch("image-private");tap("保存");ready()
+                  note()
+                  content="BEGIN_"+("a"*74)+"\n"+"\n".join("ROW%03d"%i for i in range(90))
+                  text(content);note();text("UNSELECTED_EXPORT_SENTINEL")
+                  stop();baseline=state();data,media=baseline;blocks=data["blocks"]
+                  assert len(data["notes"])==1 and len(blocks)==4 and len(media)==1
+                  assert blocks[0]==images[0] and blocks[1][1]==images[1][1] and blocks[1][6:8]==("PRIVATE_EXPORT_SENTINEL",1)
+                  assert blocks[2][3:5]==("TEXT",content) and blocks[3][3:5]==("TEXT","UNSELECTED_EXPORT_SENTINEL")
+                  assert all(r[0]==data["notes"][0][0] for r in blocks)
+                  ok("ui_created_exact_image_private_text_fixture")
+                  (out/"ExportPageCheck.java").write_text(PAGE_CHECK)
+                  gate.run(["javac","-d",out,out/"ExportPageCheck.java"],timeout=40)
+                  proof=gate.run(["java","-Djava.awt.headless=true","-cp",out,"ExportPageCheck","--selftest"],capture=True).stdout.strip()
+                  assert proof=="EXPORT_PAGE_CONTROLS 1 positive 6 negatives"
+                  ok("independent_pixel_observer_controls")
+                  for kind,title,filename in (("PDF","PDF","PocketTodo-notes.pdf"),("PNG_ZIP","分段PNG图片包","PocketTodo-pages.zip")):
+                      start();tap("导出笔记");tap("1. Probe_note / Probe_note");find(text="勾选内容（私有项已排除）")
+                      choices=[n for n in nodes() if n.get("class")=="android.widget.CheckedTextView"]
+                      expected=["1. 图片：","2. 文字："+content[:80]+"…","3. 文字：UNSELECTED_EXPORT_SENTINEL"]
+                      assert [n.get("text") for n in choices]==expected and all(n.get("checked")=="false" for n in choices)
+                      format_select(title);tap(expected[0]);tap(expected[1]);ok("explicit_image_text_private_excluded_"+kind)
+                      tap("生成预览");find(text=title+"预览")
+                      page_label=find(**{"content-desc":"导出第1页"})
+                      assert page_label.get("class")=="android.widget.ImageView"
+                      header=[n.get("text","") for n in nodes() if re.fullmatch(r"第 1 / [34] 页",n.get("text",""))]
+                      assert len(header)==1;preview_pages=int(header[0].split(" / ")[1].split()[0])
+                      ok("actual_multipage_preview_"+kind)
+                      consent();tap("选择保存位置")
+                      assert find(text=filename).get("package") in ("com.android.documentsui","com.google.android.documentsui")
+                      save=find(text="SAVE");assert save.get("package") in ("com.android.documentsui","com.google.android.documentsui")
+                      assert not shell("find","/sdcard/Download","-type","f","-name",filename).splitlines(),"preexisting output"
+                      lost_owner(kind,title,filename)
+                      click(find(text="SAVE"));find(**{"content-desc":"v12-status","text":title+"已保存，逐字节回读一致"})
+                      assert shell("find","/sdcard/Download","-type","f","-name",filename).splitlines()==["/sdcard/Download/"+filename]
+                      raw=command("exec-out","cat",paths[0],binary=True) if False else command("exec-out","cat","/sdcard/Download/"+filename,binary=True);assert 0<len(raw)<=16777216
+                      artifact=out/filename;artifact.write_bytes(raw);ok("real_documentsui_saved_"+kind)
+                      if kind=="PDF":
+                          info=gate.run(["pdfinfo",artifact],capture=True).stdout
+                          count=re.findall(r"^Pages:\s+(\d+)",info,re.M);assert count==[str(preview_pages)]
+                          gate.run(["pdftotext","-enc","UTF-8",artifact,out/"text.txt"])
+                          assert "".join((out/"text.txt").read_text().split())=="".join(content.split()),"PDF selected text/order/privacy mismatch"
+                          gate.run(["pdftocairo","-r","72","-png",artifact,out/"page"])
+                          pages=sorted(out.glob("page-*.png"));assert len(pages)==preview_pages
+                      else:
+                          with zipfile.ZipFile(io.BytesIO(raw)) as z:
+                              assert z.namelist()==["pages/page-%03d.png"%i for i in range(1,preview_pages+1)]
+                              assert sum(e.file_size for e in z.infolist())<=16777216 and all(not e.is_dir() for e in z.infolist())
+                              pages=[]
+                              for i,name in enumerate(z.namelist()):
+                                  p=out/("png-page-%03d.png"%(i+1));p.write_bytes(z.read(name));pages.append(p)
+                          assert preview_pages==result["outputs"]["PDF"]["pages"]
+                      gate.run(["java","-Djava.awt.headless=true","-cp",out,"ExportPageCheck",*pages],timeout=60)
+                      ok("independent_image_pixels_and_page_set_"+kind)
+                      result["outputs"][kind]={"pages":preview_pages,"bytes":len(raw),"sha256":hashlib.sha256(raw).hexdigest(),
+                          "text":"EXACT_WHITESPACE_INSENSITIVE" if kind=="PDF" else "NOT_OCR_TESTED",
+                          "image":"EXACT_96X96_GREEN_FIRST_PAGE_NO_OTHER_COLOR"}
+                      stop();assert state()==baseline;ok("all_tables_and_media_unchanged_"+kind)
+                      record=result["process_loss"][kind]
+                      record["labels"].append("fresh_saved_independent_output_and_state")
+                      record.update(status="PASS",fresh_output=dict(result["outputs"][kind]))
+                  observer.close()
+                  result["status"]="PASS"
+              except Exception as exc:
+                  result["error"]=repr(exc)
+                  result["original_failure"]=exception_evidence(exc)
+                  result["server_log_after"]=capture_existing_server_log(adb,gate.SERIAL,previous=result["server_log_before"])
+                  try:result["crash_logs"]=capture_crash_logs(adb,gate.SERIAL)
+                  except Exception as diagnostic:result["crash_diagnostic_error"]=exception_evidence(diagnostic)
+                  try:result["failure_diagnostics"]=native_failure_evidence(adb,gate,exc)
+                  except Exception as diagnostic:result["diagnostic_error"]=exception_evidence(diagnostic)
+                  try:(out/"failure.png").write_bytes(command("exec-out","screencap","-p",binary=True))
+                  except Exception:pass
+                  raise
+              finally:
+                  observer.close(primary_failed=True)
+                  if "server_log_after" not in result:
+                      result["server_log_after"]=capture_existing_server_log(adb,gate.SERIAL,previous=result["server_log_before"])
+                  result.update(checks=len(result["labels"]),elapsed_seconds=round(time.monotonic()-started,3))
+                  Path("export-native.json").write_text(json.dumps(result,ensure_ascii=False,indent=2)+"\n")
+                  print("EXPORT_NATIVE_RESULT "+json.dumps(result,ensure_ascii=False),flush=True)
+              return result
+
+          PAGE_CHECK=r'''
+          import java.awt.image.BufferedImage;
+          import javax.imageio.ImageIO;
+          import java.io.File;
+          public class ExportPageCheck {
+           static void check(BufferedImage p,boolean first){
+            if(p==null||p.getWidth()!=595||p.getHeight()!=842)throw new AssertionError("page dimensions");
+            int ink=0;
+            for(int y=0;y<842;y++)for(int x=0;x<595;x++){
+             int c=p.getRGB(x,y);
+             if((c>>>24)!=255)throw new AssertionError("alpha");
+             if(first&&x>=36&&x<132&&y>=36&&y<132){
+              if(c!=0xff21785f)throw new AssertionError("selected image pixel");continue;
+             }
+             if(c!=0xffffffff){
+              int r=(c>>16)&255,g=(c>>8)&255,b=c&255;
+              if(r!=g||g!=b)throw new AssertionError("unexpected color or extra image");
+              if(x<36||x>=559||y<36||y>=806||(first&&y<144))throw new AssertionError("unexpected content region");
+              ink++;
+             }
+            }
+            if(ink==0)throw new AssertionError("empty text page");
+           }
+           static BufferedImage fixture(boolean first){
+            BufferedImage p=new BufferedImage(595,842,BufferedImage.TYPE_INT_ARGB);
+            for(int y=0;y<842;y++)for(int x=0;x<595;x++)p.setRGB(x,y,first&&x>=36&&x<132&&y>=36&&y<132?0xff21785f:0xffffffff);
+            p.setRGB(36,150,0xff000000);return p;
+           }
+           public static void main(String[] a)throws Exception{
+            if(a[0].equals("--selftest")){
+             check(fixture(true),true);int rejected=0;
+             for(int i=0;i<6;i++){
+              BufferedImage p=fixture(true);
+              if(i==0)p.setRGB(50,50,0xffffffff);
+              if(i==1)p.setRGB(200,300,0xff21785f);
+              if(i==2)p.setRGB(5,500,0xff000000);
+              if(i==3)p.setRGB(36,150,0xffffffff);
+              if(i==4)p.setRGB(36,150,0x80000000);
+              if(i==5)p=new BufferedImage(1,1,2);
+              try{check(p,true);}catch(AssertionError e){rejected++;continue;}
+              throw new AssertionError("pixel negative control survived "+i);
+             }
+             if(rejected!=6)throw new AssertionError("control count");
+             System.out.println("EXPORT_PAGE_CONTROLS 1 positive 6 negatives");return;
+            }
+            if(a.length<3||a.length>4)throw new AssertionError("multipage fixture count");
+            for(int i=0;i<a.length;i++)check(ImageIO.read(new File(a[i])),i==0);
+            System.out.println("EXPORT_IMAGE_MULTIPAGE_PIXELS_PASS "+a.length);
+           }
+          }
+          '''
+          if __name__ == "__main__":
+              image_navigation_selftest()
+              absence_selftest()
+          PY
+          python3 -m py_compile "$RUNNER_TEMP/export_native_probe.py"
+          python3 "$RUNNER_TEMP/export_native_probe.py" 2>&1 | tee -a export-probe-setup.log
+      - name: Independent backend preview and synthetic image multipage native saves
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' 2>&1 | tee export-probe.log
+          import hashlib,json,os,sys,time,traceback
+          from pathlib import Path
+          sys.path.insert(0,'tools')
+          sys.path.insert(0,os.environ['RUNNER_TEMP'])
+          from export_native_probe import standalone_native
+          import emulator_gate as gate
+          import verify_exports
+          from verify_schema3 import PAGED_BACKEND_LABELS,PAGED_PREVIEW_LABELS,require_registration,certificate,exception_evidence
+          started=time.monotonic()
+          result={'status':'FAIL','commit':os.environ['GITHUB_SHA'],'run_id':os.environ['GITHUB_RUN_ID'],
+            'api':gate.API,'scope':'PARALLEL_EXPORT_BACKEND_PREVIEW_AND_SYNTHETIC_NATIVE_MULTIPAGE_NOT_FULL_REGRESSION',
+            'release_ready':False,'durable_upgrade_ready':False}
+          calls=[]
+          preflight={'phase':'EMULATOR_START'};result['preflight']=preflight
+          def install_and_probe(adb):
+            preflight['phase']='APK_DISCOVERY'
+            apps=list(Path('build/outputs/apk/debug').glob('*.apk'))
+            tests=list(Path('build/outputs/apk/androidTest/debug').glob('*.apk'))
+            preflight.update(apps=list(map(str,apps)),tests=list(map(str,tests)))
+            assert len(apps)==len(tests)==1,'expected exactly one product and one test APK'
+            preflight['phase']='CERTIFICATES'
+            app_cert=certificate(apps[0],gate);test_cert=certificate(tests[0],gate)
+            preflight.update(app_certificate=app_cert,test_certificate=test_cert)
+            assert app_cert==test_cert,'product/test APK certificate mismatch'
+            preflight['phase']='BADGING'
+            badging=gate.run([gate.SDK/'build-tools/35.0.0/aapt','dump','badging',apps[0]],capture=True).stdout
+            preflight['badging']=badging[:4096]
+            assert "name='"+gate.PKG+"'" in badging and "sdkVersion:'26'" in badging,'product package/minSdk mismatch'
+            for apk in (apps[0],tests[0]):
+              preflight.update(phase='INSTALL',apk=str(apk))
+              gate.run([adb,'-s',gate.SERIAL,'install','-t',apk],timeout=120)
+            preflight['phase']='REGISTRATION'
+            require_registration(adb,gate,'probe','V12DeviceTest')
+            preflight['phase']='INSTALLED_PATH'
+            installed=gate.run([adb,'-s',gate.SERIAL,'shell','pm','path',gate.PKG],capture=True).stdout.strip()
+            preflight['installed_path']=installed
+            assert installed.startswith('package:') and '\n' not in installed,'installed APK path missing or ambiguous'
+            from verify_adb_transfer import pull_exact
+            preflight['phase']='INSTALLED_BYTES'
+            expected=apps[0].read_bytes()
+            preflight['installed_transfer']={}
+            actual=pull_exact(adb,gate.SERIAL,installed[8:],expected,preflight['installed_transfer'])
+            preflight.update(actual_bytes=len(actual),expected_bytes=len(expected),actual_sha256=hashlib.sha256(actual).hexdigest(),expected_sha256=hashlib.sha256(expected).hexdigest())
+            assert actual==expected,'installed product bytes differ from built APK'
+            calls.append('installed_exact_product')
+            preflight['phase']='CODEC_AND_PREVIEW'
+            verify_exports.android_codec(adb,gate)
+            calls.append('codec_and_actual_preview')
+            # The codec composes a later native callback for the FULL runner.
+            # This separate job deliberately has a narrower named contract.
+            # Restore only this job's receipt callback, never alter full jobs.
+            gate.verify_native_ui=finish_probe
+          def finish_probe(adb):
+            preflight['phase']='CODEC_RECEIPT'
+            assert calls==['installed_exact_product','codec_and_actual_preview']
+            codec=json.loads(Path('native-ui/codec-result.json').read_text())
+            assert codec['status']=='PASS' and codec['commit']==result['commit'] and codec['run_id']==result['run_id'] and codec['api']==gate.API
+            paged=codec['paged_exports'];preview=paged['preview_ui']
+            assert paged['status']=='PASS' and paged['labels']==PAGED_BACKEND_LABELS and paged['checks']==29
+            assert preview['labels']==PAGED_PREVIEW_LABELS and preview['checks']==22
+            assert paged['instrumentation']['product_apk_sha256']==hashlib.sha256(actual_product()).hexdigest()
+            assert not Path('native-ui/native-result.json').exists(),'probe must not fabricate full native acceptance'
+            result['codec']=codec
+            preflight['phase']='NATIVE_SAF'
+            result['native_image_pages']=standalone_native(adb,gate)
+            calls.append('synthetic_native_saved')
+            calls.append('receipt_verified')
+            result.update(status='PASS',native_saf='SYNTHETIC_IMAGE_MULTIPAGE_ONLY')
+          def actual_product():
+            apps=list(Path('build/outputs/apk/debug').glob('*.apk'));assert len(apps)==1
+            return apps[0].read_bytes()
+          gate.verify_database=install_and_probe
+          gate.verify_native_ui=finish_probe
+          try:
+            gate.main()
+            assert calls==['installed_exact_product','codec_and_actual_preview','synthetic_native_saved','receipt_verified']
+          except Exception as exc:
+            result.update(status='FAIL',error=repr(exc),original_failure=exception_evidence(exc),traceback=traceback.format_exc()[-16000:]);raise
+          finally:
+            result.update(elapsed_seconds=round(time.monotonic()-started,3),stages=calls)
+            if Path('export-native.json').exists():result['native_image_pages']=json.loads(Path('export-native.json').read_text())
+            Path('export-probe.json').write_text(json.dumps(result,indent=2)+'\n')
+            if Path('emulator.log').exists():
+              Path('export-probe-emulator.log').write_bytes(Path('emulator.log').read_bytes())
+            print('EXPORT_PROBE_RESULT '+json.dumps(result),flush=True)
+          PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: android-evidence
+          name: export-probe-api-${{ matrix.api }}
           path: |
-            delivery/
-            setup.log
-            build.log
-            ui.log
-            emulator.log
-            build/reports/lint-results-debug.html
+            isolated-trace-host.log
+            export-probe.json
+            export-probe.log
+            export-probe-setup.log
+            export-probe-build.log
+            export-probe-emulator.log
+            export-native.json
+            export-native/*.png
+            native-ui/codec-result.json
           if-no-files-found: error
-      - name: Preserve UI failure signal
-        if: steps.emulator.outcome == 'failure'
-        run: exit 1
-  report:
-    needs: [core, android]
+  export_feedback:
+    needs: export_probe
     if: always() && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: export-probe-api-*
+          path: collected
+      - name: Publish early diagnostic receipts without waiting for full regression
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import base64,json,os,tempfile,urllib.request,urllib.error
+          from pathlib import Path
+          from tools.verify_evidence import initial_evidence_read, verify_readback
+          source,run=os.environ['GITHUB_SHA'],os.environ['GITHUB_RUN_ID']
+          def log_tail(path):
+              try:
+                  with path.open("rb") as stream:
+                      stream.seek(0,2);size=stream.tell()
+                      stream.seek(max(0,size-24000));raw=stream.read(24000)
+                  return {"status":"OBSERVED_NOT_ACCEPTANCE","bytes":size,
+                      "truncated":size>24000,"tail":raw.decode("utf-8",errors="replace")}
+              except OSError as exc:
+                  return {"status":"NOT_OBSERVED","error":repr(exc)}
+          def log_controls():
+              with tempfile.TemporaryDirectory() as folder:
+                  p=Path(folder)/"log"
+                  assert log_tail(p)["status"]=="NOT_OBSERVED"
+                  assert log_tail(Path(folder))["status"]=="NOT_OBSERVED"
+                  p.write_bytes(b"");v=log_tail(p)
+                  assert v["tail"]=="" and v["bytes"]==0 and v["truncated"] is False
+                  p.write_bytes(b"x"*23999+b"\xff");v=log_tail(p)
+                  assert len(v["tail"])==24000 and v["tail"].endswith("\ufffd") and v["truncated"] is False
+                  p.write_bytes(b"x"*24001+b"TRACEBACK_SENTINEL");v=log_tail(p)
+                  assert len(v["tail"])==24000 and v["truncated"] is True and v["tail"].endswith("TRACEBACK_SENTINEL")
+              return {"checks":5,"scope":"HOST_LOG_CAPTURE_NOT_DEVICE"}
+          controls=log_controls()
+          devices={};logs={}
+          for level in (26,34):
+            folder=Path('collected')/('export-probe-api-'+str(level))
+            path=folder/'export-probe.json'
+            logs[str(level)]={name:log_tail(folder/name) for name in (
+              'export-probe-setup.log','export-probe-build.log','export-probe.log','export-probe-emulator.log')}
+            try:
+              assert path.stat().st_size<=2*1024*1024
+              value=json.loads(path.read_bytes())
+              assert value['commit']==source and value['run_id']==run and type(value['api']) is int and value['api']==level
+              devices[str(level)]=value
+            except (OSError,ValueError,KeyError,TypeError,AssertionError) as exc:
+              devices[str(level)]={'status':'NOT_VERIFIED','error':repr(exc)}
+          doc={'commit':source,'run_id':run,'scope':'EARLY_DIAGNOSTIC_NOT_ACCEPTANCE',
+            'devices':devices,'logs':logs,'log_controls':controls,'release_ready':False,'durable_upgrade_ready':False}
+          data=(json.dumps(doc,ensure_ascii=False,indent=2)+'\n').encode()
+          endpoint='https://api.github.com/repos/'+os.environ['GITHUB_REPOSITORY']+'/'
+          def api(path,method='GET',body=None,timeout=30):
+            req=urllib.request.Request(endpoint+path,method=method,data=None if body is None else json.dumps(body).encode(),
+              headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+            with urllib.request.urlopen(req,timeout=timeout) as response:return json.load(response)
+          path='reports/export-probe-early-'+source+'-'+run+'.json'
+          body={'message':'Record early export diagnostics, not acceptance','branch':'evidence','content':base64.b64encode(data).decode()}
+          try:body['sha']=initial_evidence_read(api,path,emit=lambda row: print('EVIDENCE_INITIAL_READ '+json.dumps(row),flush=True))['sha']
+          except urllib.error.HTTPError as exc:
+            if exc.code!=404:raise
+          written=api('contents/'+path,'PUT',body)
+          actual=verify_readback(api,path,written['commit']['sha'],data)
+          print('EARLY_EXPORT_DIAGNOSTIC '+actual['html_url'],flush=True)
+          PY
+  database:
+    needs: core
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [26, 34]
+    runs-on: ubuntu-24.04
+    # Run36359317036 API34 exceeded 55m; 75m approved on 2026-09-28.
+    # Provisional headroom, not measured completion time; no assertion or stage is skipped.
+    timeout-minutes: 75
+    env:
+      TEST_API: ${{ matrix.api }}
+      POCKET_STABLE_SIGNING: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Require isolated tracing before full regression device work
+        run: *isolated_trace_setup
+      - name: Initialize fixed signing directory
+        run: |
+          set -euo pipefail
+          case "$TEST_API" in 26|34) ;; *) exit 1 ;; esac
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"])
+          assert root.is_absolute() and root.is_dir(), "valid runner temp required"
+          assert not any(c in str(root) for c in ("\n", "\r", "\0")), "unsafe runner temp"
+          folder = root / ("pocket-signing-" + os.environ["TEST_API"])
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as stream:
+              stream.write("POCKET_SIGNING_DIR=" + str(folder) + "\n")
+          PY
+      - name: Fixed Android build setup
+        run: &upgrade_build_setup |
+          set -euo pipefail
+          exec > >(tee setup.log) 2>&1
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip -o /tmp/gradle.zip
+          curl --fail --location --retry 2 https://services.gradle.org/distributions/gradle-8.9-bin.zip.sha256 -o /tmp/gradle.sha256
+          echo "$(cat /tmp/gradle.sha256)  /tmp/gradle.zip" | sha256sum -c -
+          unzip -q /tmp/gradle.zip -d /tmp
+          echo "/tmp/gradle-8.9/bin" >> "$GITHUB_PATH"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+      - name: Require fixed preview signing without fallback
+        env:
+          POCKET_PREVIEW_KEYSTORE_B64: ${{ secrets.POCKET_PREVIEW_KEYSTORE_B64 }}
+          POCKET_PREVIEW_STORE_PASSWORD: ${{ secrets.POCKET_PREVIEW_STORE_PASSWORD }}
+          POCKET_PREVIEW_KEY_ALIAS: ${{ secrets.POCKET_PREVIEW_KEY_ALIAS }}
+          POCKET_PREVIEW_KEY_PASSWORD: ${{ secrets.POCKET_PREVIEW_KEY_PASSWORD }}
+          POCKET_PREVIEW_CERT_SHA256: ${{ secrets.POCKET_PREVIEW_CERT_SHA256 }}
+        run: python3 tools/verify_upgrade.py prepare-signing
+      - name: Compile internal test APKs and lint (not deliverable)
+        env:
+          BUILD_429_EXECUTE: 'true'
+          BUILD_LOG: build.log
+          BUILD_LINT: 'true'
+        run: *verified_build
+      - name: Freeze API34 candidate bytes before device tests
+        if: matrix.api == 34
+        run: |
+          set -euo pipefail
+          sha256sum build/outputs/apk/debug/*.apk > tested-apk.sha256
+      - name: Database, semantic backups and actual native UI interactions
+        run: |
+          set -euo pipefail
+          python3 tools/verify_schema3.py android 2>&1 | tee ui.log
+      - name: Package tested API34 preview candidate, not full V1.2
+        if: matrix.api == 34
+        run: |
+          set -euo pipefail
+          sha256sum -c tested-apk.sha256
+          python3 - <<'PY'
+          import hashlib,json,os,re,shutil,subprocess
+          from pathlib import Path
+          native=json.loads(Path('native-ui/native-result.json').read_text())
+          device=json.loads(Path('device-result.json').read_text())
+          assert native['status']=='PASS' and native['count']==len(native['checks']) and native['count']>=164
+          assert device['status']=='PASS' and device['checks']=={'seed':155,'reopen':25}
+          assert native['release_ready'] is False and device['release_ready'] is False
+          apks=list(Path('build/outputs/apk/debug').glob('*.apk'))
+          assert len(apks)==1
+          source=apks[0];tools=Path(os.environ['ANDROID_HOME'])/'build-tools/35.0.0'
+          def output(args):return subprocess.check_output(list(map(str,args)),text=True)
+          package=output([tools/'aapt','dump','badging',source])
+          permissions=output([tools/'aapt','dump','permissions',source])
+          signature=output([tools/'apksigner','verify','--verbose','--print-certs',source])
+          assert "name='com.supercubegame.pockettodo.v12.preview'" in package
+          assert "versionCode='3'" in package and "versionName='1.2'" in package and "sdkVersion:'26'" in package
+          assert 'uses-permission:' not in permissions
+          certs=re.findall(r'^Signer #1 certificate SHA-256 digest: ([0-9a-f]+)$',signature,re.M)
+          assert len(certs)==1 and len(certs[0])==64
+          signing=json.loads((Path(os.environ['POCKET_SIGNING_DIR'])/'credentials.json').read_text())
+          assert certs[0]==signing['certificate'],'fixed preview certificate mismatch'
+          folder=Path('preview-candidate');folder.mkdir()
+          name='PocketTodo-v1.2-preview-'+os.environ['GITHUB_SHA'][:12]+'.apk'
+          target=folder/name;shutil.copyfile(source,target)
+          assert target.read_bytes()==source.read_bytes()
+          digest=hashlib.sha256(target.read_bytes()).hexdigest()
+          (folder/'SHA256SUMS.txt').write_text(digest+'  '+name+'\n')
+          (folder/'signature.txt').write_text(signature)
+          (folder/'package.txt').write_text(package+'\n'+permissions)
+          meta={'commit':os.environ['GITHUB_SHA'],'run_id':os.environ['GITHUB_RUN_ID'],'apk':name,'sha256':digest,'bytes':target.stat().st_size,'certificate_sha256':certs[0],'package':'com.supercubegame.pockettodo.v12.preview','version_name':'1.2','version_code':3,'exact_binary_device_api':34,'release_ready':False,'durable_upgrade_ready':False}
+          (folder/'preview.json').write_text(json.dumps(meta,indent=2)+'\n')
+          (folder/'README.txt').write_text('口袋待办 v1.2 阶段开发预览，不是完整正式版。\n与旧版隔离安装；仅用于试用，请先备份。\n固定预览签名；覆盖安装仅验证过同一固定密钥重建的旧源码，不代表兼容此前临时签名包。请勿为安装直接卸载有数据的旧预览；先导出完整备份。\n完整备份包含私有内容、原图与元数据，未加密。私有图片标记不是加密，分享过滤尚未实现。\n已接通待办、活动、打卡历史、日期账目、多笔记、PNG/JPEG导入、图片说明和私有标记、备份确认恢复。\n裁剪遮挡、PDF/图片/Markdown分享、应用目录与字段完整UI、恢复撤销、搜索模板日程、稳定签名和真机验收尚未完成。\n不含账号、网络权限或遥测。不要输入无法承担丢失风险的重要数据。\n此APK是API34实际测试过的同一字节；API26测试同源码的独立构建。源码和摘要见preview.json、SHA256SUMS.txt。\n下载Actions产物需要GitHub登录；压缩包解压后安装.apk，不要安装测试instrumentation包。\n',encoding='utf-8')
+          print('PREVIEW_CANDIDATE '+json.dumps(meta))
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: matrix.api == 34
+        with:
+          name: internal-preview-candidate
+          path: preview-candidate/
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: database-api-${{ matrix.api }}
+          path: |
+            setup.log
+            isolated-trace-host.log
+            build.log
+            ui.log
+            emulator.log
+            device-*.txt
+            device-result.json
+            native-ui/native-result.json
+            native-ui/codec-result.json
+            native-ui/*.png
+            native-ui/full-observer/binding.json
+            native-ui/full-observer/phase.json
+            native-ui/full-observer/observer.json
+            native-ui/full-observer/observer-last.xml
+            native-ui/full-observer/observer-stderr.log
+            native-ui/full-observer/observer-*/PocketUiObserver.java
+            native-ui/full-observer/observer-*/dex/classes.dex
+            build/reports/lint-results-debug.html
+          if-no-files-found: error
+      - name: Remove temporary signing material
+        if: always()
+        run: python3 tools/verify_upgrade.py cleanup-signing
+  upgrade:
+    needs: [core, database]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [26, 34]
+    env:
+      TEST_API: ${{ matrix.api }}
+      POCKET_STABLE_SIGNING: '1'
+    steps:
+      - name: Initialize fixed signing directory
+        run: |
+          set -euo pipefail
+          case "$TEST_API" in 26|34) ;; *) exit 1 ;; esac
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"])
+          assert root.is_absolute() and root.is_dir(), "valid runner temp required"
+          assert not any(c in str(root) for c in ("\n", "\r", "\0")), "unsafe runner temp"
+          folder = root / ("pocket-signing-" + os.environ["TEST_API"])
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as stream:
+              stream.write("POCKET_SIGNING_DIR=" + str(folder) + "\n")
+          PY
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: f42e88e10052a4c71e21b83aa0d4475849b807a0
+          path: upgrade-old
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: internal-preview-candidate
+          path: upgrade-candidate
+      - name: Fixed Android build setup for upgrade probe
+        run: *upgrade_build_setup
+      - name: Initialize bounded upgrade evidence
+        run: mkdir upgrade-evidence
+      - name: Require fixed preview signing without fallback
+        env:
+          POCKET_PREVIEW_KEYSTORE_B64: ${{ secrets.POCKET_PREVIEW_KEYSTORE_B64 }}
+          POCKET_PREVIEW_STORE_PASSWORD: ${{ secrets.POCKET_PREVIEW_STORE_PASSWORD }}
+          POCKET_PREVIEW_KEY_ALIAS: ${{ secrets.POCKET_PREVIEW_KEY_ALIAS }}
+          POCKET_PREVIEW_KEY_PASSWORD: ${{ secrets.POCKET_PREVIEW_KEY_PASSWORD }}
+          POCKET_PREVIEW_CERT_SHA256: ${{ secrets.POCKET_PREVIEW_CERT_SHA256 }}
+        run: python3 tools/verify_upgrade.py prepare-signing
+      - name: Build pinned historical source with same fixed key
+        run: python3 tools/verify_upgrade.py build-old
+      - name: Actual retained-data overwrite on the exact candidate APK
+        run: python3 tools/verify_upgrade.py android
+      - name: Remove temporary signing material
+        if: always()
+        run: python3 tools/verify_upgrade.py cleanup-signing
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: upgrade-api-${{ matrix.api }}
+          path: upgrade-evidence/
+          if-no-files-found: error
+          retention-days: 14
+  report:
+    needs: [core, database, export_probe, export_feedback, upgrade]
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           path: collected
-      - name: Publish and read back exact evidence
+      - name: Preserve matrix and synthetic native screenshots with exact readback
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          python3 - <<'PY' 2>&1 | tee collected/publication.log
+          import base64,hashlib,json,os,re,urllib.request,urllib.error
+          from pathlib import Path
+          from tools.verify_evidence import publish as publish_evidence
+          root=Path('collected')
+          repo=os.environ['GITHUB_REPOSITORY']
+          source=os.environ['GITHUB_SHA']
+          run=os.environ['GITHUB_RUN_ID']
+          def api(path,method='GET',body=None):
+            req=urllib.request.Request('https://api.github.com/repos/'+repo+'/'+path,data=json.dumps(body).encode() if body is not None else None,method=method,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+            with urllib.request.urlopen(req,timeout=30) as response:return json.load(response)
+          def publish(path,data):
+            return publish_evidence(api,path,data,emit=lambda row: print('EVIDENCE_TRANSPORT '+json.dumps(row),flush=True))
+          required={
+            'seed':[
+              'restore preview does not mutate any live table or publish media',
+              'preview shows independent exact current and incoming counts for every table',
+              'restore preview summary cannot be modified by caller',
+              'cancel twice clears private staging without altering live state',
+              'canceled restore plan cannot be confirmed',
+              'semantic-invalid preview refuses and cleans staging without touching live data',
+              'restore preview is bound to its exact database helper owner',
+              'ordinary write after preview rejects stale restore',
+              'stale rejection preserves every new row and revision and clears stage',
+              'failed stale plan is single use and requires a new preview',
+              'full snapshot guard rejects another connection write even without revision bump',
+              'same-revision stale rejection retains exact externally changed state',
+              'changed staged media is rejected on confirmation with complete old state intact',
+              'guarded confirmation late injected failure rolls back every replaced table',
+              'failed commit plan cannot be reused after removing the fault',
+              'confirmation uses the exact validated preview not a subsequently replaced source file',
+              'confirmed snapshot publishes exact media and cleans staging before commit',
+              'successful confirmation cannot be replayed',
+              'exact idempotent retry remains a genuine no-op while preview is open',
+              'unchanged state after no-op can still confirm the reviewed snapshot'],
+            'reopen':[
+              'guarded restore survives a separate Android process with all tables exact',
+              'guarded restore retains usable import journal and exact-cent totals after restart']}
+          def coverage(text,phase):
+            labels=re.findall(r'(?:^|stream=)PASS ([^\r\n]+)',text,re.M)
+            result=re.findall(r'DEVICE_DATABASE_RESULT '+phase+r' (\d+)/(\d+) PASS',text)
+            finished=re.findall(r'^INSTRUMENTATION_CODE: (-?\d+)\s*$',text,re.M)==['-1']
+            return (finished and 'DEVICE_DATABASE_FAILED' not in text and 'INSTRUMENTATION_FAILED' not in text and len(result)==1 and result[0][0]==result[0][1] and int(result[0][0])==len(labels) and all(labels.count(x)==1 for x in required[phase])),labels
+          # Parser self-checks, NOT device behavior. Missing a required check must fail
+          # even if remaining labels and the declared count are internally consistent.
+          for phase,labels in required.items():
+            def sample(rows):return '\n'.join('PASS '+x for x in rows)+'\nDEVICE_DATABASE_RESULT '+phase+' '+str(len(rows))+'/'+str(len(rows))+' PASS\nINSTRUMENTATION_CODE: -1\n'
+            assert coverage(sample(labels),phase)[0]
+            assert not coverage(sample(labels[:-1]),phase)[0]
+            assert not coverage(sample(labels)+'DEVICE_DATABASE_FAILED\n',phase)[0]
+            assert not coverage(sample(labels).replace('INSTRUMENTATION_CODE: -1','INSTRUMENTATION_CODE: 0'),phase)[0]
+          # Independent observer of the frozen historical suite: lives outside the
+          # instrumentation methods whose calls could accidentally be removed.
+          legacy_required={
+            'seed':[
+              'frozen fixture really uses schema2 and eight block columns',
+              'frozen serializer detects a real changed row and rollback restores fixture',
+              'archive wraps frozen old bytes without current database encoder',
+              'opening frozen old database preserves all historical cells and ordering',
+              'cancel old-backup preview preserves live state and publishes no media',
+              'guarded old-backup restore preserves complete old-format projection',
+              'guarded old-backup restore publishes exact original bytes',
+              'old archived field and note attachment survive restore',
+              'duplicate titles and shared image retain separate block privacy and ownership',
+              'truncated frozen state cannot replace current live data',
+              'missing frozen original refuses restore without data loss',
+              'late old-backup restore failure rolls back every deleted and inserted table',
+              'lower-level old restore stays deterministic and retains original bytes',
+              'current-format export and restore retain historical semantic content'],
+            'reopen':[
+              'separate process retains complete frozen old-backup content',
+              'separate process retains exact shared original',
+              'restored todo and archived field remain usable after process restart']}
+          assert {p:len(v) for p,v in legacy_required.items()}=={'seed':14,'reopen':3}
+          def legacy_coverage(text,phase):
+            labels=re.findall(r'(?:^|stream=)LEGACY_SCHEMA2_PASS ([^\r\n]+)',text,re.M)
+            results=re.findall(r'(?:^|stream=)LEGACY_SCHEMA2_RESULT ([^\r\n]+)',text,re.M)
+            expected=legacy_required[phase]
+            total=str(len(expected))
+            passed=(coverage(text,phase)[0] and labels==expected and
+                    results==[phase+' '+total+'/'+total+' PASS'] and
+                    'LEGACY_SCHEMA2_FAILED' not in text)
+            return passed,labels
+          legacy_controls={}
+          for phase,expected in legacy_required.items():
+            # Old gate passes without ANY legacy output: demonstrate the original
+            # blind spot, then require the same new checker to reject each mutant.
+            base=sample(required[phase])
+            assert coverage(base,phase)[0] and not legacy_coverage(base,phase)[0]
+            records='\n'.join('LEGACY_SCHEMA2_PASS '+x for x in expected)+'\n'
+            marker='LEGACY_SCHEMA2_RESULT '+phase+' '+str(len(expected))+'/'+str(len(expected))+' PASS\n'
+            def embed(extra):return base.replace('INSTRUMENTATION_CODE: -1',extra+'INSTRUMENTATION_CODE: -1',1)
+            good=embed(records+marker)
+            assert legacy_coverage(good,phase)[0]
+            assert legacy_coverage(good.replace('\n','\r\n'),phase)[0]
+            mutants={
+              'missing_entire_suite':base,
+              'missing_result':embed(records),
+              'wrong_count':embed(records+marker.replace(str(len(expected))+'/',str(len(expected)-1)+'/',1)),
+              'duplicate_result':embed(records+marker+marker),
+              'wrong_phase':embed(records+marker.replace('RESULT '+phase,'RESULT other',1)),
+              'missing_named_check':embed(records.replace('LEGACY_SCHEMA2_PASS '+expected[-1]+'\n','',1)+marker),
+              'self_consistent_missing_check':embed(records.replace('LEGACY_SCHEMA2_PASS '+expected[-1]+'\n','',1)+marker.replace(str(len(expected)),str(len(expected)-1))),
+              'duplicate_named_check':embed(records+'LEGACY_SCHEMA2_PASS '+expected[0]+'\n'+marker),
+              'substituted_named_check':embed(records.replace(expected[-1],'unknown check',1)+marker),
+              'failed_suite':good+'LEGACY_SCHEMA2_FAILED\n',
+              'failed_instrumentation':good.replace('INSTRUMENTATION_CODE: -1','INSTRUMENTATION_CODE: 0',1),
+              'missing_instrumentation_finish':good.replace('INSTRUMENTATION_CODE: -1','',1)}
+            assert len(mutants)==12
+            for name,bad in mutants.items():
+              assert bad!=good,'Legacy mutation did not apply: '+name
+              if name not in ('failed_instrumentation','missing_instrumentation_finish'):
+                assert coverage(bad,phase)[0],'Legacy fixture broke the old positive control: '+name
+              assert not legacy_coverage(bad,phase)[0],'Legacy observer missed: '+name
+            legacy_controls[phase]={'positive_controls':2,'negative_controls':len(mutants),'mutants':list(mutants)}
+          print('LEGACY_OBSERVER_SELFTEST '+json.dumps(legacy_controls))
+          devices={}
+          native={}
+          guarded={}
+          codecs={}
+          legacy_devices={}
+          for api_level in (26,34):
+            folder=root/('database-api-'+str(api_level))
+            logs={}
+            for name in ('setup.log','build.log','ui.log','emulator.log'):
+              path=folder/name
+              if path.exists():
+                logs[name]=path.read_text(errors='replace')[-24000:]
+                path.rename(folder/(str(api_level)+'-'+name))
+              else:logs[name]='NOT_OBSERVED'
+            result=folder/'device-result.json'
+            devices[str(api_level)]={'result':json.loads(result.read_text()) if result.exists() else {'status':'NOT_OBSERVED'},'logs':logs}
+            phases={}
+            legacy_phases={}
+            for phase in required:
+              path=folder/('device-'+phase+'.txt')
+              text=path.read_text(errors='replace') if path.exists() else ''
+              passed,labels=coverage(text,phase)
+              phases[phase]={'status':'PASS' if passed else 'NOT_VERIFIED','required_checks':required[phase],'observed_required':[x for x in required[phase] if x in labels],'missing':[x for x in required[phase] if x not in labels],'total_device_pass_records':len(labels),'failure_tail':None if passed else text[-7000:]}
+              legacy_passed,legacy_labels=legacy_coverage(text,phase)
+              legacy_phases[phase]={'status':'PASS' if legacy_passed else 'NOT_VERIFIED','checks':len(legacy_labels),'expected_checks':len(legacy_required[phase]),'labels':legacy_labels,'required_labels':legacy_required[phase],'decoded_log_text_sha256':hashlib.sha256(text.encode()).hexdigest(),'failure_tail':None if legacy_passed else text[-7000:]}
+            legacy_devices[str(api_level)]={'status':'PASS' if devices[str(api_level)]['result'].get('status')=='PASS' and all(p['status']=='PASS' for p in legacy_phases.values()) else 'NOT_VERIFIED','phases':legacy_phases}
+            guarded[str(api_level)]={'status':'PASS' if devices[str(api_level)]['result'].get('status')=='PASS' and all(p['status']=='PASS' for p in phases.values()) else 'NOT_VERIFIED','phases':phases}
+            result=folder/'native-ui/native-result.json'
+            native[str(api_level)]=json.loads(result.read_text()) if result.exists() else {'status':'NOT_OBSERVED'}
+            codec=folder/'native-ui/codec-result.json'
+            codecs[str(api_level)]=json.loads(codec.read_text()) if codec.exists() else {'status':'NOT_OBSERVED'}
+            published=[]
+            for image in sorted((folder/'native-ui').glob('*.png')):
+              data=image.read_bytes()
+              assert data.startswith(b'\x89PNG\r\n\x1a\n'),'invalid native screenshot'
+              asset=publish('screenshots/'+source+'-'+run+'/'+str(api_level)+'/'+image.name,data)
+              asset['file']=image.name
+              published.append(asset)
+            native[str(api_level)]['published_screenshots']=published
+          restore='SCHEMA2_DB_MEDIA_BYTES_PASS' if all(d['result'].get('status')=='PASS' and d['result'].get('full_backup_restore')=='SCHEMA2_DB_MEDIA_BYTES_PASS' for d in devices.values()) else 'NOT_VERIFIED'
+          native_status='PASS' if all(n.get('status')=='PASS' and n.get('scope')=='NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE' and n.get('count',0)>0 and n.get('saf_restore')=='NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS' for n in native.values()) else 'NOT_VERIFIED'
+          guarded_status='PASS' if all(g['status']=='PASS' for g in guarded.values()) else 'NOT_VERIFIED'
+          legacy_status='PASS' if set(legacy_devices)=={'26','34'} and all(d['status']=='PASS' for d in legacy_devices.values()) else 'NOT_VERIFIED'
+          legacy_asset=publish('reports/legacy-schema2-'+source+'-'+run+'.json',(json.dumps({'commit':source,'run_id':run,'status':legacy_status,'scope':'FROZEN_SCHEMA2_DB_BACKUP_COMPATIBILITY_NOT_SCHEMA3_IMPLEMENTATION','devices':legacy_devices,'observer_selftests':legacy_controls,'release_ready':False},ensure_ascii=False,indent=2)+'\n').encode())
+          codec_status='PASS' if all(c.get('status')=='PASS' and c.get('commit')==source and c.get('run_id')==run and c.get('checks')==29 and len(c.get('labels',[]))==29 and c.get('host_negative_controls')==4 and c.get('device_apk_readback')=='EXACT_BYTES' for c in codecs.values()) else 'NOT_VERIFIED'
+          codec_asset=publish('reports/codec-'+source+'-'+run+'.json',(json.dumps({'commit':source,'run_id':run,'status':codec_status,'scope':'ANDROID_APK_CODEC_NOT_UI_OR_PERSISTENCE','devices':codecs,'release_ready':False},ensure_ascii=False,indent=2)+'\n').encode())
+          guarded_asset=publish('reports/restore-plan-'+source+'-'+run+'.json',(json.dumps({'commit':source,'run_id':run,'status':guarded_status,'scope':'GUARDED_RESTORE_BACKEND_NOT_SAF_UI','devices':guarded,'saf_restore_ui':'SEE_NATIVE_INDEX','undo_restore':'NOT_IMPLEMENTED','release_ready':False},ensure_ascii=False,indent=2)+'\n').encode())
+          index={'commit':source,'run_id':run,'scope':'NATIVE_TODO_CATEGORY_ACTIVITY_PATH_CHECKIN_LEDGER_NOTE_RESTORE_SLICE','status':native_status,'devices':native,'release_ready':False}
+          index_asset=publish('reports/native-'+source+'-'+run+'.json',(json.dumps(index,ensure_ascii=False,indent=2)+'\n').encode())
+          saf_ui='PASS' if all(n.get('saf_restore')=='NATIVE_SAF_RESTORE_PREVIEW_CONFIRM_PASS' for n in native.values()) else 'NOT_VERIFIED'
+          scope=root/'scope';scope.mkdir(exist_ok=True)
+          (scope/'ui-result.json').write_text(json.dumps({'status':native_status,'scope':'NATIVE_SLICE_AND_DATABASE_NOT_FULL_PRODUCT','devices':devices,'native':native,'native_index':index_asset,'guarded_restore':{'status':guarded_status,'evidence':guarded_asset},'screenshots':'SYNTHETIC_NATIVE_UI_ONLY','exports':'NOT_TESTED','full_database_media_restore':restore,'saf_restore_ui':saf_ui,'image_decoding':'NOT_TESTED','power_loss':'NOT_TESTED','release_ready':False}))
+          print('NATIVE_EVIDENCE '+index_asset['url'])
+          print('GUARDED_RESTORE_EVIDENCE '+guarded_asset['url'])
+          # Persist an independent marker for the required post-publication gate.
+          (scope/'codec-result.json').write_text(json.dumps({'status':codec_status,'evidence':codec_asset}))
+          print('CODEC_EVIDENCE '+codec_asset['url'])
+          (scope/'legacy-schema2-result.json').write_text(json.dumps({'commit':source,'run_id':run,'status':legacy_status,'evidence':legacy_asset}))
+          print('LEGACY_SCHEMA2_EVIDENCE '+legacy_asset['url'])
+          PY
+      - name: Publish independent matrix receipt even when screenshot publication fails
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          python3 - <<'PY' 2>&1 | tee collected/matrix-publication.log
+          import base64,copy,hashlib,json,os,tempfile,urllib.request,urllib.error
+          from pathlib import Path
+          from tools.verify_evidence import publish as publish_evidence
+          source,run=os.environ['GITHUB_SHA'],os.environ['GITHUB_RUN_ID']
+          required=[
+            'exact_selected_zip_members','private_and_unselected_text_absent',
+            'document_order_and_duplicate_references','literal_markdown_html_text',
+            'share_redaction_pixels_preserved','share_source_bytes_unchanged',
+            'frozen_input_ownership_and_repeatability','empty_selection_refused_not_all',
+            'private_only_selection_refused','unknown_selection_refused',
+            'duplicate_identity_refused','null_selection_refused',
+            'selected_invalid_image_refuses_entire_export',
+            'unselected_image_never_decoded_or_packaged',
+            'selected_original_is_reencoded_not_copied','share_source_budget_retained',
+            'no_original_named_zip_member','share_text_budget_refuses_not_truncates']
+          def observe(value,api):
+            if not isinstance(value,dict):return False
+            share=value.get('markdown_share')
+            labels=value.get('labels')
+            return (value.get('status')=='PASS' and value.get('commit')==source and
+              value.get('run_id')==run and type(value.get('api')) is int and value['api']==api and
+              value.get('scope')=='ANDROID_APK_CODEC_SHELL_NOT_APP_UI_OR_PERSISTENCE' and
+              type(value.get('checks')) is int and value['checks']==29 and
+              isinstance(labels,list) and len(labels)==29 and all(isinstance(x,str) for x in labels) and len(set(labels))==29 and
+              value.get('host_negative_controls')==4 and value.get('device_apk_readback')=='EXACT_BYTES' and
+              isinstance(share,dict) and share.get('status')=='PASS' and
+              type(share.get('checks')) is int and share['checks']==len(required) and
+              share.get('labels')==required and share.get('independent_host_png_checks')==2 and
+              share.get('scope')=='READ_ONLY_ZIP_BACKEND_NOT_UI_STALE_PREVIEW_OR_RECEIVER')
+          def matrix(values):
+            return (isinstance(values,dict) and set(values)=={'26','34'} and
+                    all(observe(values[str(api)],api) for api in (26,34)))
+          # Observer controls only: these synthetic receipts do not certify Android.
+          sample={'status':'PASS','commit':source,'run_id':run,'api':26,
+            'scope':'ANDROID_APK_CODEC_SHELL_NOT_APP_UI_OR_PERSISTENCE','checks':29,
+            'labels':['codec-'+str(i) for i in range(29)],'host_negative_controls':4,
+            'device_apk_readback':'EXACT_BYTES','markdown_share':{'status':'PASS',
+              'checks':18,'labels':required[:],'independent_host_png_checks':2,
+              'scope':'READ_ONLY_ZIP_BACKEND_NOT_UI_STALE_PREVIEW_OR_RECEIVER'}}
+          controls=0
+          def check(value):
+            global controls
+            assert value,'independent share receipt observer selftest failed'
+            controls+=1
+          check(observe(sample,26))
+          for index in range(len(required)):
+            bad=copy.deepcopy(sample);bad['markdown_share']['labels'][index]='unrelated-'+str(index)
+            check(not observe(bad,26))
+          for key,value in [('commit','wrong-source'),('run_id','wrong-run'),('api',34),
+                            ('api',True),('status','FAIL'),('checks',28),
+                            ('host_negative_controls',3),('device_apk_readback','NOT_OBSERVED'),
+                            ('labels',[None]*29),('markdown_share',[])]:
+            bad=copy.deepcopy(sample);bad[key]=value;check(not observe(bad,26))
+          for key,value in [('checks',17),('labels',required[:-1]),('labels',required[::-1]),
+                            ('labels',required[:-1]+[required[0]]),('status','NOT_VERIFIED'),
+                            ('independent_host_png_checks',1),('scope','UI_VERIFIED')]:
+            bad=copy.deepcopy(sample);bad['markdown_share'][key]=value;check(not observe(bad,26))
+          pair={'26':copy.deepcopy(sample),'34':copy.deepcopy(sample)};pair['34']['api']=34
+          check(matrix(pair));check(not matrix({'26':sample}));check(not matrix({'26':sample,'34':sample}))
+          check(not matrix(dict(pair,extra=sample)));check(not observe(None,26))
+          before=copy.deepcopy(sample);observe(sample,26);check(sample==before)
+          # Each expected path is fixed. Missing/malformed/oversized input is explicit,
+          # not skipped; a broken screenshot publisher cannot hide already-run suites.
+          root=Path('collected')
+          def read_result(path):
+            if not path.is_file():return {'status':'NOT_OBSERVED','path':str(path)}
+            size=path.stat().st_size
+            if size>2*1024*1024:return {'status':'NOT_VERIFIED','error':'JSON exceeds 2 MiB receipt budget','bytes':size}
+            data=path.read_bytes()
+            try:
+              value=json.loads(data)
+              if not isinstance(value,dict):raise ValueError('result is not an object')
+              return value
+            except (ValueError,UnicodeError) as exc:
+              return {'status':'NOT_VERIFIED','error':str(exc),'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()}
+          def tail(path):
+            if not path.is_file():return {'status':'NOT_OBSERVED'}
+            size=path.stat().st_size
+            with path.open('rb') as stream:
+              stream.seek(max(0,size-24000));data=stream.read()
+            return {'status':'OBSERVED_NOT_ACCEPTANCE','bytes':size,'truncated':size>24000,
+                    'tail':data.decode('utf-8',errors='replace')}
+          with tempfile.TemporaryDirectory(prefix='receipt-controls-') as temporary:
+            fixture=Path(temporary)/'result.json'
+            check(read_result(fixture)['status']=='NOT_OBSERVED')
+            for invalid in ('not json','[]','null','"string"'):
+              fixture.write_text(invalid);check(read_result(fixture)['status']=='NOT_VERIFIED')
+            fixture.write_bytes(b'\xff');check(read_result(fixture)['status']=='NOT_VERIFIED')
+            fixture.write_bytes(b' '*(2*1024*1024+1));check('budget' in read_result(fixture)['error'])
+            fixture.write_text(json.dumps(sample));check(observe(read_result(fixture),26))
+            fixture.write_bytes(b'x'*25000+b'FINAL_TRACEBACK_SENTINEL')
+            bounded=tail(fixture)
+            check(bounded['truncated'] and len(bounded['tail'])==24000 and bounded['tail'].endswith('FINAL_TRACEBACK_SENTINEL'))
+            fixture.write_bytes(b'');check(tail(fixture)['tail']=='' and not tail(fixture)['truncated'])
+          print('SHARE_RECEIPT_OBSERVER_SELFTEST '+str(controls)+' PASS; synthetic parser and file controls only',flush=True)
+          devices={};codecs={}
+          for api in (26,34):
+            folder=root/('database-api-'+str(api))
+            codec=read_result(folder/'native-ui/codec-result.json');codecs[str(api)]=codec
+            logs={}
+            for name in ('build.log','ui.log','emulator.log'):
+              # The preceding publisher may have renamed only part of the matrix.
+              paths=[folder/name,folder/(str(api)+'-'+name)]
+              logs[name]={p.name:tail(p) for p in paths if p.is_file()} or {'status':'NOT_OBSERVED'}
+            devices[str(api)]={'codec':codec,'markdown_share_observer':'PASS' if observe(codec,api) else 'NOT_VERIFIED',
+              'native':read_result(folder/'native-ui/native-result.json'),'logs':logs}
+          passed=matrix(codecs)
+          doc={'commit':source,'run_id':run,'scope':'INDEPENDENT_MATRIX_RECEIPT_NOT_DELIVERY_ACCEPTANCE',
+            'markdown_share_status':'PASS' if passed else 'NOT_VERIFIED','devices':devices,
+            'publication_log':tail(root/'publication.log'),'observer_selftests':controls,
+            'release_ready':False,'durable_upgrade_ready':False}
+          data=(json.dumps(doc,ensure_ascii=False,indent=2)+'\n').encode()
+          repo=os.environ['GITHUB_REPOSITORY']
+          def api(path,method='GET',body=None):
+            request=urllib.request.Request('https://api.github.com/repos/'+repo+'/'+path,
+              data=None if body is None else json.dumps(body).encode(),method=method,
+              headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+            with urllib.request.urlopen(request,timeout=30) as response:return json.load(response)
+          path='reports/matrix-receipt-'+source+'-'+run+'.json'
+          asset=publish_evidence(api,path,data,emit=lambda row: print('EVIDENCE_TRANSPORT '+json.dumps(row),flush=True))
+          print('MATRIX_RECEIPT '+asset['url'],flush=True)
+          assert passed,'Markdown backend checks missing/failed; receipt published, not a native sharing acceptance'
+          PY
+      - name: Preserve publication diagnostics independently of evidence branch
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: report-publication-diagnostics
+          path: |
+            collected/publication.log
+            collected/matrix-publication.log
+          if-no-files-found: error
+      - name: Publish and require both independent export probes
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import base64,copy,json,os,re,sys,urllib.request,urllib.error
+          from pathlib import Path
+          sys.path.insert(0,'tools')
+          from verify_schema3 import PAGED_BACKEND_LABELS,PAGED_PREVIEW_LABELS
+          source,run=os.environ['GITHUB_SHA'],os.environ['GITHUB_RUN_ID']
+          LOSS_LABELS=["exact_old_identity","old_process_absent_picker_retained","stale_owner_no_nonempty_output",
+              "exact_new_identity","loss_preserves_all_tables_media","fresh_explicit_selection_and_consent",
+              "fresh_saved_independent_output_and_state"]
+          def loss_observe(receipt,output):
+              if not isinstance(receipt,dict):return False
+              if not (receipt.get("status")=="PASS" and receipt.get("labels")==LOSS_LABELS and
+                  receipt.get("injection")=="CI_APP_UID_SIGKILL_NOT_LMK" and
+                  type(receipt.get("stale_output_bytes")) is int and receipt["stale_output_bytes"]==0 and
+                  receipt.get("picker_package") in ("com.android.documentsui","com.google.android.documentsui") and
+                  receipt.get("fresh_output")==output and isinstance(output,dict) and bool(output)):return False
+              identities=[]
+              for key in ("old_identity","new_identity"):
+                  value=receipt.get(key)
+                  if not isinstance(value,dict):return False
+                  pid,uid=value.get("pid"),value.get("uid")
+                  if not (isinstance(pid,str) and re.fullmatch("[1-9][0-9]*",pid) and int(pid)>1 and
+                      isinstance(uid,str) and re.fullmatch("[1-9][0-9]*",uid) and
+                      value.get("status")=="PASS" and value.get("expected_package")=="com.supercubegame.pockettodo.v12.preview" and
+                      value.get("exact_argv0") is True and value.get("nul_only_tail") is True and
+                      value.get("uid_fields")==[[uid]*4]):return False
+                  identities.append(value)
+              if identities[0]["pid"]==identities[1]["pid"] or identities[0]["uid"]!=identities[1]["uid"]:return False
+              probes=receipt.get("absence_probes")
+              if not isinstance(probes,list) or not probes:return False
+              if probes[-1]!={"returncode":1,"stdout":""}:return False
+              return all(p=={"returncode":0,"stdout":identities[0]["pid"]} for p in probes[:-1])
+          def loss_sample(output):
+              identity={"status":"PASS","expected_package":"com.supercubegame.pockettodo.v12.preview",
+                  "uid":"10123","uid_fields":[["10123"]*4],"exact_argv0":True,"nul_only_tail":True}
+              return {"status":"PASS","labels":LOSS_LABELS[:],"injection":"CI_APP_UID_SIGKILL_NOT_LMK",
+                  "old_identity":dict(identity,pid="123"),"new_identity":dict(identity,pid="456"),
+                  "stale_output_bytes":0,"picker_package":"com.android.documentsui",
+                  "absence_probes":[{"returncode":1,"stdout":""}],"fresh_output":copy.deepcopy(output)}
+          def loss_controls():
+              output={"sha256":"a"*64};good=loss_sample(output)
+              assert loss_observe(good,output)
+              bad=[{},None,dict(good,status="FAIL"),dict(good,stale_output_bytes=1),
+                  dict(good,stale_output_bytes=False),dict(good,injection="LMK"),
+                  dict(good,absence_probes=[]),dict(good,absence_probes=[{"returncode":0,"stdout":"123"}]),
+                  dict(good,picker_package="fake.documentsui"),dict(good,fresh_output={})]
+              for i in range(len(LOSS_LABELS)):
+                  b=copy.deepcopy(good);del b["labels"][i];bad.append(b)
+              for key in ("old_identity","new_identity"):
+                  for field,value in (("pid","1"),("pid","123 456"),("uid","0"),("uid_fields",[]),
+                      ("status","FAIL"),("exact_argv0",False),("nul_only_tail",False),("expected_package","other")):
+                      b=copy.deepcopy(good);b[key][field]=value;bad.append(b)
+              b=copy.deepcopy(good);b["new_identity"]["pid"]="123";bad.append(b)
+              b=copy.deepcopy(good);b["new_identity"]["uid"]="10124";b["new_identity"]["uid_fields"]=[["10124"]*4];bad.append(b)
+              for b in bad:assert not loss_observe(b,output),"process-loss observer accepted false proof"
+              return len(bad)
+          loss_negative=loss_controls()
+          NATIVE_SCOPE="SYNTHETIC_NATIVE_IMAGE_MULTIPAGE_SAF_WITH_PROCESS_LOSS_NOT_RECEIVER"
+          NATIVE_REQUIRED=["fresh_ui_database","ui_created_exact_image_private_text_fixture","independent_pixel_observer_controls"]+[
+              step+"_"+kind for kind in ("PDF","PNG_ZIP") for step in (
+              "explicit_image_text_private_excluded","actual_multipage_preview","real_documentsui_saved",
+              "independent_image_pixels_and_page_set","all_tables_and_media_unchanged")]
+          def native_observe(value,api,source,run):
+              if not isinstance(value,dict):return False
+              if not (value.get("status")=="PASS" and value.get("commit")==source and value.get("run_id")==run and
+                  type(value.get("api")) is int and value["api"]==api and value.get("scope")==NATIVE_SCOPE and
+                  value.get("labels")==NATIVE_REQUIRED and type(value.get("checks")) is int and value["checks"]==13 and
+                  value.get("release_ready") is False):return False
+              outputs=value.get("outputs")
+              if not isinstance(outputs,dict) or set(outputs)!={"PDF","PNG_ZIP"}:return False
+              loss=value.get("process_loss")
+              if not isinstance(loss,dict) or set(loss)!={"PDF","PNG_ZIP"}:return False
+              for kind in ("PDF","PNG_ZIP"):
+                  out=outputs[kind]
+                  if not isinstance(out,dict) or not loss_observe(loss[kind],out):return False
+                  if not (type(out.get("pages")) is int and 3<=out["pages"]<=4 and
+                      type(out.get("bytes")) is int and 0<out["bytes"]<=16777216 and
+                      isinstance(out.get("sha256"),str) and re.fullmatch("[0-9a-f]{64}",out["sha256"]) and
+                      out.get("image")=="EXACT_96X96_GREEN_FIRST_PAGE_NO_OTHER_COLOR" and
+                      out.get("text") ==("EXACT_WHITESPACE_INSENSITIVE" if kind=="PDF" else "NOT_OCR_TESTED")):return False
+              return outputs["PDF"]["pages"]==outputs["PNG_ZIP"]["pages"]
+          def native_sample(api=26,source="s",run="r"):
+              good={"status":"PASS","commit":source,"run_id":run,"api":api,"scope":NATIVE_SCOPE,
+                  "labels":NATIVE_REQUIRED[:],"checks":13,"release_ready":False,"outputs":{},"process_loss":{}}
+              for kind in ("PDF","PNG_ZIP"):
+                  good["outputs"][kind]={"pages":3,"bytes":100,"sha256":"a"*64,
+                      "image":"EXACT_96X96_GREEN_FIRST_PAGE_NO_OTHER_COLOR",
+                      "text":"EXACT_WHITESPACE_INSENSITIVE" if kind=="PDF" else "NOT_OCR_TESTED"}
+                  good["process_loss"][kind]=loss_sample(good["outputs"][kind])
+              return good
+          def native_controls():
+              good=native_sample()
+              assert len(NATIVE_REQUIRED)==13 and native_observe(good,26,"s","r")
+              bad=[None,{},dict(good,commit="old"),dict(good,run_id="old"),dict(good,api=True),dict(good,status="FAIL"),
+                  dict(good,outputs={}),dict(good,release_ready=True),dict(good,scope="BACKEND_ONLY"),dict(good,process_loss={})]
+              for i in range(13):
+                  x=copy.deepcopy(good);del x["labels"][i];x["checks"]-=1;bad.append(x)
+              for kind in ("PDF","PNG_ZIP"):
+                  for key,val in (("pages",1),("pages",True),("bytes",0),("sha256","bad"),("image","NONBLANK"),("text","PASS")):
+                      x=copy.deepcopy(good);x["outputs"][kind][key]=val
+                      x["process_loss"][kind]["fresh_output"]=copy.deepcopy(x["outputs"][kind]);bad.append(x)
+                  for i in range(len(LOSS_LABELS)):
+                      x=copy.deepcopy(good);del x["process_loss"][kind]["labels"][i];bad.append(x)
+              x=copy.deepcopy(good);x["outputs"]["PNG_ZIP"]["pages"]=4
+              x["process_loss"]["PNG_ZIP"]["fresh_output"]=copy.deepcopy(x["outputs"]["PNG_ZIP"]);bad.append(x)
+              for x in bad:assert not native_observe(x,26,"s","r"),"native observer accepted missing or wrong evidence"
+              return len(bad)
+          native_negative=native_controls()
+          scope='PARALLEL_EXPORT_BACKEND_PREVIEW_AND_SYNTHETIC_NATIVE_MULTIPAGE_NOT_FULL_REGRESSION'
+          stages=['installed_exact_product','codec_and_actual_preview','synthetic_native_saved','receipt_verified']
+          def observe(value,api):
+            if not isinstance(value,dict):return False
+            codec=value.get('codec',{})
+            if not isinstance(codec,dict):return False
+            paged=codec.get('paged_exports',{})
+            if not isinstance(paged,dict):return False
+            preview=paged.get('preview_ui',{})
+            if not isinstance(preview,dict):return False
+            return (value.get('status')=='PASS' and value.get('scope')==scope and
+              value.get('commit')==source and value.get('run_id')==run and
+              type(value.get('api')) is int and value['api']==api and
+              value.get('stages')==stages and value.get('release_ready') is False and
+              value.get('durable_upgrade_ready') is False and
+              value.get('native_saf')=='SYNTHETIC_IMAGE_MULTIPAGE_ONLY' and
+              native_observe(value.get('native_image_pages'),api,source,run) and
+              type(value.get('elapsed_seconds')) in (int,float) and 0<value['elapsed_seconds']<2100 and
+              codec.get('status')=='PASS' and codec.get('commit')==source and
+              codec.get('run_id')==run and type(codec.get('api')) is int and codec['api']==api and
+              paged.get('status')=='PASS' and paged.get('commit')==source and paged.get('run_id')==run and
+              type(paged.get('api')) is int and paged['api']==api and
+              paged.get('labels')==PAGED_BACKEND_LABELS and type(paged.get('checks')) is int and paged['checks']==29 and
+              preview.get('labels')==PAGED_PREVIEW_LABELS and type(preview.get('checks')) is int and preview['checks']==22)
+          def matrix(values):
+            return isinstance(values,dict) and set(values)=={'26','34'} and all(observe(values[str(a)],a) for a in (26,34))
+          pair={}
+          for api in (26,34):
+            identity={'status':'PASS','commit':source,'run_id':run,'api':api}
+            pair[str(api)]=dict(identity,scope=scope,stages=stages[:],release_ready=False,
+              durable_upgrade_ready=False,native_saf='SYNTHETIC_IMAGE_MULTIPAGE_ONLY',elapsed_seconds=1,
+              native_image_pages=native_sample(api,source,run),
+              codec=dict(identity,paged_exports=dict(identity,checks=29,labels=PAGED_BACKEND_LABELS[:],
+                preview_ui={'checks':22,'labels':PAGED_PREVIEW_LABELS[:]})))
+          assert matrix(pair)
+          negative=0
+          def reject(value):
+            global negative
+            assert not matrix(value),'independent probe observer accepted incomplete evidence'
+            negative+=1
+          reject({});reject({'26':pair['26']});reject(dict(pair,extra={}))
+          for api in ('26','34'):
+            for key,value in [('status','FAIL'),('commit','old'),('run_id','old'),('api',True),('stages',stages[:-1]),
+                              ('release_ready',True),('native_saf','PASS'),('elapsed_seconds',0),('codec',None),('native_image_pages',None)]:
+              bad=copy.deepcopy(pair);bad[api][key]=value;reject(bad)
+            for preview in (False,True):
+              labels=PAGED_PREVIEW_LABELS if preview else PAGED_BACKEND_LABELS
+              for i in range(len(labels)):
+                bad=copy.deepcopy(pair);target=bad[api]['codec']['paged_exports']
+                if preview:target=target['preview_ui']
+                del target['labels'][i];target['checks']-=1;reject(bad)
+          devices={}
+          for api in (26,34):
+            path=Path('collected')/('export-probe-api-'+str(api))/'export-probe.json'
+            try:
+              assert path.stat().st_size<=2*1024*1024
+              devices[str(api)]=json.loads(path.read_bytes())
+            except (OSError,ValueError,AssertionError) as exc:
+              devices[str(api)]={'status':'NOT_VERIFIED','error':repr(exc)}
+          passed=matrix(devices)
+          doc={'commit':source,'run_id':run,'status':'PASS' if passed else 'NOT_VERIFIED',
+            'scope':scope,'devices':devices,'observer_controls':{'positive':1,'negative':negative,'native_positive':1,'native_negative':native_negative,'loss_positive':1,'loss_negative':loss_negative},
+            'release_ready':False,'durable_upgrade_ready':False}
+          data=(json.dumps(doc,ensure_ascii=False,indent=2)+'\n').encode()
+          endpoint='https://api.github.com/repos/'+os.environ['GITHUB_REPOSITORY']+'/'
+          def api(path,method='GET',body=None):
+            request=urllib.request.Request(endpoint+path,method=method,
+              data=None if body is None else json.dumps(body).encode(),
+              headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+            with urllib.request.urlopen(request,timeout=30) as response:return json.load(response)
+          path='reports/export-probe-'+source+'-'+run+'.json'
+          body={'message':'Record independent export probe, not full regression','branch':'evidence',
+            'content':base64.b64encode(data).decode()}
+          try:body['sha']=api('contents/'+path+'?ref=evidence')['sha']
+          except urllib.error.HTTPError as exc:
+            if exc.code!=404:raise
+          written=api('contents/'+path,'PUT',body)
+          from tools.verify_evidence import verify_readback
+          actual=verify_readback(api,path,written['commit']['sha'],data)
+          print('EXPORT_PROBE_EVIDENCE '+actual['html_url'],flush=True)
+          assert passed,'independent export probe missing or failed; full regression is also still required'
+          PY
+      - name: Publish and read back evidence
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: python3 tools/verify.py report
+      - name: Publish and require independently observed schema3 storage contracts
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/verify_schema3.py report
+      - name: Require actual guarded restore and SAF UI coverage
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          path=Path('collected/scope/ui-result.json')
+          assert path.exists(),'Guarded restore evidence missing, not a pass'
+          doc=json.loads(path.read_text())
+          assert doc.get('guarded_restore',{}).get('status')=='PASS','Guarded restore checks missing or failed; read published evidence'
+          assert doc.get('saf_restore_ui')=='PASS','SAF restore preview and explicit confirmation missing or failed; read native evidence'
+          assert json.loads(Path('collected/scope/codec-result.json').read_text()).get('status')=='PASS','Android codec coverage missing or failed'
+          assert json.loads(Path('collected/scope/legacy-schema2-result.json').read_text()).get('status')=='PASS','Frozen schema2 compatibility missing or failed; read legacy evidence'
+          PY
+      - name: Require independent retained-data upgrade before preview delivery
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 tools/verify_upgrade.py report
+      - name: Require both current-source devices before preview delivery
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+          needs=json.loads(os.environ['NEEDS_JSON'])
+          assert all(needs[name]['result']=='success' for name in ('core','database','export_probe','export_feedback'))
+          legacy=json.loads(Path('collected/scope/legacy-schema2-result.json').read_text())
+          assert legacy['status']=='PASS' and legacy['commit']==os.environ['GITHUB_SHA'] and legacy['run_id']==os.environ['GITHUB_RUN_ID']
+          report=json.loads(Path('collected/scope/ui-result.json').read_text())
+          assert report['status']=='PASS' and report['release_ready'] is False
+          for api in ('26','34'):
+            n=report['native'][api];d=report['devices'][api]['result']
+            assert n['status']=='PASS' and n['count']==len(n['checks']) and n['count']>=164
+            assert d['status']=='PASS' and d['checks']=={'seed':155,'reopen':25}
+          folder=Path('collected/internal-preview-candidate')
+          meta=json.loads((folder/'preview.json').read_text())
+          assert meta['commit']==os.environ['GITHUB_SHA'] and meta['run_id']==os.environ['GITHUB_RUN_ID']
+          assert meta['release_ready'] is False and meta['durable_upgrade_ready'] is False
+          assert {p.name for p in folder.iterdir()}=={meta['apk'],'preview.json','SHA256SUMS.txt','signature.txt','package.txt','README.txt'}
+          data=(folder/meta['apk']).read_bytes()
+          assert len(data)==meta['bytes'] and hashlib.sha256(data).hexdigest()==meta['sha256']
+          print('PREVIEW_DELIVERY_GATE_PASS; complete V1.2 remains blocked')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: preview
+        with:
+          name: PocketTodo-v1.2-preview-${{ github.sha }}
+          path: collected/internal-preview-candidate/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Download preview archive and prove exact bytes before publishing receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.preview.outputs.artifact-id }}
+          ARTIFACT_URL: ${{ steps.preview.outputs.artifact-url }}
+          ARTIFACT_DIGEST: ${{ steps.preview.outputs.artifact-digest }}
+        run: |
+          python3 - <<'PY'
+          import base64,hashlib,io,json,os,urllib.request,urllib.error,urllib.parse,zipfile
+          from pathlib import Path
+          repo=os.environ['GITHUB_REPOSITORY']
+          endpoint='https://api.github.com/repos/'+repo+'/'
+          headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'}
+          def api(path,method='GET',body=None):
+            req=urllib.request.Request(endpoint+path,data=None if body is None else json.dumps(body).encode(),headers=headers,method=method)
+            with urllib.request.urlopen(req,timeout=30) as r:return json.load(r)
+          artifact=api('actions/artifacts/'+os.environ['ARTIFACT_ID'])
+          assert not artifact['expired'] and str(artifact['workflow_run']['id'])==os.environ['GITHUB_RUN_ID']
+          assert artifact['workflow_run']['head_sha']==os.environ['GITHUB_SHA']
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self,req,fp,code,msg,h,newurl):return None
+          opener=urllib.request.build_opener(NoRedirect)
+          try:
+            opener.open(urllib.request.Request(endpoint+'actions/artifacts/'+os.environ['ARTIFACT_ID']+'/zip',headers=headers),timeout=30)
+            raise AssertionError('Expected signed archive redirect')
+          except urllib.error.HTTPError as exc:
+            assert exc.code==302
+            location=exc.headers['Location']
+          assert urllib.parse.urlparse(location).scheme=='https'
+          # Signed storage download is a new request: NEVER forward the GitHub token.
+          with urllib.request.urlopen(location,timeout=60) as response:
+            archive=response.read(artifact['size_in_bytes']+1)
+          archive_hash=hashlib.sha256(archive).hexdigest()
+          assert archive_hash==os.environ['ARTIFACT_DIGEST']
+          assert artifact['digest']=='sha256:'+archive_hash
+          folder=Path('collected/internal-preview-candidate')
+          with zipfile.ZipFile(io.BytesIO(archive)) as z:
+            expected={p.name:p.read_bytes() for p in folder.iterdir()}
+            assert len(z.namelist())==len(expected) and set(z.namelist())==set(expected)
+            for name,data in expected.items():assert z.read(name)==data,'download differs: '+name
+          meta=json.loads((folder/'preview.json').read_text())
+          meta.update(status='PASS',scope='TESTED_STAGE_PREVIEW_NOT_FULL_V12',artifact_id=artifact['id'],download_url=os.environ['ARTIFACT_URL'],expires_at=artifact['expires_at'],archive_sha256=archive_hash,download_readback='EXACT_ALL_FILES_PASS',github_login_required=True)
+          data=(json.dumps(meta,ensure_ascii=False,indent=2)+'\n').encode()
+          path='reports/preview-'+os.environ['GITHUB_SHA']+'-'+os.environ['GITHUB_RUN_ID']+'.json'
+          written=api('contents/'+path,'PUT',{'message':'Record verified staged APK download','branch':'evidence','content':base64.b64encode(data).decode()})
+          from tools.verify_evidence import verify_readback
+          actual=verify_readback(api,path,written['commit']['sha'],data)
+          print('PREVIEW_DOWNLOAD '+os.environ['ARTIFACT_URL'])
+          print('PREVIEW_RECEIPT '+actual['html_url'])
+          PY

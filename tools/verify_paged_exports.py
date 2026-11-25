@@ -300,6 +300,24 @@ public final class PagedContractTest {
    }
   }
  }
+ // Post-failure only: a bounded census of system-owned nodes, never a recipient picker.
+ static String receiverSurface(AccessibilityNodeInfo top,long endNanos){
+  if(top==null||!ChooserChoice.system(ChooserChoice.s(top.getPackageName())))return "surface=unavailable";
+  String owner=ChooserChoice.s(top.getPackageName());int win=top.getWindowId(),visited=0,text=0,desc=0,hidden=0,scrollable=0,expand=0;
+  boolean complete=true;ArrayDeque<AccessibilityNodeInfo> q=new ArrayDeque<>();q.add(top);
+  try{while(!q.isEmpty()){
+   if(System.nanoTime()>=endNanos){complete=false;break;}
+   AccessibilityNodeInfo n=q.remove();try{
+    if(!ChooserChoice.sameWindow(n,owner,win)){complete=false;continue;}visited++;
+    boolean t=ChooserChoice.LABEL.contentEquals(ChooserChoice.s(n.getText())),d=ChooserChoice.LABEL.contentEquals(ChooserChoice.s(n.getContentDescription()));
+    if(n.isVisibleToUser()){if(t)text++;if(d)desc++;if(n.isScrollable())scrollable++;if((n.getActions()&AccessibilityNodeInfo.ACTION_EXPAND)!=0)expand++;}
+    else if(t||d)hidden++;
+    int count=n.getChildCount(),room=128-visited-q.size();if(count>room)complete=false;
+    for(int i=0;i<Math.min(count,room);i++){if(System.nanoTime()>=endNanos){complete=false;break;}AccessibilityNodeInfo c=n.getChild(i);if(c==null)complete=false;else q.add(c);}
+   }finally{if(n!=top)n.recycle();}
+  }}catch(RuntimeException e){return "surface=unavailable";}finally{while(!q.isEmpty()){AccessibilityNodeInfo n=q.remove();if(n!=top)n.recycle();}}
+  return "surface=observed complete="+complete+" nodes="+visited+" visible_exact_text="+text+" visible_exact_description="+desc+" hidden_exact="+hidden+" visible_scrollable="+scrollable+" visible_expand_action="+expand;
+ }
  static void receiverUi(android.app.Instrumentation inst,File root,String filename,String nonce)throws Exception{
   if(!nonce.matches("[0-9a-f]{32}")||!Arrays.asList("paged.pdf","picture.zip","paged.zip").contains(filename))throw new AssertionError("fixture identity");
   boolean pdf=filename.endsWith(".pdf");Class<?> cl=Class.forName("com.supercubegame.pockettodo.MainActivity");
@@ -329,7 +347,10 @@ public final class PagedContractTest {
     if(picked)System.out.println("CHOOSER_TILE_CLICK "+nonce+" "+c.key+" samples="+choice.samples);
     else android.os.SystemClock.sleep(200);
    }
-   if(!picked)throw new AssertionError("no stable isolated CI receiver tile; case="+filename+" reason="+last+" observations="+choice.samples+" final_tree="+ChooserChoice.shape(inst.getUiAutomation().getRootInActiveWindow()));File ack=new File(root,"ack-"+nonce);long endAck=android.os.SystemClock.elapsedRealtime()+35000;while(!ack.exists()&&android.os.SystemClock.elapsedRealtime()<endAck)android.os.SystemClock.sleep(150);
+   if(!picked){AccessibilityNodeInfo top=inst.getUiAutomation().getRootInActiveWindow();String original=ChooserChoice.shape(top);String evidence="";
+    try{if(android.os.Build.VERSION.SDK_INT==34&&"paged.pdf".equals(filename)&&"no_exact_visible_label".equals(last))evidence=" "+receiverSurface(top,System.nanoTime()+250000000L);}catch(RuntimeException ignored){}finally{if(top!=null)top.recycle();}
+    throw new AssertionError("no stable isolated CI receiver tile; case="+filename+" reason="+last+" observations="+choice.samples+" final_tree="+original+evidence);
+   }File ack=new File(root,"ack-"+nonce);long endAck=android.os.SystemClock.elapsedRealtime()+35000;while(!ack.exists()&&android.os.SystemClock.elapsedRealtime()<endAck)android.os.SystemClock.sleep(150);
    if(!ack.exists()){
     android.view.accessibility.AccessibilityNodeInfo top=inst.getUiAutomation().getRootInActiveWindow();String owner=top==null?"none":String.valueOf(top.getPackageName());
     throw new AssertionError("ack absent after receiver choice: "+filename+" owner="+owner);
@@ -828,7 +849,7 @@ package android.view.accessibility;
 import android.graphics.Rect;
 import java.util.*;
 public class AccessibilityNodeInfo {
- public static final int ACTION_CLICK=16; public static final String SYSTEM="com.google.android.intentresolver";
+ public static final int ACTION_CLICK=16,ACTION_EXPAND=262144; public int actions; public int getActions(){return actions;} public void recycle(){} public static final String SYSTEM="com.google.android.intentresolver";
  public String name="", alt="", pkg=SYSTEM, cls="android.view.View", id="", result=""; public int window=7,calls; public boolean clickable,visible=true,enabled=true,scroll,collection,accept=true; public Rect b=new Rect(10,10,60,60);
  public AccessibilityNodeInfo parent; public final List<AccessibilityNodeInfo> children=new ArrayList<>();
  public AccessibilityNodeInfo(String t,boolean click){name=t;clickable=click;}
@@ -903,6 +924,65 @@ def chooser_tile_selftest():
         assert segment.count('performAction(AccessibilityNodeInfo.ACTION_CLICK)')==1
     print('CHOOSER_TILE_HOST 28 actual selector scenarios, 4 witnessed mutants; synthetic accessibility nodes, NOT_DEVICE_ACCEPTANCE',flush=True)
 
+def failure_evidence_selftest():
+    # The very same selector still refuses a missing/description-only/unrevealed label.
+    import contextlib,io
+    from unittest.mock import patch
+    j=JAVA[JAVA.index(' static final class ChooserChoice {'):JAVA.index(' static void receiverUi(')]
+    app='com.supercubegame.pockettodo.v12.preview';recv='com.supercubegame.pockettodo.exportprobe';pre=['adb','-s','emulator-5554'];launch=app+'/com.supercubegame.pockettodo.MainActivity';tile=recv+'/.ReceiverActivity';none='No activities found'
+    modes='none desc text both hidden scroll expand private partial oldwin cap deadline foreign null'.split()
+    main=r''' public static void main(String[] args){for(String m:args){Tree t=new Tree();t.root.pkg=t.row.pkg=t.label.pkg="com.android.intentresolver";t.label.name="";
+      if(m.equals("desc")||m.equals("both"))t.row.alt=ChooserChoice.LABEL;if(m.equals("text")||m.equals("both"))t.label.name=ChooserChoice.LABEL;
+      if(m.equals("hidden")){t.label.visible=false;t.label.alt=ChooserChoice.LABEL;}if(m.equals("scroll"))t.root.scroll=true;if(m.equals("expand"))t.root.actions=AccessibilityNodeInfo.ACTION_EXPAND;
+      if(m.equals("private"))t.row.alt="PRIVATE_FIXTURE";if(m.equals("partial"))t.row.children.add(null);if(m.equals("oldwin")){t.label.window++;t.label.alt=ChooserChoice.LABEL;}
+      if(m.equals("foreign"))t.root.pkg="OTHER_FIXTURE";if(m.equals("cap"))for(int i=0;i<133;i++){AccessibilityNodeInfo n=n(i==132?ChooserChoice.LABEL:"",false);n.pkg=t.root.pkg;t.root.add(n);}
+      String x=receiverSurface(m.equals("null")?null:t.root,System.nanoTime()+(m.equals("deadline")?-1:1000000000L));
+      ok(t.row.calls+t.label.calls+t.root.calls==0&&!x.contains("PRIVATE_FIXTURE")&&!x.contains("OTHER_FIXTURE")&&!x.contains(ChooserChoice.LABEL));
+      if(m.equals("foreign")||m.equals("null"))ok(x.equals("surface=unavailable"));else{
+       boolean incomplete=Arrays.asList("partial","oldwin","cap","deadline").contains(m);ok(x.contains("complete="+(!incomplete)+" "));
+       ok(x.contains(" visible_exact_text="+((m.equals("text")||m.equals("both"))?1:0)+" "));ok(x.contains(" visible_exact_description="+((m.equals("desc")||m.equals("both"))?1:0)+" "));
+       ok(x.contains(" hidden_exact="+(m.equals("hidden")?1:0)+" "));ok(x.contains(" visible_scrollable="+(m.equals("scroll")?1:0)+" "));ok(x.endsWith(" visible_expand_action="+(m.equals("expand")?1:0)));
+       if(m.equals("cap"))ok(x.contains(" nodes=128 "));if(m.equals("deadline"))ok(x.contains(" nodes=0 "));
+       if(m.equals("desc")||m.equals("none")||m.equals("scroll")){ChooserChoice c=ChooserChoice.sample(t.root);ok(c.row==null&&c.reason.equals("no_exact_visible_label"));}}
+      System.out.println("SURFACE "+m+" PASS");}}}'''
+    with tempfile.TemporaryDirectory() as folder:
+        root=Path(folder);files=[]
+        for name,t in CHOOSER_FIXTURES.items():
+            if name.endswith('.java'):
+                f=root/name;f.parent.mkdir(parents=True,exist_ok=True);f.write_text(t);files.append(str(f))
+        def trial(segment,ms):
+            t=CHOOSER_FIXTURES['Harness.template'].split(' public static void main(String[] args)',1)[0].replace('@@HELPER@@',segment)+main
+            f=root/'ChoiceHarness.java';f.write_text(t);cmd=['javac'] if shutil.which('javac') else ['java','-m','jdk.compiler/com.sun.tools.javac.Main'];subprocess.run([*cmd,'-d',folder,*files,str(f)],check=True,timeout=30)
+            return subprocess.run(['java','-cp',folder,'ChoiceHarness',*ms],capture_output=True,text=True,timeout=15)
+        run=trial(j,modes);assert run.returncode==0 and run.stdout.splitlines()==['SURFACE '+k+' PASS' for k in modes],(run.stdout,run.stderr)
+        for a,b,k in [('if(d)desc++;','if(false)desc++;','desc'),('if(!ChooserChoice.sameWindow(n,owner,win)){complete=false;continue;}','if(false){complete=false;continue;}','oldwin'),('if(count>room)complete=false;','if(false)complete=false;','cap')]:
+            assert j.count(a)==1;bad=trial(j.replace(a,b,1),['none',k]);assert bad.returncode!=0 and bad.stdout.splitlines()==['SURFACE none PASS'] and 'CHOOSER_CONTRACT' in bad.stderr
+    tables=[(launch,none,tile,'matched'),(launch,none,recv+'/'+recv+'.ReceiverActivity','matched'),(launch,none,none,'not_listed'),(none,none,none,'unknown'),(launch,tile,tile,'unknown'),(launch,none,'','unknown'),(launch,none,tile+'\n'+tile,'unknown'),(launch,none,'FOREIGN_FIXTURE/private','unknown'),(launch,none,'NONZERO','unknown'),(launch,none,'STDERR','unknown'),(launch,none,'TIMEOUT','unknown'),(launch,none,'TOO_LONG','unknown')]
+    with patch.dict(os.environ,{'GITHUB_ACTIONS':'true'}):
+        for pos,neg,target,expect in tables:
+            answers=iter([pos,neg,target]);calls=[]
+            def execute(cmd,**kw):
+                calls.append(cmd);assert cmd[:10]==pre+['shell','cmd','package','query-activities','--components','--user','current'] and kw=={'capture_output':True,'timeout':2,'check':False}
+                assert cmd[cmd.index('-p')+1] in (app,recv) and cmd.count('-p')==1;v=next(answers)
+                if v=='TIMEOUT':raise subprocess.TimeoutExpired(cmd,2)
+                return subprocess.CompletedProcess(cmd,int(v=='NONZERO'),(v if v!='TOO_LONG' else 'x'*513).encode(),b'unrelated' if v=='STDERR' else b'')
+            evidence=pdf_route_after_miss(pre,34,app,recv,execute);assert len(calls)==3 and evidence['pdf_match']==expect and 'FOREIGN_FIXTURE' not in str(evidence)
+            assert calls[0][10:]==['-a','android.intent.action.MAIN','-c','android.intent.category.LAUNCHER','-p',app] and calls[1][10:]==['-a','android.intent.action.SEND','-c','android.intent.category.DEFAULT','-p',recv,'-t','application/x-pocket-ci-no-receiver'] and calls[2]==calls[1][:-1]+['application/pdf']
+        def never(*a,**kw):raise AssertionError('off-scope diagnostic')
+        for args in [(pre,26,app,recv),(pre[:-1]+['physical-device'],34,app,recv),(pre,34,'other',recv),(pre,34,app,'other')]:assert pdf_route_after_miss(*args,never)=={'scope':'not_applicable'}
+        with patch.dict(os.environ,{'GITHUB_ACTIONS':'false'}):assert pdf_route_after_miss(pre,34,app,recv,never)=={'scope':'not_applicable'}
+    failure='java.lang.AssertionError: no stable isolated CI receiver tile; case=paged.pdf reason=no_exact_visible_label observations=97';markers=[]
+    def record(*a):markers.append(a);return {'scope':'synthetic_control'}
+    def unavailable(*a):raise OSError('PRIVATE_FIXTURE')
+    with contextlib.redirect_stdout(io.StringIO()) as buffer:
+        for s,k,a in [('SEND_PROBE', 'paged.pdf',34),(failure,'paged.zip',34),(failure,'paged.pdf',26),(failure.replace('no_exact_visible_label','shared_action'),'paged.pdf',34),(failure,'paged.pdf',34)]:note_pdf_miss(s,k,pre,a,app,recv,record)
+        note_pdf_miss(failure,'paged.pdf',pre,34,app,recv,unavailable)
+    assert len(markers)==1 and len(buffer.getvalue().splitlines())==2 and '"unavailable"' in buffer.getvalue() and 'PRIVATE_FIXTURE' not in buffer.getvalue()
+    from inspect import getsource
+    body=getsource(test_receiver_cases);tail=body.split('finally:',1)[1];assert tail.count('note_pdf_miss(output,filename,prefix,gate.API,gate.PKG,pkg)')==1 and body.count('note_pdf_miss(')==1 and tail.index("print('RECEIVER_INSTRUMENTATION'")<tail.index('note_pdf_miss(')
+    use=JAVA.split(' static void receiverUi(',1)[1].split(' public static void verify(',1)[0];assert use.count('receiverSurface(')==1 and 'if(!picked)' in use and use.index('if(!picked)')<use.index('receiverSurface(')<use.index('File ack=') and '"no_exact_visible_label".equals(last)' in use
+    print('AFTER_MISS_HOST %d surface cases / 3 mutants; %d route cases / 5 scope exclusions; success bypass and diagnostic-failure controls; NO_DEVICE_NO_CLICK'%(len(modes),len(tables)),flush=True)
+
 def consent_checkbox(nodes,kind,package):
     if kind not in ("MARKDOWN","PDF","PNG_ZIP"):raise ValueError("unknown preview format")
     expected="我已核对内容与图片，可保存此包" if kind=="MARKDOWN" else "我已核对预览，接下来由我选择保存或发送"
@@ -958,6 +1038,33 @@ def receiver_ack_selftest():
         else:raise AssertionError('bad ack name allowed')
     print('RECEIVER_ACK_HOST atomic publication, first-write failure and 4 path controls; NOT_DEVICE_ACCEPTANCE',flush=True)
 
+def pdf_route_after_miss(prefix,api,product,receiver,runner=subprocess.run):
+    """System package-matcher observation after a failed synthetic PDF send. Never start an activity."""
+    if (api!=34 or product!='com.supercubegame.pockettodo.v12.preview' or receiver!='com.supercubegame.pockettodo.exportprobe' or
+        len(prefix)!=3 or list(map(str,prefix[1:]))!=['-s','emulator-5554'] or os.environ.get('GITHUB_ACTIONS')!='true'):
+        return {'scope':'not_applicable'}
+    def query(package,activity,action,cat,mime):
+        args=[*map(str,prefix),'shell','cmd','package','query-activities','--components','--user','current','-a','android.intent.action.'+action,'-c','android.intent.category.'+cat,'-p',package]
+        if mime:args+=['-t',mime]
+        try:p=runner(args,capture_output=True,timeout=2,check=False)
+        except (subprocess.TimeoutExpired,OSError):return 'unknown'
+        if p.returncode or p.stderr.strip() or len(p.stdout)>512:return 'unknown'
+        lines=p.stdout.strip().splitlines()
+        if lines==[b'No activities found']:return 'not_listed'
+        full=(package+'/'+activity).encode();short=(package+'/.'+activity[len(package)+1:]).encode() if activity.startswith(package+'.') else full
+        return 'matched' if lines in ([short],[full]) else 'unknown'
+    activity=receiver+'.ReceiverActivity';pos=query(product,'com.supercubegame.pockettodo.MainActivity','MAIN','LAUNCHER',None)
+    neg=query(receiver,activity,'SEND','DEFAULT','application/x-pocket-ci-no-receiver');pdf=query(receiver,activity,'SEND','DEFAULT','application/pdf')
+    return {'scope':'emulator_system_query_after_failure_not_actual_chooser','launcher_control':pos,'unsupported_mime_control':neg,
+            'pdf_match':pdf if (pos,neg)==('matched','not_listed') else 'unknown'}
+
+def note_pdf_miss(output,filename,prefix,api,product,receiver,probe=pdf_route_after_miss):
+    if (filename!='paged.pdf' or api!=34 or not re.search(r'^java\.lang\.AssertionError: no stable isolated CI receiver tile; case=paged\.pdf reason=no_exact_visible_label ',output,re.M)):
+        return
+    try:r=probe(prefix,api,product,receiver)
+    except Exception:r={'scope':'unavailable'}  # Keep the original exception, never substitute diagnostic success.
+    print('RECEIVER_ROUTE_AFTER_MISS '+json.dumps(r,sort_keys=True),flush=True)
+
 def test_receiver_cases(folder,prefix,gate,work,root,args,component,cache):
     """Only the generated receiver on a disposable emulator. No user media, implicit recipient or phone."""
     import secrets,time,io
@@ -1007,7 +1114,8 @@ def test_receiver_cases(folder,prefix,gate,work,root,args,component,cache):
                 receipts.append(dict(r,sender_uid=sender_uid,receiver_uid=receiver_uid))
             finally:
                 if proc.poll() is None:proc.kill();proc.wait()
-                out.seek(0);print('RECEIVER_INSTRUMENTATION',filename,out.read()[-4000:].decode(errors='replace'),flush=True)
+                out.seek(0);output=out.read()[-4000:].decode(errors='replace');print('RECEIVER_INSTRUMENTATION',filename,output,flush=True)
+                note_pdf_miss(output,filename,prefix,gate.API,gate.PKG,pkg)
     return receipts
 
 
@@ -1277,6 +1385,7 @@ def share_png_fixture_selftest():
 def selftest():
     consent_copy_selftest()
     chooser_tile_selftest()
+    failure_evidence_selftest()
     receiver_ack_selftest()
     print("PAGED_SHARE_FIXTURE_HOST", share_png_fixture_selftest(), flush=True)
     paged_readiness_selftest()

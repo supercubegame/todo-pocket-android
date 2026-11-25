@@ -370,6 +370,9 @@ def select_restore_file(read_nodes, tap_node, label, records, clock=None, pause=
     packages = {"com.android.documentsui", "com.google.android.documentsui"}
     deadline = clock() + 20
     switched = False
+    first_layout = None
+    stable = 0
+    reconfirmed = False
     def valid(n, package=None):
         assert n.get("package") in packages, "foreign picker control"
         if package is not None:
@@ -400,14 +403,32 @@ def select_restore_file(read_nodes, tap_node, label, records, clock=None, pause=
                                              for n in matches]})
         assert len(controls) <= 1, "ambiguous picker view controls"
         assert len(files) <= 1, "ambiguous restore filename"
+        # Only this version's explicit layout button can be requested again.
+        key = None
+        if len(controls) == len(files) == 1:
+            c, f = controls[0], files[0]
+            pkg = 'com.google.android.documentsui'
+            if (c.get('package') == f.get('package') == pkg and
+                    c.get('resource-id') == pkg + ':id/sub_menu_list' and
+                    c.get('content-desc') == 'List view' and c.get('class') == 'android.widget.Button' and
+                    c.get('clickable') == 'true' and f.get('resource-id') == 'android:id/title'):
+                valid(c); valid(f, pkg)
+                key = (c.get('bounds'), f.get('bounds'), f.get('text'))
+        stable = stable + 1 if key is not None and key == first_layout else 0
         if controls:
             control = controls[0]
             valid(control)
             if control.get("content-desc") == "List view":
                 if not switched:
                     switched = True
+                    first_layout = key
                     tap_node(control)
                     records.append({"stage": "LIST_VIEW_REQUESTED"})
+                elif stable >= 2 and not reconfirmed:
+                    assert key is not None and clock() < deadline, 'layout confirmation expired'
+                    reconfirmed = True
+                    records.append({'stage':'SAME_GRID_RECONFIRMED','bounds':key[:2]})
+                    tap_node(control)
                 # Never reuse grid coordinates even if the filename was visible.
             elif files:
                 file = files[0]
@@ -554,7 +575,21 @@ def restore_picker_selftest():
         else:
             raise AssertionError("tap error swallowed")
         assert m.taps == ["pocket-todo-backup.zip"]
-        return 6, 20
+        # Model the API34 trace: a persistent grid is not proof the first tap was lost.
+        c=dict(GRID, **{'resource-id':PKG+':id/sub_menu_list','class':'android.widget.Button','clickable':'true','bounds':'[248,174][296,222]'})
+        f=dict(FILE,bounds='[74,372][144,391]'); g=[c,f]
+        for frames, expected, succeeds in (([g,g,g,[LIST,FILE]], ['List view']*2+[FILE['text']], True),
+                ([g,[LIST,FILE]], ['List view', FILE['text']], True),
+                ([g], ['List view']*2, False),
+                ([g,[dict(c,bounds='[24,17][29,22]'),f]], ['List view'], False),
+                ([[dict(c,clickable='false'),f]], ['List view'], False),
+                ([g,[c]], ['List view'], False)):
+            m=Model(frames)
+            try:result=m.run(function)
+            except TimeoutError:assert not succeeds
+            else:assert succeeds and result==FILE
+            assert m.taps==expected
+        return 8, 24
 
 
     print('RESTORE_PICKER_HOST', exercise(select_restore_file), 'PASS; NOT_ANDROID')

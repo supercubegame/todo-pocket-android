@@ -318,6 +318,54 @@ public final class PagedContractTest {
   }}catch(RuntimeException e){return "surface=unavailable";}finally{while(!q.isEmpty()){AccessibilityNodeInfo n=q.remove();if(n!=top)n.recycle();}}
   return "surface=observed complete="+complete+" nodes="+visited+" visible_exact_text="+text+" visible_exact_description="+desc+" hidden_exact="+hidden+" visible_scrollable="+scrollable+" visible_expand_action="+expand;
  }
+ // Fixture navigation only. An EXPAND is never a recipient choice, byte receipt or acknowledgement.
+ static final class DrawerReveal {
+  static final String OWNER="com.android.intentresolver", PANEL="android:id/contentPanel", TYPE="android.widget.ScrollView";
+  static boolean fixtureScope(int api,String product,String hardware,String file){return api==34&&"com.supercubegame.pockettodo.v12.preview".equals(product)&&"ranchu".equals(hardware)&&"paged.pdf".equals(file);}
+  static final class NodeAt {
+   final AccessibilityNodeInfo n;final String path;NodeAt(AccessibilityNodeInfo node,String p){n=node;path=p;}
+  }
+  AccessibilityNodeInfo previousDrawer,previousLabel;String previousKey="",status="not_observed";long since;boolean used;
+  void clear(){if(previousDrawer!=null)previousDrawer.recycle();if(previousLabel!=null)previousLabel.recycle();previousDrawer=previousLabel=null;previousKey="";}
+  void reject(String why){clear();status=why;}
+  boolean eligible(int api,String file,String miss){return !used && api==34 && "paged.pdf".equals(file) && "no_exact_visible_label".equals(miss);}
+  void consider(int api,String file,String miss,AccessibilityNodeInfo top,java.util.function.LongSupplier clock,long end){
+   if(!eligible(api,file,miss)){clear();return;}
+   long start=clock.getAsLong(),scanEnd=Math.min(end,start+120);
+   if(start>=end||top==null||!OWNER.contentEquals(ChooserChoice.s(top.getPackageName()))||top.getWindowId()<0){reject("wrong_window_or_deadline");return;}
+   int win=top.getWindowId(),expandCount=0,hiddenCount=0;NodeAt drawer=null,hidden=null;
+   ArrayList<NodeAt> nodes=new ArrayList<>();nodes.add(new NodeAt(top,"r"));
+   try{
+    for(int i=0;i<nodes.size();i++){
+     NodeAt v=nodes.get(i);AccessibilityNodeInfo n=v.n;
+     if(clock.getAsLong()>=scanEnd||!ChooserChoice.sameWindow(n,OWNER,win)){reject("incomplete_window");return;}
+     boolean visible=n.isVisibleToUser(),exact=ChooserChoice.LABEL.equals(ChooserChoice.s(n.getText()))||ChooserChoice.LABEL.equals(ChooserChoice.s(n.getContentDescription()));
+     if(exact){if(visible){reject("already_visible");return;}hiddenCount++;hidden=v;}
+     if(visible&&(n.getActions()&AccessibilityNodeInfo.ACTION_EXPAND)!=0){
+      expandCount++;
+      if(n.isEnabled()&&n.isScrollable()&&TYPE.equals(ChooserChoice.s(n.getClassName()))&&PANEL.equals(n.getViewIdResourceName()))drawer=v;
+     }
+     int count=n.getChildCount();if(count>128-nodes.size()){reject("incomplete_window");return;}
+     for(int k=0;k<count;k++){
+      if(clock.getAsLong()>=scanEnd){reject("incomplete_window");return;}
+      AccessibilityNodeInfo child=n.getChild(k);if(child==null){reject("incomplete_window");return;}nodes.add(new NodeAt(child,v.path+"/"+k));
+     }
+    }
+    if(expandCount!=1||drawer==null||hiddenCount!=1||!hidden.path.startsWith(drawer.path+"/")){reject("not_unique_drawer_and_hidden_descendant");return;}
+    Rect bounds=ChooserChoice.box(drawer.n);if(bounds.isEmpty()||!ChooserChoice.box(top).contains(bounds)){reject("invalid_drawer_bounds");return;}
+    long at=clock.getAsLong();if(at>=scanEnd){reject("scan_deadline");return;}
+    String key=win+":"+drawer.path+":"+hidden.path+":"+bounds.flattenToString();
+    if(!key.equals(previousKey)||!drawer.n.equals(previousDrawer)||!hidden.n.equals(previousLabel)){
+     clear();previousKey=key;previousDrawer=AccessibilityNodeInfo.obtain(drawer.n);previousLabel=AccessibilityNodeInfo.obtain(hidden.n);since=at;status="one_sample";return;
+    }
+    if(at-since<150){status="awaiting_stability";return;}
+    if(clock.getAsLong()>=end){reject("action_deadline");return;}
+    used=true;status=drawer.n.performAction(AccessibilityNodeInfo.ACTION_EXPAND)?"accepted":"refused";
+    System.out.println("CHOOSER_DRAWER_EXPAND case=paged.pdf one_shot=true result="+status);
+   }catch(RuntimeException e){reject(used?"action_error":"unavailable");}
+   finally{for(int i=1;i<nodes.size();i++)nodes.get(i).n.recycle();if(used)clear();}
+  }
+ }
  static void receiverUi(android.app.Instrumentation inst,File root,String filename,String nonce)throws Exception{
   if(!nonce.matches("[0-9a-f]{32}")||!Arrays.asList("paged.pdf","picture.zip","paged.zip").contains(filename))throw new AssertionError("fixture identity");
   boolean pdf=filename.endsWith(".pdf");Class<?> cl=Class.forName("com.supercubegame.pockettodo.MainActivity");
@@ -340,13 +388,21 @@ public final class PagedContractTest {
     }
    }finally{inst.removeMonitor(guard);}
    onUi(inst,()->{preview.invoke(a,new byte[][]{current,bytes},pdf?1:2);List<?> ds=(List<?>)field(a,"shareDialogs");if(ds.size()!=1)throw new AssertionError("one preview");android.app.AlertDialog d=(android.app.AlertDialog)ds.get(0);android.view.View decor=d.getWindow().getDecorView();List<android.widget.CheckBox> boxes=new ArrayList<>();collect(decor,new ArrayList<>(),boxes);android.widget.Button send=findSend(decor,pdf?"发送 PDF":"按页发送图片");if(boxes.size()!=1||boxes.get(0).isChecked()||send==null)throw new AssertionError("initial send controls");send.performClick();if(!d.isShowing())throw new AssertionError("unchecked send");boxes.get(0).setChecked(true);send.performClick();});
-   long end=android.os.SystemClock.elapsedRealtime()+20000;boolean picked=false;ChooserChoice.Gate choice=new ChooserChoice.Gate();String last="not_observed";
-   while(android.os.SystemClock.elapsedRealtime()<end&&!picked){
+   final boolean canReveal=DrawerReveal.fixtureScope(android.os.Build.VERSION.SDK_INT,inst.getTargetContext().getPackageName(),android.os.Build.HARDWARE,filename);
+   long end=android.os.SystemClock.elapsedRealtime()+20000;boolean picked=false;ChooserChoice.Gate choice=new ChooserChoice.Gate();String last="not_observed";DrawerReveal reveal=new DrawerReveal();
+   try{while(android.os.SystemClock.elapsedRealtime()<end&&!picked){
     ChooserChoice c=ChooserChoice.sample(inst.getUiAutomation().getRootInActiveWindow());last=c.reason;
     picked=choice.act(c,android.os.SystemClock.elapsedRealtime(),end);
     if(picked)System.out.println("CHOOSER_TILE_CLICK "+nonce+" "+c.key+" samples="+choice.samples);
-    else android.os.SystemClock.sleep(200);
-   }
+    else{
+     if(canReveal&&reveal.eligible(android.os.Build.VERSION.SDK_INT,filename,last)){
+      AccessibilityNodeInfo top=inst.getUiAutomation().getRootInActiveWindow();
+      try{reveal.consider(android.os.Build.VERSION.SDK_INT,filename,last,top,android.os.SystemClock::elapsedRealtime,end);}finally{if(top!=null)top.recycle();}
+     }else reveal.clear();
+     android.os.SystemClock.sleep(200);
+    }
+   }}finally{reveal.clear();}
+   if(android.os.Build.VERSION.SDK_INT==34&&"paged.pdf".equals(filename))System.out.println("CHOOSER_DRAWER_STATUS used="+reveal.used+" state="+reveal.status);
    if(!picked){AccessibilityNodeInfo top=inst.getUiAutomation().getRootInActiveWindow();String original=ChooserChoice.shape(top);String evidence="";
     try{if(android.os.Build.VERSION.SDK_INT==34&&"paged.pdf".equals(filename)&&"no_exact_visible_label".equals(last))evidence=" "+receiverSurface(top,System.nanoTime()+250000000L);}catch(RuntimeException ignored){}finally{if(top!=null)top.recycle();}
     throw new AssertionError("no stable isolated CI receiver tile; case="+filename+" reason="+last+" observations="+choice.samples+" final_tree="+original+evidence);
@@ -849,14 +905,14 @@ package android.view.accessibility;
 import android.graphics.Rect;
 import java.util.*;
 public class AccessibilityNodeInfo {
- public static final int ACTION_CLICK=16,ACTION_EXPAND=262144; public int actions; public int getActions(){return actions;} public void recycle(){} public static final String SYSTEM="com.google.android.intentresolver";
+ public static final int ACTION_CLICK=16,ACTION_EXPAND=262144; public int actions,expands; public static AccessibilityNodeInfo obtain(AccessibilityNodeInfo n){return n;} public int getActions(){return actions;} public void recycle(){} public static final String SYSTEM="com.google.android.intentresolver";
  public String name="", alt="", pkg=SYSTEM, cls="android.view.View", id="", result=""; public int window=7,calls; public boolean clickable,visible=true,enabled=true,scroll,collection,accept=true; public Rect b=new Rect(10,10,60,60);
  public AccessibilityNodeInfo parent; public final List<AccessibilityNodeInfo> children=new ArrayList<>();
  public AccessibilityNodeInfo(String t,boolean click){name=t;clickable=click;}
  public void add(AccessibilityNodeInfo n){children.add(n);n.parent=this;}
  public CharSequence getText(){return name;} public CharSequence getContentDescription(){return alt;} public CharSequence getPackageName(){return pkg;} public CharSequence getClassName(){return cls;} public String getViewIdResourceName(){return id;} public int getWindowId(){return window;}
  public boolean isClickable(){return clickable;} public boolean isEnabled(){return enabled;} public boolean isVisibleToUser(){return visible;} public boolean isScrollable(){return scroll;} public Object getCollectionInfo(){return collection?this:null;} public AccessibilityNodeInfo getParent(){return parent;} public int getChildCount(){return children.size();} public AccessibilityNodeInfo getChild(int i){return children.get(i);}
- public void getBoundsInScreen(Rect v){v.set(b.left,b.top,b.right,b.bottom);} public boolean performAction(int a){if(a!=16)throw new AssertionError();calls++;return accept;}
+ public void getBoundsInScreen(Rect v){v.set(b.left,b.top,b.right,b.bottom);} public boolean performAction(int a){if(a==ACTION_EXPAND){expands++;return accept;}if(a!=ACTION_CLICK)throw new AssertionError();calls++;return accept;}
  public List<AccessibilityNodeInfo> findAccessibilityNodeInfosByText(String s){List<AccessibilityNodeInfo> r=new ArrayList<>();if(name.contains(s)||alt.contains(s))r.add(this);for(AccessibilityNodeInfo n:children)if(n!=null)r.addAll(n.findAccessibilityNodeInfosByText(s));return r;}
 }
 ''',
@@ -923,6 +979,83 @@ def chooser_tile_selftest():
         assert loop.count('ChooserChoice.sample(inst.getUiAutomation().getRootInActiveWindow())')==1 and loop.count('choice.act(c,android.os.SystemClock.elapsedRealtime(),end)')==1 and 'performAction(' not in dispatch and 'injectInputEvent' not in dispatch
         assert segment.count('performAction(AccessibilityNodeInfo.ACTION_CLICK)')==1
     print('CHOOSER_TILE_HOST 28 actual selector scenarios, 4 witnessed mutants; synthetic accessibility nodes, NOT_DEVICE_ACCEPTANCE',flush=True)
+
+def bounded_drawer_selftest():
+    """Real helper/selector running on a synthetic Android-14 tree. No device acceptance here."""
+    import inspect
+    j=JAVA[JAVA.index(' static final class ChooserChoice {'):JAVA.index(' static void receiverUi(')]
+    cases=('visible_first reveal_then_visible still_hidden reveal_refused description_only too_soon at_deadline cost_deadline '
+           'other_owner mixed_child other_window unstable_window rebound_drawer rebound_label bounds_change interrupted different_reason '
+           'wrong_id wrong_class disabled not_scrollable outside_box empty_box no_action hidden_drawer unrelated_drawer prefix_sibling '
+           'two_hidden two_expand visible_description no_label partial capped foreign_root no_root api26 png other_case').split()
+    assert len(set(cases))==len(cases)
+    host=r''' static final class Sheet {
+      AccessibilityNodeInfo root=item("",false), drawer=item("",false), row=item("",true), label=item(ChooserChoice.LABEL,false);
+      DrawerReveal reveal=new DrawerReveal();ChooserChoice.Gate selector=new ChooserChoice.Gate();int api=34;String file="paged.pdf";
+      static AccessibilityNodeInfo item(String s,boolean click){AccessibilityNodeInfo n=new AccessibilityNodeInfo(s,click);n.pkg="com.android.intentresolver";return n;}
+      Sheet(){root.b=new Rect(0,0,400,800);drawer.b=new Rect(0,0,400,790);row.b=new Rect(4,5,95,95);drawer.id="android:id/contentPanel";drawer.cls="android.widget.ScrollView";drawer.scroll=true;drawer.actions=AccessibilityNodeInfo.ACTION_EXPAND;
+       root.add(drawer);drawer.add(row);row.add(label);label.visible=false;for(int i=0;i<61;i++){AccessibilityNodeInfo n=item("",false);if(i==0)n.scroll=true;drawer.add(n);} }
+      boolean pulse(long t){ChooserChoice c=ChooserChoice.sample(root);boolean result=selector.act(c,t,20000);if(!result)reveal.consider(api,file,c.reason,root,()->t,20000);return result;}
+      void exact(int ex,int click){ok(drawer.expands==ex&&row.calls==click);ArrayDeque<AccessibilityNodeInfo> q=new ArrayDeque<>();q.add(root);while(!q.isEmpty()){AccessibilityNodeInfo n=q.remove();if(n!=row)ok(n.calls==0);if(n!=drawer)ok(n.expands==0);for(AccessibilityNodeInfo c:n.children)if(c!=null)q.add(c);}}
+    }
+    static void drawerCase(String name){Sheet h=new Sheet();AccessibilityNodeInfo d=h.drawer,l=h.label,root=h.root;long first=100,last=350;
+      if(name.equals("visible_first")){l.visible=true;ok(!h.pulse(first));ok(h.pulse(last));h.exact(0,1);}
+      else if(name.equals("reveal_then_visible")){ok(!h.pulse(first));h.exact(0,0);ok(!h.pulse(180));h.exact(0,0);ok(!h.pulse(last));h.exact(1,0);l.visible=true;d.actions=0;ok(!h.pulse(600));h.exact(1,0);ok(h.pulse(850));ok(!h.pulse(1100));h.exact(1,1);}
+      else if(name.equals("still_hidden")||name.equals("reveal_refused")||name.equals("description_only")){if(name.equals("reveal_refused"))d.accept=false;if(name.equals("description_only")){l.name="";l.alt=ChooserChoice.LABEL;}
+       ok(!h.pulse(first)&&!h.pulse(last));h.exact(1,0);ok(h.reveal.status.equals(d.accept?"accepted":"refused"));if(name.equals("description_only"))l.visible=true;
+       for(long t=550;t<=20000;t+=200)ok(!h.pulse(t));h.exact(1,0);ok(h.reveal.used);}
+      else if(name.equals("cost_deadline")){long[] now={first};boolean[] crossing={false};AccessibilityNodeInfo late=new AccessibilityNodeInfo("",false){@Override public boolean equals(Object other){if(crossing[0])now[0]=20000;return super.equals(other);}@Override public int hashCode(){return super.hashCode();}};
+       late.pkg=d.pkg;late.b=d.b;late.id=d.id;late.cls=d.cls;late.scroll=d.scroll;late.actions=d.actions;root.children.clear();root.add(late);for(AccessibilityNodeInfo x:d.children)late.add(x);h.drawer=late;
+       h.reveal.consider(34,h.file,"no_exact_visible_label",root,()->now[0],20000);now[0]=last;crossing[0]=true;h.reveal.consider(34,h.file,"no_exact_visible_label",root,()->now[0],20000);h.exact(0,0);ok(now[0]==20000&&!h.reveal.used);}
+      else if(name.equals("different_reason")||name.equals("no_root")){for(long t:new long[]{first,last})h.reveal.consider(34,h.file,name.equals("different_reason")?"shared_action":"no_exact_visible_label",name.equals("no_root")?null:root,()->t,20000);h.exact(0,0);}
+      else if(Arrays.asList("unstable_window","rebound_drawer","rebound_label","bounds_change","interrupted").contains(name)){
+       h.pulse(first);if(name.equals("unstable_window")){d.window++;h.pulse(250);d.window--;}
+       if(name.equals("interrupted"))h.reveal.consider(34,h.file,"duplicate_label",root,()->230,20000);
+       if(name.equals("bounds_change"))d.b=new Rect(0,0,400,780);
+       if(name.equals("rebound_drawer")){AccessibilityNodeInfo nd=Sheet.item("",false);nd.b=d.b;nd.id=d.id;nd.cls=d.cls;nd.scroll=d.scroll;nd.actions=d.actions;root.children.clear();root.add(nd);for(AccessibilityNodeInfo x:d.children)nd.add(x);h.drawer=nd;}
+       if(name.equals("rebound_label")){AccessibilityNodeInfo nl=Sheet.item(ChooserChoice.LABEL,false);nl.visible=false;h.row.children.clear();h.row.add(nl);h.label=nl;}
+       h.pulse(last);h.exact(0,0);h.pulse(650);h.exact(1,0);}
+      else{
+       if(name.equals("too_soon"))last=first+149;if(name.equals("at_deadline"))last=20000;
+       if(name.equals("other_owner"))d.pkg="com.other";if(name.equals("foreign_root"))root.pkg="android";
+       if(name.equals("mixed_child"))d.children.get(2).pkg="com.other";if(name.equals("other_window"))l.window++;
+       if(name.equals("wrong_id"))d.id="com.android.intentresolver:id/contentPanel";if(name.equals("wrong_class"))d.cls="android.widget.Button";
+       if(name.equals("disabled"))d.enabled=false;if(name.equals("not_scrollable"))d.scroll=false;if(name.equals("no_action"))d.actions=AccessibilityNodeInfo.ACTION_CLICK;
+       if(name.equals("hidden_drawer"))d.visible=false;if(name.equals("outside_box"))d.b=new Rect(-1,3,300,300);if(name.equals("empty_box"))d.b=new Rect();
+       if(name.equals("unrelated_drawer")){d.children.remove(h.row);root.add(h.row);}
+       if(name.equals("prefix_sibling")){d.children.remove(h.row);root.children.clear();root.add(Sheet.item("",false));root.add(d);for(int i=0;i<8;i++)root.add(Sheet.item("",false));root.add(h.row);}
+       if(name.equals("two_hidden")){AccessibilityNodeInfo copy=Sheet.item(ChooserChoice.LABEL,false);copy.visible=false;d.add(copy);}
+       if(name.equals("two_expand")){AccessibilityNodeInfo extra=Sheet.item("",false);extra.actions=AccessibilityNodeInfo.ACTION_EXPAND;root.add(extra);}
+       if(name.equals("visible_description")){AccessibilityNodeInfo other=Sheet.item("",false);other.alt=ChooserChoice.LABEL;root.add(other);}
+       if(name.equals("no_label"))l.name="Other fixture";if(name.equals("partial"))d.children.add(null);
+       if(name.equals("capped"))for(int i=0;i<64;i++)root.add(Sheet.item("",false));if(name.equals("api26"))h.api=26;
+       if(name.equals("png"))h.file="picture.zip";if(name.equals("other_case"))h.file="other.pdf";
+       ok(!h.pulse(first)&&!h.pulse(last));h.exact(0,0);
+      }h.reveal.clear();System.out.println("REVEAL_CASE "+name+" PASS");}
+     public static void main(String[] args){String pkg="com.supercubegame.pockettodo.v12.preview";ok(DrawerReveal.fixtureScope(34,pkg,"ranchu","paged.pdf"));ok(!DrawerReveal.fixtureScope(26,pkg,"ranchu","paged.pdf")&&!DrawerReveal.fixtureScope(34,"com.other","ranchu","paged.pdf")&&!DrawerReveal.fixtureScope(34,pkg,"physical","paged.pdf")&&!DrawerReveal.fixtureScope(34,pkg,"ranchu","paged.zip"));for(String c:args)drawerCase(c);}}'''
+    with tempfile.TemporaryDirectory() as td:
+        r=Path(td);fs=[]
+        for n,s in CHOOSER_FIXTURES.items():
+            if n.endswith('.java'):
+                f=r/n;f.parent.mkdir(parents=True,exist_ok=True);f.write_text(s);fs.append(str(f))
+        def trial(seg,modes):
+            f=r/'ChoiceHarness.java';f.write_text(CHOOSER_FIXTURES['Harness.template'].split(' public static void main(String[] args)',1)[0].replace('@@HELPER@@',seg)+host)
+            cmd=['javac'] if shutil.which('javac') else ['java','-m','jdk.compiler/com.sun.tools.javac.Main'];subprocess.run([*cmd,'-d',td,*fs,str(f)],check=True,timeout=30)
+            return subprocess.run(['java','-cp',td,'ChoiceHarness',*modes],capture_output=True,text=True,timeout=20)
+        checked=lambda p:[s for s in p.stdout.splitlines() if s.startswith('REVEAL_CASE ')]
+        p=trial(j,cases);assert p.returncode==0 and checked(p)==['REVEAL_CASE '+s+' PASS' for s in cases],(p.stdout,p.stderr)
+        wrong=[('used=true;status=drawer.n.performAction','used=false;status=drawer.n.performAction','still_hidden'),('expandCount!=1||drawer==null','drawer==null','two_expand'),('||!hidden.path.startsWith(drawer.path+"/")','', 'unrelated_drawer'),('||!drawer.n.equals(previousDrawer)','', 'rebound_drawer'),('if(clock.getAsLong()>=end){reject("action_deadline")','if(false){reject("action_deadline")','cost_deadline'),('drawer.n.performAction(AccessibilityNodeInfo.ACTION_EXPAND)','drawer.n.performAction(AccessibilityNodeInfo.ACTION_CLICK)','reveal_then_visible')]
+        for a,b,case in wrong:
+            assert j.count(a)==1;bad=trial(j.replace(a,b,1),['visible_first',case]);assert bad.returncode!=0 and checked(bad)==['REVEAL_CASE visible_first PASS'] and 'CHOOSER_CONTRACT' in bad.stderr,(case,bad.stdout,bad.stderr)
+    # Every insertion in receiverUi is in the non-pick path; keep the click predicate and byte/ack flow intact.
+    loop=JAVA.split(' static void receiverUi(',1)[1].split('File ack=',1)[0].split('long end=android.os.SystemClock.elapsedRealtime()+20000;',1)[1]
+    assert loop.count('reveal.consider(')==1 and loop.count('reveal.eligible(android.os.Build.VERSION.SDK_INT,filename,last)')==1
+    assert loop.index('picked=choice.act(')<loop.index('else{')<loop.index('reveal.eligible(')<loop.index('reveal.consider(')<loop.index('if(!picked)')
+    assert 'reveal.consider(android.os.Build.VERSION.SDK_INT,filename,last,top,android.os.SystemClock::elapsedRealtime,end)' in loop and 'if(top!=null)top.recycle()' in loop
+    assert loop.count('if(canReveal&&reveal.eligible(')==1 and JAVA.count('canReveal=DrawerReveal.fixtureScope(android.os.Build.VERSION.SDK_INT,inst.getTargetContext().getPackageName(),android.os.Build.HARDWARE,filename)')==1
+    assert len(re.findall(r'\.performAction\(',j))==2 and j.count('performAction(AccessibilityNodeInfo.ACTION_EXPAND)')==1 and j.count('performAction(AccessibilityNodeInfo.ACTION_CLICK)')==1
+    assert 'emulator-5554' in inspect.getsource(test_receiver_cases) and "get('GITHUB_ACTIONS')=='true'" in inspect.getsource(test_receiver_cases)
+    print(f'DRAWER_HOST {len(cases)} scenarios, {len(wrong)} witnessed mutants; 5 execution-scope controls: expansion != selection != receiver receipt; SYNTHETIC_NOT_ANDROID',flush=True)
 
 def failure_evidence_selftest():
     # The very same selector still refuses a missing/description-only/unrevealed label.
@@ -1386,6 +1519,7 @@ def selftest():
     consent_copy_selftest()
     chooser_tile_selftest()
     failure_evidence_selftest()
+    bounded_drawer_selftest()
     receiver_ack_selftest()
     print("PAGED_SHARE_FIXTURE_HOST", share_png_fixture_selftest(), flush=True)
     paged_readiness_selftest()

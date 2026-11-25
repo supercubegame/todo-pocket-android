@@ -352,8 +352,70 @@ public final class V12CoreTest {
         reject(()->summary(null),"summary rejects null blocks");
         reject(()->summary(Arrays.asList((NoteDocument.Block)null)),"summary rejects null block member");
     }
+    /** Real legacy wire bytes; the only double is the final append destination.
+     * Runs on JVM, not an Android picker, SQLite transaction or device receipt. */
+    static void legacyAppendReview() throws Exception {
+        com.supercubegame.pockettodo.TodoModel old=new com.supercubegame.pockettodo.TodoModel();
+        long first=old.add("同名待办"),second=old.add("同名待办");old.toggle(second);old.add("带有空格的 旧待办");
+        byte[] expected=com.supercubegame.pockettodo.BackupCodec.encode(old),input=expected.clone();
+        Object previous=stat("LegacyImport","preview",new Class<?>[]{byte[].class},expected);
+        String digest=java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(expected));
+        ok(previous.getClass().getMethod("sourceId").invoke(previous).equals(digest)&&first!=second,"legacy append fixture is a real nonempty canonical backup");
+        class ShortRead extends java.io.ByteArrayInputStream {
+            int closes,bulk;ShortRead(byte[] b){super(b);}
+            @Override public synchronized int read(byte[] b,int o,int n){bulk++;return super.read(b,o,Math.min(7,n));}
+            @Override public int available(){return 0;}
+            @Override public void close(){closes++;}
+        }
+        ShortRead in=new ShortRead(input);Object r=stat("LegacyImport","readForAppend",new Class<?>[]{java.io.InputStream.class},in);
+        ok(in.closes==1&&in.bulk>1,"legacy review reads short chunks to EOF and closes only its source");
+        ok(number(call(r,"total",new Class[]{}))==3&&number(call(r,"completed",new Class[]{}))==1&&call(r,"sourceId",new Class[]{}).equals(digest),"legacy review counts and full-source fingerprint match independent expectations");
+        Arrays.fill(input,(byte)0);int[] writes={0};java.util.function.ToLongFunction<byte[]> target=bytes->{
+            if(++writes[0]!=1||!Arrays.equals(bytes,expected))throw new AssertionError("appended different bytes or more than once");
+            var rows=com.supercubegame.pockettodo.BackupCodec.decode(bytes).items();
+            if(rows.size()!=3||rows.get(0).id!=first||rows.get(1).id!=second||!rows.get(0).title.equals(rows.get(1).title)||rows.get(0).done||!rows.get(1).done)throw new AssertionError("wrong legacy row identities");return rows.size();};
+        ok(writes[0]==0,"legacy preview performs no append");
+        ok(number(call(r,"appendOnce",new Class[]{java.util.function.ToLongFunction.class},target))==3&&writes[0]==1,"explicit legacy append transfers only the exact reviewed bytes");
+        reject(()->call(r,"appendOnce",new Class[]{java.util.function.ToLongFunction.class},target),"second confirmation cannot replay the append");
+        Object canceled=stat("LegacyImport","readForAppend",new Class[]{java.io.InputStream.class},new ShortRead(expected));((AutoCloseable)canceled).close();((AutoCloseable)canceled).close();
+        reject(()->call(canceled,"appendOnce",new Class[]{java.util.function.ToLongFunction.class},target),"cancelled legacy review cannot append");
+        Object empty=stat("LegacyImport","readForAppend",new Class[]{java.io.InputStream.class},new ShortRead(com.supercubegame.pockettodo.BackupCodec.encode(new com.supercubegame.pockettodo.TodoModel())));
+        ok(number(call(empty,"total",new Class[]{}))==0&&number(call(empty,"completed",new Class[]{}))==0,"empty legacy backup is a read-only zero-row preview");
+        reject(()->call(empty,"appendOnce",new Class[]{java.util.function.ToLongFunction.class},target),"empty legacy source never invokes the append destination");
+        Object duplicate=stat("LegacyImport","readForAppend",new Class[]{java.io.InputStream.class},new ShortRead(expected));java.util.function.ToLongFunction<byte[]> seen=b->{if(!Arrays.equals(expected,b))throw new AssertionError("duplicate source differs");return 0;};
+        ok(number(call(duplicate,"appendOnce",new Class[]{java.util.function.ToLongFunction.class},seen))==0,"already-imported zero result is not presented as new rows");
+        Object failure=stat("LegacyImport","readForAppend",new Class[]{java.io.InputStream.class},new ShortRead(expected));RuntimeException sentinel=new IllegalStateException("synthetic append failed");int[] attempts={0};java.util.function.ToLongFunction<byte[]> refused=b->{attempts[0]++;throw sentinel;};boolean exact=false;
+        try{call(failure,"appendOnce",new Class[]{java.util.function.ToLongFunction.class},refused);}catch(RuntimeException e){exact=e==sentinel;}
+        ok(exact&&attempts[0]==1,"legacy append failure is preserved without replay");reject(()->call(failure,"appendOnce",new Class[]{java.util.function.ToLongFunction.class},target),"failed legacy confirmation requires a new review");
+        Object race=stat("LegacyImport","readForAppend",new Class[]{java.io.InputStream.class},new ShortRead(expected));java.util.concurrent.atomic.AtomicInteger entered=new java.util.concurrent.atomic.AtomicInteger(),accepted=new java.util.concurrent.atomic.AtomicInteger(),lost=new java.util.concurrent.atomic.AtomicInteger();
+        var start=new java.util.concurrent.CountDownLatch(1);var pool=java.util.concurrent.Executors.newFixedThreadPool(2);
+        try{List<java.util.concurrent.Future<?>> futures=new ArrayList<>();for(int i=0;i<2;i++)futures.add(pool.submit(()->{start.await();try{java.util.function.ToLongFunction<byte[]> sink=b->{if(!Arrays.equals(b,expected))throw new AssertionError("wrong concurrent bytes");entered.incrementAndGet();return 3;};call(race,"appendOnce",new Class[]{java.util.function.ToLongFunction.class},sink);accepted.incrementAndGet();}catch(IllegalStateException e){lost.incrementAndGet();}return null;}));start.countDown();for(var f:futures)f.get(5,java.util.concurrent.TimeUnit.SECONDS);}finally{pool.shutdownNow();}
+        ok(entered.get()==1&&accepted.get()==1&&lost.get()==1,"two concurrent confirmations deliver exactly once");
+        int limit=com.supercubegame.pockettodo.BackupCodec.MAX_BYTES;
+        class Sized extends java.io.InputStream {int left,consumed,closedAt,extra;Sized(int n){left=n;}
+          public int read(){extra++;if(left==0)return -1;left--;consumed++;return 65;}
+          public int read(byte[] b,int off,int len){if(left==0)return -1;int n=Math.min(left,len);Arrays.fill(b,off,off+n,(byte)65);left-=n;consumed+=n;return n;}
+          public void close(){closedAt++;}}
+        Sized large=new Sized(limit+32);boolean tooLarge=false;try{stat("LegacyImport","readForAppend",new Class[]{java.io.InputStream.class},large);}catch(java.io.IOException e){tooLarge=e.getMessage().contains("大小");}
+        ok(tooLarge&&large.consumed==limit+1&&large.closedAt==1,"oversize legacy stream stops at limit plus one without reading the remainder");
+        Sized exactLimit=new Sized(limit);boolean format=false;try{stat("LegacyImport","readForAppend",new Class[]{java.io.InputStream.class},exactLimit);}catch(IllegalArgumentException e){format=true;}
+        ok(format&&exactLimit.consumed==limit&&exactLimit.closedAt==1,"exact-limit invalid envelope reaches the codec rather than being rejected as oversize");
+        java.io.IOException badRead=new java.io.IOException("read failed"),badClose=new java.io.IOException("close failed");int[] closed={0};java.io.InputStream broken=new java.io.InputStream(){public int read()throws java.io.IOException{throw badRead;}public int read(byte[] b,int o,int n)throws java.io.IOException{throw badRead;}public void close()throws java.io.IOException{closed[0]++;throw badClose;}};exact=false;
+        try{stat("LegacyImport","readForAppend",new Class[]{java.io.InputStream.class},broken);}catch(java.io.IOException e){exact=e==badRead&&e.getSuppressed().length==1&&e.getSuppressed()[0]==badClose;}
+        ok(exact&&closed[0]==1,"source read and close failures retain both causes without producing a review");
+        java.io.InputStream closing=new java.io.ByteArrayInputStream(expected){public void close()throws java.io.IOException{throw badClose;}};exact=false;try{stat("LegacyImport","readForAppend",new Class[]{java.io.InputStream.class},closing);}catch(java.io.IOException e){exact=e==badClose;}
+        ok(exact,"source close must succeed before a legacy review is returned");
+        java.io.InputStream stalled=new java.io.InputStream(){public int read(){throw new AssertionError("no byte fallback");}public int read(byte[] b,int o,int n){return 0;}};boolean noProgress=false;
+        try{stat("LegacyImport","readForAppend",new Class[]{java.io.InputStream.class},stalled);}catch(java.io.IOException e){noProgress=e.getMessage().contains("进展");}
+        ok(noProgress,"zero-progress legacy provider is not treated as EOF");
+        java.io.ByteArrayOutputStream archive=new java.io.ByteArrayOutputStream();try(var zip=new java.util.zip.ZipOutputStream(archive)){zip.putNextEntry(new java.util.zip.ZipEntry("manifest.txt"));zip.write(65);zip.closeEntry();}
+        ShortRead wrong=new ShortRead(archive.toByteArray());boolean wrongFormat=false;try{stat("LegacyImport","readForAppend",new Class[]{java.io.InputStream.class},wrong);}catch(IllegalArgumentException e){wrongFormat=e.getMessage().contains("ZIP");}
+        ok(wrongFormat&&wrong.closes==1,"full-backup ZIP is rejected by append-only review, never rerouted to replacement");
+        byte[] damaged=expected.clone();damaged[damaged.length-3]^=1;ShortRead corrupt=new ShortRead(damaged);reject(()->stat("LegacyImport","readForAppend",new Class[]{java.io.InputStream.class},corrupt),"checksum failure never creates a legacy append review");
+        ok(corrupt.closes==1&&writes[0]==1,"refused and cancelled samples never reached the approved destination");
+    }
     public static void main(String[] args) throws Exception {
-        ledger(); calendar(); notes(); safety(); categories(); fields(); imageRevisions(); imageEdits(); batchShares(); noteSummaries();
+        ledger(); calendar(); notes(); safety(); categories(); fields(); imageRevisions(); imageEdits(); batchShares(); noteSummaries(); legacyAppendReview();
         System.out.println("V12_CORE_RESULT "+checks+"/"+checks+" PASS; DOMAIN_ONLY; ANDROID_EXPORT_RESTORE_NOT_TESTED");
     }
 }

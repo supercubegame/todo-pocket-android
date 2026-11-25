@@ -268,7 +268,13 @@ public final class PagedContractTest {
      if(target!=null){while(target!=null&&!target.isClickable())target=target.getParent();if(target==null||!owner.contentEquals(String.valueOf(target.getPackageName()))||!target.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK))throw new AssertionError("receiver choice refused");picked=true;}
    }}if(!picked)android.os.SystemClock.sleep(200);}
    if(!picked)throw new AssertionError("synthetic receiver not visible in system sharesheet");File ack=new File(root,"ack-"+nonce);long endAck=android.os.SystemClock.elapsedRealtime()+35000;while(!ack.exists()&&android.os.SystemClock.elapsedRealtime()<endAck)android.os.SystemClock.sleep(150);
-   if(!ack.exists()||!"checked".equals(new String(read(ack),java.nio.charset.StandardCharsets.US_ASCII))||!Arrays.equals(current,state(inst,a)))throw new AssertionError("independent receipt or unchanged state missing");System.out.println("SEND_PROBE "+nonce);
+   if(!ack.exists()){
+    android.view.accessibility.AccessibilityNodeInfo top=inst.getUiAutomation().getRootInActiveWindow();String owner=top==null?"none":String.valueOf(top.getPackageName());
+    throw new AssertionError("ack absent after receiver choice: "+filename+" owner="+owner);
+   }
+   byte[] confirmation=read(ack);if(!Arrays.equals("checked".getBytes(java.nio.charset.StandardCharsets.US_ASCII),confirmation))throw new AssertionError("incorrect ack bytes: "+filename+" length="+confirmation.length);
+   if(!Arrays.equals(current,state(inst,a)))throw new AssertionError("sender database differs after share: "+filename);
+   System.out.println("SEND_PROBE "+nonce);
   }finally{onUi(inst,a::finish);}
  }
  public static void verify(String[] args,android.app.Instrumentation inst)throws Exception{
@@ -746,6 +752,32 @@ def paged_signing_selftest():
 RECEIVER_JAVA = 'package com.supercubegame.pockettodo.exportprobe;\n\nimport android.app.Activity;\nimport android.content.ClipData;\nimport android.content.Intent;\nimport android.content.pm.PackageManager;\nimport android.database.Cursor;\nimport android.net.Uri;\nimport android.os.Bundle;\nimport android.os.Process;\nimport android.provider.OpenableColumns;\nimport org.json.JSONArray;\nimport org.json.JSONObject;\nimport java.io.*;\nimport java.nio.charset.StandardCharsets;\nimport java.nio.file.*;\nimport java.security.MessageDigest;\nimport java.util.*;\n\n/** Synthetic CI receiver only; never part of the production APK. Expected outputs are\n * seeded separately into this receiver\'s private directory by the fixture runner, not\n * provided in extras by the sender. Receipt contains metadata, not file contents. */\npublic final class ReceiverActivity extends Activity {\n    private static void need(boolean ok,String msg)throws IOException { if(!ok)throw new IOException(msg); }\n    private static String hex(byte[] data){StringBuilder s=new StringBuilder();for(byte b:data)s.append(String.format(Locale.ROOT,"%02x",b&255));return s.toString();}\n    @Override public void onCreate(Bundle saved){super.onCreate(saved);\n        final Intent received=getIntent();final Path root=getFilesDir().toPath(), result=root.resolve("receipt.json");\n        new Thread(()->{JSONObject out=new JSONObject();boolean ok=false;\n            try {\n                need(!Files.exists(result),"old receipt");Path ready=root.resolve("expected.json");\n                need(Files.isRegularFile(ready) && Files.size(ready)>0 && Files.size(ready)<65536,"missing bounded receiver-side expectation");\n                JSONObject e=new JSONObject(new String(Files.readAllBytes(ready),StandardCharsets.UTF_8));\n                String pkg=e.getString("sender"), mime=e.getString("mime"),nonce=e.getString("nonce");\n                need(e.getInt("api")==android.os.Build.VERSION.SDK_INT && nonce.matches("[0-9a-f]{32}") && e.getString("source").matches("[0-9a-f]{40}") && e.getString("run").matches("[0-9]+"),"wrong acceptance identity");\n                out.put("source",e.getString("source"));out.put("run",e.getString("run"));out.put("nonce",nonce);out.put("api",android.os.Build.VERSION.SDK_INT);\n                // The fixture runner records the sender UID independently when seeding expected.json.\n                need(Process.myUid()!=e.getInt("sender_uid"),"receiver must have a different UID");\n                need(("application/pdf".equals(mime)||"image/png".equals(mime)) && mime.equals(received.getType()),"wrong MIME");\n                JSONArray items=e.getJSONArray("files");int count=items.length();need(count>=1&&count<=64&&(!"application/pdf".equals(mime)||count==1),"invalid count");\n                boolean single=count==1;need((single?Intent.ACTION_SEND:Intent.ACTION_SEND_MULTIPLE).equals(received.getAction()),"wrong action");\n                int flags=received.getFlags();need((flags&Intent.FLAG_GRANT_READ_URI_PERMISSION)!=0 && (flags&(Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION|Intent.FLAG_GRANT_PREFIX_URI_PERMISSION))==0,"not a temporary exact read grant");\n                List<Uri> uris=single?Collections.singletonList((Uri)received.getParcelableExtra(Intent.EXTRA_STREAM)):received.getParcelableArrayListExtra(Intent.EXTRA_STREAM);\n                ClipData clip=received.getClipData();need(uris!=null && uris.size()==count && clip!=null && clip.getItemCount()==count,"stream/clip count");\n                JSONArray observed=new JSONArray();long total=0;\n                for(int i=0;i<count;i++){\n                    JSONObject w=items.getJSONObject(i);Uri uri=uris.get(i);\n                    need(uri!=null && uri.equals(clip.getItemAt(i).getUri()) && "content".equals(uri.getScheme()) && (pkg+".exports").equals(uri.getAuthority()),"unexpected stream or clip");\n                    need(checkUriPermission(uri,Process.myPid(),Process.myUid(),Intent.FLAG_GRANT_READ_URI_PERMISSION)==PackageManager.PERMISSION_GRANTED && checkUriPermission(uri,Process.myPid(),Process.myUid(),Intent.FLAG_GRANT_WRITE_URI_PERMISSION)!=PackageManager.PERMISSION_GRANTED,"wrong actual grant");\n                    Uri sibling=uri.buildUpon().appendPath("unlisted-synthetic").build();\n                    need(checkUriPermission(sibling,Process.myPid(),Process.myUid(),Intent.FLAG_GRANT_READ_URI_PERMISSION)!=PackageManager.PERMISSION_GRANTED,"unexpected sibling grant");\n                    need(mime.equals(getContentResolver().getType(uri)),"provider MIME mismatch");String canonical="application/pdf".equals(mime)?"PocketTodo-notes.pdf":String.format(Locale.ROOT,"page-%03d.png",i+1);\n                    need(canonical.equals(w.getString("name")),"bad independent name");long bytes=w.getLong("bytes");need(bytes>0&&bytes<=16777216-total,"invalid expected size");\n                    try(Cursor c=getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME,OpenableColumns.SIZE},null,null,null)){\n                        need(c!=null&&c.moveToFirst()&&canonical.equals(c.getString(0))&&c.getLong(1)==bytes&&!c.moveToNext(),"provider name or size mismatch");}\n                    MessageDigest hash=MessageDigest.getInstance("SHA-256");long read=0;\n                    try(InputStream in=getContentResolver().openInputStream(uri)){need(in!=null,"receiver could not open stream");byte[] buf=new byte[16384];int n;while((n=in.read(buf))!=-1){need(n>0&&n<=bytes-read,"receiver length mismatch");hash.update(buf,0,n);read+=n;}}\n                    String sha=hex(hash.digest());need(read==bytes && sha.equals(w.getString("sha256")),"receiver byte identity mismatch");total+=read;\n                    observed.put(new JSONObject().put("name",canonical).put("bytes",read).put("sha256",sha));\n                }\n                out.put("observed",observed);out.put("scope","SYNTHETIC_DISTINCT_UID_RECEIVER_NOT_REAL_APP_UX");out.put("status","PASS");ok=true;\n            } catch(Exception failure){try{out.put("status","FAIL");out.put("error",failure.getClass().getSimpleName()+": "+failure.getMessage());}catch(Exception ignored){}}\n            // Exclusive create; even on duplicate invocation the original first receipt survives.\n            // The host reads only after the independent checksum completion marker exists.\n            try {byte[] body=out.toString().getBytes(StandardCharsets.UTF_8);\n                Files.write(result,body,StandardOpenOption.CREATE_NEW,StandardOpenOption.WRITE);\n                String checksum=hex(MessageDigest.getInstance("SHA-256").digest(body));\n                Files.write(root.resolve("receipt.complete"),checksum.getBytes(StandardCharsets.US_ASCII),StandardOpenOption.CREATE_NEW,StandardOpenOption.WRITE);\n            }catch(Exception publication){ok=false;}\n            final boolean success=ok;runOnUiThread(()->{setResult(success?RESULT_OK:RESULT_CANCELED);finish();});\n        },"read-export-probe").start();\n    }\n}\n'
 RECEIVER_MANIFEST = '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.supercubegame.pockettodo.exportprobe">\n  <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34" />\n  <application android:label="PocketTodo CI Receiver" android:allowBackup="false" android:debuggable="true">\n    <activity android:name=".ReceiverActivity" android:exported="true">\n      <intent-filter><action android:name="android.intent.action.SEND"/><category android:name="android.intent.category.DEFAULT"/><data android:mimeType="application/pdf"/><data android:mimeType="image/png"/></intent-filter>\n      <intent-filter><action android:name="android.intent.action.SEND_MULTIPLE"/><category android:name="android.intent.category.DEFAULT"/><data android:mimeType="image/png"/></intent-filter>\n    </activity>\n  </application>\n</manifest>\n'
 
+def publish_receiver_ack(marker,write_verified,rename):
+    assert re.fullmatch(r'cache/paged-contract-[0-9]+/ack-[a-f0-9]{32}',marker), 'unknown sender ack path'
+    temp=marker+'.part';write_verified(temp);rename(temp,marker)
+
+def receiver_ack_selftest():
+    marker='cache/paged-contract-42/ack-'+'a'*32
+    with tempfile.TemporaryDirectory() as temp:
+        root=Path(temp);(root/marker).parent.mkdir(parents=True)
+        def write(p):
+            assert p==marker+'.part' and not (root/marker).exists()
+            with (root/p).open('xb') as f:
+                assert not (root/marker).exists();f.write(b'checked')
+            assert (root/p).read_bytes()==b'checked' and not (root/marker).exists()
+        publish_receiver_ack(marker,write,lambda p,q:(root/p).rename(root/q))
+        assert (root/marker).read_bytes()==b'checked' and not (root/(marker+'.part')).exists()
+    moves=[]
+    def stop(p):raise IOError('test write failure')
+    try:publish_receiver_ack(marker,stop,lambda a,b:moves.append(b))
+    except IOError as e:assert str(e)=='test write failure' and not moves
+    else:raise AssertionError('failed write handed off')
+    for bad in (marker+'.part',marker[:-1],marker.replace('cache/','other/'),marker.replace('/ack-','/../ack-')):
+        try:publish_receiver_ack(bad,lambda p:moves.append(p),lambda a,b:moves.append(b))
+        except AssertionError as e:assert str(e)=='unknown sender ack path' and not moves
+        else:raise AssertionError('bad ack name allowed')
+    print('RECEIVER_ACK_HOST atomic publication, first-write failure and 4 path controls; NOT_DEVICE_ACCEPTANCE',flush=True)
+
 def test_receiver_cases(folder,prefix,gate,work,root,args,component,cache):
     """Only the generated receiver on a disposable emulator. No user media, implicit recipient or phone."""
     import secrets,time,io
@@ -787,7 +819,10 @@ def test_receiver_cases(folder,prefix,gate,work,root,args,component,cache):
                     time.sleep(.3)
                 actual=read(pkg,'files/receipt.json');assert read(pkg,'files/receipt.complete')==hashlib.sha256(actual).hexdigest().encode();r=json.loads(actual)
                 assert r.get('status')=='PASS' and all(r[k]==e[k] for k in ('nonce','source','run','api')) and r['observed']==e['files'],r
-                seed(gate.PKG,marker,b'checked');assert proc.wait(timeout=20)==0
+                print('RECEIVER_BYTES_VERIFIED '+json.dumps(dict(r,sender_uid=sender_uid,receiver_uid=receiver_uid)),flush=True)
+                publish_receiver_ack(marker,lambda temp:seed(gate.PKG,temp,b'checked'),lambda temp,final:shell('run-as',gate.PKG,'mv',temp,final))
+                assert read(gate.PKG,marker)==b'checked', 'sender ack post-rename readback'
+                assert proc.wait(timeout=20)==0
                 out.seek(0);output=out.read().decode(errors='replace');assert 'SEND_PROBE '+nonce in output and 'INSTRUMENTATION_CODE: -1' in output and 'PAGED_FAILED' not in output,output
                 receipts.append(dict(r,sender_uid=sender_uid,receiver_uid=receiver_uid))
             finally:
@@ -1060,6 +1095,7 @@ def share_png_fixture_selftest():
 
 
 def selftest():
+    receiver_ack_selftest()
     print("PAGED_SHARE_FIXTURE_HOST", share_png_fixture_selftest(), flush=True)
     paged_readiness_selftest()
     paged_signing_selftest()

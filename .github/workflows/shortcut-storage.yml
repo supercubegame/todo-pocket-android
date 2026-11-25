@@ -1,4 +1,4 @@
-name: Native flat UI review delivery
+name: Receiver acknowledgement delivery
 on:
   push:
     branches: [ci/shortcut-storage-preflight-4d8742]
@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with: {ref: f3b74983d58126a7a37cda0830311fddbf25defe, persist-credentials: false}
-      - name: Pin two files and preserve original delivery guards
+      - name: Exact receiver test-only delta
         env:
           ORIGINAL_DRIVER_SHA: cc83f9374afd35c87252fe189c6ea7afaf7e985cc8eb9a9c9dc48ffca3fed58c
         run: |
@@ -22,72 +22,43 @@ jobs:
           python3 - <<'PY'
           import urllib.request,textwrap,hashlib
           u='https://raw.githubusercontent.com/supercubegame/todo-pocket-android/4a5ce09fac1cf2e3c9473f05fb2d7dd7d4abb710/.github/workflows/shortcut-storage.yml'
-          b=urllib.request.urlopen(u,timeout=60).read(7084);assert len(b)==7083 and hashlib.sha256(b).hexdigest()=='308cc48f0f64c58495260e1e0c469111d228de07bb1f0d56d6bba7b34ad60c4d'
-          body=textwrap.dedent(b.decode().split("          python3 - <<'PY'\n",1)[1].split('          PY\n',1)[0]);exec(compile(body,'pinned-restore','exec'),{})
+          b=urllib.request.urlopen(u,timeout=60).read(7084);assert len(b)==7083 and hashlib.sha256(b).hexdigest()=='308cc48f0f64c58495260e1e0c469111d228de07bb1f0d56d6bba7b34ad60c4d';code=textwrap.dedent(b.decode().split("          python3 - <<'PY'\n",1)[1].split('          PY\n',1)[0]);exec(compile(code,'pinned-restore','exec'),{})
           PY
-          # Delta for native TodayScreen roles and actual emulator screenshot/node checks only.
-          cat > ui-delta.b64 <<'DELTA'
-          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
-          DELTA
-          cat > repair.py <<'PY'
-          import base64,json,hashlib,lzma
-          from pathlib import Path
-          BASE='f3b74983d58126a7a37cda0830311fddbf25defe'
-          J='src/main/java/com/supercubegame/pockettodo/TodayScreen.java';P='tools/emulator_gate.py'
-          PINS={J:'e1f13eaa04747f5a1de273499209ea9745382b06',P:'c77c85752bd7d31f81d819a3c1f1edf7f6c49cfb'}
-          FINAL={J:'d8f9ede5b4825e4559b2ea29b6e34f01d127f569',P:'87e4b4a7ebf5fc1c3964fcac197d36992967a89f'}
-          def blob(b):return hashlib.sha1(b'blob %d\0'%len(b)+b).hexdigest()
-          def candidates(root):
-              b=base64.b64decode(b''.join(Path(__file__).with_name('ui-delta.b64').read_bytes().split()),validate=True);assert len(b)==3816 and hashlib.sha256(b).hexdigest()=='6d0a3f38cb74043a2a13586e0bbb6ad88b41bd11fe6c5009186dd38cc36c34b4';changes=json.loads(lzma.decompress(b));assert set(changes)==set(PINS)==set(FINAL)
-              out={}
-              for f,ops in changes.items():
-                  src=(Path(root)/f).read_bytes();assert blob(src)==PINS[f]; lines=src.decode().splitlines(keepends=True);end=len(lines)
-                  for i,j,repl in reversed(ops):
-                      assert 0<=i<=j<=end;lines[i:j]=[repl];end=i
-                  b=''.join(lines).encode();assert blob(b)==FINAL[f];out[f]=b
-              return out
-          PY
+          # One test file: atomic host ack, separate sender refusal reasons, bound partial receipts, host controls.
+          cat > ack.b64 <<'B64'
+          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
+          B64
           python3 - <<'PY'
-          import os,repair
+          import ast,base64,zlib,hashlib,os
           from pathlib import Path
-          repair.candidates(os.environ['GITHUB_WORKSPACE']);p=Path('prepare.py');p.write_text(p.read_text().replace('APPROVED_SHARE_BLOCK_ORDER_FIX','NATIVE_FLAT_MINT_UI_REVIEW_ONLY').replace('test: compare share block rows by identity not rowid order','ui: flatten native actions and distinguish selected tabs and primary add').replace('Share block order delivery','Flat UI delivery'))
+          b=zlib.decompress(base64.b64decode(b''.join(Path('ack.b64').read_bytes().split()),validate=True));assert len(b)==3801 and hashlib.sha256(b).hexdigest()=='da01bb386463f1aaca1ef6699fad3852e613f7b18308450d0a5c22921fd240c7';ast.parse(b);Path('repair.py').write_bytes(b)
+          import repair
+          repair.candidates(os.environ['GITHUB_WORKSPACE']);p=Path('prepare.py');p.write_text(p.read_text().replace('APPROVED_SHARE_BLOCK_ORDER_FIX','RECEIVER_ATOMIC_ACK_TEST_ONLY').replace('test: compare share block rows by identity not rowid order','test: publish receiver ack atomically and distinguish sender failures').replace('Share block order delivery','Receiver ack delivery'))
           PY
           python3 prepare.py
           python3 - <<'PY'
           from pathlib import Path
-          d=Path('deliver-accepted.py');s=d.read_text();old='BRANCH = "feature/v1.2-activity-notes-ledger"';assert s.count(old)==1;d.write_text(s.replace(old,'BRANCH = "ui/pocket-flat-mint-f3b7498"'))
           p=Path('test-deliver-accepted.py');s=p.read_text();i=s.index('patch.object(repair,"candidates",return_value=');j=s.index('),patch.object(m,"device_evidence"',i);p.write_text(s[:i]+'patch.object(repair,"candidates",return_value=data'+s[j:])
           PY
           python3 test-deliver-accepted.py
-      - name: Original 21 once and separately dispatch native UI validation
+      - name: Original 21 once and same-commit device dispatches
         id: delivery
         env: {GH_TOKEN: '${{ github.token }}'}
-        run: python3 "$RUNNER_TEMP/deliver-accepted.py" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/flat-ui-delivery"
+        run: python3 "$RUNNER_TEMP/deliver-accepted.py" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/ack-delivery"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: evidence
         if: always()
         with:
-          name: flat-ui-delivery
-          path: ${{ runner.temp }}/flat-ui-delivery/
+          name: receiver-ack-delivery
+          path: ${{ runner.temp }}/ack-delivery/
           if-no-files-found: error
           retention-days: 14
       - name: Publish bound delivery summary
@@ -96,4 +67,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
           DELIVERY_OUTCOME: ${{ steps.delivery.outcome }}
-        run: python3 "$RUNNER_TEMP/deliver-accepted.py" publish "$RUNNER_TEMP/flat-ui-delivery"
+        run: python3 "$RUNNER_TEMP/deliver-accepted.py" publish "$RUNNER_TEMP/ack-delivery"

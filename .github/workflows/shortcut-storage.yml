@@ -1,4 +1,4 @@
-name: Verified synthetic chooser tile delivery
+name: Verified native consent copy delivery
 on:
   push:
     branches: [ci/shortcut-storage-preflight-4d8742]
@@ -10,64 +10,221 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with: {path: reviewed, persist-credentials: false}
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with: {ref: 3e7218d3c654f8425b199e7f5bbc5946ac8bd261, path: product, persist-credentials: false}
-      - name: Bind reviewable patch to exact original and resulting test file
+        with: {ref: 39c4c7e0d15a5a1fdb0adaed6994ea1f3f8e4471, persist-credentials: false}
+      - name: Prove exact four-path patch against the chosen product parent
         env:
           ORIGINAL_DRIVER_SHA: cc83f9374afd35c87252fe189c6ea7afaf7e985cc8eb9a9c9dc48ffca3fed58c
         run: |
           set -euo pipefail
           echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
           echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
-          test "$(git -C reviewed rev-parse HEAD)" = "$GITHUB_SHA"
-          cp reviewed/ci-review/chooser-tile-3e7218d.patch "$RUNNER_TEMP/chooser-tile.patch"
           cd "$RUNNER_TEMP"
           python3 - <<'PY'
           import urllib.request,textwrap,hashlib
           u='https://raw.githubusercontent.com/supercubegame/todo-pocket-android/4a5ce09fac1cf2e3c9473f05fb2d7dd7d4abb710/.github/workflows/shortcut-storage.yml'
           b=urllib.request.urlopen(u,timeout=60).read(7084);assert len(b)==7083 and hashlib.sha256(b).hexdigest()=='308cc48f0f64c58495260e1e0c469111d228de07bb1f0d56d6bba7b34ad60c4d';code=textwrap.dedent(b.decode().split("          python3 - <<'PY'\n",1)[1].split('          PY\n',1)[0]);exec(compile(code,'pinned-restore','exec'),{})
           PY
-          cat > repair.py <<'PY'
+          cat > consent.patch <<'CONSENT_PATCH'
+          --- a/.github/workflows/android.yml
+          +++ b/.github/workflows/android.yml
+          @@ -631,3 +631,3 @@
+                         import xml.etree.ElementTree as ET
+          -              from verify_paged_exports import format_button
+          +              from verify_paged_exports import format_button,consent_checkbox
+                         from verify_schema3 import signal_target_identity,signal_identity_selftest
+          @@ -705,10 +705,8 @@
+                             tap(title)
+          -              def consent():
+          +              def consent(kind):
+                             for attempt in range(16):
+          -                      current=nodes()
+          -                      for n in current:
+          -                          if n.get("text")=="我已核对内容与图片，可保存此包":
+          -                              b=list(map(int,re.findall(r"\d+",n.get("bounds"))))
+          -                              if b[2]>b[0] and b[3]>b[1]:
+          -                                  assert n.get("checked")=="false";click(n);return
+          +                      n=consent_checkbox(nodes(),kind,gate.PKG)
+          +                      if n is not None:
+          +                          b=list(map(int,re.findall(r"\d+",n.get("bounds"))))
+          +                          if b[2]>b[0] and b[3]>b[1]:click(n);return
+                                 shell("input","swipe","160","440","160","190","350")
+          @@ -756,3 +754,3 @@
+                             format_select(title);tap(expected[0]);tap(expected[1]);tap("生成预览");find(text=title+"预览")
+          -                  consent();tap("选择保存位置")
+          +                  consent(kind);tap("选择保存位置")
+                             assert find(text=filename).get("package") in ("com.android.documentsui","com.google.android.documentsui")
+          @@ -813,3 +811,3 @@
+                                 ok("actual_multipage_preview_"+kind)
+          -                      consent();tap("选择保存位置")
+          +                      consent(kind);tap("选择保存位置")
+                                 assert find(text=filename).get("package") in ("com.android.documentsui","com.google.android.documentsui")
+          --- a/src/main/java/com/supercubegame/pockettodo/MainActivity.java
+          +++ b/src/main/java/com/supercubegame/pockettodo/MainActivity.java
+          @@ -516,3 +516,3 @@
+                       "以上是实际导出文件的全部分页缩略图，不是重新生成的示意图。仅含所选非私有内容；请核对遮挡效果。完整备份、账目和原图文件不在其中。",14,TodayScreen.MUTED));
+          -        android.widget.CheckBox consent=new android.widget.CheckBox(this);consent.setText("我已核对内容与图片，可保存此包");body.addView(consent);
+          +        android.widget.CheckBox consent=new android.widget.CheckBox(this);consent.setText(format==0?"我已核对内容与图片，可保存此包":"我已核对预览，接下来由我选择保存或发送");body.addView(consent);
+                   final int pages=images.size();
+          --- a/tools/verify_batch_exports.py
+          +++ b/tools/verify_batch_exports.py
+          @@ -1377,3 +1377,3 @@
+               privacy flag at the same revision while DocumentsUI holds a reviewed ticket."""
+          -    from verify_paged_exports import format_button
+          +    from verify_paged_exports import format_button,consent_checkbox
+               from verify_process_control import stop_verified
+          @@ -1442,8 +1442,6 @@
+                   assert all(n.get("checked") == "false" for n in c)
+          -    def consent():
+          +    def consent(kind):
+                   for _ in range(8):
+          -            c = [n for n in nodes() if n.get("text") == "我已核对内容与图片，可保存此包"]
+          -            if c:
+          -                assert len(c) == 1 and c[0].get("checked") == "false"
+          -                click(c[0]); return
+          +            n=consent_checkbox(nodes(),kind,gate.PKG)
+          +            if n is not None:click(n);return
+                       shell("input", "swipe", "160", "440", "160", "190", "350")
+          @@ -1858,3 +1856,3 @@
+                       assert not any("documentsui" in n.get("package", "") for n in nodes())
+          -            ok("unchecked_save_blocked_"+kind); consent(); tap("选择保存位置")
+          +            ok("unchecked_save_blocked_"+kind); consent(kind); tap("选择保存位置")
+                       assert find(text=filename).get("package") in ("com.android.documentsui", "com.google.android.documentsui")
+          @@ -1873,3 +1871,3 @@
+                       tap(chosen[1]); tap(chosen[0]); tap("生成预览"); find(text=title+"预览")
+          -            consent(); tap("选择保存位置")
+          +            consent(kind); tap("选择保存位置")
+                       assert find(text=filename).get("package") in ("com.android.documentsui", "com.google.android.documentsui")
+          @@ -1907,3 +1905,3 @@
+                       tap(chosen[1]); tap(chosen[0]); tap("生成预览"); find(text=title+"预览")
+          -            consent(); tap("选择保存位置")
+          +            consent(kind); tap("选择保存位置")
+                       assert find(text=filename).get("package") in ("com.android.documentsui", "com.google.android.documentsui")
+          --- a/tools/verify_paged_exports.py
+          +++ b/tools/verify_paged_exports.py
+          @@ -216,3 +216,3 @@
+                for(android.widget.ImageView view:views)shown.add(((android.graphics.drawable.BitmapDrawable)view.getDrawable()).getBitmap());
+          -     previewOk(boxes.size()==1&&!boxes.get(0).isChecked(),"unchecked_consent_"+suffix);
+          +     previewOk(boxes.size()==1&&!boxes.get(0).isChecked()&&"我已核对预览，接下来由我选择保存或发送".contentEquals(boxes.get(0).getText()),"unchecked_consent_"+suffix);
+                onUi(inst,()->dialog[0].getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick());
+          @@ -905,2 +905,35 @@
+           
+          +def consent_checkbox(nodes,kind,package):
+          +    if kind not in ("MARKDOWN","PDF","PNG_ZIP"):raise ValueError("unknown preview format")
+          +    expected="我已核对内容与图片，可保存此包" if kind=="MARKDOWN" else "我已核对预览，接下来由我选择保存或发送"
+          +    matches=[n for n in nodes if n.get("package")==package and n.get("class")=="android.widget.CheckBox"]
+          +    if not matches:return None
+          +    assert len(matches)==1,"ambiguous preview checkbox"
+          +    n=matches[0];assert n.get("text")==expected,"consent wording does not match available actions"
+          +    assert n.get("checkable")=="true" and n.get("checked")=="false" and n.get("enabled")=="true","consent is not fresh and enabled"
+          +    return n
+          +
+          +def consent_copy_selftest():
+          +    kind=("MARKDOWN","PDF","PNG_ZIP");copy=["我已核对内容与图片，可保存此包","我已核对预览，接下来由我选择保存或发送","我已核对预览，接下来由我选择保存或发送"]
+          +    path=Path(__file__).resolve().parents[1]/"src/main/java/com/supercubegame/pockettodo/MainActivity.java"
+          +    method=path.read_text().split("private void previewShare(byte[][] prepared,int format){",1)[1].split("private void finishShare(",1)[0]
+          +    expression=re.findall(r'consent\.setText\(([^;]+)\);body\.addView\(consent\);',method);assert len(expression)==1
+          +    with tempfile.TemporaryDirectory() as tmp:
+          +        def run_compiler(expr):
+          +            file=Path(tmp)/"Text.java";file.write_text('class Text {static String actual(int format){return '+expr+';}public static void main(String[] a){for(int i=0;i<3;i++)System.out.println(actual(i));}}')
+          +            javac=['javac'] if shutil.which('javac') else ['java','-m','jdk.compiler/com.sun.tools.javac.Main'];subprocess.run([*javac,'-d',tmp,str(file)],check=True,timeout=30)
+          +            return subprocess.check_output(['java','-cp',tmp,'Text'],text=True,timeout=15).splitlines()
+          +        actual=run_compiler(expression[0]);assert actual==copy,actual
+          +        for before,after,match in [('format==0','true',[True,False,False]),('format==0','false',[False,True,True])]:
+          +            assert expression[0].count(before)==1;wrong=run_compiler(expression[0].replace(before,after));assert [a==b for a,b in zip(wrong,copy)]==match
+          +    pkg='com.example.fixture';base={'class':'android.widget.CheckBox','package':pkg,'checkable':'true','checked':'false','enabled':'true'}
+          +    for i,k in enumerate(kind):
+          +        n=dict(base,text=copy[i]);assert consent_checkbox([n],k,pkg) is n
+          +        assert consent_checkbox([dict(n,package='other')],k,pkg) is None and consent_checkbox([dict(n,**{'class':'android.widget.TextView'})],k,pkg) is None
+          +        for bad in ([n,n],[dict(n,text=copy[1-i] if i<2 else copy[0])],[dict(n,checked='true')],[dict(n,checkable='false')],[dict(n,enabled='false')]):
+          +            try:consent_checkbox(bad,k,pkg)
+          +            except AssertionError:pass
+          +            else:raise AssertionError('ambiguous, misleading or stale consent accepted')
+          +    print('PREVIEW_CONSENT_COPY 3 actual Java labels, 2 wrong implementations, format-specific node controls; NOT_DEVICE',flush=True)
+          +
+           def receiver_ack_selftest():
+          @@ -1244,2 +1277,3 @@
+           def selftest():
+          +    consent_copy_selftest()
+               chooser_tile_selftest()
+          @@ -1668,9 +1702,8 @@
+                   click(find_format("Markdown"));tap(title);tap("1. 文字：Second edited");tap("生成预览");find(text=title+"预览")
+          -    def save_picker():
+          +    def save_picker(kind):
+                   for attempt in range(8):
+          -            found=[n for n in nodes() if n.get("text")=="我已核对内容与图片，可保存此包"]
+          -            if found:
+          -                n=found[0];bounds=list(map(int,re.findall(r"\d+",n.get("bounds"))))
+          -                if bounds[2]>bounds[0] and bounds[3]>bounds[1]:
+          -                    assert n.get("checked")=="false";click(n);break
+          +            n=consent_checkbox(nodes(),kind,gate.PKG)
+          +            if n is not None:
+          +                bounds=list(map(int,re.findall(r"\d+",n.get("bounds"))))
+          +                if bounds[2]>bounds[0] and bounds[3]>bounds[1]:click(n);break
+                       shell("input","swipe","160","440","160","190","350")
+          @@ -1715,6 +1748,6 @@
+                          "unchecked_save_refused",kind)
+          -            save_picker();trace=[]
+          +            save_picker(kind);trace=[]
+                       cancel_share_picker(nodes,lambda:shell("input","keyevent","KEYCODE_BACK"),gate.PKG,trace)
+                       stop();ok(not paths() and state()==baseline,"picker_cancel_preserves_state",kind)
+          -            start();open_preview(title);save_picker();tap("SAVE")
+          +            start();open_preview(title);save_picker(kind);tap("SAVE")
+                       find(**{"content-desc":"v12-status","text":title+"已保存，逐字节回读一致"})
+          @@ -1741,3 +1774,3 @@
+                       stop();ok(state()==baseline,"save_preserves_state",kind);preserve_output("accepted")
+          -            start();open_preview(title);save_picker();external(1,0)
+          +            start();open_preview(title);save_picker(kind);external(1,0)
+                       changed=state();expected=list(text_row);expected[7]=1
+          @@ -1892,3 +1925,3 @@
+                       find(text=title+"预览");find(text="第 1 / 1 页");find(**{"content-desc":"导出第1页"})
+          -            save_picker();tap("SAVE")
+          +            save_picker(kind);tap("SAVE")
+                       find(**{"content-desc":"v12-status","text":title+"已保存，逐字节回读一致"})
+          CONSENT_PATCH
+          cat > repair.py <<'REPAIR'
           from pathlib import Path
           import hashlib,subprocess,tempfile
-          BASE='3e7218d3c654f8425b199e7f5bbc5946ac8bd261'
-          P='tools/verify_paged_exports.py'
-          PINS={P:'6bae4e59c85cfbf93bbae037e091e2ba0d9160f9'}
-          def blob(b):return hashlib.sha1(b'blob %d\0'%len(b)+b).hexdigest()
+          BASE='39c4c7e0d15a5a1fdb0adaed6994ea1f3f8e4471'
+          PINS={'.github/workflows/android.yml': '93bd0d823e4b1468f955daa2d38d023335b77f8c', 'src/main/java/com/supercubegame/pockettodo/MainActivity.java': 'c9b6cc4388788950f6b4214c998badcafbd4332a', 'tools/verify_batch_exports.py': '099676851ab430cc81745d1fe6a3116eb6e08bc6', 'tools/verify_paged_exports.py': 'dea8bd8f4a79da08908b11908f8bc91bce06e6d5'}
+          FINAL={'.github/workflows/android.yml': '845edf88fd1097998f7151ecbeaf2f11b72dcc84', 'src/main/java/com/supercubegame/pockettodo/MainActivity.java': 'defa21be60df792a72e12fb419754513c380595f', 'tools/verify_batch_exports.py': '45caa21c79d19eae72da3d1ae89270a6cd53de81', 'tools/verify_paged_exports.py': '47ba492ea7e2644b2d48c9fc9976786619c45f83'}
+          def blob(data):return hashlib.sha1(b'blob %d\0'%len(data)+data).hexdigest()
           def candidates(root):
-              f=Path(root)/P;b=f.read_bytes();assert f.is_file() and not f.is_symlink() and blob(b)==PINS[P]
-              patch=Path(__file__).with_name('chooser-tile.patch').read_bytes();assert len(patch)==17990 and hashlib.sha256(patch).hexdigest()=='de6362c93c7585eb7a464c30b66efa0fe4fae755db7c93bba37b50053802f1a6'
+              patch=Path(__file__).with_name('consent.patch').read_bytes();assert len(patch)==10778 and hashlib.sha256(patch).hexdigest()=='df8a5df5587261917f99969c22c20e367b072710d74a9ff9dabe12c659a05e50'
+              assert set(PINS)==set(FINAL);b={}
+              for path,pin in PINS.items():
+                  f=Path(root)/path;assert f.is_file() and not f.is_symlink();b[path]=f.read_bytes();assert blob(b[path])==pin
               with tempfile.TemporaryDirectory() as tmp:
-                  path=Path(tmp)/P;path.parent.mkdir(parents=True);path.write_bytes(b)
-                  for args in (['--check'],[]):subprocess.run(['git','apply',*args,'-'],cwd=tmp,input=patch,check=True,timeout=30)
-                  assert [x.relative_to(tmp).as_posix() for x in Path(tmp).rglob('*') if x.is_file()]==[P] and not path.is_symlink()
-                  final=path.read_bytes();assert blob(final)=='dea8bd8f4a79da08908b11908f8bc91bce06e6d5';return {P:final}
-          PY
-          python3 - <<'PY'
+                  t=Path(tmp)
+                  for name,data in b.items():
+                      f=t/name;f.parent.mkdir(parents=True,exist_ok=True);f.write_bytes(data)
+                  for opts in (['--check'],[]):subprocess.run(['git','apply',*opts,'-'],cwd=t,input=patch,check=True,timeout=30)
+                  assert {p.relative_to(t).as_posix() for p in t.rglob('*') if p.is_file()}==set(PINS)
+                  out={p:(t/p).read_bytes() for p in PINS if not (t/p).is_symlink()};assert {p:blob(data) for p,data in out.items()}==FINAL;return out
+          REPAIR
+          python3 - <<'CHECK'
           import repair,os
           from pathlib import Path
-          repair.candidates(Path(os.environ['GITHUB_WORKSPACE'])/'product');p=Path('prepare.py');s=p.read_text()
-          for a,b in [('APPROVED_SHARE_BLOCK_ORDER_FIX','ISOLATED_CHOOSER_TILE_CONTRACT'),('test: compare share block rows by identity not rowid order','test: choose only the unique stable synthetic receiver tile'),('Share block order delivery','Isolated chooser tile delivery')]:
+          repair.candidates(os.environ['GITHUB_WORKSPACE']);p=Path('prepare.py');s=p.read_text()
+          for a,b in [('APPROVED_SHARE_BLOCK_ORDER_FIX','NATIVE_CONSENT_FOUR_REVIEWED_PATHS'),('test: compare share block rows by identity not rowid order','fix: distinguish saving from sending in paged preview consent'),('Share block order delivery','Native consent delivery')]:
               assert s.count(a)==1;s=s.replace(a,b)
           p.write_text(s)
-          PY
+          CHECK
           python3 prepare.py
-          python3 - <<'PY'
+          python3 - <<'CHECK'
           from pathlib import Path
           p=Path('test-deliver-accepted.py');s=p.read_text();i=s.index('patch.object(repair,"candidates",return_value=');j=s.index('),patch.object(m,"device_evidence"',i);p.write_text(s[:i]+'patch.object(repair,"candidates",return_value=data'+s[j:])
-          PY
+          CHECK
           python3 test-deliver-accepted.py
-      - name: Original 21 once, exact product commit, same-ref device dispatch
+      - name: Original 21 once, verify product identity, request both device workflows
         id: delivery
         env: {GH_TOKEN: '${{ github.token }}'}
-        run: python3 "$RUNNER_TEMP/deliver-accepted.py" "$GITHUB_WORKSPACE/product" "$RUNNER_TEMP/chooser-delivery"
+        run: python3 "$RUNNER_TEMP/deliver-accepted.py" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/consent-delivery"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         id: evidence
         if: always()
         with:
-          name: chooser-tile-delivery
-          path: ${{ runner.temp }}/chooser-delivery/
+          name: native-consent-delivery
+          path: ${{ runner.temp }}/consent-delivery/
           if-no-files-found: error
           retention-days: 14
       - name: Publish bound delivery result
@@ -76,4 +233,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ARTIFACT_URL: ${{ steps.evidence.outputs.artifact-url }}
           DELIVERY_OUTCOME: ${{ steps.delivery.outcome }}
-        run: python3 "$RUNNER_TEMP/deliver-accepted.py" publish "$RUNNER_TEMP/chooser-delivery"
+        run: python3 "$RUNNER_TEMP/deliver-accepted.py" publish "$RUNNER_TEMP/consent-delivery"

@@ -482,11 +482,114 @@ public final class V12DeviceTest extends Instrumentation {
             }finally{if(activity[0]!=null&&!activity[0].isFinishing()&&!activity[0].isDestroyed())runOnMainSync(activity[0]::finish);MainActivity.isolatedStartupTest=false;}
         }finally{BackupArchive.deleteTree(scope);}
     }
+    private void appendNeed(boolean value,String why){if(!value)throw new AssertionError("legacy append: "+why);}
+    private byte[] appendShell(String command)throws IOException{
+        // Only fixed utilities and our generated synthetic fixture paths on a disposable emulator.
+        try(InputStream in=new android.os.ParcelFileDescriptor.AutoCloseInputStream(getUiAutomation().executeShellCommand(command))){
+            ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] block=new byte[1024];int n;
+            while((n=in.read(block))!=-1){if(n<=0||out.size()+n>8192)throw new IOException("fixture command size");out.write(block,0,n);}return out.toByteArray();
+        }
+    }
+    private byte[] appendCells(String dbName,boolean all)throws Exception{
+        ByteArrayOutputStream buf=new ByteArrayOutputStream();DataOutputStream out=new DataOutputStream(buf);
+        try(SQLiteDatabase sql=SQLiteDatabase.openDatabase(getTargetContext().getDatabasePath(dbName).getPath(),null,SQLiteDatabase.OPEN_READONLY)){
+            for(String table:TABLES){if(!all&&(table.equals("revision")||table.equals("todos")||table.equals("legacy_imports")))continue;
+                try(android.database.Cursor c=sql.rawQuery("SELECT rowid,* FROM "+table+" ORDER BY rowid",null)){
+                    str(out,table);out.writeInt(c.getCount());for(String name:c.getColumnNames())str(out,name);
+                    while(c.moveToNext())for(int i=0;i<c.getColumnCount();i++){int t=c.getType(i);out.writeByte(t);switch(t){case 0:break;case 1:out.writeLong(c.getLong(i));break;case 3:str(out,c.getString(i));break;case 4:bytes(out,c.getBlob(i));break;default:throw new AssertionError("unexpected SQL type");}}
+                }
+            }
+        }out.flush();return buf.toByteArray();
+    }
+    private void appendButtons(android.view.View v,String text,List<android.widget.Button> found){
+        if(v instanceof android.widget.Button&&text.contentEquals(((android.widget.Button)v).getText())&&v.isAttachedToWindow()&&v.isShown()&&v.isEnabled())found.add((android.widget.Button)v);
+        if(v instanceof android.view.ViewGroup){android.view.ViewGroup g=(android.view.ViewGroup)v;for(int i=0;i<g.getChildCount();i++)appendButtons(g.getChildAt(i),text,found);}
+    }
+    private void appendClick(MainActivity a,String label,long budget)throws Exception{
+        long end=Math.min(budget,android.os.SystemClock.uptimeMillis()+10000);boolean[] clicked={false};
+        while(!clicked[0]&&android.os.SystemClock.uptimeMillis()<end){runOnMainSync(()->{
+            List<android.widget.Button> found=new ArrayList<>();appendButtons(a.getWindow().getDecorView(),label,found);
+            appendNeed(found.size()<=1,"ambiguous app action "+label);
+            if(found.size()==1){android.widget.Button b=found.get(0);b.requestRectangleOnScreen(new android.graphics.Rect(0,0,b.getWidth(),b.getHeight()),true);
+                android.graphics.Rect box=new android.graphics.Rect();if(b.getGlobalVisibleRect(box)&&!box.isEmpty())clicked[0]=b.performClick();}
+        });if(!clicked[0])android.os.SystemClock.sleep(25);}
+        appendNeed(clicked[0],"app action missing "+label);waitForIdleSync();
+    }
+    private android.graphics.Rect appendRect(String text,String viewId,boolean system,boolean exact){
+        android.view.accessibility.AccessibilityNodeInfo root=getUiAutomation().getRootInActiveWindow();if(root==null)return null;
+        try{
+            String pkg=String.valueOf(root.getPackageName());if(system?!(pkg.equals("com.android.documentsui")||pkg.equals("com.google.android.documentsui")):!getTargetContext().getPackageName().equals(pkg))return null;
+            android.graphics.Rect result=null;
+            for(android.view.accessibility.AccessibilityNodeInfo n:root.findAccessibilityNodeInfosByText(text)){
+                try{String value=String.valueOf(n.getText());if(!pkg.contentEquals(n.getPackageName())||!viewId.equals(n.getViewIdResourceName())||!n.isVisibleToUser()||!n.isEnabled()||!(exact?value.equals(text):value.contains(text)))continue;
+                    android.graphics.Rect box=new android.graphics.Rect();n.getBoundsInScreen(box);if(box.isEmpty())continue;
+                    appendNeed(result==null,"ambiguous visible node "+text);result=box;
+                }finally{n.recycle();}
+            }return result;
+        }finally{root.recycle();}
+    }
+    private void appendObserve(String text,String id,boolean system,boolean click,boolean exact,long budget)throws Exception{
+        long until=Math.min(budget,android.os.SystemClock.uptimeMillis()+(system?20000:10000));android.graphics.Rect last=null;
+        while(android.os.SystemClock.uptimeMillis()<until){android.graphics.Rect now=appendRect(text,id,system,exact);
+            if(now!=null&&now.equals(last)&&android.os.SystemClock.uptimeMillis()<until){
+                if(click){long at=android.os.SystemClock.uptimeMillis();android.view.MotionEvent d=android.view.MotionEvent.obtain(at,at,0,now.exactCenterX(),now.exactCenterY(),0),u=android.view.MotionEvent.obtain(at,at+40,1,now.exactCenterX(),now.exactCenterY(),0);
+                    try{sendPointerSync(d);sendPointerSync(u);}finally{d.recycle();u.recycle();}waitForIdleSync();}return;
+            }last=now;android.os.SystemClock.sleep(35);
+        }throw new AssertionError("legacy append visible node deadline: "+id+" / "+text);
+    }
+    private void appendRows(String dbName,String source)throws Exception{
+        try(SQLiteDatabase sql=SQLiteDatabase.openDatabase(getTargetContext().getDatabasePath(dbName).getPath(),null,SQLiteDatabase.OPEN_READONLY);
+            android.database.Cursor c=sql.rawQuery("SELECT id,title,done,position FROM todos ORDER BY position",null);
+            android.database.Cursor journal=sql.rawQuery("SELECT source_id,item_count FROM legacy_imports",null)){
+            String[] ids={"append-local","legacy-"+source+"-1","legacy-"+source+"-2"};int[] done={0,0,1};
+            for(int i=0;i<3;i++)appendNeed(c.moveToNext()&&ids[i].equals(c.getString(0))&&"同名记录".equals(c.getString(1))&&c.getInt(2)==done[i]&&c.getInt(3)==i,"stable appended identity, title, state and order "+i);
+            appendNeed(!c.moveToNext()&&journal.moveToFirst()&&source.equals(journal.getString(0))&&journal.getInt(1)==2&&!journal.moveToNext(),"one journal, no extra rows");
+        }
+    }
+    /** The ActivityMonitor only sets the system picker's initial DIRECTORY. It never
+     * substitutes a result, supplies a file URI to the app, or grants permissions.
+     * Test file creation targets only our unique synthetic directory on the CI AVD. */
+    private void legacyAppendNative()throws Exception{
+        Context c=getTargetContext();appendNeed("com.supercubegame.pockettodo.v12.preview".equals(c.getPackageName())&&"ranchu".equals(android.os.Build.HARDWARE),"refuse non-CI device or package");
+        String name="schema4-activation-ui.db";appendNeed(!c.getDatabasePath(name).exists(),"refuse existing isolated fixture");
+        TodoModel old=new TodoModel();old.add("同名记录");long done=old.add("同名记录");old.toggle(done);byte[] wire=BackupCodec.encode(old);
+        StringBuilder sha=new StringBuilder();for(byte b:java.security.MessageDigest.getInstance("SHA-256").digest(wire))sha.append(String.format(java.util.Locale.ROOT,"%02x",b&255));
+        try(AppDatabase fresh=AppDatabase.openForStartup(c,name)){fresh.addTodo("append-local","同名记录");fresh.addCategory(7,"保留分类");fresh.addActivity(71,7,0,"保留活动");fresh.recordBatch("keep-money",List.of(row("keep-entry",71,"2028-02-29",108)));}
+        byte[] initial=appendCells(name,true),side=appendCells(name,false);String nonce=UUID.randomUUID().toString(),folder="pocket-append-ci-"+nonce,file="old-"+nonce.substring(0,8)+".txt";
+        Path external=c.getExternalFilesDir(null).toPath(),local=Files.createTempFile(external,"legacy-ci-",".txt");String dir="/sdcard/Download/"+folder,dest=dir+"/"+file;
+        appendNeed(local.toString().matches("[A-Za-z0-9_./-]+")&&dir.matches("/sdcard/Download/pocket-append-ci-[a-f0-9-]{36}"),"fixed synthetic paths");
+        try{Files.write(local,wire);appendShell("mkdir "+dir);appendShell("cp -n "+local+" "+dest);appendNeed(Arrays.equals(appendShell("cat "+dest),wire),"exact external picker fixture bytes");}finally{Files.deleteIfExists(local);}
+        java.util.concurrent.atomic.AtomicInteger opens=new java.util.concurrent.atomic.AtomicInteger();android.app.Instrumentation.ActivityMonitor monitor=new android.app.Instrumentation.ActivityMonitor(){
+            @Override public android.app.Instrumentation.ActivityResult onStartActivity(android.content.Intent intent){
+                if(android.content.Intent.ACTION_OPEN_DOCUMENT.equals(intent.getAction())){
+                    appendNeed(intent.hasCategory(android.content.Intent.CATEGORY_OPENABLE)&&"*/*".equals(intent.getType())&&intent.getComponent()==null&&intent.getData()==null&&(intent.getFlags()&android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION)==0,"actual append intent is document selection, not replacement or writing");
+                    opens.incrementAndGet();intent.putExtra(android.provider.DocumentsContract.EXTRA_INITIAL_URI,android.provider.DocumentsContract.buildDocumentUri("com.android.externalstorage.documents","primary:Download/"+folder));
+                }return null;
+            }
+        };
+        MainActivity ui=null;android.accessibilityservice.AccessibilityServiceInfo info=getUiAutomation().getServiceInfo();int flags=info.flags;info.flags|=android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;getUiAutomation().setServiceInfo(info);
+        addMonitor(monitor);MainActivity.isolatedActivationTest=true;long end=android.os.SystemClock.uptimeMillis()+60000;
+        try{
+            ui=(MainActivity)startActivitySync(new android.content.Intent(c,MainActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+            appendClick(ui,"活动",end);appendClick(ui,"备份 / 恢复",end);
+            for(int pass=0;pass<3;pass++){
+                appendClick(ui,"追加旧版待办",end);appendObserve(file,"android:id/title",true,true,true,end);
+                appendObserve("文件共 2 条：已完成 1 条，未完成 1 条。","android:id/message",false,false,false,end);
+                if(pass==0){appendNeed(Arrays.equals(initial,appendCells(name,true)),"preview does not write");appendObserve("取消","android:id/button2",false,true,true,end);appendNeed(Arrays.equals(initial,appendCells(name,true)),"cancel retains every typed SQL cell");log.append("LEGACY_APPEND_NATIVE exact_picker_preview_and_cancel PASS\n");}
+                else if(pass==1){appendObserve("确认追加","android:id/button1",false,true,true,end);
+                    long until=Math.min(end,android.os.SystemClock.uptimeMillis()+10000);boolean committed=false;while(!committed&&android.os.SystemClock.uptimeMillis()<until){try(SQLiteDatabase s=SQLiteDatabase.openDatabase(c.getDatabasePath(name).getPath(),null,SQLiteDatabase.OPEN_READONLY);android.database.Cursor row=s.rawQuery("SELECT COUNT(*) FROM legacy_imports",null)){committed=row.moveToFirst()&&row.getLong(0)==1;}if(!committed)android.os.SystemClock.sleep(30);}
+                    appendNeed(committed,"positive commit observed");appendRows(name,sha.toString());appendNeed(Arrays.equals(side,appendCells(name,false)),"all non-append business cells unchanged");log.append("LEGACY_APPEND_NATIVE real_confirmation_exact_ids_and_untouched_business PASS\n");}
+                else{byte[] stable=appendCells(name,true);appendObserve("这份文件已在本机迁入","android:id/message",false,false,false,end);appendNeed(appendRect("确认追加","android:id/button1",false,true)==null,"duplicate source must not offer a write");appendObserve("关闭","android:id/button2",false,true,true,end);appendNeed(Arrays.equals(stable,appendCells(name,true)),"duplicate review no SQL change");}
+            }
+            appendNeed(opens.get()==3,"three distinct picker requests");final MainActivity closing=ui;final TodayScreen[] screen={null};runOnMainSync(()->{screen[0]=closing.shortcutTestScreen();closing.finish();});waitForIdleSync();
+            appendNeed(screen[0]!=null&&screen[0].awaitShortcutClose(),"native screen closed");appendRows(name,sha.toString());appendNeed(Arrays.equals(side,appendCells(name,false)),"preserved after close and independent reopen");log.append("LEGACY_APPEND_NATIVE duplicate_and_database_reopen PASS\n");
+        }finally{if(ui!=null&&!ui.isFinishing()&&!ui.isDestroyed()){final MainActivity a=ui;runOnMainSync(a::finish);}MainActivity.isolatedActivationTest=false;removeMonitor(monitor);info.flags=flags;getUiAutomation().setServiceInfo(info);}
+    }
     @Override public void onStart(){
         Bundle result=new Bundle();try{
             ok(getTargetContext().getPackageName().equals("com.supercubegame.pockettodo.v12.preview"),"tests target isolated v1.2 package");
             ok(android.os.Build.VERSION.SDK_INT==Integer.parseInt(args.getString("expectedApi")),"actual emulator API equals requested test matrix");
-            String phase=args.getString("phase");if("seed".equals(phase)){seed();fieldsSeed();backupSeed();guardedSeed();frozenSeed();}else if("reopen".equals(phase)){reopen();fieldsReopen();backupReopen();guardedReopen();frozenReopen();restorePreviewOwnerReopen();}else if("prepare_ui_backup".equals(phase))prepareUiBackup();else throw new IllegalArgumentException("unknown test phase");
+            String phase=args.getString("phase");if("seed".equals(phase)){seed();fieldsSeed();backupSeed();guardedSeed();frozenSeed();legacyAppendNative();}else if("reopen".equals(phase)){reopen();fieldsReopen();backupReopen();guardedReopen();frozenReopen();restorePreviewOwnerReopen();}else if("prepare_ui_backup".equals(phase))prepareUiBackup();else throw new IllegalArgumentException("unknown test phase");
             log.append("DEVICE_DATABASE_RESULT ").append(phase).append(' ').append(checks).append('/').append(checks).append(" PASS\n");result.putString("stream",log.toString());finish(Activity.RESULT_OK,result);
         }catch(Throwable error){StringWriter text=new StringWriter();error.printStackTrace(new PrintWriter(text));result.putString("stream",log+"DEVICE_DATABASE_FAILED\n"+text);finish(Activity.RESULT_CANCELED,result);}
     }

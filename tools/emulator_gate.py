@@ -2136,7 +2136,48 @@ def derivative_hardening_selftest():
     else:raise AssertionError('hardening recording omission survived')
     print('DERIVATIVE_HARDENING_SELFTEST_PASS orientations=8 messages=6 java_mutants=%d fixed_native_labels_untouched'%len(mutations),flush=True)
 
+FLAT_INK_PROBE = 'import java.awt.image.BufferedImage;\nimport javax.imageio.ImageIO;\nimport java.io.File;\nimport java.util.HashMap;\nclass FlatInkProbe {\n static int dominant(BufferedImage im,int x,int y,int r,int b){\n  if(x<0||y<0||r>im.getWidth()||b>im.getHeight()||r<=x||b<=y)throw new AssertionError("screen bounds");\n  int dx=(r-x)/6,dy=(b-y)/6,max=0,value=-1;HashMap<Integer,Integer> histogram=new HashMap<>();\n  for(int j=y+dy;j<b-dy;j++)for(int i=x+dx;i<r-dx;i++){int k=im.getRGB(i,j)&0xffffff;int n=histogram.merge(k,1,Integer::sum);if(n>max){value=k;max=n;}}\n  return value;\n }\n public static void main(String[] a)throws Exception{BufferedImage im=ImageIO.read(new File(a[0]));if(im==null)throw new AssertionError("not a screenshot");for(int i=1;i<a.length;i+=5){int v=dominant(im,Integer.parseInt(a[i]),Integer.parseInt(a[i+1]),Integer.parseInt(a[i+2]),Integer.parseInt(a[i+3]));if(v!=Integer.parseInt(a[i+4],16))throw new AssertionError("incorrect button surface "+i+" actual="+Integer.toHexString(v)+" expected="+a[i+4]);}System.out.println("FLAT_SURFACES "+((a.length-1)/5));}\n}\n'
+
+def flat_button_bounds(frame,expected,package,density):
+    """Read real Android node geometry and selection, not implementation constants."""
+    assert 0 < density <= 1280
+    args=[]
+    for label,selected,surface in expected:
+        matches=[n for n in frame if n.get('text')==label and n.get('package')==package and n.get('class')=='android.widget.Button']
+        assert len(matches)==1, 'missing/ambiguous native button: '+label
+        n=matches[0];assert n.get('clickable')=='true' and n.get('enabled')=='true' and n.get('selected')==('true' if selected else 'false'), 'action/selection state: '+label
+        m=re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]',n.get('bounds',''));assert m, 'invalid bounds: '+label
+        x,y,r,b=map(int,m.groups());assert min(r-x,b-y)*160>=48*density, 'under 48dp: '+label
+        args.extend([str(k) for k in (x,y,r,b)]+[surface]);
+    return args
+
+def flat_button_evidence(out,shot,frame,density_text,stage):
+    reported=re.findall(r'^(?:Physical|Override) density:\s*(\d+)\s*$',density_text,re.M);assert reported,'unknown display density'
+    today=stage=='today';assert today or stage=='activity'
+    expected=[('今天',today,'e4f2e8' if today else 'f5f9f6'),('活动',not today,'f5f9f6' if today else 'e4f2e8'),('导出笔记',False,'f5f9f6')]
+    if today:expected += [('添加',False,'185d4a'),('全部',True,'e4f2e8'),('待办',False,'fcfefb'),('已完成',False,'fcfefb')]
+    args=flat_button_bounds(frame,expected,PKG,int(reported[-1]));src=out/'FlatInkProbe.java';src.write_text(FLAT_INK_PROBE,encoding='utf-8')
+    evidence=subprocess.check_output(['java','-Djava.awt.headless=true',str(src),str(out/shot),*args],text=True,timeout=20).strip();assert evidence=='FLAT_SURFACES '+str(len(expected)),evidence
+    return dict(stage=stage,buttons=[x[0] for x in expected],density=int(reported[-1]),sha256=hashlib.sha256((out/shot).read_bytes()).hexdigest(),scope='REAL_SCREENSHOT_NATIVE_ACCESSIBILITY_NODES_NOT_LARGE_FONT_OR_PHONE')
+
+def flat_button_controls():
+    n={'text':'添加','class':'android.widget.Button','package':'demo.pocket','enabled':'true','clickable':'true','selected':'false','bounds':'[2,3][50,51]'};e=[('添加',False,'185d4a')];assert flat_button_bounds([n],e,'demo.pocket',160)==['2','3','50','51','185d4a']
+    for frame in ([n,n],[],[dict(n,package='other')],[dict(n,enabled='false')],[dict(n,clickable='false')],[dict(n,selected='true')],[dict(n,bounds='[2,3][49,51]')],[dict(n,bounds='bad')]):
+        try:flat_button_bounds(frame,e,'demo.pocket',160)
+        except AssertionError:pass
+        else:raise AssertionError('bad accessibility sample accepted')
+    print('FLAT_BUTTON_BOUNDS_HOST 1 positive, 8 refusals; not device acceptance',flush=True)
+    palette=(ROOT/'src/main/java/com/supercubegame/pockettodo/TodayScreen.java').read_text()
+    for fg,bg in [('INK','BG'),('MUTED','BG'),('MUTED','TINT'),('ACCENT','TINT'),('WHITE','ACCENT'),('DISABLED_FG','DISABLED_BG')]:
+        def light(key):
+            m=re.findall(r'\b'+key+r'=0xff([0-9a-f]{6})\b',palette);assert len(m)==1,key
+            vals=[int(m[0][i:i+2],16)/255 for i in (0,2,4)]
+            return sum(w*(v/12.92 if v<=.04045 else ((v+.055)/1.055)**2.4) for w,v in zip((.2126,.7152,.0722),vals))
+        lo,hi=sorted([light(fg),light(bg)]);assert (hi+.05)/(lo+.05)>=4.5, 'unreadable text '+fg+'/'+bg
+
+
 def parser_selftest():
+    flat_button_controls()
     activity_navigation_selftest()
     derivative_hardening_selftest()
     relation_input_selftest()
@@ -2408,6 +2449,7 @@ def _verify_native_ui(adb,nodes):
     """Only real taps/text input; independently read SQLite after force-stop, no seeding UI DB."""
     out = Path('native-ui'); out.mkdir(exist_ok=True)
     checks, shots = [], []
+    flat_audit=[]
     infra_retries = []
     process_stops = []
     restore_picker_traces = []
@@ -2530,6 +2572,7 @@ def _verify_native_ui(adb,nodes):
         ok(named_todo('Fresh milk').get('content-desc')=='todo-'+aid and named_todo('Fresh milk').get('checked')=='true','title edit preserves stable identity and completion')
         restart(); ok(named_todo('Fresh milk').get('checked')=='true' and named_todo('Walk outside').get('checked')=='false','native todo state survives actual process restart')
         shot('01-todos.png')
+        flat_audit.append(flat_button_evidence(out,'01-todos.png',nodes(),shell('wm','density'),'today'))
         tap('活动'); ready(); tap('新建分类'); touch('分类名称'); type_text('Daily'); tap('保存'); ready()
         ok(find(text='Daily') is not None,'category created through visible native dialog')
         touch('category-rename-1'); clear_field('分类名称'); type_text('Checkins'); tap('保存'); ready()
@@ -2542,6 +2585,7 @@ def _verify_native_ui(adb,nodes):
         tap('标记完成'); ready(); ok(find(text='今天：已完成') is not None,'repeated daily mark remains one visible day')
         tap('跳过今天'); ready(); ok(find(text='今天：已跳过') is not None,'skipped is distinct from done and unrecorded')
         shot('02-activity.png')
+        flat_audit.append(flat_button_evidence(out,'02-activity.png',nodes(),shell('wm','density'),'activity'))
         tap('返回分类'); ready(); tap('新建分类'); touch('分类名称'); type_text('Farm'); tap('保存'); ready()
         touch('category-up-2'); ready()
         cats=[n.get('text') for n in nodes() if n.get('content-desc','').startswith('category-name-')]
@@ -3238,11 +3282,13 @@ public class ImageImportFixture {
         result.update(derivative_geometry=derive_geometry,pixel_oracle=pixel_oracle,process_stops=process_stops)
         result['restore_picker_traces']=restore_picker_traces
         result['summary_navigation_traces']=summary_navigation_traces
+        result['flat_button_audit']=list(flat_audit)
         result['database_directory_traces']=directory_traces
     except Exception as exc:
         result={'status':'FAIL','api':API,'count':len(checks),'checks':checks,'error':repr(exc),'screenshots':shots,'infra_retries':infra_retries,'release_ready':False,'process_stops':process_stops}
         result['restore_picker_traces']=restore_picker_traces
         result['summary_navigation_traces']=summary_navigation_traces
+        result['flat_button_audit']=list(flat_audit)
         result['database_directory_traces']=directory_traces
         if 'derive_geometry' in locals():result['derivative_geometry']=derive_geometry
         result['derivative_hardening_partial']=list(hard_checks)

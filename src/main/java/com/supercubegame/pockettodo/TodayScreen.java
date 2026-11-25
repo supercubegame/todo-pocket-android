@@ -33,8 +33,8 @@ import java.util.function.Consumer;
  * All DB work belongs to the single executor, including close after queued work.
  */
 public final class TodayScreen {
-    static final int BG=0xfff5f9f7, INK=0xff203d35, MUTED=0xff5b726a;
-    static final int ACCENT=0xff21785f, TINT=0xffdceee5, WHITE=0xfffefffe, ERROR=0xffa33743;
+    static final int BG=0xfff5f9f6, INK=0xff19372f, MUTED=0xff4e655d;
+    static final int ACCENT=0xff185d4a, TINT=0xffe4f2e8, WHITE=0xfffcfefb, ERROR=0xff952e3e;
     final Activity activity;
     final AppDatabase db;
     private final ExecutorService io=Executors.newSingleThreadExecutor();
@@ -234,17 +234,17 @@ public final class TodayScreen {
         TextView label=text("口袋待办  /  1.2 开发预览",14,ACCENT);label.setContentDescription("v12-home");root.addView(label);
         TextView heading=text("把今天，放进口袋",28,INK);heading.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));heading.setPadding(0,dp(8),0,dp(8));root.addView(heading);
         Button activate=button("启用分类快捷入口",this::requestShortcutActivation);
-        activate.setContentDescription("activation-entry");root.addView(activate);
+        dress(activate,ButtonRole.QUIET);activate.setContentDescription("activation-entry");root.addView(activate);
         status=text("正在读取本机数据…",14,MUTED);status.setContentDescription("v12-status");status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);root.addView(status);
         content=column();LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,0,1);cp.topMargin=dp(12);root.addView(content,cp);
         LinearLayout nav=new LinearLayout(activity);
-        nav.addView(button("今天",()->navigate(0)),new LinearLayout.LayoutParams(0,dp(52),1));
-        nav.addView(button("活动",()->navigate(1)),new LinearLayout.LayoutParams(0,dp(52),1));
-        nav.addView(button("导出笔记",()->{leaveTodoSession();((MainActivity)activity).openNoteShare();}),new LinearLayout.LayoutParams(0,dp(52),1));root.addView(nav);
+        navToday=button("今天",()->navigate(0));nav.addView(navToday,new LinearLayout.LayoutParams(0,dp(52),1));
+        navActivity=button("活动",()->navigate(1));nav.addView(navActivity,new LinearLayout.LayoutParams(0,dp(52),1));
+        nav.addView(dress(button("导出笔记",()->{leaveTodoSession();((MainActivity)activity).openNoteShare();}),ButtonRole.QUIET),new LinearLayout.LayoutParams(0,dp(52),1));root.addView(nav);
         refresh();
     }
     private void navigate(int next){if(busy)return;rememberDraft();leaveTodoSession();page=next;refresh();}
-    void refresh(){if(page==1)activities.load();else loadTodos();}
+    void refresh(){paintNavigation();if(page==1)activities.load();else loadTodos();}
     LinearLayout content(){todoView=new Object();clearTodoPreview();if(page!=0)clearTodoUndo();input=null;content.removeAllViews();return content;}
     private void rememberDraft(){if(input!=null)draft=input.getText().toString();}
     private static final class TodoRow {
@@ -266,7 +266,7 @@ public final class TodayScreen {
         final List<String> renderedOrder=java.util.Collections.unmodifiableList(ids);
         TextView summary=text("还剩 "+remaining+" 件 / 共 "+todos.size()+" 件",20,INK);summary.setPadding(dp(14),dp(12),dp(14),dp(12));summary.setBackground(shape(TINT,16));body.addView(summary);
         LinearLayout tabs=new LinearLayout(activity);String[] labels={"全部","待办","已完成"};
-        for(int i=0;i<labels.length;i++){final int choice=i;Button b=button(labels[i],()->{filter=choice;loadTodos();});if(i==filter){b.setBackgroundTintList(ColorStateList.valueOf(ACCENT));b.setTextColor(WHITE);}tabs.addView(b,new LinearLayout.LayoutParams(0,dp(48),1));}
+        for(int i=0;i<labels.length;i++){final int choice=i;Button b=button(labels[i],()->{filter=choice;loadTodos();});b.setSelected(i==filter);dress(b,i==filter?ButtonRole.MARKED:ButtonRole.FILTER);tabs.addView(b,new LinearLayout.LayoutParams(0,dp(48),1));}
         body.addView(tabs);
         ScrollView scroll=new ScrollView(activity);scroll.setContentDescription("todo-list-scroll");scroll.setFillViewport(true);LinearLayout rows=column();scroll.addView(rows);body.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         int visible=0;
@@ -278,7 +278,7 @@ public final class TodayScreen {
             box.setOnCheckedChangeListener((b,checked)->{clearTodoUndo();work(()->{db.editTodo(item.id,item.title,checked);return true;},ignored->loadTodos(),this::loadTodos);});
             row.addView(box,new LinearLayout.LayoutParams(0,-2,1));
             Button edit=button("编辑",()->{clearTodoUndo();editor("编辑待办","编辑待办输入",item.title,false,value->db.editTodo(item.id,value,item.done),this::loadTodos);});edit.setContentDescription("edit-"+item.id);row.addView(edit,new LinearLayout.LayoutParams(dp(60),dp(52)));
-            Button delete=button("删除",()->previewTodoDeletion(item,renderedTodoView));delete.setContentDescription("delete-"+item.id);row.addView(delete,new LinearLayout.LayoutParams(dp(60),dp(52)));
+            Button delete=button("删除",()->previewTodoDeletion(item,renderedTodoView));dress(delete,ButtonRole.REMOVE);delete.setContentDescription("delete-"+item.id);row.addView(delete,new LinearLayout.LayoutParams(dp(60),dp(52)));
             LinearLayout card=column();card.addView(row);
             renderTodoOrder(card,item,renderedOrder,renderedTodoView);addRow(rows,card);
         }
@@ -287,7 +287,7 @@ public final class TodayScreen {
         LinearLayout composer=new LinearLayout(activity);composer.setGravity(Gravity.CENTER_VERTICAL);
         input=field("新待办输入",false);input.setHint("下一件小事…");input.setText(draft);input.setBackground(shape(WHITE,12));input.setPadding(dp(12),dp(8),dp(12),dp(8));
         composer.addView(input,new LinearLayout.LayoutParams(0,dp(56),1));
-        composer.addView(button("添加",this::addTodo),new LinearLayout.LayoutParams(dp(68),dp(56)));body.addView(composer);
+        composer.addView(dress(button("添加",this::addTodo),ButtonRole.PRIMARY),new LinearLayout.LayoutParams(dp(68),dp(56)));body.addView(composer);
     }
     /** All-tab ordering only. Consume the rendered identity before enqueueing so
      * old or sibling callbacks cannot replay even after a failed save.
@@ -410,7 +410,39 @@ public final class TodayScreen {
     LinearLayout column(){LinearLayout v=new LinearLayout(activity);v.setOrientation(LinearLayout.VERTICAL);return v;}
     TextView text(String value,int size,int color){TextView v=new TextView(activity);v.setText(value);v.setTextSize(size);v.setTextColor(color);return v;}
     EditText field(String description,boolean multiline){EditText v=new EditText(activity);v.setContentDescription(description);v.setTextSize(17);v.setTextColor(INK);v.setSingleLine(!multiline);if(multiline){v.setMinLines(3);v.setMaxLines(6);v.setGravity(Gravity.TOP);v.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);}return v;}
-    Button button(String value,Runnable action){Button b=new Button(activity);b.setText(value);b.setTextSize(14);b.setAllCaps(false);b.setTextColor(ACCENT);b.setMinWidth(0);b.setMinimumWidth(0);b.setMinHeight(dp(48));b.setPadding(dp(5),0,dp(5),0);b.setBackgroundTintList(ColorStateList.valueOf(TINT));b.setOnClickListener(v->{if(!busy)action.run();});return b;}
+    private enum ButtonRole { SECONDARY, PRIMARY, QUIET, FILTER, MARKED, REMOVE }
+    private Button navToday,navActivity;
+    private static final int DISABLED_FG=0xff53665d, DISABLED_BG=0xffe6ece7, OUTLINE=0xff8a9f92;
+    private GradientDrawable tile(int fill,int stroke,int width){
+        GradientDrawable g=shape(fill,10);if(width>0)g.setStroke(dp(width),stroke);return g;
+    }
+    private Button dress(Button b,ButtonRole role){
+        boolean primary=role==ButtonRole.PRIMARY,marked=role==ButtonRole.MARKED,remove=role==ButtonRole.REMOVE;
+        int fill=primary?ACCENT:marked?TINT:remove?0xfffaeaeb:role==ButtonRole.QUIET?BG:WHITE;
+        int ink=primary?WHITE:remove?ERROR:ACCENT;
+        int press=primary?0xff104937:remove?0xfff2d7dc:0xffcadfd1;
+        android.graphics.drawable.StateListDrawable states=new android.graphics.drawable.StateListDrawable();
+        states.addState(new int[]{-android.R.attr.state_enabled},tile(DISABLED_BG,DISABLED_BG,0));
+        states.addState(new int[]{android.R.attr.state_pressed},tile(press,ink,1));
+        states.addState(new int[]{android.R.attr.state_focused},tile(fill,primary?WHITE:ink,2));
+        states.addState(new int[]{},tile(fill,marked?ACCENT:OUTLINE,marked?2:role==ButtonRole.SECONDARY?1:0));
+        b.setBackgroundTintList(null);b.setStateListAnimator(null);b.setElevation(0f);b.setTranslationZ(0f);
+        b.setBackground(new android.graphics.drawable.InsetDrawable(states,dp(2)));
+        b.setTextColor(new ColorStateList(new int[][]{{-android.R.attr.state_enabled},{}},new int[]{DISABLED_FG,ink}));
+        b.setTypeface(Typeface.create(marked||primary?"sans-serif-medium":"sans-serif",Typeface.NORMAL));
+        b.setMinWidth(dp(48));b.setMinimumWidth(dp(48));b.setMinHeight(dp(48));b.setMinimumHeight(dp(48));
+        b.setGravity(Gravity.CENTER);b.setPadding(dp(5),dp(2),dp(5),dp(2));return b;
+    }
+    private void paintNavigation(){
+        if(navToday==null||navActivity==null)return;
+        navToday.setSelected(page==0);navActivity.setSelected(page==1);
+        dress(navToday,page==0?ButtonRole.MARKED:ButtonRole.QUIET);
+        dress(navActivity,page==1?ButtonRole.MARKED:ButtonRole.QUIET);
+    }
+    Button button(String value,Runnable action){
+        Button b=new Button(activity);b.setText(value);b.setTextSize(14);b.setAllCaps(false);
+        dress(b,ButtonRole.SECONDARY);b.setOnClickListener(v->{if(!busy)action.run();});return b;
+    }
     GradientDrawable shape(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
     int dp(int value){return Math.round(value*activity.getResources().getDisplayMetrics().density);}
     boolean awaitShortcutClose()throws InterruptedException{return io.awaitTermination(10,java.util.concurrent.TimeUnit.SECONDS);}

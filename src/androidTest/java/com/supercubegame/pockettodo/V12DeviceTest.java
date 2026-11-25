@@ -428,11 +428,65 @@ public final class V12DeviceTest extends Instrumentation {
         backup(d,out.resolve("PocketTodo-v12-backup.zip"),m);close(d);
         ok(Files.size(out.resolve("PocketTodo-v12-backup.zip"))>0,"UI backup fixture exported nonempty");
     }
+    private static void restoreOwnerNeed(boolean condition,String label){if(!condition)throw new AssertionError("Restore preview lifecycle: "+label);}
+    private static Set<Path> restoreOwnerChildren(Path root)throws IOException{
+        try(java.util.stream.Stream<Path> files=Files.list(root)){return files.collect(java.util.stream.Collectors.toSet());}
+    }
+    private static boolean restoreOwnerInput(android.view.View v){
+        if("新待办输入".contentEquals(v.getContentDescription()==null?"":v.getContentDescription()))return v.isEnabled()&&v.isAttachedToWindow();
+        if(v instanceof android.view.ViewGroup){android.view.ViewGroup g=(android.view.ViewGroup)v;for(int i=0;i<g.getChildCount();i++)if(restoreOwnerInput(g.getChildAt(i)))return true;}
+        return false;
+    }
+    private boolean restoreOwnerDialog(){
+        android.view.accessibility.AccessibilityNodeInfo root=getUiAutomation().getRootInActiveWindow();if(root==null)return false;
+        try{for(android.view.accessibility.AccessibilityNodeInfo n:root.findAccessibilityNodeInfosByText("我明白会替换本机数据")){
+            try{if(n.isVisibleToUser()&&n.isCheckable()&&!n.isChecked()&&getTargetContext().getPackageName().contentEquals(n.getPackageName())&&"restore-consent".contentEquals(n.getContentDescription()==null?"":n.getContentDescription()))return true;}finally{n.recycle();}
+        }return false;}finally{root.recycle();}
+    }
+    /** Independent from the private pending-plan field: prove the real unchecked
+     * dialog was live, then finish its Activity and read the filesystem + SQL. */
+    private void restorePreviewOwnerReopen()throws Exception{
+        Context c=getTargetContext();String dbName="schema4-startup-ui.db";
+        restoreOwnerNeed(!c.getDatabasePath(dbName).exists(),"refuse to replace an existing test database");
+        Path cache=c.getCacheDir().toPath(),scope=Files.createTempDirectory(cache,"restore-life-probe-"),stage=Files.createDirectories(cache.resolve("restore-stage"));
+        Path archive=scope.resolve("nonempty.zip"),chosen=scope.resolve("chosen.zip");byte[] payload={7,11,21,31,41},before;String mediaId;
+        MediaRepository media=new MediaRepository(c.getFilesDir().toPath().resolve("media"),64L*1024*1024);
+        try(AppDatabase d=AppDatabase.openForStartup(c,dbName)){
+            mediaId=media.copy(new ByteArrayInputStream(payload));d.registerMedia(mediaId,"application/octet-stream",payload.length);
+            d.addTodo("owner-before","预览前保留");d.exportBackup(archive,media);d.addTodo("owner-later","未确认不得覆盖");before=d.exportState();
+        }
+        Files.copy(archive,chosen);Set<Path> prior=restoreOwnerChildren(stage);MainActivity[] activity={null};TodayScreen[] screen={null};
+        try(BackupArchive.Snapshot other=BackupArchive.read(archive,stage,64L*1024*1024)){
+            Set<Path> keep=restoreOwnerChildren(stage),extra=new HashSet<>(keep);extra.removeAll(prior);restoreOwnerNeed(extra.size()==1,"positive sibling fixture");Path otherDir=extra.iterator().next();byte[] zipState=other.state();
+            restoreOwnerNeed(zipState.length>0&&!Arrays.equals(zipState,before)&&Arrays.equals(Files.readAllBytes(other.assets().get(mediaId)),payload),"distinct nonempty incoming and current fixtures");
+            MainActivity.isolatedStartupTest=true;
+            try{
+                activity[0]=(MainActivity)startActivitySync(new android.content.Intent(c,MainActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+                long until=android.os.SystemClock.uptimeMillis()+10000;
+                while(screen[0]==null&&android.os.SystemClock.uptimeMillis()<until){runOnMainSync(()->{if(restoreOwnerInput(activity[0].getWindow().getDecorView()))screen[0]=activity[0].shortcutTestScreen();});if(screen[0]==null)android.os.SystemClock.sleep(25);}
+                restoreOwnerNeed(screen[0]!=null,"native screen ready");java.util.concurrent.atomic.AtomicReference<Exception> failure=new java.util.concurrent.atomic.AtomicReference<>();
+                runOnMainSync(()->{try{screen[0].previewRestore(chosen);}catch(Exception e){failure.set(e);}});if(failure.get()!=null)throw failure.get();
+                boolean visible=false;until=android.os.SystemClock.uptimeMillis()+10000;
+                while(!visible&&android.os.SystemClock.uptimeMillis()<until){visible=restoreOwnerDialog();if(!visible)android.os.SystemClock.sleep(25);}
+                restoreOwnerNeed(visible&&!Files.exists(chosen),"real unchecked dialog and consumed input");
+                Set<Path> showing=restoreOwnerChildren(stage),own=new HashSet<>(showing);own.removeAll(keep);
+                restoreOwnerNeed(showing.containsAll(keep)&&own.size()==1,"one additional owned staging directory");Path privateDir=own.iterator().next();
+                restoreOwnerNeed(Arrays.equals(Files.readAllBytes(privateDir.resolve("state.bin")),zipState)&&Arrays.equals(Files.readAllBytes(privateDir.resolve(mediaId)),payload),"reviewed private bytes before finish");
+                runOnMainSync(activity[0]::finish);waitForIdleSync();restoreOwnerNeed(screen[0].awaitShortcutClose(),"existing close executor completed");
+                restoreOwnerNeed(activity[0].isDestroyed()&&restoreOwnerChildren(stage).equals(keep)&&Files.notExists(privateDir),"only the abandoned stage vanished");
+                restoreOwnerNeed(Arrays.equals(Files.readAllBytes(otherDir.resolve("state.bin")),zipState)&&Arrays.equals(Files.readAllBytes(other.assets().get(mediaId)),payload)&&Arrays.equals(Files.readAllBytes(media.path(mediaId)),payload),"live media and sibling snapshot survived");
+                try(AppDatabase d=AppDatabase.openForStartup(c,dbName)){restoreOwnerNeed(Arrays.equals(d.exportState(),before),"complete state after reopen");}
+                try(SQLiteDatabase sql=SQLiteDatabase.openDatabase(c.getDatabasePath(dbName).getPath(),null,SQLiteDatabase.OPEN_READONLY);android.database.Cursor rows=sql.rawQuery("SELECT id,title,done FROM todos ORDER BY position",null)){
+                    restoreOwnerNeed(rows.moveToFirst()&&rows.getString(0).equals("owner-before")&&rows.getString(1).equals("预览前保留")&&rows.getInt(2)==0&&rows.moveToNext()&&rows.getString(0).equals("owner-later")&&rows.getString(1).equals("未确认不得覆盖")&&rows.getInt(2)==0&&!rows.moveToNext(),"independent SQL retained both exact rows");}
+                log.append("RESTORE_OWNER_DEVICE unchecked_finish_owned_stage_gone_sibling_media_sql_unchanged PASS\n");
+            }finally{if(activity[0]!=null&&!activity[0].isFinishing()&&!activity[0].isDestroyed())runOnMainSync(activity[0]::finish);MainActivity.isolatedStartupTest=false;}
+        }finally{BackupArchive.deleteTree(scope);}
+    }
     @Override public void onStart(){
         Bundle result=new Bundle();try{
             ok(getTargetContext().getPackageName().equals("com.supercubegame.pockettodo.v12.preview"),"tests target isolated v1.2 package");
             ok(android.os.Build.VERSION.SDK_INT==Integer.parseInt(args.getString("expectedApi")),"actual emulator API equals requested test matrix");
-            String phase=args.getString("phase");if("seed".equals(phase)){seed();fieldsSeed();backupSeed();guardedSeed();frozenSeed();}else if("reopen".equals(phase)){reopen();fieldsReopen();backupReopen();guardedReopen();frozenReopen();}else if("prepare_ui_backup".equals(phase))prepareUiBackup();else throw new IllegalArgumentException("unknown test phase");
+            String phase=args.getString("phase");if("seed".equals(phase)){seed();fieldsSeed();backupSeed();guardedSeed();frozenSeed();}else if("reopen".equals(phase)){reopen();fieldsReopen();backupReopen();guardedReopen();frozenReopen();restorePreviewOwnerReopen();}else if("prepare_ui_backup".equals(phase))prepareUiBackup();else throw new IllegalArgumentException("unknown test phase");
             log.append("DEVICE_DATABASE_RESULT ").append(phase).append(' ').append(checks).append('/').append(checks).append(" PASS\n");result.putString("stream",log.toString());finish(Activity.RESULT_OK,result);
         }catch(Throwable error){StringWriter text=new StringWriter();error.printStackTrace(new PrintWriter(text));result.putString("stream",log+"DEVICE_DATABASE_FAILED\n"+text);finish(Activity.RESULT_CANCELED,result);}
     }

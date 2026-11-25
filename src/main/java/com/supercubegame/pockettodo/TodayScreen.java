@@ -49,6 +49,7 @@ public final class TodayScreen {
     private final Map<View,Boolean> paused=new IdentityHashMap<>();
     final ActivitiesScreen activities;
     private AppDatabase.RestorePlan pendingRestore;
+    private AlertDialog restoreDialog;
     private AppDatabase.TodoDeletionPlan pendingTodoDeletion;
     private AppDatabase.TodoDeletionUndo todoUndo;
     private TextView todoUndoHint;
@@ -362,18 +363,40 @@ public final class TodayScreen {
     void backupExported(){activity.runOnUiThread(()->{message("备份已保存到你选的位置",false);content();activities.load();});}
     void backupCancelled(){activity.runOnUiThread(()->message("已取消，没有改变本机数据",false));}
     void backupFailed(Exception e){activity.runOnUiThread(()->message("备份或恢复未完成，本机数据保持原样",true));}
-    /** The returned plan is shown in one dialog and consumed at most once.
-     * Rotation/process death currently discards this in-memory plan; the user must
-     * choose the file again. Persistent abandoned-plan cleanup remains pending.
-     */
+    /** UI-thread owner of an unsubmitted restore. A confirmed plan belongs to the
+     * serial DB worker, not to its (possibly finishing) dialog. No cache sweep. */
+    private boolean restoreLive(){return !closed&&!activity.isFinishing()&&!activity.isDestroyed();}
+    private void disposeRestore(AppDatabase.RestorePlan plan){
+        // UI callers queue this before close() queues the DB shutdown. This is
+        // only the private snapshot returned by prepareRestore, never live media.
+        io.execute(()->{try{plan.close();}catch(IOException e){
+            System.err.println("Private restore preview cleanup incomplete");
+            activity.runOnUiThread(()->{if(restoreLive())message("本次恢复预览的临时文件未能清理，请保留本机数据。",true);});
+        }});
+    }
+    private void clearRestorePreview(){
+        AppDatabase.RestorePlan plan=pendingRestore;pendingRestore=null;
+        AlertDialog dialog=restoreDialog;restoreDialog=null;
+        try{if(dialog!=null)dialog.dismiss();}finally{if(plan!=null)disposeRestore(plan);}
+    }
+    // Called synchronously by the SAF result on the UI thread. No posted plan
+    // can arrive after the owning screen and its serial worker have shut down.
     void previewRestore(Path chosen)throws IOException{
-        AppDatabase.RestorePlan plan;
-        try{plan=db.prepareRestore(chosen,activity.getCacheDir().toPath().resolve("restore-stage"),64L*1024*1024);}
-        finally{Files.deleteIfExists(chosen);}
-        activity.runOnUiThread(()->showRestorePlan(plan));
+        AppDatabase.RestorePlan plan=null;
+        try{
+            try{
+                if(!restoreLive()||busy){if(restoreLive())message("页面正忙，请稍后重新选择备份。",true);return;}
+                plan=db.prepareRestore(chosen,activity.getCacheDir().toPath().resolve("restore-stage"),64L*1024*1024);
+            }finally{Files.deleteIfExists(chosen);}
+        }catch(IOException|RuntimeException e){if(plan!=null)disposeRestore(plan);throw e;}
+        showRestorePlan(plan);
     }
     private void showRestorePlan(AppDatabase.RestorePlan plan){
-        pendingRestore=plan;
+        if(pendingRestore==plan)return;
+        try{clearRestorePreview();pendingRestore=plan;buildRestoreDialog(plan);}
+        catch(RuntimeException e){if(pendingRestore==plan)clearRestorePreview();else disposeRestore(plan);throw e;}
+    }
+    private void buildRestoreDialog(AppDatabase.RestorePlan plan){
         LinearLayout body=column();body.setPadding(dp(20),dp(4),dp(20),dp(8));
         TextView warning=text("恢复会替换本机当前所有内容，不是合并。",17,ERROR);body.addView(warning);
         Map<String,Long> current=plan.currentCounts(),incoming=plan.incomingCounts();
@@ -385,12 +408,21 @@ public final class TodayScreen {
         CheckBox consent=new CheckBox(activity);consent.setText("我明白会替换本机数据");consent.setTextSize(16);consent.setTextColor(INK);consent.setContentDescription("restore-consent");body.addView(consent);
         TextView validation=text("",14,ERROR);validation.setContentDescription("restore-validation");body.addView(validation);
         AlertDialog dialog=new AlertDialog.Builder(activity).setTitle("确认恢复备份？").setView(body).setNegativeButton("取消",null).setPositiveButton("确认恢复",null).create();
+        restoreDialog=dialog;
         dialog.setOnShowListener(unused->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+            if(!restoreLive()||busy||restoreDialog!=dialog||pendingRestore!=plan)return;
             if(!consent.isChecked()){validation.setText("请先勾选：我明白会替换本机数据");return;}
             dialog.setCancelable(false);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);consent.setEnabled(false);
-            work(()->{db.confirmRestore(plan,new MediaRepository(activity.getFilesDir().toPath().resolve("media"),64L*1024*1024));return true;},ignored->{pendingRestore=null;dialog.dismiss();activities.selected=0;refresh();},()->dialog.dismiss());
+            pendingRestore=null; // one-way handoff; dismiss/finish cannot revoke a queued commit
+            work(()->{try(AppDatabase.RestorePlan owned=plan){db.confirmRestore(owned,new MediaRepository(activity.getFilesDir().toPath().resolve("media"),64L*1024*1024));return true;}},
+                ignored->{if(restoreDialog==dialog){clearRestorePreview();if(restoreLive()){activities.selected=0;refresh();}}},
+                ()->{if(restoreDialog==dialog)clearRestorePreview();});
         }));
-        dialog.setOnDismissListener(unused->{if(pendingRestore==plan){pendingRestore=null;try{plan.close();}catch(IOException ignored){}}});
+        dialog.setOnDismissListener(unused->{
+            if(restoreDialog!=dialog)return;
+            restoreDialog=null;
+            if(pendingRestore==plan){pendingRestore=null;disposeRestore(plan);}
+        });
         dialog.show();
     }
     <T> void work(Callable<T> action,Consumer<T> success,Runnable failure){
@@ -421,5 +453,5 @@ public final class TodayScreen {
     boolean awaitShortcutClose()throws InterruptedException{return io.awaitTermination(10,java.util.concurrent.TimeUnit.SECONDS);}
     public void save(Bundle out){rememberDraft();out.putInt("page",page);out.putInt("filter",filter);out.putString("draft",draft);out.putLong("activity",activities.selected);}
     public boolean back(){if(busy)return true;if(page==1&&activities.selected!=0){activities.selected=0;activities.load();return true;}return false;}
-    public void close(){if(closed)return;closed=true;clearActivation();leaveTodoSession();io.execute(db::close);io.shutdown();}
+    public void close(){if(closed)return;closed=true;clearRestorePreview();clearActivation();leaveTodoSession();io.execute(db::close);io.shutdown();}
 }

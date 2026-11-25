@@ -1801,8 +1801,9 @@ def native(adb, gate):
         assert installed.startswith("package:") and "\n" not in installed
         assert command("exec-out", "cat", installed[8:], binary=True) == product
         stop(); before = state()
-        derivatives = [r for r in before[0]["blocks"] if r[8] is not None]; assert len(derivatives) == 1
-        first = derivatives[0][0]
+        from verify_paged_exports import share_png_fixture
+        derivative = share_png_fixture(before[0],prior["derivative_hardening"])
+        first = derivative[0]
         assert any(r[0] == first and r[7] == 1 and r[6] == "PRIVATE_SHARE_SENTINEL" for r in before[0]["blocks"])
         assert not any(r[2] == "Batchnote" for r in before[0]["notes"])
         start(); tap("活动"); ready()

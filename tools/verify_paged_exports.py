@@ -917,7 +917,59 @@ def paged_readiness_selftest():
             extract(JAVA.replace(old,new,1),accept=False)
     print("PAGED_READINESS_HOST cases=7 witnessed_mutants=4 caller_omissions=4 original_null_RED PASS ANDROID_DOUBLES_ONLY",flush=True)
 
+def share_png_fixture(data, hardening):
+    """Resolve the old public PNG share target without removing the independently verified JPEG."""
+    registry = {r[0]: r for r in data["media"]}
+    rows = [r for r in data["blocks"] if r[8] is not None]
+    assert len(rows) == 2, "expected both persisted derivative fixtures"
+    for row in rows:
+        assert row[3] == "IMAGE" and row[7] == 0 and row[5] != row[8], "unexpected derivative privacy, type or identity"
+        assert row[8] in registry and row[5] in registry and registry[row[5]][1] == "image/png", "missing source or published PNG"
+    png = [r for r in rows if registry[r[8]][1] == "image/png"]
+    jpeg = [r for r in rows if registry[r[8]][1] == "image/jpeg"]
+    assert len(png) == len(jpeg) == 1, "expected exactly one derivative per source MIME"
+    p, j = png[0], jpeg[0]
+    assert p[0] != j[0], "JPEG control cannot be in the note selected for PNG export"
+    assert hardening.get("status") == "PASS", "missing prior native hardening acceptance"
+    proof = hardening["jpeg_source_derivative"]
+    assert (j[8], j[5], registry[j[5]][2]) == (proof["source_sha256"], proof["derived_sha256"], proof["derived_bytes"]), "JPEG source or derived identity differs from native evidence"
+    siblings = [r for r in data["blocks"] if r[0] == p[0] and r[1] != p[1] and r[3] == "IMAGE" and r[7] == 1 and r[6] == "PRIVATE_SHARE_SENTINEL"]
+    assert len(siblings) == 1, "PNG target must belong to the note with the exact private sentinel sibling"
+    return p
+
+
+def share_png_fixture_selftest():
+    from copy import deepcopy
+    a,b,c,d,e = [hashlib.sha256(v.encode()).hexdigest() for v in ("p-src","p-out","j-src","j-out","private")]
+    p=("s","image-p",0,"IMAGE","",b,"",0,a); j=("f","image-j",0,"IMAGE","",d,"",0,c)
+    witness=("s","sibling",1,"IMAGE","",e,"PRIVATE_SHARE_SENTINEL",1,None)
+    media=[(a,"image/png",200),(b,"image/png",180),(c,"image/jpeg",250),(d,"image/png",170),(e,"image/png",160)]
+    h={"status":"PASS","jpeg_source_derivative":{"source_sha256":c,"derived_sha256":d,"derived_bytes":170}}
+    build=lambda rs,ms: {"blocks":list(rs),"media":list(ms)}
+    for rows in ((p,j,witness),(j,witness,p)):
+        assert share_png_fixture(build(rows,media),h) == p
+    def edit(row,i,val):
+        out=row[:i]+(val,)+row[i+1:]; assert out!=row; return out
+    def wrong_proof(key,value):
+        broken=deepcopy(h); broken["jpeg_source_derivative"][key]=value; assert broken!=h;return broken
+    cases=[((p,witness),media,h),((j,witness),media,h),((p,j,j,witness),media,h),
+           ((p,edit(j,0,p[0]),witness),media,h),((edit(p,7,1),j,witness),media,h),
+           ((p,edit(j,7,1),witness),media,h),((p,edit(j,5,c),witness),media,h),
+           ((p,j,edit(witness,6,"other")),media,h),((p,j,witness),media[1:],h),
+           ((p,j,witness),[edit(m,1,"image/png") if m[0]==c else m for m in media],h),
+           ((p,j,witness),media,wrong_proof("source_sha256",a)),
+           ((p,j,witness),media,wrong_proof("derived_sha256",b)),
+           ((p,j,witness),media,wrong_proof("derived_bytes",171)),
+           ((p,j,witness),media,dict(h,status="FAIL"))]
+    for rows,ms,proof in cases:
+        try:share_png_fixture(build(rows,ms),proof)
+        except AssertionError:pass
+        else:raise AssertionError("invalid derivative fixture was accepted")
+    return {"positive":2,"negative":len(cases)}
+
+
 def selftest():
+    print("PAGED_SHARE_FIXTURE_HOST", share_png_fixture_selftest(), flush=True)
     paged_readiness_selftest()
     paged_signing_selftest()
     dependency_setup_selftest()
@@ -1362,8 +1414,8 @@ def native_paged_ui(adb,gate):
     try:
         assert os.environ.get("GITHUB_ACTIONS")=="true" and shell("getprop","ro.kernel.qemu").strip()=="1"
         stop();baseline=state();data,media,titles=baseline
-        derivatives=[r for r in data["blocks"] if r[8] is not None];assert len(derivatives)==1
-        note=derivatives[0][0]
+        derivative=share_png_fixture(data,parent["derivative_hardening"])
+        note=derivative[0]
         texts=[r for r in data["blocks"] if r[0]==note and r[3]=="TEXT"]
         assert len(texts)==1 and texts[0][4]=="Second edited" and texts[0][7]==0
         text_row=texts[0]
@@ -1428,7 +1480,7 @@ def native_paged_ui(adb,gate):
             nonlocal filename
             filename=value
         result["derived"]=native_derived_exports(adb,gate,parent,baseline,state,stop,start,tap,find,
-            nodes,click,find_format,save_picker,command,shell,note_label,derivatives[0],set_filename)
+            nodes,click,find_format,save_picker,command,shell,note_label,derivative,set_filename)
         result["checks"]=len(result["labels"]);result["status"]="PASS"
         assert native_receipt(result,gate.API,source,run_id),"native paged coverage incomplete"
     except Exception as failure:

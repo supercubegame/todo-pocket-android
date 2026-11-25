@@ -1,0 +1,184 @@
+--- a/tools/verify_paged_exports.py
++++ b/tools/verify_paged_exports.py
+@@ -18,2 +18,4 @@
+ import java.util.*;
++import android.graphics.Rect;
++import android.view.accessibility.AccessibilityNodeInfo;
+ public final class PagedContractTest {
+@@ -241,2 +243,61 @@
+  }
++ static final class ChooserChoice {
++  static final String LABEL="PocketTodo CI Receiver";
++  final AccessibilityNodeInfo row,label; final String key,reason;
++  ChooserChoice(AccessibilityNodeInfo r,AccessibilityNodeInfo l,String k,String why){row=r;label=l;key=k;reason=why;}
++  static ChooserChoice no(String why){return new ChooserChoice(null,null,"",why);}
++  static String s(CharSequence t){return t==null?"":t.toString();}
++  static boolean system(String p){return Arrays.asList("android","com.android.intentresolver","com.google.android.intentresolver").contains(p);}
++  static Rect box(AccessibilityNodeInfo n){Rect r=new Rect();n.getBoundsInScreen(r);return r;}
++  static boolean collection(AccessibilityNodeInfo n){String c=s(n.getClassName());return n.isScrollable()||n.getCollectionInfo()!=null||c.endsWith("ListView")||c.endsWith("GridView")||c.endsWith("RecyclerView");}
++  static boolean sameWindow(AccessibilityNodeInfo n,String owner,int win){return n!=null&&n.getWindowId()==win&&owner.equals(s(n.getPackageName()));}
++  static ChooserChoice sample(AccessibilityNodeInfo top){
++   if(top==null)return no("no_window");String owner=s(top.getPackageName());int win=top.getWindowId();
++   // Never search the view hierarchy of a non-chooser or click its content.
++   if(!system(owner))return no("not_system_chooser");
++   AccessibilityNodeInfo label=null;for(AccessibilityNodeInfo n:top.findAccessibilityNodeInfosByText(LABEL)){
++    if(n==null||!LABEL.equals(s(n.getText()))||!n.isVisibleToUser())continue;
++    if(!sameWindow(n,owner,win))return no("mixed_window");if(label!=null)return no("duplicate_label");label=n;
++   }
++   if(label==null)return no("no_exact_visible_label");AccessibilityNodeInfo row=label;
++   for(int i=0;;i++){
++    if(i>=9||!sameWindow(row,owner,win)||top.equals(row)||collection(row)||!row.isEnabled()||!row.isVisibleToUser())return no("not_a_tile");
++    if(row.isClickable())break;row=row.getParent();
++   }
++   AccessibilityNodeInfo a=row;int hops=0;while(!top.equals(a)){
++    if(hops++>=32||!sameWindow(a,owner,win))return no("detached_tile");a=a.getParent();
++   }
++   Rect frame=box(top),item=box(row),text=box(label);if(text.isEmpty()||item.isEmpty()||!frame.contains(item)||!item.contains(text))return no("invalid_bounds");
++   ArrayDeque<AccessibilityNodeInfo> todo=new ArrayDeque<>();todo.add(row);int nodes=0,labels=0;
++   while(!todo.isEmpty()){
++    AccessibilityNodeInfo n=todo.remove();if(++nodes>64||!sameWindow(n,owner,win)||collection(n)||(!n.equals(row)&&n.isClickable()))return no("shared_action");
++    String t=s(n.getText()),alt=s(n.getContentDescription());
++    if((!t.isEmpty()&&!LABEL.equals(t))||(!alt.isEmpty()&&!LABEL.equals(alt)))return no("other_label_in_tile");
++    if(LABEL.equals(t)){if(!n.equals(label))return no("second_label");labels++;}
++    int count=n.getChildCount();if(count>64-nodes-todo.size())return no("large_subtree");
++    for(int i=0;i<count;i++){AccessibilityNodeInfo child=n.getChild(i);if(child==null)return no("stale_child");todo.add(child);}
++   }
++   if(labels!=1)return no("label_not_in_tile");String key=owner+":"+win+":"+s(row.getClassName())+":"+s(row.getViewIdResourceName())+":"+item.flattenToString()+":"+text.flattenToString();
++   return new ChooserChoice(row,label,key,"eligible");
++  }
++  // Diagnostics use only structure of the synthetic label's system-owned ancestors, never other labels or file contents.
++  static String shape(AccessibilityNodeInfo top){
++   if(top==null||!system(s(top.getPackageName())))return "no_system_tree";String owner=s(top.getPackageName());StringBuilder out=new StringBuilder(owner);int win=top.getWindowId(),exact=0;
++   for(AccessibilityNodeInfo n:top.findAccessibilityNodeInfosByText(LABEL)){
++    if(n==null||!sameWindow(n,owner,win)||!LABEL.equals(s(n.getText()))||!n.isVisibleToUser())continue;if(++exact>1)continue;
++    for(int i=0;i<6&&sameWindow(n,owner,win);i++,n=n.getParent()){
++     out.append('|').append(s(n.getClassName())).append(':').append(s(n.getViewIdResourceName())).append(':').append(n.isClickable()).append(':').append(n.getChildCount()).append(':').append(box(n).flattenToString());
++    }
++   }return out.append(" exact=").append(exact).toString();
++  }
++  static final class Gate {
++   ChooserChoice previous;long first;boolean attempted;int samples;
++   boolean act(ChooserChoice c,long now,long end){
++    samples++;if(attempted||now>=end)return false;if(c.row==null){previous=null;return false;}
++    if(previous==null||!c.row.equals(previous.row)||!c.label.equals(previous.label)||!c.key.equals(previous.key)){previous=c;first=now;return false;}
++    if(now-first<150)return false;attempted=true;
++    if(!c.row.performAction(AccessibilityNodeInfo.ACTION_CLICK))throw new AssertionError("CI receiver tile refused a single semantic click");return true;
++   }
++  }
++ }
+  static void receiverUi(android.app.Instrumentation inst,File root,String filename,String nonce)throws Exception{
+@@ -263,9 +324,10 @@
+    onUi(inst,()->{preview.invoke(a,new byte[][]{current,bytes},pdf?1:2);List<?> ds=(List<?>)field(a,"shareDialogs");if(ds.size()!=1)throw new AssertionError("one preview");android.app.AlertDialog d=(android.app.AlertDialog)ds.get(0);android.view.View decor=d.getWindow().getDecorView();List<android.widget.CheckBox> boxes=new ArrayList<>();collect(decor,new ArrayList<>(),boxes);android.widget.Button send=findSend(decor,pdf?"发送 PDF":"按页发送图片");if(boxes.size()!=1||boxes.get(0).isChecked()||send==null)throw new AssertionError("initial send controls");send.performClick();if(!d.isShowing())throw new AssertionError("unchecked send");boxes.get(0).setChecked(true);send.performClick();});
+-   long end=android.os.SystemClock.elapsedRealtime()+20000;boolean picked=false;
+-   while(android.os.SystemClock.elapsedRealtime()<end&&!picked){android.view.accessibility.AccessibilityNodeInfo top=inst.getUiAutomation().getRootInActiveWindow();if(top!=null){String owner=String.valueOf(top.getPackageName());if(Arrays.asList("android","com.android.intentresolver","com.google.android.intentresolver").contains(owner)){
+-     List<android.view.accessibility.AccessibilityNodeInfo> options=top.findAccessibilityNodeInfosByText("PocketTodo CI Receiver");android.view.accessibility.AccessibilityNodeInfo target=null;
+-     for(android.view.accessibility.AccessibilityNodeInfo n:options){if(!"PocketTodo CI Receiver".contentEquals(String.valueOf(n.getText()))||!owner.contentEquals(String.valueOf(n.getPackageName())))continue;if(target!=null)throw new AssertionError("ambiguous synthetic receiver");target=n;}
+-     if(target!=null){while(target!=null&&!target.isClickable())target=target.getParent();if(target==null||!owner.contentEquals(String.valueOf(target.getPackageName()))||!target.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK))throw new AssertionError("receiver choice refused");picked=true;}
+-   }}if(!picked)android.os.SystemClock.sleep(200);}
+-   if(!picked)throw new AssertionError("synthetic receiver not visible in system sharesheet");File ack=new File(root,"ack-"+nonce);long endAck=android.os.SystemClock.elapsedRealtime()+35000;while(!ack.exists()&&android.os.SystemClock.elapsedRealtime()<endAck)android.os.SystemClock.sleep(150);
++   long end=android.os.SystemClock.elapsedRealtime()+20000;boolean picked=false;ChooserChoice.Gate choice=new ChooserChoice.Gate();String last="not_observed";
++   while(android.os.SystemClock.elapsedRealtime()<end&&!picked){
++    ChooserChoice c=ChooserChoice.sample(inst.getUiAutomation().getRootInActiveWindow());last=c.reason;
++    picked=choice.act(c,android.os.SystemClock.elapsedRealtime(),end);
++    if(picked)System.out.println("CHOOSER_TILE_CLICK "+nonce+" "+c.key+" samples="+choice.samples);
++    else android.os.SystemClock.sleep(200);
++   }
++   if(!picked)throw new AssertionError("no stable isolated CI receiver tile; case="+filename+" reason="+last+" observations="+choice.samples+" final_tree="+ChooserChoice.shape(inst.getUiAutomation().getRootInActiveWindow()));File ack=new File(root,"ack-"+nonce);long endAck=android.os.SystemClock.elapsedRealtime()+35000;while(!ack.exists()&&android.os.SystemClock.elapsedRealtime()<endAck)android.os.SystemClock.sleep(150);
+    if(!ack.exists()){
+@@ -758,2 +820,87 @@
+ 
++CHOOSER_FIXTURES={
++'android/graphics/Rect.java':r'''
++package android.graphics;
++public class Rect {public int left,top,right,bottom;public Rect(){} public Rect(int l,int t,int r,int b){set(l,t,r,b);}public void set(int l,int t,int r,int b){left=l;top=t;right=r;bottom=b;}public boolean isEmpty(){return right<=left||bottom<=top;}public boolean contains(Rect r){return !isEmpty()&&!r.isEmpty()&&r.left>=left&&r.top>=top&&r.right<=right&&r.bottom<=bottom;}public String flattenToString(){return left+" "+top+" "+right+" "+bottom;}}
++''',
++'android/view/accessibility/AccessibilityNodeInfo.java':r'''
++package android.view.accessibility;
++import android.graphics.Rect;
++import java.util.*;
++public class AccessibilityNodeInfo {
++ public static final int ACTION_CLICK=16; public static final String SYSTEM="com.google.android.intentresolver";
++ public String name="", alt="", pkg=SYSTEM, cls="android.view.View", id="", result=""; public int window=7,calls; public boolean clickable,visible=true,enabled=true,scroll,collection,accept=true; public Rect b=new Rect(10,10,60,60);
++ public AccessibilityNodeInfo parent; public final List<AccessibilityNodeInfo> children=new ArrayList<>();
++ public AccessibilityNodeInfo(String t,boolean click){name=t;clickable=click;}
++ public void add(AccessibilityNodeInfo n){children.add(n);n.parent=this;}
++ public CharSequence getText(){return name;} public CharSequence getContentDescription(){return alt;} public CharSequence getPackageName(){return pkg;} public CharSequence getClassName(){return cls;} public String getViewIdResourceName(){return id;} public int getWindowId(){return window;}
++ public boolean isClickable(){return clickable;} public boolean isEnabled(){return enabled;} public boolean isVisibleToUser(){return visible;} public boolean isScrollable(){return scroll;} public Object getCollectionInfo(){return collection?this:null;} public AccessibilityNodeInfo getParent(){return parent;} public int getChildCount(){return children.size();} public AccessibilityNodeInfo getChild(int i){return children.get(i);}
++ public void getBoundsInScreen(Rect v){v.set(b.left,b.top,b.right,b.bottom);} public boolean performAction(int a){if(a!=16)throw new AssertionError();calls++;return accept;}
++ public List<AccessibilityNodeInfo> findAccessibilityNodeInfosByText(String s){List<AccessibilityNodeInfo> r=new ArrayList<>();if(name.contains(s)||alt.contains(s))r.add(this);for(AccessibilityNodeInfo n:children)if(n!=null)r.addAll(n.findAccessibilityNodeInfosByText(s));return r;}
++}
++''',
++'Harness.template':r'''
++import android.view.accessibility.AccessibilityNodeInfo;import android.graphics.Rect;import java.util.*;
++public class ChoiceHarness {
++@@HELPER@@
++ static AccessibilityNodeInfo n(String t,boolean click){return new AccessibilityNodeInfo(t,click);} static void ok(boolean b){if(!b)throw new AssertionError("CHOOSER_CONTRACT");}
++ static class Tree {AccessibilityNodeInfo root=n("",false),row=n("",true),label=n(ChooserChoice.LABEL,false);Tree(){root.b=new Rect(0,0,400,800);row.b=new Rect(4,5,90,90);root.add(row);row.add(label);} }
++ static void scenario(String kind){Tree t=new Tree();ChooserChoice.Gate g=new ChooserChoice.Gate();boolean healthy=kind.equals("ok")||kind.equals("platform26")||kind.equals("aosp34")||kind.equals("direct")||kind.equals("icon")||kind.equals("tree_recovered")||kind.equals("same_named_hidden_elsewhere");
++  if(kind.equals("platform26")||kind.equals("aosp34"))t.root.pkg=t.row.pkg=t.label.pkg=kind.equals("platform26")?"android":"com.android.intentresolver";
++  if(kind.equals("direct")){t.row.clickable=false;t.label.clickable=true;}
++  if(kind.equals("icon")){AccessibilityNodeInfo img=n("",false);img.alt=ChooserChoice.LABEL;t.row.add(img);}
++  if(kind.equals("shared"))t.row.add(n("Other fixture",false));
++  if(kind.equals("other_description"))t.row.alt="Other fixture";
++  if(kind.equals("extra_click"))t.row.add(n("",true));
++  if(kind.equals("grid"))t.row.collection=true;
++  if(kind.equals("nonclick"))t.row.clickable=false;
++  if(kind.equals("hidden"))t.label.visible=false;
++  if(kind.equals("disabled"))t.row.enabled=false;
++  if(kind.equals("substring"))t.label.name+=" 2";
++  if(kind.equals("duplicate"))t.root.add(n(ChooserChoice.LABEL,true));
++  if(kind.equals("same_named_hidden_elsewhere")){AccessibilityNodeInfo extra=n(ChooserChoice.LABEL,true);extra.visible=false;t.root.add(extra);}
++  if(kind.equals("different_owner"))t.root.pkg=t.row.pkg=t.label.pkg="com.example.notchooser";
++  if(kind.equals("mixed_window"))t.label.window++;
++  if(kind.equals("wrong_owner_child"))t.label.pkg="com.example.other";
++  if(kind.equals("detached"))t.row.parent=null;
++  if(kind.equals("outside"))t.label.b=new Rect(10,10,100,100);
++  if(kind.equals("empty"))t.label.b=new Rect(0,0,0,0);
++  if(kind.equals("refused"))t.row.accept=false;
++  if(kind.equals("tree_recovered")){t.label.visible=false;ok(!g.act(ChooserChoice.sample(t.root),0,20000));t.label.visible=true;}
++  ChooserChoice c=ChooserChoice.sample(t.root);boolean first=g.act(c,100,20000);
++  if(kind.equals("shifted"))t.row.b=new Rect(3,5,90,90);
++  if(kind.equals("rebound")){AccessibilityNodeInfo b=n(ChooserChoice.LABEL,false);t.row.children.clear();t.row.add(b);t.label=b;}
++  if(kind.equals("intervening"))g.act(ChooserChoice.sample(null),200,20000);
++  long at=kind.equals("late")?20000:kind.equals("too_soon")?200:350;
++  boolean second=false;try{second=g.act(ChooserChoice.sample(t.root),at,20000);ok(!kind.equals("refused"));}catch(AssertionError e){if(!kind.equals("refused")||!e.getMessage().contains("refused a single"))throw e;}
++  if(healthy){ok(first||second);ok(!g.act(ChooserChoice.sample(t.root),450,20000));ok(t.row.calls+t.label.calls==1);}else if(kind.equals("refused")){ok(!g.act(ChooserChoice.sample(t.root),450,20000));ok(t.row.calls==1);}else {ok(!first&&!second&&t.row.calls+t.label.calls==0);}
++  System.out.println("CHOICE_CASE "+kind+" PASS");
++ }
++ public static void main(String[] args){for(String a:args)scenario(a);}
++}
++''',
++}
++
++def chooser_tile_selftest():
++    segment=JAVA[JAVA.index(' static final class ChooserChoice {'):JAVA.index(' static void receiverUi(')]
++    cases='ok platform26 aosp34 direct icon tree_recovered same_named_hidden_elsewhere shared other_description extra_click grid nonclick hidden disabled substring duplicate different_owner mixed_window wrong_owner_child detached outside empty refused shifted rebound intervening late too_soon'.split()
++    assert len(set(cases))==len(cases)==28
++    with tempfile.TemporaryDirectory() as folder:
++        root=Path(folder); stub=[]
++        for n,t in CHOOSER_FIXTURES.items():
++            if n.endswith('.java'):
++                f=root/n;f.parent.mkdir(parents=True,exist_ok=True);f.write_text(t);stub.append(str(f))
++        def compiled(s):
++            f=root/'ChoiceHarness.java';f.write_text(CHOOSER_FIXTURES['Harness.template'].replace('@@HELPER@@',s));cmd=['javac'] if shutil.which('javac') else ['java','-m','jdk.compiler/com.sun.tools.javac.Main'];subprocess.run([*cmd,'-d',folder,*stub,str(f)],check=True,timeout=30)
++        def trial(names):return subprocess.run(['java','-cp',folder,'ChoiceHarness',*names],text=True,capture_output=True,timeout=20)
++        compiled(segment);p=trial(cases);assert p.returncode==0 and p.stdout.splitlines()==['CHOICE_CASE '+n+' PASS' for n in cases],(p.stdout,p.stderr)
++        mutants=[('if((!t.isEmpty()&&!LABEL.equals(t))||(!alt.isEmpty()&&!LABEL.equals(alt)))','if(false)','shared'),('||!c.key.equals(previous.key)','', 'shifted'),('attempted||now>=end','attempted','late'),('if(!system(owner))','if(false)','different_owner')]
++        for a,b,case in mutants:
++            assert segment.count(a)==1,a;compiled(segment.replace(a,b,1));good=trial(['ok']);bad=trial([case]);assert good.returncode==0 and bad.returncode!=0 and 'CHOOSER_CONTRACT' in bad.stderr,(case,good.stderr,bad.stderr)
++        # The exercised class must actually guard the chooser; no alternate click or coordinate fallback.
++        dispatch=JAVA.split(' static void receiverUi(',1)[1].split(' public static void verify(',1)[0];loop=dispatch.split('long end=android.os.SystemClock.elapsedRealtime()+20000;',1)[1].split('File ack=',1)[0]
++        assert loop.count('ChooserChoice.sample(inst.getUiAutomation().getRootInActiveWindow())')==1 and loop.count('choice.act(c,android.os.SystemClock.elapsedRealtime(),end)')==1 and 'performAction(' not in dispatch and 'injectInputEvent' not in dispatch
++        assert segment.count('performAction(AccessibilityNodeInfo.ACTION_CLICK)')==1
++    print('CHOOSER_TILE_HOST 28 actual selector scenarios, 4 witnessed mutants; synthetic accessibility nodes, NOT_DEVICE_ACCEPTANCE',flush=True)
++
+ def receiver_ack_selftest():
+@@ -825,3 +972,3 @@
+                 assert proc.wait(timeout=20)==0
+-                out.seek(0);output=out.read().decode(errors='replace');assert 'SEND_PROBE '+nonce in output and 'INSTRUMENTATION_CODE: -1' in output and 'PAGED_FAILED' not in output,output
++                out.seek(0);output=out.read().decode(errors='replace');assert output.count('CHOOSER_TILE_CLICK '+nonce+' ')==1 and 'SEND_PROBE '+nonce in output and 'INSTRUMENTATION_CODE: -1' in output and 'PAGED_FAILED' not in output,output
+                 receipts.append(dict(r,sender_uid=sender_uid,receiver_uid=receiver_uid))
+@@ -1097,2 +1244,3 @@
+ def selftest():
++    chooser_tile_selftest()
+     receiver_ack_selftest()

@@ -629,7 +629,7 @@ jobs:
               import hashlib,json,os,re,sqlite3,subprocess,time,zipfile,io
               from pathlib import Path
               import xml.etree.ElementTree as ET
-              from verify_paged_exports import format_button
+              from verify_paged_exports import format_button,consent_checkbox
               from verify_schema3 import signal_target_identity,signal_identity_selftest
               from verify_schema3 import exception_evidence,native_failure_evidence,diagnostics_selftest
               from verify_process_control import stop_verified,capture_crash_logs,isolated_stop_runner,isolated_export_identity
@@ -703,14 +703,12 @@ jobs:
                       if n is not None:click(n);break
                   else:raise AssertionError("format button not found")
                   tap(title)
-              def consent():
+              def consent(kind):
                   for attempt in range(16):
-                      current=nodes()
-                      for n in current:
-                          if n.get("text")=="我已核对内容与图片，可保存此包":
-                              b=list(map(int,re.findall(r"\d+",n.get("bounds"))))
-                              if b[2]>b[0] and b[3]>b[1]:
-                                  assert n.get("checked")=="false";click(n);return
+                      n=consent_checkbox(nodes(),kind,gate.PKG)
+                      if n is not None:
+                          b=list(map(int,re.findall(r"\d+",n.get("bounds"))))
+                          if b[2]>b[0] and b[3]>b[1]:click(n);return
                       shell("input","swipe","160","440","160","190","350")
                   raise AssertionError("multipage consent unreachable")
               def lost_owner(kind,title,filename):
@@ -754,7 +752,7 @@ jobs:
                   choices=[n for n in nodes() if n.get("class")=="android.widget.CheckedTextView"]
                   assert [n.get("text") for n in choices]==expected and all(n.get("checked")=="false" for n in choices)
                   format_select(title);tap(expected[0]);tap(expected[1]);tap("生成预览");find(text=title+"预览")
-                  consent();tap("选择保存位置")
+                  consent(kind);tap("选择保存位置")
                   assert find(text=filename).get("package") in ("com.android.documentsui","com.google.android.documentsui")
                   assert find(text="SAVE").get("package") in ("com.android.documentsui","com.google.android.documentsui")
                   step("fresh_explicit_selection_and_consent")
@@ -811,7 +809,7 @@ jobs:
                       header=[n.get("text","") for n in nodes() if re.fullmatch(r"第 1 / [34] 页",n.get("text",""))]
                       assert len(header)==1;preview_pages=int(header[0].split(" / ")[1].split()[0])
                       ok("actual_multipage_preview_"+kind)
-                      consent();tap("选择保存位置")
+                      consent(kind);tap("选择保存位置")
                       assert find(text=filename).get("package") in ("com.android.documentsui","com.google.android.documentsui")
                       save=find(text="SAVE");assert save.get("package") in ("com.android.documentsui","com.google.android.documentsui")
                       assert not shell("find","/sdcard/Download","-type","f","-name",filename).splitlines(),"preexisting output"

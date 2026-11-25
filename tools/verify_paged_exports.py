@@ -214,7 +214,7 @@ public final class PagedContractTest {
      });
      previewOk(views.size()==3,"actual_dialog_pages_"+suffix);
      for(android.widget.ImageView view:views)shown.add(((android.graphics.drawable.BitmapDrawable)view.getDrawable()).getBitmap());
-     previewOk(boxes.size()==1&&!boxes.get(0).isChecked(),"unchecked_consent_"+suffix);
+     previewOk(boxes.size()==1&&!boxes.get(0).isChecked()&&"我已核对预览，接下来由我选择保存或发送".contentEquals(boxes.get(0).getText()),"unchecked_consent_"+suffix);
      onUi(inst,()->dialog[0].getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick());
      inst.waitForIdleSync();
      previewOk(launches[0]==0&&field(activity,"pendingShare")==null&&dialog[0].isShowing(),"unchecked_save_blocked_"+suffix);
@@ -903,6 +903,39 @@ def chooser_tile_selftest():
         assert segment.count('performAction(AccessibilityNodeInfo.ACTION_CLICK)')==1
     print('CHOOSER_TILE_HOST 28 actual selector scenarios, 4 witnessed mutants; synthetic accessibility nodes, NOT_DEVICE_ACCEPTANCE',flush=True)
 
+def consent_checkbox(nodes,kind,package):
+    if kind not in ("MARKDOWN","PDF","PNG_ZIP"):raise ValueError("unknown preview format")
+    expected="我已核对内容与图片，可保存此包" if kind=="MARKDOWN" else "我已核对预览，接下来由我选择保存或发送"
+    matches=[n for n in nodes if n.get("package")==package and n.get("class")=="android.widget.CheckBox"]
+    if not matches:return None
+    assert len(matches)==1,"ambiguous preview checkbox"
+    n=matches[0];assert n.get("text")==expected,"consent wording does not match available actions"
+    assert n.get("checkable")=="true" and n.get("checked")=="false" and n.get("enabled")=="true","consent is not fresh and enabled"
+    return n
+
+def consent_copy_selftest():
+    kind=("MARKDOWN","PDF","PNG_ZIP");copy=["我已核对内容与图片，可保存此包","我已核对预览，接下来由我选择保存或发送","我已核对预览，接下来由我选择保存或发送"]
+    path=Path(__file__).resolve().parents[1]/"src/main/java/com/supercubegame/pockettodo/MainActivity.java"
+    method=path.read_text().split("private void previewShare(byte[][] prepared,int format){",1)[1].split("private void finishShare(",1)[0]
+    expression=re.findall(r'consent\.setText\(([^;]+)\);body\.addView\(consent\);',method);assert len(expression)==1
+    with tempfile.TemporaryDirectory() as tmp:
+        def run_compiler(expr):
+            file=Path(tmp)/"Text.java";file.write_text('class Text {static String actual(int format){return '+expr+';}public static void main(String[] a){for(int i=0;i<3;i++)System.out.println(actual(i));}}')
+            javac=['javac'] if shutil.which('javac') else ['java','-m','jdk.compiler/com.sun.tools.javac.Main'];subprocess.run([*javac,'-d',tmp,str(file)],check=True,timeout=30)
+            return subprocess.check_output(['java','-cp',tmp,'Text'],text=True,timeout=15).splitlines()
+        actual=run_compiler(expression[0]);assert actual==copy,actual
+        for before,after,match in [('format==0','true',[True,False,False]),('format==0','false',[False,True,True])]:
+            assert expression[0].count(before)==1;wrong=run_compiler(expression[0].replace(before,after));assert [a==b for a,b in zip(wrong,copy)]==match
+    pkg='com.example.fixture';base={'class':'android.widget.CheckBox','package':pkg,'checkable':'true','checked':'false','enabled':'true'}
+    for i,k in enumerate(kind):
+        n=dict(base,text=copy[i]);assert consent_checkbox([n],k,pkg) is n
+        assert consent_checkbox([dict(n,package='other')],k,pkg) is None and consent_checkbox([dict(n,**{'class':'android.widget.TextView'})],k,pkg) is None
+        for bad in ([n,n],[dict(n,text=copy[1-i] if i<2 else copy[0])],[dict(n,checked='true')],[dict(n,checkable='false')],[dict(n,enabled='false')]):
+            try:consent_checkbox(bad,k,pkg)
+            except AssertionError:pass
+            else:raise AssertionError('ambiguous, misleading or stale consent accepted')
+    print('PREVIEW_CONSENT_COPY 3 actual Java labels, 2 wrong implementations, format-specific node controls; NOT_DEVICE',flush=True)
+
 def receiver_ack_selftest():
     marker='cache/paged-contract-42/ack-'+'a'*32
     with tempfile.TemporaryDirectory() as temp:
@@ -1242,6 +1275,7 @@ def share_png_fixture_selftest():
 
 
 def selftest():
+    consent_copy_selftest()
     chooser_tile_selftest()
     receiver_ack_selftest()
     print("PAGED_SHARE_FIXTURE_HOST", share_png_fixture_selftest(), flush=True)
@@ -1666,13 +1700,12 @@ def native_paged_ui(adb,gate):
     def open_preview(title):
         tap("导出笔记");tap(note_label);find(text="勾选内容（私有项已排除）")
         click(find_format("Markdown"));tap(title);tap("1. 文字：Second edited");tap("生成预览");find(text=title+"预览")
-    def save_picker():
+    def save_picker(kind):
         for attempt in range(8):
-            found=[n for n in nodes() if n.get("text")=="我已核对内容与图片，可保存此包"]
-            if found:
-                n=found[0];bounds=list(map(int,re.findall(r"\d+",n.get("bounds"))))
-                if bounds[2]>bounds[0] and bounds[3]>bounds[1]:
-                    assert n.get("checked")=="false";click(n);break
+            n=consent_checkbox(nodes(),kind,gate.PKG)
+            if n is not None:
+                bounds=list(map(int,re.findall(r"\d+",n.get("bounds"))))
+                if bounds[2]>bounds[0] and bounds[3]>bounds[1]:click(n);break
             shell("input","swipe","160","440","160","190","350")
         else:raise AssertionError("native paged consent unreachable")
         tap("选择保存位置")
@@ -1713,10 +1746,10 @@ def native_paged_ui(adb,gate):
             tap("选择保存位置")
             ok(find(text=title+"预览") is not None and not any("documentsui" in n.get("package","") for n in nodes()),
                "unchecked_save_refused",kind)
-            save_picker();trace=[]
+            save_picker(kind);trace=[]
             cancel_share_picker(nodes,lambda:shell("input","keyevent","KEYCODE_BACK"),gate.PKG,trace)
             stop();ok(not paths() and state()==baseline,"picker_cancel_preserves_state",kind)
-            start();open_preview(title);save_picker();tap("SAVE")
+            start();open_preview(title);save_picker(kind);tap("SAVE")
             find(**{"content-desc":"v12-status","text":title+"已保存，逐字节回读一致"})
             found=paths();assert found==["/sdcard/Download/"+filename],repr(found)
             raw=command("exec-out","cat",found[0],binary=True)
@@ -1739,7 +1772,7 @@ def native_paged_ui(adb,gate):
             result["outputs"][kind]={"sha256":hashlib.sha256(raw).hexdigest(),"bytes":len(raw),
                 "pdf_text":"EXACT" if kind=="PDF" else "NOT_OCR_TESTED","page":"SINGLE_NONBLANK_TEXT_REGION_NO_IMAGE"}
             stop();ok(state()==baseline,"save_preserves_state",kind);preserve_output("accepted")
-            start();open_preview(title);save_picker();external(1,0)
+            start();open_preview(title);save_picker(kind);external(1,0)
             changed=state();expected=list(text_row);expected[7]=1
             ok(changed[0]["blocks"]==[tuple(expected) if r==text_row else r for r in data["blocks"]] and
                all(changed[0][t]==data[t] for t in data if t!="blocks") and changed[1:]==baseline[1:],
@@ -1890,7 +1923,7 @@ def native_derived_exports(adb,gate,parent,baseline,state,stop,start,tap,find,
             assert all(n.get("checked")=="false" for n in choices)
             click(find_format("Markdown"));tap(title);tap("2. 图片：");tap("生成预览")
             find(text=title+"预览");find(text="第 1 / 1 页");find(**{"content-desc":"导出第1页"})
-            save_picker();tap("SAVE")
+            save_picker(kind);tap("SAVE")
             find(**{"content-desc":"v12-status","text":title+"已保存，逐字节回读一致"})
             assert shell("find","/sdcard/Download","-type","f","-name",filename).splitlines()==["/sdcard/Download/"+filename]
             raw=command("exec-out","cat","/sdcard/Download/"+filename,binary=True)

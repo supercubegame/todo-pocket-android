@@ -514,7 +514,7 @@ public final class MainActivity extends Activity {
         }catch(Exception e){ticket.close();for(android.graphics.Bitmap b:images)b.recycle();screen.message("预览无法完整显示，未导出；请减少选项",true);return;}
         body.addView(screen.text(format==0?"以上是实际包内Markdown源码和图片缩略图。仅导出所选非私有内容；图片重新编码不等于自动脱敏。完整备份、账目和原图文件不在包内。":
             "以上是实际导出文件的全部分页缩略图，不是重新生成的示意图。仅含所选非私有内容；请核对遮挡效果。完整备份、账目和原图文件不在其中。",14,TodayScreen.MUTED));
-        android.widget.CheckBox consent=new android.widget.CheckBox(this);consent.setText("我已核对内容与图片，可保存此包");body.addView(consent);
+        android.widget.CheckBox consent=new android.widget.CheckBox(this);consent.setText(format==0?"我已核对内容与图片，可保存此包":"我已核对预览，接下来由我选择保存或发送");body.addView(consent);
         final int pages=images.size();
         final boolean[] sending={false};
         android.widget.Button send=null;

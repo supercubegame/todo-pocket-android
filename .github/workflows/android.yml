@@ -665,8 +665,8 @@ jobs:
               def tap(text):click(find(text=text))
               def touch(desc):click(find(**{"content-desc":desc}))
               def ready():find(**{"content-desc":"v12-status","text":"已保存到本机"})
-              def stop():
-                  return stop_verified(adb,gate.SERIAL,gate.PKG,runner=stop_runner,emit=result["process_stops"].append)
+              def stop(verify_before_stop=None):
+                  return stop_verified(adb,gate.SERIAL,gate.PKG,runner=stop_runner,emit=result["process_stops"].append,verify_before_stop=verify_before_stop)
               def start():
                   shell("am","start","-W","-n",gate.PKG+"/com.supercubegame.pockettodo.MainActivity");ready()
               def state():
@@ -716,10 +716,15 @@ jobs:
                   result["process_loss"][kind]=record
                   def step(label):record["labels"].append(label)
                   uid=identity_command("shell","-n","-T","run-as",gate.PKG,"id","-u").strip()
-                  def identity(phase):
+                  def identity(phase,stop_pid=None):
                       trace={"phase":phase,"uid":uid,"stage":"PID_READ"}
                       record.setdefault("identity_reads",[]).append(trace)
-                      pid=identity_command("shell","-n","-T","pidof",gate.PKG).strip()
+                      if stop_pid is None:
+                          pid=identity_command("shell","-n","-T","pidof",gate.PKG).strip()
+                      else:
+                          assert phase=="new" and kind=="PNG_ZIP" and gate.API==26
+                          assert gate.SERIAL=="emulator-5554" and gate.PKG=="com.supercubegame.pockettodo.v12.preview"
+                          pid=stop_pid;trace["pid_source"]="THIS_STOP_PIDOF"
                       trace.update(pid=pid,stage="CMDLINE_READ")
                       assert re.fullmatch(r"[1-9][0-9]*",pid) and int(pid)>1
                       raw=identity_command("exec-out","run-as",gate.PKG,"cat","/proc/"+pid+"/cmdline",binary=True)
@@ -740,9 +745,15 @@ jobs:
                   paths=shell("find","/sdcard/Download","-type","f","-name",filename).splitlines()
                   assert not paths or (paths==["/sdcard/Download/"+filename] and command("exec-out","cat",paths[0],binary=True)==b"")
                   record["stale_output_bytes"]=0;step("stale_owner_no_nonempty_output")
-                  new=identity("new");assert new["pid"]!=old["pid"]
-                  record["new_identity"]=new;step("exact_new_identity")
-                  stop();assert state()==baseline;step("loss_preserves_all_tables_media")
+                  def confirm_recreated(stop_pid=None):
+                      new=identity("new",stop_pid)
+                      assert new["pid"]!=old["pid"] and new["uid"]==old["uid"],"recreated identity not independent"
+                      record["new_identity"]=new;step("exact_new_identity");return new
+                  if gate.API==26 and kind=="PNG_ZIP":
+                      stop(confirm_recreated)
+                  else:
+                      confirm_recreated();stop()
+                  assert state()==baseline;step("loss_preserves_all_tables_media")
                   if paths:
                       destination="/sdcard/Download/loss-empty-"+filename
                       assert not shell("find","/sdcard/Download","-type","f","-name","loss-empty-"+filename).splitlines()

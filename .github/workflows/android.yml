@@ -987,6 +987,12 @@ jobs:
             assert preview['labels']==PAGED_PREVIEW_LABELS and preview['checks']==22
             assert paged['instrumentation']['product_apk_sha256']==hashlib.sha256(actual_product()).hexdigest()
             assert not Path('native-ui/native-result.json').exists(),'probe must not fabricate full native acceptance'
+            document=json.loads(Path('markdown-system-send.json').read_text())
+            assert document==paged['instrumentation']['markdown_system_send'] and document['status']=='PASS' and document['source']==result['commit'] and document['run']==result['run_id'] and document['api']==gate.API
+            assert document['run_attempt']==os.environ['GITHUB_RUN_ATTEMPT'] and document['completion']=='SENDER_ACK_EXACT_AND_TERMINAL_INSTRUMENTATION' and document['preview_guards']=='UNCHECKED_CANCEL_STALE_NO_CHOOSER'
+            assert document['readonly_exact'] is True and document['action']=='android.intent.action.SEND' and document['mime']=='application/zip' and document['sender_uid']!=document['receiver_uid'] and len(paged['instrumentation']['external_receiver'])==3
+            assert len(document['observed'])==1 and document['observed'][0]['name']=='PocketTodo-notes.zip' and document['markdown_archive']['members']==['notes.md','assets/image-1.png'] and document['markdown_archive']['references']==2
+            result['markdown_system_send']=document
             result['codec']=codec
             preflight['phase']='NATIVE_SAF'
             result['native_image_pages']=standalone_native(adb,gate)
@@ -1018,6 +1024,7 @@ jobs:
           path: |
             isolated-trace-host.log
             export-probe.json
+            markdown-system-send.json
             export-probe.log
             export-probe-setup.log
             export-probe-build.log
@@ -1228,6 +1235,7 @@ jobs:
             emulator.log
             device-*.txt
             device-result.json
+            markdown-system-send.json
             native-ui/native-result.json
             native-ui/codec-result.json
             native-ui/*.png

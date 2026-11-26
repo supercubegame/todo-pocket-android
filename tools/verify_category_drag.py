@@ -21,13 +21,13 @@ PACKAGE = runner.PACKAGE
 SCOPE = "CATEGORY_GUARDED_ORDER_AND_INJECTED_TOUCH_NOT_PHYSICAL_PHONE_OR_ALL_LIFECYCLES"
 REQUIRED = {
     "seed": "backend_fixture move_forward move_backward no_op_readonly stale_refused stale_readonly duplicate_refused duplicate_readonly null_refused null_readonly missing_refused missing_readonly bounds_refused bounds_readonly outer_refused outer_readonly late_fault late_rollback backend_checkpoint".split(),
-    "deleted": "backend_restart backend_backup ui_same_title_categories touch_forward touch_duplicate_up_readonly touch_backward touch_same_readonly touch_cancel_readonly touch_outside_readonly touch_short_readonly touch_early_move_readonly touch_navigation_readonly buttons_retained touch_multitouch_pending_readonly touch_multitouch_active_readonly touch_stale_order_refused touch_stale_session_terminal touch_fresh_after_stale ui_checkpoint".split(),
-    "undone": "ui_restart ui_backup".split(),
+    "deleted": "backend_restart backend_backup ui_same_title_categories compact_enter_readonly compact_roundtrip_readonly compact_back_readonly compact_three_targets compact_spoken_names touch_forward touch_duplicate_up_readonly touch_backward touch_same_readonly touch_cancel_readonly touch_outside_readonly touch_short_readonly touch_early_move_readonly touch_navigation_readonly buttons_retained touch_multitouch_pending_readonly touch_multitouch_active_readonly touch_stale_order_refused touch_stale_session_terminal touch_fresh_after_stale expanded_touch_forward expanded_touch_backward ui_checkpoint".split(),
+    "undone": "expanded_default_after_restart ui_restart ui_backup".split(),
 }
 EXPECTED = {
     "seed": ["backend_fixture", "move_forward", "move_backward", "no_op_readonly", "stale_refused", "stale_readonly", "duplicate_refused", "duplicate_readonly", "null_refused", "null_readonly", "missing_refused", "missing_readonly", "bounds_refused", "bounds_readonly", "outer_refused", "outer_readonly", "late_fault", "late_rollback", "backend_checkpoint"],
-    "deleted": ["backend_restart", "backend_backup", "ui_same_title_categories", "touch_forward", "touch_duplicate_up_readonly", "touch_backward", "touch_same_readonly", "touch_cancel_readonly", "touch_outside_readonly", "touch_short_readonly", "touch_early_move_readonly", "touch_navigation_readonly", "buttons_retained", "touch_multitouch_pending_readonly", "touch_multitouch_active_readonly", "touch_stale_order_refused", "touch_stale_session_terminal", "touch_fresh_after_stale", "ui_checkpoint"],
-    "undone": ["ui_restart", "ui_backup"],
+    "deleted": ["backend_restart", "backend_backup", "ui_same_title_categories", "compact_enter_readonly", "compact_roundtrip_readonly", "compact_back_readonly", "compact_three_targets", "compact_spoken_names", "touch_forward", "touch_duplicate_up_readonly", "touch_backward", "touch_same_readonly", "touch_cancel_readonly", "touch_outside_readonly", "touch_short_readonly", "touch_early_move_readonly", "touch_navigation_readonly", "buttons_retained", "touch_multitouch_pending_readonly", "touch_multitouch_active_readonly", "touch_stale_order_refused", "touch_stale_session_terminal", "touch_fresh_after_stale", "expanded_touch_forward", "expanded_touch_backward", "ui_checkpoint"],
+    "undone": ["expanded_default_after_restart", "ui_restart", "ui_backup"],
 }
 JAVA = r'''
 package ci.todos;
@@ -189,7 +189,10 @@ public final class TodoInstrumentation extends Instrumentation {
   }
  }
  Rect handle(long id)throws Exception{
-  Rect r=new Rect();ui(()->{View v=one("category-drag-"+id,true);need(v.isShown()&&v.isEnabled()&&v.getGlobalVisibleRect(r)&&r.width()>0&&r.height()>0,"visible handle");});return r;
+  Rect r=new Rect();ui(()->{View v=one("category-drag-"+id,true);boolean clipped=v.getGlobalVisibleRect(r);
+   need(v.isAttachedToWindow()&&v.isShown()&&v.isEnabled()&&clipped&&r.width()>0&&r.height()>0,
+       "visible handle id="+id+" attached="+v.isAttachedToWindow()+" shown="+v.isShown()+" enabled="+v.isEnabled()+" laidOut="+v.isLaidOut()+" measured="+v.getWidth()+"x"+v.getHeight()+" visible="+clipped+" rect="+r);
+  });return r;
  }
  static void requireInjection(boolean accepted,boolean orphan){
   need(orphan?!accepted:accepted,orphan?"orphan UP must be rejected by Android":"valid touch injection");
@@ -294,6 +297,37 @@ public final class TodoInstrumentation extends Instrumentation {
   drag(changed.get(2),changed.get(0),MotionEvent.ACTION_UP,false);
   pass(h.categoryIds().equals(rendered)&&state(h).equals(expected(external,rendered,1))&&media().equals(images),"touch_fresh_after_stale");
  }
+ boolean hasKey(String key){List<View> found=new ArrayList<>();find(root(),key,true,found);return !found.isEmpty();}
+ void sortSwitch(String key)throws Exception{
+  ui(()->{View button=one(key,true);Rect r=new Rect();need(button instanceof Button&&button.isAttachedToWindow()&&button.isShown()&&button.isEnabled()&&button.getGlobalVisibleRect(r)&&!r.isEmpty(),"visible sort navigation "+key+" "+r);need(button.performClick(),"one sort navigation "+key);});ready();
+ }
+ void checkCompact(AppDatabase h,List<Long> order,Map<String,String> images)throws Exception{
+  Map<String,List<List<String>>> before=state(h);View[] old={null};ui(()->old[0]=one("category-order-enter",true));
+  sortSwitch("category-order-enter");ui(()->{need(!old[0].isAttachedToWindow(),"old full view retired");old[0].performClick();need(!hasKey("category-order-enter")&&!hasKey("category-add-"+order.get(0))&&hasKey("category-order-leave"),"isolated sorting controls");});
+  pass(state(h).equals(before)&&media().equals(images),"compact_enter_readonly");
+  sortSwitch("category-order-leave");ui(()->need(!hasKey("category-order-scroll")&&hasKey("category-add-"+order.get(0))&&hasKey("category-app-add-"+order.get(2)),"normal activity controls retained"));
+  pass(state(h).equals(before)&&media().equals(images),"compact_roundtrip_readonly");sortSwitch("category-order-enter");
+  ui(()->activity.onBackPressed());ready();ui(()->need(!activity.isFinishing()&&hasKey("category-order-enter")&&!hasKey("category-order-scroll"),"system back returns to activity list"));
+  pass(state(h).equals(before)&&media().equals(images),"compact_back_readonly");sortSwitch("category-order-enter");
+  ui(()->{View scroll=one("category-order-scroll",true);Rect viewport=new Rect();need(scroll instanceof ScrollView&&scroll.getGlobalVisibleRect(viewport),"compact viewport "+viewport);int last=-1;int min=Math.round(48*activity.getResources().getDisplayMetrics().density);
+   for(int i=0;i<order.size();i++){long id=order.get(i);View v=one("category-drag-"+id,true),row=one("category-order-row-"+id,true);Rect r=new Rect();boolean seen=v.getGlobalVisibleRect(r);System.out.println("CATEGORY_COMPACT_GEOMETRY id="+id+" viewport="+viewport+" visible="+seen+" rect="+r+" min="+min);
+    ViewParent node=v.getParent();while(node instanceof View&&node!=row)node=node.getParent();need(node==row,"handle owner row "+id);while(node instanceof View&&node!=scroll)node=node.getParent();need(node==scroll,"row owner scroll "+id);
+    need(v.isAttachedToWindow()&&v.isEnabled()&&v.isShown()&&seen&&viewport.contains(r)&&r.width()>=min&&r.height()>=min&&r.top>=last,"compact touch target "+id+" "+r+" viewport="+viewport);last=r.bottom;
+    need((i==2?"Last":"Same").contentEquals(((TextView)one("category-name-"+id,true)).getText()),"compact exact identity/name "+id);
+   }
+  });pass(state(h).equals(before)&&media().equals(images),"compact_three_targets");
+  ui(()->{for(int i=0;i<order.size();i++){String tail=(i==2?"Last":"Same")+"，第"+(i+1)+"项，共3项";
+    String[] keys={"category-name-","category-drag-","category-up-","category-down-"};String[] titles={"","长按拖动：","上移：","下移："};
+    for(int j=0;j<keys.length;j++){View control=one(keys[j]+order.get(i),true);AccessibilityNodeInfo info=control.createAccessibilityNodeInfo();
+     try{need((titles[j]+tail).contentEquals(info.getContentDescription())&&info.isEnabled()==control.isEnabled(),"spoken target and state "+keys[j]+i);}finally{info.recycle();}}
+   }});pass(state(h).equals(before)&&media().equals(images),"compact_spoken_names");
+ }
+ void verifyExpandedPair(AppDatabase h,Map<String,String> images)throws Exception{
+  Map<String,List<List<String>>> before=state(h);List<Long> a=h.categoryIds();List<Long> b=Arrays.asList(a.get(1),a.get(0),a.get(2));
+  sortSwitch("category-order-leave");need(state(h).equals(before)&&media().equals(images),"leave sort after drag is readonly");
+  drag(a.get(0),a.get(1),MotionEvent.ACTION_UP,false);pass(h.categoryIds().equals(b)&&state(h).equals(expected(before,b,1))&&media().equals(images),"expanded_touch_forward");
+  before=state(h);drag(a.get(0),a.get(1),MotionEvent.ACTION_UP,false);pass(h.categoryIds().equals(a)&&state(h).equals(expected(before,a,1))&&media().equals(images),"expanded_touch_backward");
+ }
  void deleted()throws Exception{
   try(AppDatabase h=AppDatabase.openSchema3(getTargetContext(),name())){pass(state(h).toString().equals(read("backend-state")),"backend_restart");backup(h,"backend");}
   need(!getTargetContext().getDatabasePath("pocket-v12.db").exists(),"UI fixtures must not be SQL seeded");
@@ -301,6 +335,7 @@ public final class TodoInstrumentation extends Instrumentation {
   AppDatabase h=db();List<Long> a=h.categoryIds();need(a.size()==3,"three categories");save("ui-order",a.toString());
   pass(h.categoryName(a.get(0)).equals("Same")&&h.categoryName(a.get(1)).equals("Same")&&!a.get(0).equals(a.get(1)),"ui_same_title_categories");
   Map<String,String> images=media();Map<String,List<List<String>>> before=state(h);List<Long> b=Arrays.asList(a.get(1),a.get(2),a.get(0));
+  checkCompact(h,a,images);
   Rect duplicateTarget=handle(a.get(2));View[] previousHandle={null};ui(()->previousHandle[0]=one("category-drag-"+a.get(0),true));
   long previousDown=drag(a.get(0),a.get(2),MotionEvent.ACTION_UP,false);
   pass(h.categoryIds().equals(b)&&state(h).equals(expected(before,b,1))&&media().equals(images),"touch_forward");
@@ -325,11 +360,11 @@ public final class TodoInstrumentation extends Instrumentation {
   pass(state(h).equals(before)&&media().equals(images),"touch_multitouch_pending_readonly");
   multitouch(c.get(0),c.get(2),true);
   pass(state(h).equals(before)&&media().equals(images),"touch_multitouch_active_readonly");
-  staleOrder(h,c,images);
+  staleOrder(h,c,images);verifyExpandedPair(h,images);
   save("ui-state",state(h).toString());save("ui-media",media().toString());pass(true,"ui_checkpoint");
  }
  void undone()throws Exception{
-  launch();click("活动",false);pass(state(db()).toString().equals(read("ui-state"))&&media().toString().equals(read("ui-media")),"ui_restart");backup(db(),"ui");
+  launch();click("活动",false);ui(()->need(hasKey("category-order-enter")&&!hasKey("category-order-scroll"),"default activity view after restart"));pass(true,"expanded_default_after_restart");pass(state(db()).toString().equals(read("ui-state"))&&media().toString().equals(read("ui-media")),"ui_restart");backup(db(),"ui");
  }
  @Override public void onCreate(Bundle b){super.onCreate(b);args=b;start();}
  @Override public void onStart(){
@@ -395,7 +430,7 @@ def validate(value, manifest, logs, api, source, run, attempt):
 
 def fixture(api):
     manifest = dict(commit="a"*40, run_id="123", run_attempt="1", api=api, apk_sha256="b"*64, certificate="c"*64, apk_bytes=100)
-    value = dict(manifest, status="PASS", scope=SCOPE, checks=40, labels=sum(EXPECTED.values(), []),
+    value = dict(manifest, status="PASS", scope=SCOPE, checks=48, labels=sum(EXPECTED.values(), []),
                  release_ready=False, default_test_restored=True, diagnostic_rejected=True,
                  product_readback="EXACT_BEFORE_AND_AFTER", native_ui="INJECTED_TOUCH_WITH_DETACHED_VIEW_REPLAY")
     stop = dict(status="PASS", package=PACKAGE, scope="COMMAND_ACK_AND_OBSERVED_ABSENCE_NOT_LMK", force_stop_attempts=1,
@@ -519,7 +554,7 @@ System.out.println("INJECTION_ASSERTION positive=2 negative=2 PASS; assertion be
 
 
 def selftest():
-    assert REQUIRED == EXPECTED and [len(EXPECTED[p]) for p in ("seed", "deleted", "undone")] == [19, 19, 2]
+    assert REQUIRED == EXPECTED and [len(EXPECTED[p]) for p in ("seed", "deleted", "undone")] == [19, 26, 3]
     total = 0
     for api in (26, 34):
         value, manifest, logs = fixture(api)
@@ -529,7 +564,7 @@ def selftest():
             bad = copy.deepcopy(value);del bad[key];cases.append((bad, manifest, logs))
         for key in manifest:
             bad = dict(manifest);del bad[key];cases.append((value, bad, logs))
-        for key, wrong in (("checks", 40.0), ("checks", True), ("release_ready", 0), ("api", float(api)), ("default_test_restored", 1),
+        for key, wrong in (("checks", 48.0), ("checks", True), ("release_ready", 0), ("api", float(api)), ("default_test_restored", 1),
                            ("commit", "d"*40), ("run_id", "999"), ("run_attempt", "2"), ("apk_sha256", "d"*64),
                            ("native_ui", "WIDGET_CALLBACKS"), ("status", "FAIL"), ("error", "sentinel")):
             bad = copy.deepcopy(value);bad[key] = wrong;cases.append((bad, manifest, logs))
@@ -545,7 +580,7 @@ def selftest():
     for old, new, key, wrong in (
         ('assert value["native_ui"] == "INJECTED_TOUCH_WITH_DETACHED_VIEW_REPLAY"', "assert True", "native_ui", "WIDGET_CALLBACKS"),
         ('assert value["release_ready"] is False', "assert True", "release_ready", 0),
-        ('assert type(value["checks"]) is int and value["checks"] == len(labels) and value["labels"] == labels', "assert True", "checks", 40.0),
+        ('assert type(value["checks"]) is int and value["checks"] == len(labels) and value["labels"] == labels', "assert True", "checks", 48.0),
     ):
         assert source.count(old) == 1
         namespace = dict(globals());exec(compile(source.replace(old, new), "<category-validator-mutant>", "exec"), namespace)

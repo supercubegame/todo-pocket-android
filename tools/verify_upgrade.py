@@ -200,17 +200,114 @@ def apk_identity(path, sdk):
 
 def read_candidate(folder, source, run):
     meta = json.loads((folder / "preview.json").read_text())
-    need(meta["commit"] == source and meta["run_id"] == run, "CANDIDATE_BINDING")
+    need(meta["commit"] == source and meta["run_id"] == run and meta.get("run_attempt") == os.environ["GITHUB_RUN_ATTEMPT"], "CANDIDATE_BINDING")
     need(meta["release_ready"] is False and meta["durable_upgrade_ready"] is False,
          "CANDIDATE_OVERCLAIM")
     name = meta["apk"]
     need(isinstance(name, str) and re.fullmatch(r"PocketTodo-v1\.2-preview-[0-9a-f]{12}\.apk", name),
          "CANDIDATE_UNSAFE_FILENAME")
+    need(name == "PocketTodo-v1.2-preview-"+source[:12]+".apk", "CANDIDATE_NAME_SOURCE")
     path = folder / name
     need(path.is_file() and not path.is_symlink(), "CANDIDATE_NOT_ORDINARY_FILE")
     raw = path.read_bytes()
     need(len(raw) == meta["bytes"] and digest(raw) == meta["sha256"], "CANDIDATE_BYTES")
     return meta, path
+
+
+SIGNING_OVERLAY_SHA256 = "8e2753bbfe7641fcfec3bd334fc3ef8aacea9655ece644dd1e962ef59798a7e7"  # Reviewed build.gradle, signing-only delta against OLD_SOURCE.
+BASELINE_NAME = "legacy.apk"
+BASELINE_META = "baseline.json"
+BASELINE_SCOPE = "PINNED_SOURCE_SINGLE_BUILD_SAME_RUN_ONLY"
+BASELINE_MAX = 64 * 1024 * 1024  # Internal transport guard, not an application storage limit.
+
+
+def baseline_binding(source, run, attempt):
+    need(isinstance(source, str) and re.fullmatch('[0-9a-f]{40}', source) and
+         all(isinstance(x, str) and re.fullmatch('[1-9][0-9]*', x) for x in (run, attempt)),
+         'BASELINE_COORDINATES')
+    return dict(commit=source, run_id=run, run_attempt=attempt, old_source=OLD_SOURCE, scope=BASELINE_SCOPE)
+
+
+def baseline_file(path, limit):
+    need(not path.is_symlink() and path.is_file() and 0 < path.stat().st_size <= limit,
+         'BASELINE_MEMBER_NOT_ORDINARY_OR_BOUNDED')
+    with path.open('rb') as stream:
+        raw = stream.read(limit+1)
+    need(len(raw) == path.stat().st_size and len(raw) <= limit, 'BASELINE_READBACK_INCOMPLETE')
+    return raw
+
+
+def baseline_members(folder):
+    need(not folder.is_symlink() and folder.is_dir() and
+         {p.name for p in folder.iterdir()} == {BASELINE_META, BASELINE_NAME}, 'BASELINE_MEMBER_SET')
+
+
+def package_baseline(path, folder, source, run, attempt, cert, identify):
+    # identify is apk_identity(..., SDK) in CI. The host tests replace ONLY the Android SDK boundary.
+    bind = baseline_binding(source, run, attempt)
+    need(isinstance(cert, str) and re.fullmatch('[0-9a-f]{64}', cert), 'BASELINE_SIGNER_BINDING')
+    raw = baseline_file(path, BASELINE_MAX); identity = identify(path)
+    check_apk_identity(identity, cert)
+    need(set(identity) == {'package','version_code','version_name','min_sdk','certificate','sha256','bytes'} and
+         identity['sha256'] == digest(raw) and identity['bytes'] == len(raw), 'BASELINE_SOURCE_BYTES')
+    folder.mkdir(mode=0o700, exist_ok=False)
+    target = folder / BASELINE_NAME
+    with target.open('xb') as stream: stream.write(raw)
+    need(baseline_file(target, BASELINE_MAX) == raw and identify(target) == identity, 'BASELINE_STAGE_READBACK')
+    meta = dict(**bind, filename=BASELINE_NAME, apk=identity)
+    payload = (json.dumps(meta, sort_keys=True, separators=(',', ':'))+'\n').encode('utf-8')
+    with (folder/BASELINE_META).open('xb') as stream: stream.write(payload)
+    seal = {'apk_sha256': digest(raw), 'manifest_sha256': digest(payload)}
+    read_baseline(folder, source, run, attempt, cert, seal)
+    return seal
+
+
+def read_baseline(folder, source, run, attempt, cert, seal):
+    bind = baseline_binding(source, run, attempt); baseline_members(folder)
+    need(isinstance(cert,str) and re.fullmatch('[0-9a-f]{64}',cert), 'BASELINE_SIGNER_BINDING')
+    need(set(seal) == {'apk_sha256','manifest_sha256'} and all(isinstance(v,str) and re.fullmatch('[0-9a-f]{64}',v) for v in seal.values()),'BASELINE_PRODUCER_OUTPUT_MISSING')
+    payload=baseline_file(folder/BASELINE_META,8192)
+    need(digest(payload)==seal['manifest_sha256'],'BASELINE_MANIFEST_NOT_PRODUCER_BYTES')
+    meta=json.loads(payload); need(isinstance(meta,dict) and set(meta)==set(bind)|{'filename','apk'} and
+        all(meta[k]==v for k,v in bind.items()) and meta['filename']==BASELINE_NAME, 'BASELINE_BINDING')
+    # Reject duplicate keys, trailing data and noncanonical manifests even if the wrong producer emitted one.
+    need((json.dumps(meta,sort_keys=True,separators=(',',':'))+'\n').encode('utf-8')==payload,'BASELINE_MANIFEST_NONCANONICAL')
+    ident=meta['apk'];need(isinstance(ident,dict) and set(ident)=={'package','version_code','version_name','min_sdk','certificate','sha256','bytes'},'BASELINE_IDENTITY_FIELDS')
+    check_apk_identity(ident,cert);path=folder/BASELINE_NAME;raw=baseline_file(path,BASELINE_MAX)
+    need(ident['bytes']==len(raw) and digest(raw)==ident['sha256']==seal['apk_sha256'], 'BASELINE_APK_NOT_PRODUCER_BYTES')
+    return ident,path
+
+
+def producer_seal():
+    # Both values originate in the producing job's verified outputs, not the downloaded file or a matrix leg.
+    return dict(apk_sha256=os.environ.get('EXPECTED_BASELINE_APK_SHA256'),
+                manifest_sha256=os.environ.get('EXPECTED_BASELINE_MANIFEST_SHA256'))
+
+
+def baseline_pair(value, old, candidate, seal):
+    need(value.get('baseline_input')==seal and value['old_apk']==old and
+         value['installed']['old_apk']==old['sha256']==seal['apk_sha256'], 'DEVICE_DID_NOT_USE_SHARED_BASELINE')
+    need(value['old_apk']['sha256']!=candidate['sha256'] and
+         value['new_apk']['sha256']==value['installed']['new_apk']==candidate['sha256'], 'DEVICE_CANDIDATE_PAIR')
+    installs=[v['args'] for v in value['commands'] if v['args'] and v['args'][0]=='install']
+    need(installs==[['install','-t','upgrade-input/legacy.apk'],
+                   ['install','-r','-t','upgrade-evidence/candidate.apk']], 'SHARED_INPUT_INSTALL_PATH')
+
+
+def freeze_old():
+    root=Path.cwd();old=root/'upgrade-old';sdk=Path(os.environ['ANDROID_HOME']);cert=json.loads((signing_directory()/'credentials.json').read_text())['certificate']
+    def git(*args):return subprocess.check_output(['git','-C',str(old),*args],text=True,timeout=30).strip()
+    need(git('rev-parse','HEAD')==OLD_SOURCE and git('diff','HEAD','--name-only')=='build.gradle' and
+         (old/'build.gradle').read_bytes()==(root/'build.gradle').read_bytes() and digest((old/'build.gradle').read_bytes())==SIGNING_OVERLAY_SHA256, 'OLD_SOURCE_DIFF_ESCAPES_SIGNING')
+    out=old/'build/outputs/apk/debug';apk=out/'todo-pocket-android-debug.apk'
+    need(not any(p.is_symlink() for p in [old,out,*[x for x in out.parents if x!=root and root in x.parents]]) and
+         list(out.glob('*.apk'))==[apk], 'ONE_PINNED_OLD_OUTPUT_REQUIRED')
+    seal=package_baseline(apk,root/'baseline-transfer',os.environ['GITHUB_SHA'],os.environ['GITHUB_RUN_ID'],
+                          os.environ['GITHUB_RUN_ATTEMPT'],cert,lambda p:apk_identity(p,sdk))
+    with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as stream:
+        for k,v in seal.items():stream.write(k+'='+v+'\n')
+    print('BASELINE_TRANSFER_VERIFIED '+json.dumps(seal),flush=True)
+
 
 
 def android():
@@ -236,15 +333,15 @@ def android():
         (out / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
 
     def execute(adb):
-        cert = json.loads((signing_directory() / "credentials.json").read_text())["certificate"]
         meta, candidate_path = read_candidate(Path("upgrade-candidate"), source, run)
-        old_paths = list(Path("upgrade-old/build/outputs/apk/debug").glob("*.apk"))
-        need(len(old_paths) == 1, "ONE_OLD_APK_REQUIRED")
-        old = old_paths[0]
+        cert = meta["certificate_sha256"]
+        seal = producer_seal(); baseline, old = read_baseline(Path("upgrade-input"), source, run, attempt, cert, seal)
+        result["baseline_input"] = seal
         # Constant filename makes the asserted overwrite command independent of build naming.
         candidate = out / "candidate.apk"
         candidate.write_bytes(candidate_path.read_bytes())
         result["old_apk"] = apk_identity(old, gate.SDK)
+        need(result["old_apk"] == baseline, "BASELINE_DEVICE_SIGNATURE_OR_BYTES")
         result["new_apk"] = apk_identity(candidate, gate.SDK)
         for key in ("old_apk", "new_apk"):
             check_apk_identity(result[key], cert)
@@ -396,6 +493,7 @@ def android():
             observer.close()
             result["status"] = "PASS"
             check_receipt(result, source, run, attempt, gate.API, meta)
+            baseline_pair(result, baseline, meta, seal)
             completed.append("verified")
         finally:
             observer.close(primary_failed=result["status"] != "PASS")
@@ -430,7 +528,12 @@ def report():
     failure = None
     try:
         errors = collect_upgrade_devices(root, value, source, run, attempt)
+        value["baseline_build"]=baseline_build_observation(root,source,run,attempt)
         meta, _ = read_candidate(root / "internal-preview-candidate", source, run)
+        seal=producer_seal()
+        old,_ = read_baseline(root/("upgrade-baseline-"+run+"-"+attempt),source,run,attempt,meta["certificate_sha256"],seal)
+        value["baseline_input"]=seal
+        need(value["baseline_build"]["status"]=="BUILT","BASELINE_BUILD_NOT_CONFIRMED")
         needs = json.loads(os.environ["NEEDS_JSON"])
         validation = {}
         for api in (26, 34):
@@ -438,9 +541,11 @@ def report():
                 continue
             try:
                 check_receipt(value["devices"][str(api)], source, run, attempt, api, meta)
+                baseline_pair(value["devices"][str(api)],old,meta,seal)
             except (AssertionError, OSError, ValueError, KeyError, TypeError) as exc:
                 validation[str(api)] = repr(exc)
         value["device_validation_errors"] = validation
+        need(needs["upgrade_baseline"]["result"] == "success", "BASELINE_PRODUCER_NOT_SUCCESS")
         need(needs["upgrade"]["result"] == "success", "UPGRADE_MATRIX_JOB_NOT_SUCCESS")
         need(not errors and not validation and set(value["devices"]) == {"26", "34"},
              "UPGRADE_DEVICE_RECEIPTS_NOT_ACCEPTED")
@@ -559,6 +664,89 @@ def signing_path_selftest():
 
 
 
+def baseline_build_observation(root, source, run, attempt):
+    name='upgrade-baseline-log-'+run+'-'+attempt
+    try:
+        f=root/name/'old-build.log';need(f.is_file() and not f.is_symlink(),'BASELINE_BUILD_LOG_MISSING')
+        with f.open('rb') as stream:
+            size=f.stat().st_size;stream.seek(max(0,size-65536));tail=stream.read(65536).decode('utf-8',errors='replace')
+        line=tail.rstrip('\n').split('\n')[-1];need(line.startswith('BUILD_ATTEMPTS '),'BASELINE_BUILD_LOG_INCOMPLETE')
+        j=json.loads(line[len('BUILD_ATTEMPTS '):]);rows=j['attempts']
+        need((j['commit'],j['run_id'],j['run_attempt'],j['role'],j['api'],j['scope'])==
+             (source,run,attempt,'PINNED_OLD_SINGLETON',None,'BUILD_CONFIGURATION_RETRY_NOT_DEVICE_RETRY'),'BASELINE_BUILD_LOG_BINDING')
+        need(isinstance(rows,list) and 1<=len(rows)<=3 and all(isinstance(q,dict) and
+             type(q.get('attempt')) is int and q['attempt']==i and type(q.get('returncode')) is int and
+             type(q.get('dependency_429_only')) is bool and type(q.get('retry_wait_seconds')) is int and
+             (q['returncode']!=0 and q['dependency_429_only'] is True and q['retry_wait_seconds']>0 if i<len(rows) else q['retry_wait_seconds']==0)
+             for i,q in enumerate(rows,1)),'BASELINE_BUILD_ATTEMPT_SHAPE')
+        return dict(status='BUILT' if rows[-1]['returncode']==0 else 'BUILD_FAILED', role='OLD_APK_NOT_DEVICE',attempts=[{k:q[k] for k in ('attempt','returncode','dependency_429_only','retry_wait_seconds')} for q in rows])
+    except (OSError,KeyError,ValueError,AssertionError,TypeError):
+        return dict(status='NOT_OBSERVED',role='OLD_APK_NOT_DEVICE')
+
+
+def baseline_transfer_selftest():
+    """Exercise the real handoff on files. Signed-package identity checker is a double here; real CI re-verifies bytes using aapt/apksigner."""
+    import tempfile
+    from unittest.mock import patch
+    S='4'*40;run='53';attempt='2';cert='a'*64;old=b'known old payload\x00\xff';changed=old[::-1];tests=[]
+    def identity(p):return dict(package=PACKAGE,version_code=3,version_name='1.2',min_sdk=26,certificate=cert,sha256=digest(p.read_bytes()),bytes=p.stat().st_size)
+    def reject(label,fn):
+        try:fn()
+        except (AssertionError, OSError, ValueError, KeyError, TypeError):tests.append(label);return
+        raise AssertionError('BASELINE_BAD_INPUT_ACCEPTED '+label)
+    with tempfile.TemporaryDirectory(prefix='upgrade-handoff-') as td:
+        root=Path(td);p=root/'old.apk';p.write_bytes(old);folder=root/'made';seal=package_baseline(p,folder,S,run,attempt,cert,identity)
+        published=folder/BASELINE_NAME;meta=folder/BASELINE_META;orig=meta.read_bytes();original=json.loads(orig)
+        def read(s=S,r=run,a=attempt,c=cert,sh=None):return read_baseline(folder,s,r,a,c,sh if sh is not None else seal)
+        got,path=read();need(path.read_bytes()==old and got==identity(p) and seal==dict(apk_sha256=digest(old),manifest_sha256=digest(orig)),'SHARED_POSITIVE')
+        for label,kw in [('source',{'s':'5'*40}),('run',{'r':'54'}),('attempt',{'a':'1'}),('short-sha',{'s':'4'}),('attempt-as-int',{'a':2}),('cert',{'c':'b'*64}),('missing-pin',{'sh':{}}),('wrong-independent-output',{'sh':dict(seal,apk_sha256=digest(changed))})]:
+            reject(label,lambda kw=kw:read(**kw))
+        def setmeta(obj):raw=(json.dumps(obj,sort_keys=True,separators=(',',':'))+'\n').encode();meta.write_bytes(raw);return dict(seal,manifest_sha256=digest(raw))
+        for k,v in [('old_source','0'*40),('scope','historical artifact'),('filename','../candidate.apk'),('wrong',1),('run_attempt','3'),('commit','1'*40)]:
+            sh=setmeta(dict(original,**{k:v}));reject('meta:'+k,lambda:read(sh=sh));meta.write_bytes(orig)
+        for k,v in [('package','other.pkg'),('certificate','b'*64),('version_code',4),('min_sdk',34),('sha256',digest(changed)),('bytes',len(old)-1),('signing_password','fixture-only')]:
+            sh=setmeta(dict(original,apk=dict(original['apk'],**{k:v})));reject('identity:'+k,lambda:read(sh=sh));meta.write_bytes(orig)
+        meta.write_bytes(orig+b' ');reject('tampered-manifest',lambda:read());meta.write_bytes(orig);dup=b'{"filename":"legacy.apk",'+orig[1:];meta.write_bytes(dup);reject('duplicate-key',lambda:read(sh=dict(seal,manifest_sha256=digest(dup))));meta.write_bytes(orig)
+        for label,raw in [('corrupt-same-size',changed),('empty',b''),('trailing',old+b'x')]:published.write_bytes(raw);reject(label,read)
+        published.unlink();reject('missing-file',read);published.symlink_to(p);reject('symlink',read);published.unlink();published.write_bytes(old)
+        other=folder/'extra.txt';other.write_text('fixture');reject('extra-file',read);other.unlink();reject('no-overwrite',lambda:package_baseline(p,folder,S,run,attempt,cert,identity))
+        foreign=root/'source-link';foreign.symlink_to(p);reject('source-link',lambda:package_baseline(foreign,root/'bad1',S,run,attempt,cert,identity));reject('source-signature',lambda:package_baseline(p,root/'bad2',S,run,attempt,cert,lambda p:dict(identity(p),certificate='b'*64)));reject('source-digest',lambda:package_baseline(p,root/'bad3',S,run,attempt,cert,lambda p:dict(identity(p),sha256='0'*64)))
+        def switch(path):return identity(path) if path==p else dict(identity(path),version_code=4)
+        reject('staged-file-verifier',lambda:package_baseline(p,root/'bad4',S,run,attempt,cert,switch))
+        with patch.dict(os.environ,GITHUB_RUN_ATTEMPT=attempt):
+            newdir=root/'new';newdir.mkdir();n='PocketTodo-v1.2-preview-'+S[:12]+'.apk';(newdir/n).write_bytes(changed);v=dict(commit=S,run_id=run,run_attempt=attempt,apk=n,bytes=len(changed),sha256=digest(changed),certificate_sha256=cert,release_ready=False,durable_upgrade_ready=False);vf=newdir/'preview.json';vf.write_text(json.dumps(v));need(read_candidate(newdir,S,run)[1].read_bytes()==changed,'NEW_POSITIVE');vf.write_text(json.dumps(dict(v,run_attempt='1')));reject('new-stale-attempt',lambda:read_candidate(newdir,S,run));vf.write_text(json.dumps(dict(v,apk='PocketTodo-v1.2-preview-000000000000.apk')));reject('new-wrong-source-name',lambda:read_candidate(newdir,S,run))
+        need(read()[0]==got,'BASELINE_VALID_AFTER_NEGATIVES')
+    print('BASELINE_TRANSFER_HOST two exact files, signed-identity boundary doubled;',len(tests),'rejected handoffs; NOT_ANDROID',flush=True)
+
+
+def shared_baseline_wiring(jobs):
+    p=jobs['upgrade_baseline'];u=jobs['upgrade'];r=jobs['report'];artifact='upgrade-baseline-${{ github.run_id }}-${{ github.run_attempt }}'
+    def steps(lines):
+        vals=[]
+        for line in lines[lines.index('    steps:')+1:]:
+            if line.startswith('      - '): vals.append([])
+            vals[-1].append(line)
+        return ['\n'.join(v) for v in vals]
+    def only(data,token):
+        matches=[s for s in data if token in s.splitlines()];need(len(matches)==1,'BASELINE_STEP_MISSING_OR_DUPLICATE');return matches[0]
+    ps=steps(p);us=steps(u);rs=steps(r)
+    need('    needs: [core, database]' in p and "    if: github.event_name != 'pull_request'" in p and
+         not any('matrix' in x or 'strategy:' in x for x in p) and not any(x.startswith('    permissions:') for x in p+u), 'BASELINE_NOT_SINGLETON_OR_PERMISSIONS')
+    need(not any(any(m in x for m in ('secrets.', 'POCKET_SIGNING', 'prepare-signing','cleanup-signing','build-old','freeze-old','upgrade-old','verified_build','upgrade_build_setup','gradle')) for x in u ),'CONSUMER_MAY_NOT_BUILD_OR_HOLD_KEY')
+    pin='actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683';ul='actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02';dl='actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093'
+    need(only(ps,'          path: upgrade-old').splitlines()==['      - uses: '+pin,'        with:','          ref: '+OLD_SOURCE,'          path: upgrade-old','          persist-credentials: false'],'OLD_CHECKOUT_NOT_PINNED')
+    pack=only(ps,'        run: python3 tools/verify_upgrade.py freeze-old');upl=only(ps,'          name: '+artifact);old=only(ps,'        run: python3 tools/verify_upgrade.py build-old')
+    need(pack.splitlines()==['      - name: Freeze only verified old APK and manifest','        id: freeze','        run: python3 tools/verify_upgrade.py freeze-old'] and
+         not any('if:' in t or 'continue-on-error:' in t for t in old.splitlines()) and ps.index(old)<ps.index(pack)<ps.index(upl),'BASELINE_FREEZE_ORDER')
+    need(upl.splitlines()==['      - uses: '+ul,'        with:','          name: '+artifact,'          path: |','            baseline-transfer/legacy.apk','            baseline-transfer/baseline.json','          if-no-files-found: error','          retention-days: 1'],'BASELINE_UPLOAD_SCOPE')
+    get=only(us,'          name: '+artifact);device=only(us,'        run: python3 tools/verify_upgrade.py android');new=only(us,'          name: internal-preview-candidate');need(get.splitlines()==['      - uses: '+dl,'        with:','          name: '+artifact,'          path: upgrade-input'] and new.splitlines()==['      - uses: '+dl,'        with:','          name: internal-preview-candidate','          path: upgrade-candidate'] and
+        us.index(device)>max(us.index(get),us.index(new)) and not any('if:' in t or 'continue-on-error:' in t for t in device.splitlines()),'BASELINE_CONSUMER_ORDER')
+    for key in ('apk_sha256','manifest_sha256'):
+        need('      '+key+': ${{ steps.freeze.outputs.'+key+' }}' in p,'BASELINE_SOURCE_OUTPUT')
+        line='EXPECTED_BASELINE_'+key.upper()+': ${{ needs.upgrade_baseline.outputs.'+key+' }}';need('      '+line in u and '          '+line in only(rs,'        run: python3 tools/verify_upgrade.py report').splitlines(),'BASELINE_OUTPUT_NOT_BOUND')
+    need(sum(x.strip()=='run: python3 tools/verify_upgrade.py build-old' for v in jobs.values() for x in v)==1,'OLD_BUILD_NOT_UNIQUE')
+
+
 def workflow_contract(text):
     """Canonical job/step layout only; separate from the stages it guards."""
     jobs = {}
@@ -573,19 +761,19 @@ def workflow_contract(text):
             jobs[current] = []
         elif current is not None:
             jobs[current].append(line)
-    need(set(jobs) == {"core", "database", "export_probe", "export_feedback", "upgrade", "report"},
+    need(set(jobs) == {"core", "database", "export_probe", "export_feedback", "upgrade_baseline", "upgrade", "report"},
          "UPGRADE_JOB_POPULATION")
     for job, budget in (("core", 5), ("database", 75), ("export_probe", 35),
-                        ("export_feedback", 5), ("report", 5), ("upgrade", 35)):
+                        ("export_feedback", 5), ("report", 5), ("upgrade", 35), ("upgrade_baseline", 35)):
         need([v for v in jobs[job] if v.startswith("    timeout-minutes:")] ==
              ["    timeout-minutes: " + str(budget)], "JOB_BUDGET_CHANGED")
-    need("    needs: [core, database]" in jobs["upgrade"] and
+    need("    needs: [core, database, upgrade_baseline]" in jobs["upgrade"] and
          "        api: [26, 34]" in jobs["upgrade"] and
          "    if: github.event_name != 'pull_request'" in jobs["upgrade"],
          "UPGRADE_MATRIX_OR_DEPENDENCY")
-    need("    needs: [core, database, export_probe, export_feedback, upgrade]" in jobs["report"],
+    need("    needs: [core, database, export_probe, export_feedback, upgrade_baseline, upgrade]" in jobs["report"],
          "REPORT_DOES_NOT_WAIT_FOR_UPGRADE")
-    for job in ("database", "upgrade"):
+    for job in ("database", "upgrade_baseline"):
         lines = jobs[job]
         prefix = (
             ["      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683"],
@@ -606,6 +794,7 @@ def workflow_contract(text):
                    if line.strip() == "run: python3 tools/verify_upgrade.py cleanup-signing"]
         need(len(cleanup) == 1 and lines[cleanup[0] - 1] == "        if: always()",
              "SIGNING_CLEANUP_NOT_ALWAYS")
+    shared_baseline_wiring(jobs)
     need("        run: python3 tools/verify_upgrade.py android" in jobs["upgrade"],
          "ANDROID_UPGRADE_CALLER_MISSING")
     need("        run: python3 tools/verify_upgrade.py report" in jobs["report"],
@@ -622,12 +811,41 @@ def workflow_contract(text):
                  for lines in jobs.values() for line in lines), "UNSAFE_ARTIFACT_SCOPE")
 
 
+def baseline_framing_selftest(text):
+    """A dependency process need not finish its last line. Exercise the real guard, preserving raw stdout and explicit exit code."""
+    import contextlib,io
+    from unittest.mock import patch
+    marker='        run: &verified_build |\n';need(text.count(marker)==1,'ONE_PRESERVED_BUILD_GUARD');lines=[]
+    for line in text.split(marker,1)[1].splitlines():
+        if line and not line.startswith('          '):break
+        lines.append(line[10:] if line else '')
+    code=compile(('\n'.join(lines)+'\n').split("python3 - <<'PY'\n",1)[1].rsplit('\nPY',1)[0],'<actual-producer-build-driver>','exec')
+    source='c'*40;run='17';attempt='2'
+    with tempfile.TemporaryDirectory(prefix='baseline-log-') as td:
+        root=Path(td);folder=root/('upgrade-baseline-log-'+run+'-'+attempt);folder.mkdir();f=folder/'old-build.log'
+        for rc,raw in ((0,b'build succeeded with no newline'),(7,b'compile error with no newline'),(0,b'normal output\n')):
+            f.unlink(missing_ok=True);calls=[]
+            def exe(args,**kw):
+                need(args==['gradle','--no-daemon','--console=plain','assembleDebug'],'OLD_APP_ONLY_BUILD');calls.append(args)
+                return subprocess.CompletedProcess(args,rc,raw)
+            env=dict(GITHUB_SHA=source,GITHUB_RUN_ID=run,GITHUB_RUN_ATTEMPT=attempt,TEST_API='34',BUILD_LINT='false',BUILD_ROLE='PINNED_OLD_SINGLETON',BUILD_429_EXECUTE='true',BUILD_LOG=str(f))
+            with patch.dict(os.environ,env),patch.object(subprocess,'run',exe),contextlib.redirect_stdout(io.StringIO()):
+                try:exec(code,{})
+                except SystemExit as e:need(e.code==rc,'BUILD_EXIT_NOT_PRESERVED')
+                else:raise AssertionError('BUILD_EXIT_NOT_PROPAGATED')
+            observed=baseline_build_observation(root,source,run,attempt)
+            need(len(calls)==1 and f.read_bytes().startswith(b'\nBUILD_ATTEMPT 1\n'+raw) and observed['status']==('BUILT' if rc==0 else 'BUILD_FAILED') and
+                 observed['attempts']==[dict(attempt=1,returncode=rc,dependency_429_only=False,retry_wait_seconds=0)], 'UNTERMINATED_BUILD_OUTPUT_LOST_RECEIPT')
+    print('BASELINE_BUILD_FRAMING 3 real guard path cases; child process simulated; NOT_ANDROID')
+
+
 def workflow_selftest():
     signing_path_selftest()
     text = Path(".github/workflows/android.yml").read_text()
     workflow_contract(text)
+    baseline_framing_selftest(text)
     start = text.index("  database:\n")
-    end = text.index("  upgrade:\n", start)
+    end = text.index("  upgrade_baseline:\n", start)
     database = text[start:end]
     initializer = ("      - name: Initialize fixed signing directory\n        run: |\n" +
                    "".join("          " + line + "\n" for line in SIGNING_PATH_SCRIPT.splitlines()))
@@ -648,13 +866,28 @@ def workflow_selftest():
     print("SIGNING_ORDER original_first_step_REJECTED missing_trace_REJECTED conditional_trace_REJECTED")
     variants = [
         ("  upgrade:", "  missing:"),
-        ("    needs: [core, database, export_probe, export_feedback, upgrade]",
+        ("    needs: [core, database, export_probe, export_feedback, upgrade_baseline, upgrade]",
          "    needs: [core, database, export_probe, export_feedback]"),
         ("        run: python3 tools/verify_upgrade.py android", "        run: echo omitted"),
         ("        run: python3 tools/verify_upgrade.py report", "        run: echo omitted"),
         ("      POCKET_STABLE_SIGNING: '1'", "      POCKET_STABLE_SIGNING: '0'"),
         ("          name: upgrade-api-${{ matrix.api }}", "          name: other-evidence"),
     ]
+    variants.extend([
+        ('    needs: [core, database]\n', '    needs: core\n'),
+        ('    needs: [core, database, upgrade_baseline]', '    needs: [core, database]'),
+        ('  upgrade_baseline:', '  other_producer:'),
+        ('        id: freeze', '        if: false\n        id: freeze'),
+        ('          name: upgrade-baseline-${{ github.run_id }}-${{ github.run_attempt }}', '          name: historical-apk'),
+        ('            baseline-transfer/baseline.json', '            baseline-transfer/**'),
+        ('          retention-days: 1\n', '          retention-days: 7\n'),
+        ('          path: upgrade-input', '          path: upgrade-candidate'),
+        ('          ref: '+OLD_SOURCE,'          ref: main'),
+        ('      EXPECTED_BASELINE_MANIFEST_SHA256: ${{ needs.upgrade_baseline.outputs.manifest_sha256 }}','      EXPECTED_BASELINE_MANIFEST_SHA256: local'),
+        ('      - name: Fixed device validation tools (no build, no key material)', '      - run: python3 tools/verify_upgrade.py build-old\n      - name: Fixed device validation tools (no build, no key material)'),
+        ('      - name: Fixed device validation tools (no build, no key material)', '      - run: echo omitted\n        env:\n          UNEXPECTED: ${{ secrets.POCKET_PREVIEW_KEY_ALIAS }}\n      - name: Fixed device validation tools (no build, no key material)'),
+        ('        run: python3 tools/verify_upgrade.py freeze-old','        run: echo skipped'),
+    ])
     for old, new in variants:
         need(old in text, "WORKFLOW_MUTATION_NOT_APPLIED")
         changed = text.replace(old, new, 1)
@@ -674,7 +907,11 @@ def build_old():
     old = root / "upgrade-old"
     need(subprocess.check_output(["git", "-C", str(old), "rev-parse", "HEAD"],
                                  text=True, timeout=30).strip() == OLD_SOURCE, "OLD_CHECKOUT_IDENTITY")
-    (old / "build.gradle").write_bytes((root / "build.gradle").read_bytes())
+    need(not (old/"build").exists() and not (old/".gradle").exists(),"OLD_CHECKOUT_HAS_PREEXISTING_BUILD")
+    need(not subprocess.check_output(["git", "-C", str(old), "status", "--porcelain", "--untracked-files=all"], timeout=30).strip(), "OLD_CHECKOUT_MUST_START_CLEAN")
+    overlay=(root / "build.gradle").read_bytes()
+    need(digest(overlay)==SIGNING_OVERLAY_SHA256,"OLD_SIGNING_OVERLAY_NOT_REVIEWED")
+    (old / "build.gradle").write_bytes(overlay)
     changed = subprocess.check_output(["git", "-C", str(old), "diff", "--name-only"],
                                       text=True, timeout=30).splitlines()
     need(changed == ["build.gradle"], "OLD_SOURCE_DIFF_ESCAPES_SIGNING")
@@ -690,12 +927,13 @@ def build_old():
     need(script.startswith("set -euo pipefail\npython3 - <<'PY'\n") and script.endswith("PY\n"),
          "BUILD_GUARD_SHAPE")
     ast.parse(script.split("python3 - <<'PY'\n", 1)[1][:-3])
-    env = dict(os.environ, BUILD_429_EXECUTE="true", BUILD_LOG=str(root / "upgrade-evidence/old-build.log"))
+    env = dict(os.environ, BUILD_429_EXECUTE="true", BUILD_ROLE="PINNED_OLD_SINGLETON", BUILD_LOG=str(root / "upgrade-evidence/old-build.log"))
     subprocess.run(["bash", "-euo", "pipefail", "-c", script], cwd=old, env=env,
                    check=True, timeout=900)
 
 
 def selftest():
+    baseline_transfer_selftest()
     metadata_selftest()
     upgrade_report_selftest()
     import contextlib
@@ -1028,24 +1266,28 @@ def upgrade_report_selftest():
     from unittest.mock import patch
     source, run, attempt = "e" * 40, "12", "1"
     meta = dict(sha256="c" * 64, bytes=14, certificate_sha256="a" * 64)
+    raw_old=b"OLD-APK-BYTES"
     identity = dict(package=PACKAGE, version_code=3, version_name="1.2", min_sdk=26,
-                    certificate="a" * 64, bytes=13, sha256="b" * 64)
+                    certificate="a" * 64, bytes=len(raw_old), sha256=digest(raw_old))
+    manifest=dict(**baseline_binding(source,run,attempt),filename=BASELINE_NAME,apk=identity)
+    payload=(json.dumps(manifest,sort_keys=True,separators=(",",":"))+"\n").encode()
+    seal=dict(apk_sha256=digest(raw_old),manifest_sha256=digest(payload))
     state = dict(database=dict(tables=dict(todos=dict(rows=[["fixture"]]),
                                           blocks=dict(rows=[["fixture"]]))),
                  media={"d" * 64: dict(bytes=3, base64="YWJj")}, uid="10077")
     def sample(api):
-        return dict(status="PASS", scope=SCOPE, commit=source, run_id=run, run_attempt=attempt,
+        return dict(status="PASS", scope=SCOPE, commit=source, run_id=run, run_attempt=attempt, baseline_input=seal.copy(),
                     api=api, old_source=OLD_SOURCE, labels=LABELS[:],
                     install_command=["install", "-r", "-t", "candidate.apk"],
-                    commands=[dict(args=["install", "-t", "old.apk"], returncode=0, attempts=1),
+                    commands=[dict(args=["install", "-t", "upgrade-input/legacy.apk"], returncode=0, attempts=1),
                               dict(args=["install", "-r", "-t", "upgrade-evidence/candidate.apk"],
                                    returncode=0, attempts=1)],
                     old_apk=identity, new_apk=dict(identity, bytes=14, sha256="c" * 64),
-                    installed=dict(old_apk="b" * 64, new_apk="c" * 64),
+                    installed=dict(old_apk=identity["sha256"], new_apk="c" * 64),
                     snapshots={p: copy.deepcopy(state) for p in ("before", "immediate", "restart")},
                     release_ready=False, durable_upgrade_ready=False,
                     current_phone_certificate_compatible=False)
-    def execute(rows, matrix="success", candidate_ok=True, checker=report):
+    def execute(rows, matrix="success", candidate_ok=True, checker=report, baseline_mode="good"):
         with tempfile.TemporaryDirectory(prefix="upgrade-report-host-") as td:
             root = Path(td)
             raw_rows = {}
@@ -1056,6 +1298,13 @@ def upgrade_report_selftest():
                 path.parent.mkdir(parents=True)
                 raw = row if isinstance(row, bytes) else json.dumps(row).encode()
                 path.write_bytes(raw); raw_rows[str(api)] = raw
+            log=root/'collected'/('upgrade-baseline-log-'+run+'-'+attempt)/'old-build.log';log.parent.mkdir(parents=True)
+            fixture_log=dict(commit=source,run_id=run,run_attempt=attempt,api=None,scope='BUILD_CONFIGURATION_RETRY_NOT_DEVICE_RETRY',role='PINNED_OLD_SINGLETON',attempts=[dict(attempt=1,returncode=1 if baseline_mode=='failed' else 0,dependency_429_only=False,retry_wait_seconds=0)])
+            if baseline_mode!='missing-log':log.write_text('BUILD_ATTEMPTS '+json.dumps(fixture_log)+'\n')
+            folder=root/'collected'/('upgrade-baseline-'+run+'-'+attempt)
+            if baseline_mode!='missing':
+                folder.mkdir(parents=True);(folder/BASELINE_META).write_bytes(payload)
+                (folder/BASELINE_NAME).write_bytes(raw_old if baseline_mode!='altered' else raw_old[::-1])
             published = []
             evidence = types.ModuleType("verify_evidence")
             evidence.publish = lambda api, path, raw: (published.append((path, raw)) or {"host": True})
@@ -1063,7 +1312,8 @@ def upgrade_report_selftest():
                 need(candidate_ok, "HOST_CANDIDATE_FAILURE")
                 return meta, None
             env = dict(GITHUB_SHA=source, GITHUB_RUN_ID=run, GITHUB_RUN_ATTEMPT=attempt,
-                       NEEDS_JSON=json.dumps({"upgrade": {"result": matrix}}))
+                       EXPECTED_BASELINE_APK_SHA256=seal["apk_sha256"], EXPECTED_BASELINE_MANIFEST_SHA256=seal["manifest_sha256"],
+                       NEEDS_JSON=json.dumps({"upgrade_baseline":{"result":"failure" if baseline_mode=="failed" else "success"}, "upgrade": {"result": matrix}}))
             cwd = Path.cwd(); caught = None
             try:
                 os.chdir(root)
@@ -1084,8 +1334,8 @@ def upgrade_report_selftest():
                 need(str(caught) == "UPGRADE_NOT_ACCEPTED: see published evidence", "REPORT_WRONG_FAILURE")
                 need(value["status"] == "FAIL", "FAILED_REPORT_CLAIMS_PASS")
             return value, caught, raw_rows
-    def verify(rows, matrix="success", candidate_ok=True, checker=report, passed=False):
-        value, failure, raw_rows = execute(rows, matrix, candidate_ok, checker)
+    def verify(rows, matrix="success", candidate_ok=True, checker=report, passed=False, baseline_mode="good"):
+        value, failure, raw_rows = execute(rows, matrix, candidate_ok, checker, baseline_mode)
         need((failure is None) == passed, "REPORT_ACCEPTANCE_WRONG")
         need(all(value[k] is False for k in ("release_ready", "durable_upgrade_ready",
                                              "current_phone_certificate_compatible")), "REPORT_SCOPE_CHANGED")
@@ -1115,6 +1365,12 @@ def upgrade_report_selftest():
             cases.append((rows, "success", True))
     for rows, matrix, candidate_ok in cases:
         verify(rows, matrix, candidate_ok)
+    for mode in ('missing','altered','failed','missing-log'):verify(good,baseline_mode=mode)
+    for api in (26,34):
+        for key,val in [('apk_sha256','a'*64),('manifest_sha256','0'*64)]:
+            rows=copy.deepcopy(good);rows[api]['baseline_input'][key]=val;verify(rows)
+        rows=copy.deepcopy(good);rows[api]['old_apk']['sha256']=rows[api]['installed']['old_apk']='9'*64;verify(rows)
+        rows=copy.deepcopy(good);rows[api]['commands'][0]['args'][-1]='historical.apk';verify(rows)
     # Actual entry mutations preserve the success witness but lose originals on
     # failure; run the same observer rather than a special mutant checker.
     text = inspect.getsource(report)
@@ -1137,7 +1393,7 @@ def upgrade_report_selftest():
                 detected = True
         need(detected, "REPORT_OMISSION_MUTANT_SURVIVED")
         mutants += 1
-    result = dict(positive=1, negative=len(cases), witnessed_mutants=mutants,
+    result = dict(positive=1, negative=len(cases)+12, witnessed_mutants=mutants,
                   scope="HOST_REPORT_ENTRY_PUBLICATION_DOUBLE_NOT_ANDROID")
     print("UPGRADE_REPORT_HOST " + json.dumps(result), flush=True)
     return result
@@ -1163,6 +1419,8 @@ if __name__ == "__main__":
         report()
     elif command == "workflow-selftest":
         workflow_selftest()
+    elif command == "freeze-old":
+        freeze_old()
     elif command == "build-old":
         build_old()
     else:

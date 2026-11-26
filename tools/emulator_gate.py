@@ -2419,7 +2419,28 @@ def image_fixture_target_selftest():
         raise AssertionError('off-scope file or environment allowed')
     print('IMAGE_FIXTURE_TARGET_HOST %d selection/observation cases and 5 off-scope refusals; no device'%len(cases),flush=True)
 
+def activity_search_host_selftest():
+    # Execute actual SQL constants against SQLite. A separate device phase exercises UI callbacks and restoration.
+    src=(ROOT/'src/main/java/com/supercubegame/pockettodo/ActivitiesScreen.java').read_text();android=(ROOT/'src/main/java/com/supercubegame/pockettodo/AppDatabase.java').read_text()
+    def literal(key):
+        match=re.findall(r'\b'+key+r'=(?:SEARCH_COLS\+)?("[^"\n]*");',src);assert len(match)==1,key;return json.loads(match[0])
+    query=literal('SEARCH_COLS')+literal('SEARCH_MATCH');one=literal('SEARCH_COLS')+literal('SEARCH_BY_ID');tests=[]
+    with sqlite3.connect(':memory:') as db:
+        for table in ('categories','applications','activities'):
+            ddl=re.findall(r'db\.execSQL\(("CREATE TABLE '+table+r'\([^"\n]+")\);',android);assert len(ddl)==1,table;db.execute(json.loads(ddl[0]))
+        db.executemany('INSERT INTO categories VALUES (?,?,?)',[(2,'家庭',0),(5,'工作',1)]);db.execute("INSERT INTO applications VALUES (6,'读书','')");base=[(72,2,6,'晨读🌱',0),(74,5,6,'晨读🌱',0),(75,5,6,'晨读🌱',1),(79,2,None,"O'Brien 50%_café",0)]+[(200+i,2,6,'连续编号',0) for i in range(31)];db.executemany('INSERT INTO activities VALUES (?,?,?,?,?)',base);db.commit();db.execute('PRAGMA query_only=ON');before=list(db.iterdump())
+        def ids(term,arch,cursor=0):return [x[0] for x in db.execute(query,(str(cursor),'1' if arch else '0',term))]
+        for term,arch,want in [('晨',False,[72,74]),('晨',True,[72,74,75]),('🌱',False,[72,74]),('%_',True,[79]),("O'B",False,[79]),('café',False,[79]),('不在标题',True,[]),('家庭',True,[]),('读书',True,[])]:assert ids(term,arch)==want,(term,arch);tests.append(term)
+        assert ids('连续',False)==list(range(200,225)) and ids('连续',False,223)==list(range(224,231));assert db.execute(one,('74',)).fetchall()==[(74,5,'工作','晨读🌱',0)] and not db.execute(one,('2',)).fetchall() and list(db.iterdump())==before
+    sample=''.join('ACTIVITY_SEARCH_NATIVE '+label+' PASS\n' for label in SEARCH_LABELS)+'DEVICE_DATABASE_RESULT activity_search 2/2 PASS\nINSTRUMENTATION_CODE: -1\n';search_native_receipt(sample);bad=[sample.replace(label,'absent',1) for label in SEARCH_LABELS]+[sample.replace('-1','0'),sample.replace('2/2','1/2'),sample.replace('DEVICE_DATABASE_RESULT','DEVICE_DATABASE_FAILED\nDEVICE_DATABASE_RESULT'),sample.replace(SEARCH_LABELS[1],SEARCH_LABELS[0])]
+    for v in bad:
+        try:search_native_receipt(v)
+        except AssertionError:continue
+        raise AssertionError('false search acceptance')
+    print('ACTIVITY_SEARCH_HOST 9 literal result sets, 2 pages, stable-ID relookup and readonly cells, %d receipt negatives; not Android'%len(bad),flush=True)
+
 def parser_selftest():
+    activity_search_host_selftest()
     image_fixture_target_selftest()
     image_cancel_selftest()
     calendar_draft_selftest()
@@ -2492,6 +2513,16 @@ def verify_calendar_batch_device(adb):
     assert re.findall(r'(?m)^INSTRUMENTATION_CODE: (-?\d+)\s*$',out)==['-1'] and 'DEVICE_DATABASE_FAILED' not in out and labels==expected and 'DEVICE_DATABASE_RESULT calendar_batch 2/2 PASS' in out,'calendar native phase not accepted; see device-calendar-batch.txt'
 
 
+SEARCH_LABELS=('empty_query_and_two_distinct_active_identities','spoken_identity_and_detached_result_cannot_navigate','open_second_and_archived_id_back_preserves_scope','literal_symbols_unicode_and_no_private_body_results','keyset_pages_exact_no_drops_or_duplicates','unchanged_all_cells_reopen_and_independent_backup_restore')
+
+def search_native_receipt(out):
+    labels=tuple(re.findall(r'(?m)^(?:INSTRUMENTATION_RESULT: stream=)?ACTIVITY_SEARCH_NATIVE ([a-z0-9_]+) PASS\s*$',out));codes=re.findall(r'(?m)^INSTRUMENTATION_CODE: (-?\d+)\s*$',out)
+    if labels!=SEARCH_LABELS or codes!=['-1'] or 'DEVICE_DATABASE_FAILED' in out or not re.search(r'(?m)^DEVICE_DATABASE_RESULT activity_search 2/2 PASS\s*$',out):raise AssertionError('activity search device contract not verified')
+
+def verify_search_device(adb):
+    out=run_database_phase([adb,'-s',SERIAL,'shell','am','instrument','-w','-r','-e','phase','activity_search','-e','expectedApi',str(API),PKG+'.test/com.supercubegame.pockettodo.V12DeviceTest'],timeout=120,capture=True,phase='activity-search').stdout
+    Path('device-activity-search.txt').write_text(out);print(out,flush=True);search_native_receipt(out)
+
 def verify_database(adb):
     apks = list(Path('build/outputs/apk/debug').glob('*.apk'))
     tests = list(Path('build/outputs/apk/androidTest/debug').glob('*.apk'))
@@ -2511,6 +2542,10 @@ def verify_database(adb):
     try:verify_calendar_batch_device(adb)
     except Exception as exc:
         calendar_error=exc;print('CALENDAR_PHASE_NOT_ACCEPTED '+repr(exc),flush=True)
+    search_error=None
+    try:verify_search_device(adb)
+    except Exception as exc:
+        search_error=exc;print('ACTIVITY_SEARCH_PHASE_NOT_ACCEPTED '+repr(exc),flush=True)
     legacy_public_fixture(adb)
     results = {}
     for phase in ('seed', 'reopen'):
@@ -2526,6 +2561,7 @@ def verify_database(adb):
         'full_backup_restore': RESTORE_SCOPE, 'saf_restore_ui': 'SEE_NATIVE_UI_RESULT', 'power_loss': 'NOT_TESTED',
         'release_ready': False}, indent=2))
     if calendar_error is not None:raise calendar_error
+    if search_error is not None:raise search_error
 
 def derivative_checker():
     """Compile and prove the actual pixel oracle before slow native UI work."""

@@ -35,7 +35,71 @@ public final class ActivitiesScreen {
         NoteSummary(String id,String title,String text){this.id=id;this.title=title;this.text=text;}
     }
     private static final class Detail {String title,status;boolean archived;List<String> path,tags;LocalDate day;List<String> history=new ArrayList<>();final List<NoteSummary> notes=new ArrayList<>();}
-    void load(){if(categorySession!=null)categorySession.alive=false;if(backupPanel)renderBackup();else if(selected==0){if(archivePanel)loadArchivedActivities();else loadCategories();}else if(historyPanel)loadHistory(selected);else loadDetail(selected);}
+    // Search reads only activity/category metadata, never notes, field values, money or marks.
+    private static final String SEARCH_COLS="SELECT a.id,a.category_id,c.name,a.title,a.archived FROM activities a JOIN categories c ON c.id=a.category_id ";
+    static final int SEARCH_PAGE=24;
+    static final String SEARCH_MATCH=SEARCH_COLS+"WHERE a.id>CAST(? AS INTEGER) AND (a.archived=0 OR ?='1') AND instr(lower(a.title),lower(?))>0 ORDER BY a.id LIMIT 25";
+    static final String SEARCH_BY_ID=SEARCH_COLS+"WHERE a.id=CAST(? AS INTEGER)";
+    static final class SearchHit {
+        final long id,category;final String categoryName,title;final boolean archived;
+        SearchHit(Cursor c){id=c.getLong(0);category=c.getLong(1);categoryName=c.getString(2);title=c.getString(3);archived=c.getInt(4)!=0;}
+        boolean same(SearchHit h){return h!=null&&id==h.id&&category==h.category&&archived==h.archived&&title.equals(h.title)&&categoryName.equals(h.categoryName);}
+        String label(){return title+"\n"+categoryName+" · 活动 #"+id+(archived?" · 已归档":"");}
+    }
+    static final class SearchFlow {
+        String text="";boolean archives,submitted;long epoch,opened;
+        final ArrayList<Long> pages=new ArrayList<>();SearchFlow(){pages.add(0L);}
+        long after(){return pages.get(pages.size()-1);}
+        void change(String query,boolean include){text=query;archives=include;submitted=false;pages.clear();pages.add(0L);epoch++;}
+    }
+    private SearchFlow searchFlow;
+    void leaveSearch(){if(searchFlow!=null){searchFlow.epoch++;searchFlow=null;}}
+    private boolean searchDetail(long id){return id>0&&searchFlow!=null&&searchFlow.opened==id&&selected==id;}
+    boolean backFromSearch(){
+        if(searchFlow==null)return false;
+        if(searchDetail(selected)){searchFlow.opened=0;selected=0;historyPanel=false;archivePanel=false;load();return true;}
+        if(selected==0){leaveSearch();load();return true;}return false;
+    }
+    static List<SearchHit> searchRead(android.database.sqlite.SQLiteDatabase db,String raw,boolean archives,long after){
+        String term=raw.trim();List<SearchHit> hits=new ArrayList<>();if(term.isEmpty()||after<0)return hits;
+        try(Cursor c=db.rawQuery(SEARCH_MATCH,new String[]{Long.toString(after),archives?"1":"0",term})){while(c.moveToNext())hits.add(new SearchHit(c));}return hits;
+    }
+    static boolean searchStillCurrent(android.database.sqlite.SQLiteDatabase db,SearchHit hit){
+        try(Cursor c=db.rawQuery(SEARCH_BY_ID,new String[]{Long.toString(hit.id)})){return c.moveToFirst()&&hit.same(new SearchHit(c))&&!c.moveToNext();}
+    }
+    private final class SearchPage {
+        final SearchFlow s;final ScrollView scroll;final LinearLayout panel,rows;final EditText input;final CheckBox archives;final TextView help;
+        SearchPage(SearchFlow state){
+            s=state;LinearLayout body=host.content();scroll=new ScrollView(host.activity);scroll.setTag("activity-search-scroll");panel=host.column();panel.setFocusableInTouchMode(true);scroll.addView(panel);body.addView(scroll,new LinearLayout.LayoutParams(-1,-1));
+            LinearLayout bar=new LinearLayout(host.activity);bar.addView(host.text("搜索活动",22,TodayScreen.INK),new LinearLayout.LayoutParams(0,-2,1));Button back=host.button("返回分类",()->{if(active())backFromSearch();});back.setTag("activity-search-back");bar.addView(back);panel.addView(bar);
+            input=host.field("活动标题关键词",false);input.setTag("activity-search-query");input.setHint("输入活动标题");input.setText(s.text);input.setSelection(input.length());input.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH);panel.addView(input,new LinearLayout.LayoutParams(-1,-2));
+            LinearLayout actions=new LinearLayout(host.activity);archives=new CheckBox(host.activity);archives.setText("包含已归档");archives.setMinHeight(host.dp(48));archives.setTag("activity-search-archives");archives.setChecked(s.archives);actions.addView(archives,new LinearLayout.LayoutParams(0,-2,1));Button go=host.button("搜索",()->submit(true));go.setTag("activity-search-submit");actions.addView(go);panel.addView(actions);
+            help=host.text("输入标题后搜索，只查活动名称。",15,TodayScreen.MUTED);help.setTag("activity-search-status");help.setAccessibilityLiveRegion(android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE);panel.addView(help);rows=host.column();panel.addView(rows);panel.requestFocus();
+            input.addTextChangedListener(new android.text.TextWatcher(){public void beforeTextChanged(CharSequence x,int st,int ct,int af){}public void onTextChanged(CharSequence x,int st,int before,int count){changed();}public void afterTextChanged(android.text.Editable e){}});
+            archives.setOnCheckedChangeListener((button,on)->changed());input.setOnEditorActionListener((v,action,event)->{if(action!=android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH)return false;submit(true);return true;});
+            if(s.submitted)submit(false);
+        }
+        boolean active(){return searchFlow==s&&s.opened==0&&selected==0&&scroll.isAttachedToWindow()&&!host.activity.isFinishing()&&!host.activity.isDestroyed();}
+        void changed(){if(!active())return;s.change(input.getText().toString(),archives.isChecked());rows.removeAllViews();help.setText("输入标题后搜索，只查活动名称。");}
+        void submit(boolean fresh){
+            if(!active())return;if(fresh)s.change(input.getText().toString(),archives.isChecked());
+            final String term=s.text.trim();final long cursor=s.after();final boolean include=s.archives;final long ticket=++s.epoch;
+            rows.removeAllViews();if(term.isEmpty()){s.submitted=false;help.setText("请输入活动标题。");return;}
+            android.view.inputmethod.InputMethodManager ime=(android.view.inputmethod.InputMethodManager)host.activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE);if(ime!=null)ime.hideSoftInputFromWindow(input.getWindowToken(),0);panel.requestFocus();
+            help.setText("正在搜索…");s.submitted=true;
+            host.work(()->searchRead(host.db.getReadableDatabase(),term,include,cursor),hits->{
+                if(!active()||ticket!=s.epoch)return;int n=Math.min(SEARCH_PAGE,hits.size());help.setText(n==0?"没有匹配的活动。":"第 "+s.pages.size()+" 页 · 本页 "+n+" 项");
+                for(int i=0;i<n;i++){final SearchHit hit=hits.get(i);Button open=host.button(hit.label(),()->{});open.setTag("activity-search-hit-"+hit.id);open.setContentDescription(hit.label().replace('\n','，'));open.setOnClickListener(v->{if(!active()||!open.isEnabled()||!open.isAttachedToWindow()||s.epoch!=ticket)return;
+                    host.work(()->searchStillCurrent(host.db.getReadableDatabase(),hit),valid->{if(!active()||s.epoch!=ticket)return;if(!valid){help.setText("活动已变化，请重新搜索。");s.epoch++;rows.removeAllViews();return;}
+                        s.epoch++;s.opened=hit.id;selected=hit.id;historyPanel=false;archivePanel=false;load();},()->{if(active())help.setText("无法读取这项活动，请重新搜索。");});});rows.addView(open,new LinearLayout.LayoutParams(-1,-2));}
+                if(s.pages.size()>1)addPage("上一页",false,0,ticket);if(hits.size()>SEARCH_PAGE)addPage("下一页",true,hits.get(n-1).id,ticket);
+                host.message("本机搜索 · 未修改数据",false);scroll.scrollTo(0,0);
+            },()->{if(active()&&s.epoch==ticket){s.submitted=false;help.setText("搜索未完成，请再试一次。");}});
+        }
+        void addPage(String label,boolean next,long lower,long ticket){Button b=host.button(label,()->{if(!active()||s.epoch!=ticket)return;if(next)s.pages.add(lower);else s.pages.remove(s.pages.size()-1);submit(false);});b.setTag(next?"activity-search-next":"activity-search-previous");rows.addView(b,new LinearLayout.LayoutParams(-1,-2));}
+    }
+
+    void load(){if(categorySession!=null)categorySession.alive=false;if(backupPanel)renderBackup();else if(selected==0){if(archivePanel)loadArchivedActivities();else if(searchFlow!=null)new SearchPage(searchFlow);else loadCategories();}else if(historyPanel)loadHistory(selected);else loadDetail(selected);}
     private long nextId(String table){
         // Only fixed internal table names, and one UI writer on the shared executor.
         if(!table.equals("categories")&&!table.equals("activities"))throw new IllegalArgumentException();
@@ -58,7 +122,8 @@ public final class ActivitiesScreen {
         CategorySession session=new CategorySession(shown);categorySession=session;
         final boolean orderOnly=compactOrder;
         LinearLayout title=new LinearLayout(host.activity);title.setGravity(android.view.Gravity.CENTER_VERTICAL);
-        title.addView(host.text(orderOnly?"分类排序":"长期的事，慢慢积累",22,TodayScreen.INK),new LinearLayout.LayoutParams(0,-2,1));
+        title.addView(host.text(orderOnly?"分类排序":"活动",22,TodayScreen.INK),new LinearLayout.LayoutParams(0,-2,1));
+        if(!orderOnly){Button search=host.button("搜索",()->{if(!categoryCurrent(session,title))return;searchFlow=new SearchFlow();load();});search.setTag("activity-search-open");search.setContentDescription("按活动标题搜索");title.addView(search,new LinearLayout.LayoutParams(-2,-2));}
         Button mode=host.button(orderOnly?"返回活动":"分类排序",()->setCategoryOrderMode(session,title,!orderOnly));
         mode.setContentDescription(orderOnly?"category-order-leave":"category-order-enter");
         categorySpeech(mode,orderOnly?"返回活动列表":"整理分类顺序");
@@ -108,7 +173,7 @@ public final class ActivitiesScreen {
     private CategorySession categorySession;
     private boolean categoryHere(CategorySession session,android.view.View anchor){
         return categorySession==session&&session.alive&&selected==0&&!backupPanel
-            &&!archivePanel&&anchor.isAttachedToWindow()&&anchor.isEnabled()
+            &&!archivePanel&&searchFlow==null&&anchor.isAttachedToWindow()&&anchor.isEnabled()
             &&!host.activity.isFinishing()&&!host.activity.isDestroyed();
     }
     private boolean categoryCurrent(CategorySession session,android.view.View anchor){
@@ -540,7 +605,7 @@ public final class ActivitiesScreen {
     private void renderDetail(long id,Detail d){
         if(d.archived){renderArchived(id,d);return;}
         LinearLayout body=host.content();LinearLayout toolbar=new LinearLayout(host.activity);
-        toolbar.addView(host.button("返回分类",()->{selected=0;archivePanel=false;historyPanel=false;load();}),new LinearLayout.LayoutParams(0,host.dp(48),1));
+        toolbar.addView(host.button(searchDetail(id)?"返回搜索":"返回分类",()->{if(searchDetail(id)){backFromSearch();return;}selected=0;archivePanel=false;historyPanel=false;load();}),new LinearLayout.LayoutParams(0,host.dp(48),1));
         toolbar.addView(host.button("日历账本",()->new CalendarScreen(host,id,d.title,this::load).load()),new LinearLayout.LayoutParams(0,host.dp(48),1));body.addView(toolbar);
         FieldScreen fields=new FieldScreen(host,id,this::load);
         Button fieldEntry=host.button("字段",()->{});fieldEntry.setContentDescription("activity-fields-"+id);
@@ -786,7 +851,7 @@ public final class ActivitiesScreen {
     }
     private void renderArchived(long id,Detail d){
         LinearLayout body=host.content();body.addView(host.text("已归档 · 只读历史",24,TodayScreen.INK));
-        Button back=host.button("返回归档列表",()->{selected=0;historyPanel=false;archivePanel=true;load();});
+        Button back=host.button(searchDetail(id)?"返回搜索":"返回归档列表",()->{if(searchDetail(id)){backFromSearch();return;}selected=0;historyPanel=false;archivePanel=true;load();});
         back.setContentDescription("archive-detail-back");body.addView(back);
         ArchiveAction action=new ArchiveAction(host,id,d.title,true,this::load);
         Button restore=host.button("恢复活动",()->{});restore.setContentDescription("activity-restore-"+id);

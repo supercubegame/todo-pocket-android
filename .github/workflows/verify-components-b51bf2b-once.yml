@@ -1,0 +1,66 @@
+name: Verify six pinned Pocket Todo components once
+on:
+  push:
+    branches: [ci/verify-components-b51bf2b]
+    paths: [.github/workflows/verify-components-b51bf2b-once.yml]
+permissions:
+  contents: read
+  actions: write
+concurrency:
+  group: pocket-components-once-b51bf2b
+  cancel-in-progress: false
+jobs:
+  dispatch:
+    if: github.repository == 'supercubegame/todo-pocket-android' && github.actor == 'supercubegame' && github.run_attempt == 1 && github.event.before == 'b51bf2b28976ebd9da4f6da67ff531fb7f887388'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check six exact definitions, stagger pairs, request at most once and read back
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYTHON'
+          import json,os,subprocess,time
+          from urllib.parse import quote
+          R='supercubegame/todo-pocket-android';B='feature/calendar-batch-738f984';S='b51bf2b28976ebd9da4f6da67ff531fb7f887388'
+          BRIDGE='ci/verify-components-b51bf2b';H='.github/workflows/verify-components-b51bf2b-once.yml'
+          GROUPS=((('custom-fields',374595917,'c0caf7a3c0aa5896540e82688dd660cb090a875a'),('note-drafts',371338208,'21922203cc64c340dcfb2c3909a7da68dc41025a')),(('todo-management',372690401,'1e6964aa7191f248717e726e8be9c46d1bd57876'),('category-drag',373709465,'f33cd9b6389a613eff1e89c1262af963a0001dd2')),(('app-catalog',374339204,'5416834047407353be2aefbcaa1baefcefa21548'),('shortcut-storage',380248902,'feb297e1398fd211a9d3380854eba494cc4add0e')))
+          def need(c,m):
+              if not c:raise RuntimeError(m)
+          def cmd(path,method,fields=()):return subprocess.run(['gh','api','--method',method,'repos/'+R+'/'+path,*fields],text=True,capture_output=True,timeout=20)
+          def read(path):
+              q=cmd(path,'GET');need(q.returncode==0,'GitHub read failed: '+path);return json.loads(q.stdout)
+          def send(w):
+              # Single request only; a timeout may already have been accepted by the server.
+              try:q=cmd('actions/workflows/'+str(w)+'/dispatches','POST',('-f','ref='+B));print('Request',w,'exit',q.returncode,flush=True)
+              except subprocess.TimeoutExpired:print('Request',w,'timed out; read back only',flush=True)
+          def campaign(get,post,pause,env,emit):
+              def bound():need(get('git/ref/heads/'+B)['object']['sha']==S,'candidate branch moved')
+              def checked(item):
+                  name,w,blob=item;f='.github/workflows/'+name+'.yml';v=get('actions/workflows/'+str(w));need((v['id'],v['path'],v['state'])==(w,f,'active'),'workflow registration changed')
+                  need(get('contents/'+f+'?ref='+S)['sha']==blob,'workflow definition changed')
+              def observe(item):
+                  name,w,blob=item;p=get('actions/workflows/'+str(w)+'/runs?event=workflow_dispatch&branch='+quote(B,safe='')+'&head_sha='+S+'&per_page=2');rows=p['workflow_runs'];need(p['total_count']==len(rows)<=1,'duplicate or incomplete result page');
+                  if not rows:return None
+                  j=rows[0];rid=j['id'];link='https://github.com/'+R+'/actions/runs/'+str(rid)
+                  need(type(rid)is int and rid>0 and (j['event'],j['workflow_id'],j['path'],j['head_sha'],j['head_branch'],j['run_attempt'],j['html_url'])==('workflow_dispatch',w,'.github/workflows/'+name+'.yml',S,B,1,link),'observed run identity mismatch');return link
+              need(env['GITHUB_REPOSITORY']==R and env['GITHUB_ACTOR']=='supercubegame' and env['GITHUB_REF']=='refs/heads/'+BRIDGE and env['GITHUB_RUN_ATTEMPT']=='1','foreign trigger or replay');c=get('commits/'+env['GITHUB_SHA']);need(c['sha']==env['GITHUB_SHA'] and [v['sha'] for v in c['parents']]==[S] and [(x['filename'],x['status']) for x in c['files']]==[(H,'added')],'helper diff or parent differs')
+              flat=[v for group in GROUPS for v in group];need(len(flat)==len(set(i[1] for i in flat))==6,'allowlist identity');bound()
+              for item in flat:checked(item);observe(item) # validate the whole batch before its first write
+              for i,group in enumerate(GROUPS):
+                  if i:pause(120) # stagger starts, not a promise that preceding jobs have finished
+                  for item in group:
+                      bound();checked(item);url=observe(item);reused=bool(url)
+                      if not url:
+                          bound();post(item[1]);
+                          for n in range(8):
+                              bound();url=observe(item)
+                              if url:break
+                              if n<7:pause(5)
+                      need(url is not None,'no matching receipt; no second request');emit(item[0],url,reused)
+          if __name__=='__main__':
+              def record(name,url,reused):
+                  with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:print(('* Existing' if reused else '* Observed')+' ['+name+']('+url+') on `'+S+'`. Not an acceptance claim.',file=f)
+              campaign(read,send,time.sleep,os.environ,record)
+          PYTHON

@@ -717,11 +717,62 @@ public final class V12DeviceTest extends Instrumentation {
             runOnMainSync(activity::finish);waitForIdleSync();moneyNeed(host.awaitShortcutClose()&&moneyScalar(n,"SELECT undone FROM batches WHERE id=?",key)==1&&moneyScalar(n,"SELECT count(*) FROM ledger")==1,"independent database reopen after finish");moneyPass("undo_cancel_then_exact_batch_only_and_reopen");
         }finally{if(a!=null&&!a.isFinishing()&&!a.isDestroyed()){MainActivity closing=a;runOnMainSync(closing::finish);}MainActivity.isolatedShortcutTest=false;}
     }
+    private static void searchNeed(boolean pass,String label){if(!pass)throw new AssertionError("activity search: "+label);}
+    private void searchPass(String label){log.append("ACTIVITY_SEARCH_NATIVE ").append(label).append(" PASS\n");}
+    private static void searchFind(android.view.View v,String key,List<android.view.View> out){
+        if((key.equals(v.getTag())||key.contentEquals(String.valueOf(v.getContentDescription())))&&v.isShown()&&v.isAttachedToWindow()&&v.isEnabled())out.add(v);
+        if(v instanceof android.view.ViewGroup){android.view.ViewGroup g=(android.view.ViewGroup)v;for(int i=0;i<g.getChildCount();i++)searchFind(g.getChildAt(i),key,out);}
+    }
+    private void searchWidget(MainActivity a,String key,String value,boolean click,long budget)throws Exception{
+        long until=Math.min(budget,android.os.SystemClock.uptimeMillis()+8000);boolean[] done={false};android.view.View[] located={null};boolean[] scrolled={false};
+        while(!done[0]&&android.os.SystemClock.uptimeMillis()<until){runOnMainSync(()->{
+            ArrayList<android.view.View> found=new ArrayList<>();searchFind(a.getWindow().getDecorView(),key,found);searchNeed(found.size()<=1,"ambiguous control "+key);if(found.isEmpty())return;android.view.View v=found.get(0);
+            if(value!=null&&!(v instanceof android.widget.EditText)&&(!(v instanceof android.widget.TextView)||!value.contentEquals(((android.widget.TextView)v).getText())))return;
+            if(!click&&!(v instanceof android.widget.EditText&&value!=null)){done[0]=true;return;}
+            if(v.getWidth()<=0||v.getHeight()<=0)return;if(located[0]!=null)searchNeed(located[0]==v,"control replaced "+key);located[0]=v;android.graphics.Rect rect=new android.graphics.Rect();
+            if(!v.getLocalVisibleRect(rect)||rect.left!=0||rect.top!=0||rect.right!=v.getWidth()||rect.bottom!=v.getHeight()){
+                if(!scrolled[0]){scrolled[0]=true;v.requestRectangleOnScreen(new android.graphics.Rect(0,0,v.getWidth(),v.getHeight()),true);}return;
+            }
+            if(click){searchNeed(v.isClickable(),"not clickable "+key);v.performClick();}else ((android.widget.EditText)v).setText(value);done[0]=true;
+        });if(!done[0])android.os.SystemClock.sleep(30);}searchNeed(done[0],"missing requested widget "+key);waitForIdleSync();
+    }
+    private static void searchIds(android.view.View v,List<Long> ids){String desc=String.valueOf(v.getTag());if(desc.startsWith("activity-search-hit-")&&v.isAttachedToWindow()&&v.isShown())ids.add(Long.parseLong(desc.substring("activity-search-hit-".length())));if(v instanceof android.view.ViewGroup){android.view.ViewGroup g=(android.view.ViewGroup)v;for(int i=0;i<g.getChildCount();i++)searchIds(g.getChildAt(i),ids);}}
+    private void searchResults(MainActivity a,int page,List<Long> expected,long end)throws Exception{
+        searchWidget(a,"activity-search-status",expected.isEmpty()?"没有匹配的活动。":"第 "+page+" 页 · 本页 "+expected.size()+" 项",false,end);
+        runOnMainSync(()->{List<Long> got=new ArrayList<>();searchIds(a.getWindow().getDecorView(),got);searchNeed(got.equals(expected),"ordered IDs expected "+expected+" got "+got);});
+    }
+    private void searchQuery(MainActivity a,String query,int page,List<Long> ids,long end)throws Exception{searchWidget(a,"activity-search-query",query,false,end);searchWidget(a,"activity-search-submit",null,true,end);searchResults(a,page,ids,end);}
+    private void activitySearchPhase()throws Exception{
+        Context c=getTargetContext();searchNeed("com.supercubegame.pockettodo.v12.preview".equals(c.getPackageName())&&"ranchu".equals(android.os.Build.HARDWARE)&&android.os.Build.VERSION.SDK_INT==Integer.parseInt(args.getString("expectedApi")),"disposable test environment only");
+        // Dedicated schema4 workbench already used by the calendar phase, never the default product database. Refuse existing search IDs.
+        String n="schema4-ui.db",dest="search-roundtrip-ci.db";searchNeed(c.getDatabasePath(n).exists()&&!c.getDatabasePath(dest).exists(),"fresh CI roundtrip destination");byte[] before,wire;
+        try(AppDatabase s=AppDatabase.openSchema4(c,n)){
+            searchNeed(scalar(s.getReadableDatabase(),"SELECT count(*) FROM activities WHERE id BETWEEN 8100 AND 8400")==0&&scalar(s.getReadableDatabase(),"SELECT count(*) FROM todos WHERE id='keep-ui'")==1,"existing calendar fixture, no search ID collision");
+            s.addCategory(801,"家庭");s.addCategory(802,"工作");s.addApplication(803,"共享应用","");s.addActivity(8101,801,803,"早读🌱");s.addActivity(8102,802,803,"早读🌱");s.addActivity(8103,802,803,"早读🌱");s.addActivity(8104,802,0,"预算 50%_A\\café");s.savePath(8101,List.of("只在路径里"));s.createNote("search-private-note",8102,"私密笔记标题");NoteDocument body=new NoteDocument();body.add(NoteDocument.Block.text("search-private-block","不搜索这段私密内容",true));s.saveNote("search-private-note",body.snapshot());
+            try(AppDatabase.ActivityArchivePlan p=s.prepareActivityArchive(8103,true)){searchNeed(s.confirmActivityArchive(p),"archived fixture");}
+            for(int i=0;i<26;i++)s.addActivity(8200+i,801,803,"页例 "+i);before=appendCells(n,true);wire=s.exportState();
+        }
+        MainActivity a=null;long end=android.os.SystemClock.uptimeMillis()+65000;List<Long> only=Arrays.asList(8101L,8102L),all=Arrays.asList(8101L,8102L,8103L);MainActivity.isolatedShortcutTest=true;
+        try{
+            a=(MainActivity)startActivitySync(new android.content.Intent(c,MainActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));final MainActivity active=a;TodayScreen host=a.shortcutTestScreen();searchNeed(host!=null,"real host");
+            searchWidget(a,"activity-search-open",null,true,end);searchWidget(a,"activity-search-submit",null,true,end);searchWidget(a,"activity-search-status","请输入活动标题。",false,end);searchQuery(a,"早读",1,only,end);searchNeed(Arrays.equals(before,appendCells(n,true)),"search preview readonly");searchPass("empty_query_and_two_distinct_active_identities");
+            final android.view.View[] old={null};runOnMainSync(()->{List<android.view.View> found=new ArrayList<>();searchFind(active.getWindow().getDecorView(),"activity-search-hit-8101",found);searchNeed(found.size()==1,"first stable result");old[0]=found.get(0);android.view.accessibility.AccessibilityNodeInfo info=old[0].createAccessibilityNodeInfo();try{String spoken=String.valueOf(info.getContentDescription());searchNeed(spoken.contains("家庭")&&spoken.contains("8101")&&spoken.contains("早读"),"spoken identity");}finally{info.recycle();}});searchWidget(a,"activity-search-query","修改关键词",false,end);runOnMainSync(()->{searchNeed(!old[0].isAttachedToWindow(),"old result detached");old[0].performClick();searchNeed(host.activities.selected==0,"stale click did not open detail");});searchNeed(Arrays.equals(before,appendCells(n,true)),"stale click no writes");searchQuery(a,"早读",1,only,end);searchPass("spoken_identity_and_detached_result_cannot_navigate");
+            searchWidget(a,"activity-search-hit-8102",null,true,end);searchWidget(a,"activity-fields-8102",null,false,end);searchNeed(host.activities.selected==8102,"second identity not title");runOnMainSync(active::onBackPressed);searchResults(a,1,only,end);searchWidget(a,"activity-search-archives",null,true,end);searchWidget(a,"activity-search-submit",null,true,end);searchResults(a,1,all,end);
+            searchWidget(a,"activity-search-hit-8103",null,true,end);searchWidget(a,"archive-history-8103",null,false,end);appendClick(a,"返回搜索",end);searchResults(a,1,all,end);runOnMainSync(()->{List<android.view.View> in=new ArrayList<>(),flags=new ArrayList<>();searchFind(active.getWindow().getDecorView(),"activity-search-query",in);searchFind(active.getWindow().getDecorView(),"activity-search-archives",flags);searchNeed(in.size()==1&&flags.size()==1&&"早读".contentEquals(((android.widget.EditText)in.get(0)).getText())&&((android.widget.CheckBox)flags.get(0)).isChecked(),"back retained query and archive scope");});searchPass("open_second_and_archived_id_back_preserves_scope");
+            searchQuery(a,"%_a\\café",1,Arrays.asList(8104L),end);searchQuery(a,"私密内容",1,Collections.emptyList(),end);searchQuery(a,"只在路径里",1,Collections.emptyList(),end);searchQuery(a,"🌱",1,all,end);searchPass("literal_symbols_unicode_and_no_private_body_results");
+            List<Long> front=new ArrayList<>();for(int i=0;i<24;i++)front.add(8200L+i);searchQuery(a,"页例",1,front,end);searchWidget(a,"activity-search-next",null,true,end);searchResults(a,2,Arrays.asList(8224L,8225L),end);searchWidget(a,"activity-search-previous",null,true,end);searchResults(a,1,front,end);searchPass("keyset_pages_exact_no_drops_or_duplicates");
+            searchWidget(a,"activity-search-back",null,true,end);searchWidget(a,"activity-search-open",null,false,end);searchNeed(Arrays.equals(before,appendCells(n,true)),"all source tables unchanged");runOnMainSync(active::finish);waitForIdleSync();searchNeed(host.awaitShortcutClose(),"closed database worker");
+        }finally{if(a!=null&&!a.isFinishing()&&!a.isDestroyed()){final MainActivity live=a;runOnMainSync(live::finish);}MainActivity.isolatedShortcutTest=false;}
+        Path dir=Files.createTempDirectory(c.getCacheDir().toPath(),"search-ci-");Path zip=dir.resolve("activity-backup.zip");MediaRepository m=new MediaRepository(dir.resolve("media"),1048576);
+        try(AppDatabase reopened=AppDatabase.openSchema4(c,n)){searchNeed(Arrays.equals(wire,reopened.exportState())&&Arrays.equals(before,appendCells(n,true)),"reopened raw rows and wire unchanged");reopened.exportBackup(zip,m);}
+        try(AppDatabase restored=AppDatabase.openSchema4(c,dest)){restored.restoreBackup(zip,dir,8388608L,m);List<Long> ids=new ArrayList<>();for(ActivitiesScreen.SearchHit h:ActivitiesScreen.searchRead(restored.getReadableDatabase(),"早读",true,0))ids.add(h.id);searchNeed(ids.equals(all)&&Arrays.equals(wire,restored.exportState()),"fresh backup restoration, exact complete wire and search IDs");}
+        searchPass("unchanged_all_cells_reopen_and_independent_backup_restore");
+    }
     @Override public void onStart(){
         Bundle result=new Bundle();try{
             ok(getTargetContext().getPackageName().equals("com.supercubegame.pockettodo.v12.preview"),"tests target isolated v1.2 package");
             ok(android.os.Build.VERSION.SDK_INT==Integer.parseInt(args.getString("expectedApi")),"actual emulator API equals requested test matrix");
-            String phase=args.getString("phase");if("seed".equals(phase)){seed();fieldsSeed();backupSeed();guardedSeed();frozenSeed();legacyAppendNative();}else if("reopen".equals(phase)){reopen();fieldsReopen();backupReopen();guardedReopen();frozenReopen();restorePreviewOwnerReopen();}else if("calendar_batch".equals(phase))calendarBatchPhase();else if("prepare_ui_backup".equals(phase))prepareUiBackup();else throw new IllegalArgumentException("unknown test phase");
+            String phase=args.getString("phase");if("seed".equals(phase)){seed();fieldsSeed();backupSeed();guardedSeed();frozenSeed();legacyAppendNative();}else if("reopen".equals(phase)){reopen();fieldsReopen();backupReopen();guardedReopen();frozenReopen();restorePreviewOwnerReopen();}else if("calendar_batch".equals(phase))calendarBatchPhase();else if("activity_search".equals(phase))activitySearchPhase();else if("prepare_ui_backup".equals(phase))prepareUiBackup();else throw new IllegalArgumentException("unknown test phase");
             log.append("DEVICE_DATABASE_RESULT ").append(phase).append(' ').append(checks).append('/').append(checks).append(" PASS\n");result.putString("stream",log.toString());finish(Activity.RESULT_OK,result);
         }catch(Throwable error){StringWriter text=new StringWriter();error.printStackTrace(new PrintWriter(text));result.putString("stream",log+"DEVICE_DATABASE_FAILED\n"+text);finish(Activity.RESULT_CANCELED,result);}
     }

@@ -288,16 +288,24 @@ jobs:
             if(error[0]!=null)throw new AssertionError("UI action",error[0]);
            }
            void ready()throws Exception{
-            long deadline=SystemClock.elapsedRealtime()+10000;
-            while(true){
-             final boolean[] done={false};ui(()->done[0]=!((Boolean)field(screen,"busy")));
-             if(done[0]){waitForIdleSync();return;}
-             need(SystemClock.elapsedRealtime()<deadline,"UI async deadline");SystemClock.sleep(20);
+            final Activity owner=activity;need(owner!=null,"UI activity missing");
+            final long end=SystemClock.elapsedRealtime()+10000;boolean settled=false;
+            while(SystemClock.elapsedRealtime()<end){
+             final boolean[] idle={false};ui(()->{
+              need(activity==owner&&!owner.isDestroyed()&&!owner.isFinishing(),"UI activity ended");
+              Object live=field(owner,"screen");
+              need(screen==null||screen==live,"UI screen changed");
+              if(live!=null){screen=live;idle[0]=!((Boolean)field(live,"busy"));}
+             });
+             if(SystemClock.elapsedRealtime()>=end)break;
+             if(idle[0]){if(settled)return;waitForIdleSync();settled=true;continue;}
+             settled=false;SystemClock.sleep(20);
             }
+            throw new AssertionError("UI idle deadline");
            }
            void launch()throws Exception{
             Intent intent=new Intent().setClassName(getTargetContext(),"com.supercubegame.pockettodo.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            activity=startActivitySync(intent);screen=field(activity,"screen");ready();
+            activity=startActivitySync(intent);screen=null;ready();
            }
            View root(){return activity.getWindow().getDecorView();}
            View unique(View root,String value,boolean description){

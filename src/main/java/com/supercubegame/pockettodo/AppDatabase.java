@@ -423,6 +423,63 @@ public final class AppDatabase extends SQLiteOpenHelper {
     }
     public synchronized void addApplication(long id,String name,String packageName){Ledger.positive(id);String clean=text(name);if(packageName==null||(!packageName.isEmpty()&&!packageName.matches("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")))throw new IllegalArgumentException("应用包名无效");tx(db->{db.execSQL("INSERT INTO applications VALUES(?,?,?)",new Object[]{id,clean,packageName});bump(db);return null;});}
     public synchronized void addActivity(long id,long category,long application,String title){Ledger.positive(id);Ledger.positive(category);if(application<0)throw new IllegalArgumentException("应用标识无效");String clean=text(title);tx(db->{exists(db,"categories",category);if(application!=0)exists(db,"applications",application);db.execSQL("INSERT INTO activities(id,category_id,application_id,title) VALUES(?,?,?,?)",new Object[]{id,category,application==0?null:application,clean});bump(db);return null;});}
+    /** A structure-only activity template. Nothing is persisted by preview; the ticket is not a backup format. */
+    public static final class ActivityTemplatePlan implements AutoCloseable {
+        private final AppDatabase owner;private final Object session;private final SQLiteDatabase connection;
+        public final long sourceId,categoryId,applicationId;public final String title,categoryName,applicationName;
+        public final List<String> paths,tags;private byte[] before;private boolean terminal;
+        private ActivityTemplatePlan(AppDatabase owner,SQLiteDatabase db,long id,long category,long app,String title,String catName,String appName,List<String> paths,List<String> tags,byte[] before){
+            this.owner=owner;this.session=owner.restoreSession;connection=db;sourceId=id;categoryId=category;applicationId=app;this.title=title;categoryName=catName;applicationName=appName;
+            this.paths=Collections.unmodifiableList(new ArrayList<>(paths));this.tags=Collections.unmodifiableList(new ArrayList<>(tags));this.before=before;
+        }
+        public void close(){synchronized(owner){terminal=true;before=null;}}
+    }
+    private static List<String> templateLinks(SQLiteDatabase db,String table,long id){
+        require(table.equals("paths")||table.equals("tags"),"未知的模板关联");List<String> r=new ArrayList<>();
+        try(Cursor c=db.rawQuery("SELECT position,text FROM "+table+" WHERE activity_id=? ORDER BY position",new String[]{Long.toString(id)})){
+            while(c.moveToNext()){require(c.getLong(0)==r.size(),"原活动的关联顺序不完整");r.add(c.getString(1));}}
+        return r;
+    }
+    public synchronized ActivityTemplatePlan prepareActivityTemplate(long source){
+        Ledger.positive(source);SQLiteDatabase db=getReadableDatabase();noteDeletionNoOuterTransaction(db);db.beginTransaction();
+        try(Cursor c=db.rawQuery("SELECT a.category_id,a.application_id,a.title,c.name,p.name FROM activities a JOIN categories c ON c.id=a.category_id LEFT JOIN applications p ON p.id=a.application_id WHERE a.id=? AND a.archived=0",new String[]{Long.toString(source)})){
+            if(!c.moveToFirst())throw new IllegalStateException("活动不存在或已归档，未创建副本");long category=c.getLong(0),app=c.isNull(1)?0:c.getLong(1);require(app==0||!c.isNull(4),"原活动的应用关联无效");
+            ActivityTemplatePlan plan=new ActivityTemplatePlan(this,db,source,category,app,c.getString(2),c.getString(3),app==0?"无":c.getString(4),templateLinks(db,"paths",source),templateLinks(db,"tags",source),noteDeletionState(db));
+            db.setTransactionSuccessful();return plan;
+        }finally{db.endTransaction();}
+    }
+    /** Reconstruct the original typed snapshot from post-state, omitting only the verified three sets of inserts.
+     * Compare every other row/rowid and registry, including inactive/same-name sources and schema4 shortcuts.
+     * No image files or drafts are opened. The existing 8 MiB snapshot guard applies on both sides. */
+    private static byte[] templatePriorState(SQLiteDatabase db,long created,long prev){
+        comparisonLayout(db);try{LimitedBytes bytes=new LimitedBytes();DataOutputStream out=new DataOutputStream(bytes);String[] tables=comparisonTables(db.getVersion());out.writeInt(0x4e444c31);out.writeInt(db.getVersion());out.writeInt(tables.length);
+            for(String table:tables){String by=table.equals("activities")?"id":(table.equals("paths")||table.equals("tags")?"activity_id":null);
+                String q=by==null?comparisonQuery(table):"SELECT rowid,* FROM "+table+" WHERE "+by+"<>? ORDER BY rowid";
+                try(Cursor c=db.rawQuery(q,by==null?null:new String[]{Long.toString(created)})){
+                    int revisionColumn=table.equals("revision")?c.getColumnIndexOrThrow("value"):-1;
+                    utf8(out,table);out.writeInt(c.getColumnCount());for(String name:c.getColumnNames())utf8(out,name);out.writeInt(c.getCount());
+                    while(c.moveToNext())for(int i=0;i<c.getColumnCount();i++){Object v=cell(c,i);out.writeByte(c.getType(i));if(i==revisionColumn)v=Long.valueOf(prev);
+                        if(v instanceof Long)out.writeLong((Long)v);else if(v instanceof String)utf8(out,(String)v);else if(v instanceof byte[])blob(out,(byte[])v);}
+                }}out.flush();return bytes.toByteArray();
+        }catch(IOException ex){throw new IllegalStateException("无法核对模板创建结果",ex);}
+    }
+    public synchronized long confirmActivityTemplate(ActivityTemplatePlan plan,String desiredTitle){
+        if(plan==null||plan.owner!=this)throw new IllegalArgumentException("模板预览不属于当前数据库");
+        if(plan.terminal||plan.session!=restoreSession){plan.close();throw new IllegalStateException("预览已取消、使用或失效，请重新打开");}plan.terminal=true;
+        try{String clean=text(desiredTitle);SQLiteDatabase conn=getWritableDatabase();noteDeletionNoOuterTransaction(conn);if(conn!=plan.connection||!conn.isOpen())throw new IllegalStateException("数据库连接已变化");
+            return tx(db->{if(!Arrays.equals(plan.before,noteDeletionState(db)))throw new IllegalStateException("本机内容已变化，请重新预览");
+                long id,prev=revision(db),next=Math.incrementExact(prev);try(Cursor c=db.rawQuery("SELECT MAX(id) FROM activities",null)){require(c.moveToFirst()&&!c.isNull(0),"源活动不存在");id=Math.incrementExact(c.getLong(0));}Ledger.positive(id);
+                db.execSQL("INSERT INTO activities(id,category_id,application_id,title,archived) VALUES(?,?,?,?,0)",new Object[]{id,plan.categoryId,plan.applicationId==0?null:Long.valueOf(plan.applicationId),clean});
+                for(int i=0;i<plan.paths.size();i++)db.execSQL("INSERT INTO paths(activity_id,position,text) VALUES(?,?,?)",new Object[]{id,i,plan.paths.get(i)});
+                for(int i=0;i<plan.tags.size();i++)db.execSQL("INSERT INTO tags(activity_id,position,text) VALUES(?,?,?)",new Object[]{id,i,plan.tags.get(i)});
+                if(bump(db)!=next||revision(db)!=next)throw new IllegalStateException("创建修订不一致，已拒绝提交");
+                try(Cursor c=db.rawQuery("SELECT category_id,application_id,title,archived FROM activities WHERE id=?",new String[]{Long.toString(id)})){
+                    require(c.moveToFirst()&&c.getLong(0)==plan.categoryId&&(plan.applicationId==0?c.isNull(1):!c.isNull(1)&&c.getLong(1)==plan.applicationId)&&clean.equals(c.getString(2))&&c.getLong(3)==0&&!c.moveToNext(),"新活动身份或关联不一致");}
+                if(!plan.paths.equals(templateLinks(db,"paths",id))||!plan.tags.equals(templateLinks(db,"tags",id))||!Arrays.equals(plan.before,templatePriorState(db,id,prev)))throw new IllegalStateException("模板创建回读不一致，已拒绝提交");return id;
+            });
+        }finally{plan.close();}
+    }
+
     /** Single-attempt selection. Catalog reuse creates only a new activity row.
      * Full typed state is compared in the insert transaction; cancel is read-only.
      * In-memory helper/session/connection scope, not a persistent undo or ABA log.

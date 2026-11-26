@@ -19,6 +19,8 @@ public final class MainActivity extends Activity {
     static boolean isolatedShortcutTest;
     // Same-process instrumentation only. No intent, external path or preference can select this database.
     static volatile boolean isolatedActivitySearchTest;
+    static volatile boolean isolatedActivityTemplateTest;
+    static final String ACTIVITY_TEMPLATE_TEST_DB="schema4-activity-template-ci.db";
     static final String ACTIVITY_SEARCH_TEST_DB="schema4-activity-search-ci.db";
     static boolean isolatedStartupTest;
     static boolean isolatedActivationTest;
@@ -38,6 +40,8 @@ public final class MainActivity extends Activity {
     }else if(isolatedActivitySearchTest){
         screen=new TodayScreen(this,AppDatabase.openSchema4(this,ACTIVITY_SEARCH_TEST_DB));
         Bundle isolated=new Bundle();isolated.putInt("page",1);screen.show(isolated);
+    }else if(isolatedActivityTemplateTest){
+        screen=new TodayScreen(this,AppDatabase.openSchema4(this,ACTIVITY_TEMPLATE_TEST_DB));Bundle isolated=new Bundle();isolated.putInt("page",1);screen.show(isolated);
     }else{beginDefaultStartup(saved);}}
     @Override protected void onSaveInstanceState(Bundle out){if(screen!=null)screen.save(out);else if(startupSaved!=null)out.putAll(startupSaved);super.onSaveInstanceState(out);}
     @Override public void onBackPressed(){if(screen==null||!screen.back())super.onBackPressed();}

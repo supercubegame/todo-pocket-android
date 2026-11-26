@@ -654,7 +654,42 @@ public final class ActivitiesScreen {
         RelationEditor pathEditor=new RelationEditor(host,id,d.title,false,d.path,this::load);
         Button pathEdit=host.button("编辑路径",()->{});pathEdit.setContentDescription("activity-path-edit-"+id);
         pathEdit.setOnClickListener(v->pathEditor.open(pathEdit));details.addView(pathEdit,new LinearLayout.LayoutParams(-1,-2));
+        details.addView(new TemplateAction(id,d.title).entry,new LinearLayout.LayoutParams(-1,-2));
     }
+    /** Only an attached, active activity detail can own a template preview. The normal close/back path is read-only. */
+    private final class TemplateAction {
+        final long source;final String shown;final Button entry;boolean opening;
+        TemplateAction(long id,String title){source=id;shown=title;entry=host.button("按此结构新建活动",this::open);entry.setTag("activity-template-open-"+id);entry.setContentDescription("以活动编号 "+id+" 的结构新建独立活动");}
+        boolean owner(){return selected==source&&!backupPanel&&!historyPanel&&!archivePanel&&entry.isAttachedToWindow()&&entry.isShown()&&!host.activity.isFinishing()&&!host.activity.isDestroyed();}
+        void open(){if(opening||!owner()||!entry.isEnabled())return;opening=true;
+            host.work(()->host.db.prepareActivityTemplate(source),plan->{
+                if(!owner()||plan.sourceId!=source||!shown.equals(plan.title)){opening=false;plan.close();return;}
+                try{show(plan);}catch(android.view.WindowManager.BadTokenException|IllegalStateException ex){opening=false;plan.close();if(owner())host.message("页面已变化，请重新打开模板预览。",true);}
+            },()->{opening=false;if(owner())host.message("活动状态已变化或读取失败，请重新进入后预览。",true);},AppDatabase.ActivityTemplatePlan::close);
+        }
+        void show(AppDatabase.ActivityTemplatePlan plan){
+            LinearLayout contents=host.column();contents.setPadding(host.dp(18),host.dp(8),host.dp(18),host.dp(8));contents.setFocusableInTouchMode(true);
+            TextView identity=host.text("来源："+plan.title+" · #"+source,18,TodayScreen.INK);identity.setTag("template-source");contents.addView(identity);
+            TextView scope=host.text("沿用分类："+plan.categoryName+" · #"+plan.categoryId+"\n关联应用："+plan.applicationName+(plan.applicationId==0?"":" · #"+plan.applicationId)+"\n复制操作路径 "+plan.paths.size()+" 步、标签 "+plan.tags.size()+" 个，顺序不变。",16,TodayScreen.INK);scope.setTag("template-scope");contents.addView(scope);
+            contents.addView(host.text("不复制字段值、字段笔记、其他笔记、图片、草稿、打卡或账目。副本有自己的编号，不会覆盖源活动。",15,TodayScreen.MUTED));
+            EditText name=host.field("新活动名称",false);name.setTag("template-name");name.setText(plan.title);name.setSelection(name.length());contents.addView(name,new LinearLayout.LayoutParams(-1,-2));
+            TextView validation=host.text("",14,TodayScreen.ERROR);validation.setTag("template-validation");validation.setAccessibilityLiveRegion(android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE);contents.addView(validation);contents.requestFocus();
+            ScrollView scroll=new ScrollView(host.activity);scroll.addView(contents);
+            AlertDialog dialog=new AlertDialog.Builder(host.activity).setTitle("按此结构新建活动").setView(scroll).setNegativeButton("取消",null).setPositiveButton("确认新建",null).create();
+            final boolean[] handed={false};android.view.View.OnAttachStateChangeListener detach=new android.view.View.OnAttachStateChangeListener(){public void onViewAttachedToWindow(android.view.View v){}public void onViewDetachedFromWindow(android.view.View v){if(dialog.isShowing())dialog.dismiss();}};
+            entry.addOnAttachStateChangeListener(detach);dialog.setOnDismissListener(d->{entry.removeOnAttachStateChangeListener(detach);opening=false;if(!handed[0])plan.close();});
+            dialog.setOnShowListener(d->{Button yes=dialog.getButton(AlertDialog.BUTTON_POSITIVE),no=dialog.getButton(AlertDialog.BUTTON_NEGATIVE);yes.setTag("template-confirm");no.setTag("template-cancel");yes.setMinHeight(host.dp(48));no.setMinHeight(host.dp(48));
+                yes.setOnClickListener(v->{if(handed[0]||!dialog.isShowing()||!owner()||!yes.isEnabled())return;String entered=name.getText().toString();if(entered.trim().isEmpty()){validation.setText("请输入新活动名称。");return;}
+                    handed[0]=true;dialog.setCancelable(false);yes.setEnabled(false);no.setEnabled(false);name.setEnabled(false);
+                    host.work(()->host.db.confirmActivityTemplate(plan,entered),created->{boolean active=owner()&&dialog.isShowing();dialog.dismiss();if(active){leaveSearch();selected=created;load();}},()->{
+                        plan.close();if(owner()&&dialog.isShowing()){dialog.setCancelable(true);no.setEnabled(true);validation.setText("未能确认创建；请关闭后核对活动列表，再重新预览。");}
+                    });
+                });
+            });
+            try{dialog.show();}catch(RuntimeException e){entry.removeOnAttachStateChangeListener(detach);plan.close();throw e;}
+        }
+    }
+
     /** Buttons retain the displayed stable-ID sequence, never a title lookup.
      * The backend rejects stale membership/order and owns the single transaction.
      */

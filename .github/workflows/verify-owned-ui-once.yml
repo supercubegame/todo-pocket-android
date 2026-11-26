@@ -1,0 +1,81 @@
+name: Verify owned UI interactions once
+on:
+  push:
+    branches: [ci/owned-ui-checks-77cac38]
+    paths: [.github/workflows/verify-owned-ui-once.yml]
+permissions:
+  contents: read
+  actions: write
+concurrency:
+  group: pocket-owned-ui-77cac38-once
+  cancel-in-progress: false
+jobs:
+  dispatch:
+    if: github.repository == 'supercubegame/todo-pocket-android' && github.actor == 'supercubegame' && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Verify candidate tree, three reviewed files and two pinned workflows; launch once per missing receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          POCKET_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYTHON'
+          import json,os,subprocess,time
+          from urllib.parse import quote
+          R='supercubegame/todo-pocket-android';B='test/owned-ui-checks-77cac38';BASE='77cac3838d3af9d93c9d51b1dcc6ddb9626db504';TREE='8376eca39aa5c2290dc4710b185886e44bb63ab0'
+          BRIDGE='ci/owned-ui-checks-77cac38';H='.github/workflows/verify-owned-ui-once.yml'
+          GROUPS=((('android', 362709435, '94afbc3c37115eb8f283c1a7e34701d8744a26d5'),), (('todo-management', 372690401, '0929952ced6bba983758fa322862adef1a438ba8'),))
+          FILES={'.github/workflows/todo-management.yml': '0929952ced6bba983758fa322862adef1a438ba8', 'tools/emulator_gate.py': '7dda8b265b018e57e98ee4c768a4bfdb95876809', 'tools/verify_batch_exports.py': 'c2e3db6bd20953898b9bb1f3a58f85e2b9bacd95'}
+          def need(c,m):
+              if not c:raise RuntimeError(m)
+          def cmd(path,method,fields=()):return subprocess.run(['gh','api','--method',method,'repos/'+R+'/'+path,*fields],text=True,capture_output=True,timeout=20)
+          def read(path):
+              q=cmd(path,'GET');need(q.returncode==0,'GitHub read failed: '+path);return json.loads(q.stdout)
+          def send(w):
+              # Single request only; a timeout may already have been accepted by the server.
+              try:q=cmd('actions/workflows/'+str(w)+'/dispatches','POST',('-f','ref='+B));print('Request',w,'exit',q.returncode,flush=True)
+              except subprocess.TimeoutExpired:print('Request',w,'timed out; read back only',flush=True)
+          def campaign(get,post,pause,env,emit):
+              # Only the immutable, independently reviewed candidate can be the helper's sole parent.
+              import re
+              need(env['GITHUB_REPOSITORY']==R and env['GITHUB_ACTOR']=='supercubegame' and env['GITHUB_REF']=='refs/heads/'+BRIDGE and env['GITHUB_RUN_ATTEMPT']=='1','foreign trigger or replay')
+              hc=get('commits/'+env['GITHUB_SHA']);ps=hc['parents'];need(hc['sha']==env['GITHUB_SHA'] and len(ps)==1 and [(f['filename'],f['status']) for f in hc['files']]==[(H,'added')],'helper diff or parent differs')
+              S=ps[0]['sha'];need(bool(re.fullmatch('[0-9a-f]{40}',S)) and S==env['POCKET_BEFORE'] and S!=BASE,'unexpected prior tip')
+              tip=get('commits/'+S);need(tip['sha']==S and tip['commit']['tree']['sha']==TREE,'candidate tree differs')
+              diff=get('compare/'+BASE+'...'+S);need(diff['status']=='ahead' and diff['merge_base_commit']['sha']==BASE and diff['ahead_by']==diff['total_commits']==len(diff['commits']) and 1<=diff['ahead_by']<=2,'not one or two direct reviewed commits')
+              prev=BASE;seen={}
+              for row in diff['commits']:
+                  cid=row['sha'];v=get('commits/'+cid);need(v['sha']==cid and [p['sha'] for p in v['parents']]==[prev] and len(v['files'])>0,'unexpected candidate ancestry')
+                  for f in v['files']:
+                      p=f['filename'];need(p in FILES and p not in seen and f['status']=='modified' and f['sha']==FILES[p],'extra, repeated or unexpected candidate content');seen[p]=f['sha']
+                  prev=cid
+              need(prev==S and seen==FILES,'incomplete candidate file set')
+              def bound():need(get('git/ref/heads/'+B)['object']['sha']==S,'candidate branch moved')
+              def checked(item):
+                  name,w,blob=item;f='.github/workflows/'+name+'.yml';v=get('actions/workflows/'+str(w));need((v['id'],v['path'],v['state'])==(w,f,'active'),'workflow registration changed')
+                  need(get('contents/'+f+'?ref='+S)['sha']==blob,'workflow definition changed')
+              def observe(item):
+                  name,w,blob=item;p=get('actions/workflows/'+str(w)+'/runs?event=workflow_dispatch&branch='+quote(B,safe='')+'&head_sha='+S+'&per_page=2');rows=p['workflow_runs'];need(p['total_count']==len(rows)<=1,'duplicate or incomplete result page');
+                  if not rows:return None
+                  j=rows[0];rid=j['id'];link='https://github.com/'+R+'/actions/runs/'+str(rid)
+                  need(type(rid)is int and rid>0 and (j['event'],j['workflow_id'],j['path'],j['head_sha'],j['head_branch'],j['run_attempt'],j['html_url'])==('workflow_dispatch',w,'.github/workflows/'+name+'.yml',S,B,1,link),'observed run identity mismatch');return link
+              flat=[v for group in GROUPS for v in group];need(len(flat)==len(set(i[1] for i in flat))==2,'allowlist identity');bound()
+              for item in flat:checked(item);observe(item) # validate the whole batch before its first write
+              for i,group in enumerate(GROUPS):
+                  if i:pause(120) # stagger starts, not a promise that preceding jobs have finished
+                  for item in group:
+                      bound();checked(item);url=observe(item);reused=bool(url)
+                      if not url:
+                          bound();post(item[1]);
+                          for n in range(8):
+                              bound();url=observe(item)
+                              if url:break
+                              if n<7:pause(5)
+                      need(url is not None,'no matching receipt; no second request');emit(item[0],url,reused,S)
+          if __name__=='__main__':
+              def record(name,url,reused,S):
+                  with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as f:print(('* Existing' if reused else '* Observed')+' ['+name+']('+url+') on `'+S+'`. Not an acceptance claim.',file=f)
+              campaign(read,send,time.sleep,os.environ,record)
+          PYTHON

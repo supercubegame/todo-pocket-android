@@ -2439,7 +2439,41 @@ def activity_search_host_selftest():
         raise AssertionError('false search acceptance')
     print('ACTIVITY_SEARCH_HOST 9 literal result sets, 2 pages, stable-ID relookup and readonly cells, %d receipt negatives; not Android'%len(bad),flush=True)
 
+TEMPLATE_LABELS=('archived_nullable_sibling_and_stale_preview_readonly','owned_native_preview_cancel_all_cells_unchanged','new_id_only_ordered_structure_no_fields_notes_money_marks_or_media_copy','independent_edit_reopen_and_backup_preserve_source_and_copy')
+
+def template_native_receipt(out):
+    labels=tuple(re.findall(r'(?m)^(?:INSTRUMENTATION_RESULT: stream=)?ACTIVITY_TEMPLATE_NATIVE ([a-z0-9_]+) PASS\s*$',out))
+    codes=re.findall(r'(?m)^INSTRUMENTATION_CODE: (-?\d+)\s*$',out);ends=re.findall(r'(?m)^DEVICE_DATABASE_RESULT activity_template ([^\r\n]+)$',out)
+    if labels!=TEMPLATE_LABELS or codes!=['-1'] or ends!=['2/2 PASS'] or 'DEVICE_DATABASE_FAILED' in out:raise AssertionError('template device contract incomplete; see device-activity-template.txt')
+
+def verify_template_device(adb):
+    out=run_database_phase([adb,'-s',SERIAL,'shell','am','instrument','-w','-r','-e','phase','activity_template','-e','expectedApi',str(API),PKG+'.test/com.supercubegame.pockettodo.V12DeviceTest'],timeout=120,capture=True,phase='activity-template').stdout
+    Path('device-activity-template.txt').write_text(out);print(out,flush=True);template_native_receipt(out)
+
+def activity_template_host_selftest():
+    src=(ROOT/'src/main/java/com/supercubegame/pockettodo/AppDatabase.java').read_text();cut=src[src.index('public static final class ActivityTemplatePlan'):src.index('/** Single-attempt selection. Catalog reuse')]
+    def string(pattern):
+        v=re.findall(pattern,cut);assert len(v)==1,pattern;return json.loads(v[0])
+    source=string(r'rawQuery\(("SELECT a.category_id[^"\n]+"),');q=[string(r'execSQL\(("INSERT INTO '+table+r'\([^"\n]+"),') for table in ('activities','paths','tags')]
+    with sqlite3.connect(':memory:') as db:
+        db.execute('PRAGMA foreign_keys=ON')
+        for table in ('categories','applications','activities','paths','tags'):
+            ddl=re.findall(r'db\.execSQL\(("CREATE TABLE '+table+r'\([^"\n]+")\);',src);assert len(ddl)==1;db.execute(json.loads(ddl[0]))
+        db.executescript("INSERT INTO categories VALUES(3,'原分类',0); INSERT INTO applications VALUES(4,'应用',''); INSERT INTO activities VALUES(9,3,NULL,'同名',0),(10,3,4,'同名',0),(11,3,4,'同名',1);INSERT INTO paths VALUES(10,0,'去'),(10,1,'回'),(10,2,'去'); INSERT INTO tags VALUES(10,0,'甲'),(10,1,'乙');")
+        assert db.execute(source,(9,)).fetchall()==[(3,None,'同名','原分类',None)] and db.execute(source,(10,)).fetchall()==[(3,4,'同名','原分类','应用')] and not db.execute(source,(11,)).fetchall();before=list(db.iterdump());db.execute('BEGIN');db.execute(q[0],(12,3,4,'同名'))
+        for i,t in enumerate(['去','回','去']):db.execute(q[1],(12,i,t))
+        for i,t in enumerate(['甲','乙']):db.execute(q[2],(12,i,t))
+        assert db.execute('SELECT category_id,application_id,title,archived FROM activities WHERE id=12').fetchall()==[(3,4,'同名',0)] and db.execute('SELECT position,text FROM paths WHERE activity_id=12 ORDER BY position').fetchall()==[(0,'去'),(1,'回'),(2,'去')] and db.execute('SELECT position,text FROM tags WHERE activity_id=12 ORDER BY position').fetchall()==[(0,'甲'),(1,'乙')];db.rollback();assert list(db.iterdump())==before
+    sample=''.join('ACTIVITY_TEMPLATE_NATIVE '+s+' PASS\n' for s in TEMPLATE_LABELS)+'DEVICE_DATABASE_RESULT activity_template 2/2 PASS\nINSTRUMENTATION_CODE: -1\n';template_native_receipt(sample)
+    invalid=[sample.replace(s,'missing',1) for s in TEMPLATE_LABELS]+[sample.replace('-1','0'),sample.replace('2/2','1/2'),sample.replace(TEMPLATE_LABELS[1],TEMPLATE_LABELS[0]),'DEVICE_DATABASE_FAILED\n'+sample,sample.replace('ACTIVITY_TEMPLATE_NATIVE','X',1),sample+'INSTRUMENTATION_CODE: -1\n',sample+'DEVICE_DATABASE_RESULT activity_template 2/2 PASS\n']
+    for bad in invalid:
+        try:template_native_receipt(bad)
+        except AssertionError:continue
+        raise AssertionError('false template acceptance')
+    print('ACTIVITY_TEMPLATE_HOST source/inserts/ordered children and rollback, %d invalid receipts rejected; not a device'%len(invalid),flush=True)
+
 def parser_selftest():
+    activity_template_host_selftest()
     activity_search_host_selftest()
     image_fixture_target_selftest()
     image_cancel_selftest()
@@ -2546,6 +2580,10 @@ def verify_database(adb):
     try:verify_search_device(adb)
     except Exception as exc:
         search_error=exc;print('ACTIVITY_SEARCH_PHASE_NOT_ACCEPTED '+repr(exc),flush=True)
+    template_error=None
+    try:verify_template_device(adb)
+    except Exception as exc:
+        template_error=exc;print('ACTIVITY_TEMPLATE_PHASE_NOT_ACCEPTED '+repr(exc),flush=True)
     legacy_public_fixture(adb)
     results = {}
     for phase in ('seed', 'reopen'):
@@ -2562,6 +2600,7 @@ def verify_database(adb):
         'release_ready': False}, indent=2))
     if calendar_error is not None:raise calendar_error
     if search_error is not None:raise search_error
+    if template_error is not None:raise template_error
 
 def derivative_checker():
     """Compile and prove the actual pixel oracle before slow native UI work."""

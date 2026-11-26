@@ -9,7 +9,7 @@ import time
 
 
 def stop_verified(adb, serial, package, *, runner=subprocess.run,
-                  monotonic=time.monotonic, sleep=time.sleep, budget=30, emit=None):
+                  monotonic=time.monotonic, sleep=time.sleep, budget=30, emit=None, verify_before_stop=None):
     if not isinstance(package, str) or not re.fullmatch(
             r"[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+", package):
         raise ValueError("exact package required")
@@ -41,6 +41,24 @@ def stop_verified(adb, serial, package, *, runner=subprocess.run,
     try:
         record["before"] = {}
         original = pid_result(invoke(["pidof", package], 10, record["before"]))
+        if verify_before_stop is not None:
+            # The caller validates live cmdline and UID of THIS pidof result. No cached PID,
+            # no shortcut on rc255, no substitute force-stop and no omitted post-stop probe.
+            checked_at = monotonic()
+            proof = record["before_identity"] = {"source": "THIS_STOP_PIDOF", "status": "UNVERIFIED"}
+            if original is None:
+                raise AssertionError("recreated process not present for identity check")
+            observed = verify_before_stop(original)
+            if not isinstance(observed, dict):
+                raise AssertionError("missing recreated process identity")
+            uid = observed.get("uid")
+            if not (observed.get("status") == "PASS" and observed.get("pid") == original and
+                    isinstance(uid, str) and re.fullmatch(r"[1-9][0-9]*", uid) and
+                    observed.get("expected_package") == package and observed.get("exact_argv0") is True and
+                    observed.get("nul_only_tail") is True and observed.get("uid_fields") in ([(uid,)*4], [[uid]*4]) and
+                    0 <= monotonic() - checked_at <= 10):
+                raise AssertionError("foreign, stale or incomplete recreated process identity")
+            proof.update(status="PASS", pid=original, uid=uid)
         record["force_stop_attempts"] = 1
         record["command"] = {}
         p = invoke(["am", "force-stop", package], 40, record["command"])
@@ -165,7 +183,69 @@ def contract(stop):
     return len(cases) + 7
 
 
+def rebuilt_observation_selftest(workflow, stop_check=stop_verified):
+    """Run actual generated caller, actual identity verifier, and actual stop checker. Mock ADB only."""
+    import ast,contextlib,io
+    from types import SimpleNamespace
+    from verify_schema3 import signal_target_identity
+    marker='          cat > "$RUNNER_TEMP/export_native_probe.py" <<'+"'PY'\n"
+    assert workflow.count(marker)==1
+    source='\n'.join(l[10:] if l else '' for l in workflow.split(marker)[1].split('          PY\n')[0].splitlines())+'\n'
+    names=lambda node,name:next(n for n in node.body if isinstance(n,ast.FunctionDef) and n.name==name)
+    native=names(ast.parse(source),'standalone_native');loss=names(native,'lost_owner');idx=next(i for i,n in enumerate(loss.body) if isinstance(n,ast.FunctionDef) and n.name=='confirm_recreated');end=next(i for i in range(idx,len(loss.body)) if ast.unparse(loss.body[i])=="step('loss_preserves_all_tables_media')")
+    src=compile(ast.Module([names(native,'stop'),names(loss,'identity')]+loss.body[idx:end+1],[]),'actual-recreated-stop','exec')
+    pkg='com.supercubegame.pockettodo.v12.preview';serial='emulator-5554';pid='8853';uid='10077';cases=[]
+    def one(name, stage=None, api=26,kind='PNG_ZIP'):
+        calls=[];labels=[];records=[];row={};stops=0;reads=0;clock=[0.];verified=[];state_calls=[]
+        def command(*a,binary=False):
+            tail=a[-1];calls.append('identity.pid' if tail==pkg else ('cmdline' if tail.endswith('/cmdline') else 'status'));assert (tail==pkg or tail in ['/proc/'+pid+'/cmdline','/proc/'+pid+'/status']);
+            if tail==pkg:return pid+'\n'
+            if tail.endswith('/cmdline'):
+                assert binary
+                if stage=='read_exception':raise OSError('original identity error')
+                return (b'other.process' if stage=='foreign' else pkg.encode())+b'\x00\x00'
+            if stage=='late':clock[0]+=10.001
+            owner='10079' if stage=='wrong-owner' else uid
+            return 'Uid:\t'+'\t'.join([owner]*4)+'\n'
+        def run(args,**kw):
+            nonlocal reads,stops
+            assert args[:6]==['fixture-adb','-s',serial,'shell','-n','-T'] and args[-1]==pkg
+            assert kw['stdin']==subprocess.DEVNULL and kw['capture_output'] is True and kw['text'] is True
+            if args[6]=='pidof':
+                assert 0<kw['timeout']<=10;reads+=1;calls.append('pre' if not stops else 'post');rc,out,err=(0,pid+'\n','') if not stops else (1,'','')
+                if not stops and stage in ('pre255','absent','many','pre_stderr'):rc,out,err={'pre255':(255,'',''),'absent':(1,'',''),'many':(0,'8853 8854',''),'pre_stderr':(0,pid,'warning')}[stage]
+                if stops and stage in ('post255','post_stderr','replaced','post_timeout','delayed'):
+                    if stage=='post_timeout':raise subprocess.TimeoutExpired(args,kw['timeout'],output=b'x')
+                    if stage=='delayed' and reads==2:rc,out=0,pid+'\n'
+                    if stage=='replaced':rc,out=0,'99\n'
+                    if stage=='post255':rc,out=255,''
+                    if stage=='post_stderr':err='not absence'
+            else:
+                assert args[6:]==['am','force-stop',pkg];stops+=1;calls.append('stop');rc,out,err=(1,'','no ack') if stage=='stopfail' else (0,'','')
+            return subprocess.CompletedProcess(args,rc,out,err)
+        def checker(*a,**kw):return stop_check(*a,**kw,monotonic=lambda:clock[0],sleep=lambda t:clock.__setitem__(0,clock[0]+t))
+        def state():state_calls.append(1);return 'changed' if stage=='state' else 'initial'
+        gate=SimpleNamespace(API=api,SERIAL=serial,PKG=pkg);env=dict(re=re,hashlib=__import__('hashlib'),gate=gate,kind=kind,record=row,uid=uid,identity_command=command,signal_target_identity=signal_target_identity,stop_verified=checker,adb='fixture-adb',result={'process_stops':records},stop_runner=run,old={'pid':pid if stage=='same' else '8660','uid':uid},step=labels.append,state=state,baseline='initial')
+        caught=None
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):exec(src,env)
+        except (AssertionError,subprocess.CalledProcessError,subprocess.TimeoutExpired,OSError) as e:caught=e
+        good=stage in (None,'delayed');assert (caught is None)==good,(name,caught,calls);assert len(records)==1 and (records[0]['status']=='PASS')==(good or stage=='state');
+        assert ('loss_preserves_all_tables_media' in labels)==good and len(state_calls)==int(good or stage=='state');is_target=api==26 and kind=='PNG_ZIP';assert calls.count('identity.pid')==int(not is_target)
+        if good:
+            assert calls==(['pre','cmdline','status','stop','post'] if is_target else ['identity.pid','cmdline','status','pre','stop','post'])+(['post'] if stage=='delayed' else []);assert labels==['exact_new_identity','loss_preserves_all_tables_media']
+            assert ('before_identity' in records[0])==is_target and (not is_target or (records[0]['before_identity']['pid']==pid and records[0]['before_identity']['uid']==uid and row['identity_reads'][0]['pid_source']=='THIS_STOP_PIDOF'))
+        if stage in ('pre255','absent','many','pre_stderr','foreign','wrong-owner','read_exception','same','late'):assert 'stop' not in calls and 'post' not in calls
+        if stage in ('post255','post_stderr','replaced','post_timeout','stopfail'):assert stops==1
+        if stage in ('pre255','post255'):assert isinstance(caught,subprocess.CalledProcessError) and caught.returncode==255 and caught.stdout=='' and caught.stderr=='' and records[0]['original_failure']['returncode']==255
+        cases.append(name)
+    one('api26_png');one('api34_png',api=34);one('api26_pdf',kind='PDF');one('api34_pdf',api=34,kind='PDF')
+    for case in ['delayed','pre255','absent','many','pre_stderr','foreign','wrong-owner','read_exception','same','late','stopfail','post255','post_stderr','replaced','post_timeout','state']:one(case,case)
+    print('RECREATED_STOP_HOST',len(cases),'actual generated callback cases; no added stop, old evidence unchanged; HOST_NOT_ANDROID',flush=True)
+
+
 def selftest():
+    rebuilt_observation_selftest(Path(".github/workflows/android.yml").read_text())
     import contextlib
     import io
     import inspect
@@ -2493,7 +2573,7 @@ def isolated_stop_wiring(workflow):
         tree = ast.parse(source)
         native = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "standalone_native")
         stop = next(n for n in native.body if isinstance(n, ast.FunctionDef) and n.name == "stop")
-        expected = ast.parse('def stop():\n    return stop_verified(adb,gate.SERIAL,gate.PKG,runner=stop_runner,emit=result["process_stops"].append)\n').body[0]
+        expected = ast.parse('def stop(verify_before_stop=None):\n    return stop_verified(adb,gate.SERIAL,gate.PKG,runner=stop_runner,emit=result["process_stops"].append,verify_before_stop=verify_before_stop)\n').body[0]
         assert ast.dump(stop) == ast.dump(expected), "export stop bypasses isolated runner"
         bindings = [n for n in native.body if isinstance(n, ast.Assign) and
                     any(isinstance(t, ast.Name) and t.id == "stop_runner" for t in n.targets)]

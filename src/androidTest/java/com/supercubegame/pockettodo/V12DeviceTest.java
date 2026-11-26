@@ -667,7 +667,15 @@ public final class V12DeviceTest extends Instrumentation {
             try{android.app.AlertDialog dlg=moneyDialog(cal);if(dlg==null||!dlg.isShowing())return;
                 List<android.view.View> found=new ArrayList<>();moneyViews(dlg.getWindow().getDecorView(),id,text!=null,text!=null,found);moneyNeed(found.size()<=1,"duplicate dialog action "+id);
                 if(found.size()==1){android.view.View v=found.get(0);v.requestRectangleOnScreen(new android.graphics.Rect(0,0,v.getWidth(),v.getHeight()),true);android.graphics.Rect visible=new android.graphics.Rect();if(!v.getGlobalVisibleRect(visible)||visible.isEmpty())return;
-                    if(text==null)done[0]=v.performClick();else{((android.widget.EditText)v).setText(text);done[0]=true;}}
+                    if(text==null&&v instanceof android.widget.RadioButton){
+                        android.widget.RadioButton radio=(android.widget.RadioButton)v;
+                        moneyNeed(radio.getParent() instanceof android.widget.RadioGroup&&radio.getId()>0,"radio is outside its group: "+id);
+                        android.widget.RadioGroup group=(android.widget.RadioGroup)radio.getParent();
+                        if(!radio.isChecked()||group.getCheckedRadioButtonId()!=radio.getId())radio.performClick();
+                        moneyNeed(radio.isChecked()&&group.getCheckedRadioButtonId()==radio.getId(),"radio did not select the requested item: "+id);
+                        done[0]=true;
+                    }else if(text==null){moneyNeed(v.performClick(),"ordinary button did not handle click: "+id);done[0]=true;}
+                    else{((android.widget.EditText)v).setText(text);done[0]=true;}}
             }catch(ReflectiveOperationException e){throw new AssertionError(e);}catch(Exception e){throw new AssertionError(e);}
         });if(!done[0])android.os.SystemClock.sleep(25);}moneyNeed(done[0],"missing visible dialog action "+id);waitForIdleSync();
     }

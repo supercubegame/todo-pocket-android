@@ -697,21 +697,21 @@ public final class V12DeviceTest extends Instrumentation {
     }
     private void calendarBatchPhase()throws Exception{
         Context c=getTargetContext();moneyNeed("com.supercubegame.pockettodo.v12.preview".equals(c.getPackageName())&&"ranchu".equals(android.os.Build.HARDWARE)&&android.os.Build.VERSION.SDK_INT==Integer.parseInt(args.getString("expectedApi")),"CI preview only");
-        moneyControls();String n="schema4-ui.db";moneyNeed(!c.getDatabasePath(n).exists(),"isolated native UI database must be new");
+        ciCalendarBoundary("enter_backend_controls");moneyControls();ciCalendarBoundary("prepare_workbench");String n="schema4-ui.db";moneyNeed(!c.getDatabasePath(n).exists(),"isolated native UI database must be new");
         try(AppDatabase s=AppDatabase.openSchema4(c,n)){s.addCategory(7,"分类");s.addApplication(9,"应用","");s.addActivity(71,7,9,"同名账本");s.addActivity(72,7,9,"同名账本");s.setShortcut(7,9,true);s.addTodo("keep-ui","非空本机待办");s.recordBatch("unrelated",List.of(row("other-row",72,"2028-03-01",999)));}
-        byte[] base=appendCells(n,true),other=moneySide(n,71);long rev=moneyScalar(n,"SELECT value FROM revision WHERE id=1");long end=android.os.SystemClock.uptimeMillis()+55000;MainActivity a=null;
+        ciCalendarBoundary("snapshot_nonempty_fixture");byte[] base=appendCells(n,true),other=moneySide(n,71);long rev=moneyScalar(n,"SELECT value FROM revision WHERE id=1");long end=android.os.SystemClock.uptimeMillis()+55000;MainActivity a=null;
         try{
-            MainActivity.isolatedShortcutTest=true;a=(MainActivity)startActivitySync(new android.content.Intent(c,MainActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));final MainActivity activity=a;final TodayScreen host=a.shortcutTestScreen();moneyNeed(host!=null,"real schema4 test workbench");
+            ciCalendarBoundary("launch_workbench");MainActivity.isolatedShortcutTest=true;a=(MainActivity)startActivitySync(new android.content.Intent(c,MainActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));final MainActivity activity=a;final TodayScreen host=a.shortcutTestScreen();moneyNeed(host!=null,"real schema4 test workbench");
             boolean ready=false;long until=Math.min(end,android.os.SystemClock.uptimeMillis()+7000);while(!ready&&android.os.SystemClock.uptimeMillis()<until){boolean[] seen={false};runOnMainSync(()->{List<android.widget.Button> b=new ArrayList<>();appendButtons(activity.getWindow().getDecorView(),"备份 / 恢复",b);seen[0]=b.size()==1;});ready=seen[0];if(!ready)android.os.SystemClock.sleep(25);}moneyNeed(ready,"workbench ready");
-            final CalendarScreen cal=new CalendarScreen(host,71,"同名账本",()->{});runOnMainSync(cal::load);appendClick(a,"批量记账",end);
-            moneyLine(cal,"2028-02-29","支出","5",true,end);moneyAct(cal,"核对批次",null,end);moneyNeed(Arrays.equals(base,appendCells(n,true)),"review is read-only");moneyAct(cal,"取消",null,end);moneyNeed(Arrays.equals(base,appendCells(n,true)),"cancel is read-only");moneyPass("preview_and_cancel_preserve_all_business_cells");
-            appendClick(a,"批量记账",end);String[] days={"2028-02-28","2028-02-29","2028-03-01","2028-03-01","2028-03-01","2028-03-01"},kinds={"支出","支出","支出","退款","收入","预计"},types={"EXPENSE","EXPENSE","EXPENSE","REFUND","INCOME","PLANNED"},yuan={"0","1.25","13","1","2.50","9"};long[] cents={0,125,1300,100,250,900};
+            ciCalendarBoundary("open_calendar");final CalendarScreen cal=new CalendarScreen(host,71,"同名账本",()->{});runOnMainSync(cal::load);appendClick(a,"批量记账",end);
+            ciCalendarBoundary("first_preview");moneyLine(cal,"2028-02-29","支出","5",true,end);moneyAct(cal,"核对批次",null,end);moneyNeed(Arrays.equals(base,appendCells(n,true)),"review is read-only");moneyAct(cal,"取消",null,end);moneyNeed(Arrays.equals(base,appendCells(n,true)),"cancel is read-only");moneyPass("preview_and_cancel_preserve_all_business_cells");
+            ciCalendarBoundary("six_row_batch");appendClick(a,"批量记账",end);String[] days={"2028-02-28","2028-02-29","2028-03-01","2028-03-01","2028-03-01","2028-03-01"},kinds={"支出","支出","支出","退款","收入","预计"},types={"EXPENSE","EXPENSE","EXPENSE","REFUND","INCOME","PLANNED"},yuan={"0","1.25","13","1","2.50","9"};long[] cents={0,125,1300,100,250,900};
             for(int i=0;i<6;i++)moneyLine(cal,days[i],kinds[i],yuan[i],i==0,end);moneyAct(cal,"核对批次",null,end);moneyNeed(Arrays.equals(base,appendCells(n,true)),"not saved by review");moneyAct(cal,"确认记账",null,end);
             appendClick(a,"撤销最近批次",end);String key;Set<String> ids=new HashSet<>();try(SQLiteDatabase s=SQLiteDatabase.openDatabase(c.getDatabasePath(n).getPath(),null,SQLiteDatabase.OPEN_READONLY);android.database.Cursor rows=s.rawQuery("SELECT id,day,kind,cents,position,batch_id FROM ledger WHERE activity_id=71 ORDER BY position",null)){
                 String current=null;for(int i=0;i<6;i++){moneyNeed(rows.moveToNext()&&ids.add(rows.getString(0))&&days[i].equals(rows.getString(1))&&types[i].equals(rows.getString(2))&&cents[i]==rows.getLong(3)&&i==rows.getLong(4),"exact row "+i);if(i==0)current=rows.getString(5);moneyNeed(current!=null&&current.equals(rows.getString(5)),"all rows one batch");}moneyNeed(!rows.moveToNext()&&scalar(s,"SELECT value FROM revision")==rev+1&&scalar(s,"SELECT COUNT(*) FROM ledger WHERE activity_id=71 AND day='2028-03-02'")==0,"one revision and absent day");key=current;
                 moneyNeed(scalar(s,"SELECT SUM(cents) FROM ledger WHERE activity_id=71 AND kind='EXPENSE'")==1425&&scalar(s,"SELECT count(DISTINCT day) FROM ledger WHERE activity_id=71 AND kind<>'PLANNED'")==3,"independent expense and actual days");
             }moneyNeed(Arrays.equals(other,moneySide(n,71)),"unrelated business tables unchanged");moneyPass("six_ordered_rows_one_key_zero_missing_leap_four_kinds");
-            byte[] committed=appendCells(n,true);moneyAct(cal,"取消",null,end);moneyNeed(Arrays.equals(committed,appendCells(n,true)),"cancel undo is read-only");appendClick(a,"撤销最近批次",end);moneyAct(cal,"确认撤销",null,end);
+            ciCalendarBoundary("start_undo");byte[] committed=appendCells(n,true);moneyAct(cal,"取消",null,end);moneyNeed(Arrays.equals(committed,appendCells(n,true)),"cancel undo is read-only");appendClick(a,"撤销最近批次",end);moneyAct(cal,"确认撤销",null,end);
             until=Math.min(end,android.os.SystemClock.uptimeMillis()+8000);while(moneyScalar(n,"SELECT value FROM revision")!=rev+2&&android.os.SystemClock.uptimeMillis()<until)android.os.SystemClock.sleep(25);
             moneyNeed(moneyScalar(n,"SELECT value FROM revision")==rev+2&&moneyScalar(n,"SELECT count(*) FROM ledger WHERE activity_id=71")==0&&moneyScalar(n,"SELECT cents FROM ledger WHERE id='other-row' AND activity_id=72")==999&&moneyScalar(n,"SELECT undone FROM batches WHERE id=?",key)==1&&Arrays.equals(other,moneySide(n,71)),"undo only exact batch with tombstone");
             runOnMainSync(activity::finish);waitForIdleSync();moneyNeed(host.awaitShortcutClose()&&moneyScalar(n,"SELECT undone FROM batches WHERE id=?",key)==1&&moneyScalar(n,"SELECT count(*) FROM ledger")==1,"independent database reopen after finish");moneyPass("undo_cancel_then_exact_batch_only_and_reopen");
@@ -742,17 +742,50 @@ public final class V12DeviceTest extends Instrumentation {
         runOnMainSync(()->{List<Long> got=new ArrayList<>();searchIds(a.getWindow().getDecorView(),got);searchNeed(got.equals(expected),"ordered IDs expected "+expected+" got "+got);});
     }
     private void searchQuery(MainActivity a,String query,int page,List<Long> ids,long end)throws Exception{searchWidget(a,"activity-search-query",query,false,end);searchWidget(a,"activity-search-submit",null,true,end);searchResults(a,page,ids,end);}
+    /** Reserve one disposable, fixed app-private search fixture name. Do not open or remove old files. */
+    static void reserveSearchDatabase(Path file,String name)throws java.io.IOException{
+        if(!(MainActivity.ACTIVITY_SEARCH_TEST_DB.equals(name)||"search-roundtrip-ci.db".equals(name))||file==null||
+                !file.isAbsolute()||!file.equals(file.normalize())||!name.equals(file.getFileName().toString()))throw new java.io.IOException("Unexpected search fixture path");
+        Path dir=file.getParent();Files.createDirectories(dir);
+        if(!Files.isDirectory(dir,java.nio.file.LinkOption.NOFOLLOW_LINKS))throw new java.io.IOException("Search fixture directory unavailable");
+        // A sidecar without its database is not a fresh fixture either. Names only; no unrelated files are opened.
+        try(java.nio.file.DirectoryStream<Path> family=Files.newDirectoryStream(dir,name+"-*")){
+            if(family.iterator().hasNext())throw new java.io.IOException("Existing sidecar for "+name+"; preserving fixture");
+        }
+        Files.createFile(file); // Exclusive CREATE_NEW, including broken symlinks. No truncation or retry.
+    }
+    private static int checkSearchReservation(Path dir)throws Exception{
+        String name=MainActivity.ACTIVITY_SEARCH_TEST_DB;int checks=0;Path sample=dir.resolve(name);
+        reserveSearchDatabase(sample,name);if(!Files.isRegularFile(sample)||Files.size(sample)!=0)throw new AssertionError("fresh reservation");checks++;
+        byte[] marker={4,9,7};Files.write(sample,marker);boolean refused=false;try{reserveSearchDatabase(sample,name);}catch(java.io.IOException ex){refused=true;}
+        if(!refused||!Arrays.equals(marker,Files.readAllBytes(sample)))throw new AssertionError("existing source preserved");checks++;
+        for(String suffix:new String[]{"-wal","-shm","-journal","-mj-test"}){Path sub=Files.createTempDirectory(dir,"owned-side-");Path f=sub.resolve(name+suffix);Files.write(f,marker);refused=false;
+            try{reserveSearchDatabase(sub.resolve(name),name);}catch(java.io.IOException ex){refused=true;}
+            if(!refused||Files.exists(sub.resolve(name))||!Arrays.equals(marker,Files.readAllBytes(f)))throw new AssertionError("orphan sidecar preserved "+suffix);checks++;}
+        for(String other:new String[]{"pocket-v12.db","schema4-ui.db","other.db"}){Path f=dir.resolve(other);refused=false;try{reserveSearchDatabase(f,other);}catch(java.io.IOException ex){refused=true;}
+            if(!refused||Files.exists(f))throw new AssertionError("foreign database untouched");checks++;}
+        String dest="search-roundtrip-ci.db";Path otherPath=dir.resolve("unrelated-fresh.db");refused=false;try{reserveSearchDatabase(otherPath,dest);}catch(java.io.IOException ex){refused=true;}
+        if(!refused||Files.exists(otherPath)||!Arrays.equals(marker,Files.readAllBytes(sample)))throw new AssertionError("name/path mismatch");checks++;
+        reserveSearchDatabase(dir.resolve(dest),dest);if(!Files.exists(dir.resolve(dest))||!Arrays.equals(marker,Files.readAllBytes(sample)))throw new AssertionError("independent destination");return checks+1;
+    }
+    private void ciCalendarBoundary(String label){Bundle b=new Bundle();b.putString("pocket_calendar_stage",label);sendStatus(1,b);}
     private void activitySearchPhase()throws Exception{
         Context c=getTargetContext();searchNeed("com.supercubegame.pockettodo.v12.preview".equals(c.getPackageName())&&"ranchu".equals(android.os.Build.HARDWARE)&&android.os.Build.VERSION.SDK_INT==Integer.parseInt(args.getString("expectedApi")),"disposable test environment only");
-        // Dedicated schema4 workbench already used by the calendar phase, never the default product database. Refuse existing search IDs.
-        String n="schema4-ui.db",dest="search-roundtrip-ci.db";searchNeed(c.getDatabasePath(n).exists()&&!c.getDatabasePath(dest).exists(),"fresh CI roundtrip destination");byte[] before,wire;
+        // This phase must not borrow a previous phase's initialization; all fixtures are this invocation's own.
+        searchNeed(!MainActivity.isolatedShortcutTest&&!MainActivity.isolatedStartupTest&&!MainActivity.isolatedActivationTest&&!MainActivity.isolatedActivitySearchTest,"no overlapping test window");
+        searchNeed(checkSearchReservation(Files.createTempDirectory(c.getCacheDir().toPath(),"search-reserve-controls-"))==11,"search reservation controls");
+        String n=MainActivity.ACTIVITY_SEARCH_TEST_DB,dest="search-roundtrip-ci.db";
+        reserveSearchDatabase(c.getDatabasePath(n).toPath(),n);reserveSearchDatabase(c.getDatabasePath(dest).toPath(),dest);byte[] before,wire;
         try(AppDatabase s=AppDatabase.openSchema4(c,n)){
-            searchNeed(scalar(s.getReadableDatabase(),"SELECT count(*) FROM activities WHERE id BETWEEN 8100 AND 8400")==0&&scalar(s.getReadableDatabase(),"SELECT count(*) FROM todos WHERE id='keep-ui'")==1,"existing calendar fixture, no search ID collision");
+            searchNeed(scalar(s.getReadableDatabase(),"SELECT count(*) FROM activities")==0&&scalar(s.getReadableDatabase(),"SELECT count(*) FROM todos")==0,"fresh search source not empty");
+            s.addCategory(7,"对照分类");s.addApplication(9,"对照应用","");s.addActivity(71,7,9,"无关活动");s.addActivity(72,7,9,"无关活动");s.setShortcut(7,9,true);
+            s.addTodo("keep-ui","非空本机待办");s.recordBatch("unrelated",List.of(row("other-row",72,"2028-03-01",999)));
+            searchNeed(scalar(s.getReadableDatabase(),"SELECT count(*) FROM todos WHERE id='keep-ui'")==1&&scalar(s.getReadableDatabase(),"SELECT cents FROM ledger WHERE id='other-row' AND activity_id=72")==999&&s.shortcutApplications(7).contains(9L),"owned nonempty unrelated fixture");
             s.addCategory(801,"家庭");s.addCategory(802,"工作");s.addApplication(803,"共享应用","");s.addActivity(8101,801,803,"早读🌱");s.addActivity(8102,802,803,"早读🌱");s.addActivity(8103,802,803,"早读🌱");s.addActivity(8104,802,0,"预算 50%_A\\café");s.savePath(8101,List.of("只在路径里"));s.createNote("search-private-note",8102,"私密笔记标题");NoteDocument body=new NoteDocument();body.add(NoteDocument.Block.text("search-private-block","不搜索这段私密内容",true));s.saveNote("search-private-note",body.snapshot());
             try(AppDatabase.ActivityArchivePlan p=s.prepareActivityArchive(8103,true)){searchNeed(s.confirmActivityArchive(p),"archived fixture");}
             for(int i=0;i<26;i++)s.addActivity(8200+i,801,803,"页例 "+i);before=appendCells(n,true);wire=s.exportState();
         }
-        MainActivity a=null;long end=android.os.SystemClock.uptimeMillis()+65000;List<Long> only=Arrays.asList(8101L,8102L),all=Arrays.asList(8101L,8102L,8103L);MainActivity.isolatedShortcutTest=true;
+        MainActivity a=null;long end=android.os.SystemClock.uptimeMillis()+65000;List<Long> only=Arrays.asList(8101L,8102L),all=Arrays.asList(8101L,8102L,8103L);MainActivity.isolatedActivitySearchTest=true;
         try{
             a=(MainActivity)startActivitySync(new android.content.Intent(c,MainActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));final MainActivity active=a;TodayScreen host=a.shortcutTestScreen();searchNeed(host!=null,"real host");
             searchWidget(a,"activity-search-open",null,true,end);searchWidget(a,"activity-search-submit",null,true,end);searchWidget(a,"activity-search-status","请输入活动标题。",false,end);searchQuery(a,"早读",1,only,end);searchNeed(Arrays.equals(before,appendCells(n,true)),"search preview readonly");searchPass("empty_query_and_two_distinct_active_identities");
@@ -762,7 +795,7 @@ public final class V12DeviceTest extends Instrumentation {
             searchQuery(a,"%_a\\café",1,Arrays.asList(8104L),end);searchQuery(a,"私密内容",1,Collections.emptyList(),end);searchQuery(a,"只在路径里",1,Collections.emptyList(),end);searchQuery(a,"🌱",1,all,end);searchPass("literal_symbols_unicode_and_no_private_body_results");
             List<Long> front=new ArrayList<>();for(int i=0;i<24;i++)front.add(8200L+i);searchQuery(a,"页例",1,front,end);searchWidget(a,"activity-search-next",null,true,end);searchResults(a,2,Arrays.asList(8224L,8225L),end);searchWidget(a,"activity-search-previous",null,true,end);searchResults(a,1,front,end);searchPass("keyset_pages_exact_no_drops_or_duplicates");
             searchWidget(a,"activity-search-back",null,true,end);searchWidget(a,"activity-search-open",null,false,end);searchNeed(Arrays.equals(before,appendCells(n,true)),"all source tables unchanged");runOnMainSync(active::finish);waitForIdleSync();searchNeed(host.awaitShortcutClose(),"closed database worker");
-        }finally{if(a!=null&&!a.isFinishing()&&!a.isDestroyed()){final MainActivity live=a;runOnMainSync(live::finish);}MainActivity.isolatedShortcutTest=false;}
+        }finally{if(a!=null&&!a.isFinishing()&&!a.isDestroyed()){final MainActivity live=a;runOnMainSync(live::finish);}MainActivity.isolatedActivitySearchTest=false;}
         Path dir=Files.createTempDirectory(c.getCacheDir().toPath(),"search-ci-");Path zip=dir.resolve("activity-backup.zip");MediaRepository m=new MediaRepository(dir.resolve("media"),1048576);
         try(AppDatabase reopened=AppDatabase.openSchema4(c,n)){searchNeed(Arrays.equals(wire,reopened.exportState())&&Arrays.equals(before,appendCells(n,true)),"reopened raw rows and wire unchanged");reopened.exportBackup(zip,m);}
         try(AppDatabase restored=AppDatabase.openSchema4(c,dest)){restored.restoreBackup(zip,dir,8388608L,m);List<Long> ids=new ArrayList<>();for(ActivitiesScreen.SearchHit h:ActivitiesScreen.searchRead(restored.getReadableDatabase(),"早读",true,0))ids.add(h.id);searchNeed(ids.equals(all)&&Arrays.equals(wire,restored.exportState()),"fresh backup restoration, exact complete wire and search IDs");}

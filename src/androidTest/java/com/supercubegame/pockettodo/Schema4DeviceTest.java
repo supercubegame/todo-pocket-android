@@ -378,6 +378,7 @@ public final class Schema4DeviceTest extends Instrumentation {
     private MainActivity uiActivity;
     private android.view.View findUi(android.view.View view,String id){
         if(id.contentEquals(view.getContentDescription()==null?"":view.getContentDescription()))return view;
+        if((id.equals("shortcut-origin")||id.equals("shortcut-detail-back")||id.equals("shortcut-return-status"))&&id.equals(view.getTag()))return view;
         if(view instanceof android.view.ViewGroup){
             android.view.ViewGroup group=(android.view.ViewGroup)view;
             for(int i=0;i<group.getChildCount();i++){android.view.View v=findUi(group.getChildAt(i),id);if(v!=null)return v;}
@@ -436,6 +437,17 @@ public final class Schema4DeviceTest extends Instrumentation {
     private byte[] uiCells()throws Exception{
         try(AppDatabase db=AppDatabase.openSchema4(getTargetContext(),UI_DB)){return bridgeCells(db.getReadableDatabase());}
     }
+    private String[] uiWords(String id)throws Exception{
+        android.view.View v=awaitUi(id);String[] out=new String[2];runOnMainSync(()->{
+            assertThat(v instanceof android.widget.TextView,"visible text type "+id);out[0]=((android.widget.TextView)v).getText().toString();
+            android.view.accessibility.AccessibilityNodeInfo n=v.createAccessibilityNodeInfo();try{out[1]=String.valueOf(n.getContentDescription());}finally{n.recycle();}});return out;
+    }
+    private boolean absentUi(String id){boolean[] missing={false};runOnMainSync(()->missing[0]=findUi(uiActivity.getWindow().getDecorView(),id)==null);return missing[0];}
+    private void shortcutSystemBack(String witness)throws Exception{
+        final android.view.View live=awaitUi(witness);long until=android.os.SystemClock.uptimeMillis()+10000;boolean[] ok={false};
+        while(android.os.SystemClock.uptimeMillis()<until){runOnMainSync(()->{android.view.View root=uiActivity.getWindow().getDecorView();ok[0]=findUi(root,witness)==live&&live.isAttachedToWindow()&&live.isEnabled()&&live.getWindowToken()!=null&&live.getWindowToken()==root.getWindowToken()&&uiActivity.hasWindowFocus()&&!uiActivity.isFinishing()&&!uiActivity.isDestroyed();});if(ok[0])break;Thread.sleep(25);}
+        assertThat(ok[0],"Back must belong to the live preview activity");sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK);waitForIdleSync();
+    }
     private void uiSeed()throws Exception{
         Context context=getTargetContext();context.deleteDatabase(UI_DB);
         try(SQLiteDatabase db=context.openOrCreateDatabase(UI_DB,0,null)){frozen(db);}
@@ -464,10 +476,30 @@ public final class Schema4DeviceTest extends Instrumentation {
             android.view.View[] absent={null};
             runOnMainSync(()->absent[0]=findUi(uiActivity.getWindow().getDecorView(),"shortcut-target-23"));
             need(absent[0]==null&&awaitUi("shortcut-target-21")!=null&&Arrays.equals(baseline,uiCells()),"ui_targets_exclude_archived_and_do_not_write");
+            String[] one=uiWords("shortcut-target-20"),two=uiWords("shortcut-target-21");
+            need(uiWords("shortcut-origin")[0].equals("入口分类：分类同名 · #7\n应用：应用同名 · #10")&&
+                one[0].equals("活动同名 · 活动 #20\n所属分类：分类同名 · #7")&&two[0].equals("活动同名 · 活动 #21\n所属分类：分类同名 · #8")&&
+                one[1].equals("打开 活动同名，活动编号 20，所属分类 分类同名，分类编号 7")&&two[1].equals("打开 活动同名，活动编号 21，所属分类 分类同名，分类编号 8")&&Arrays.equals(baseline,uiCells()),"ui_shortcut_context_and_accessible_duplicate_targets");
             android.view.View oldTarget=touchUi("shortcut-target-21");awaitUi("activity-fields-21");
             need(Arrays.equals(baseline,uiCells()),"ui_same_name_navigation_exact_and_pure");
             runOnMainSync(()->oldTarget.performClick());waitForIdleSync();
             need(Arrays.equals(baseline,uiCells()),"ui_detached_callback_cannot_replay");
+            android.view.View lastDetail=awaitUi("shortcut-detail-back");shortcutSystemBack("shortcut-detail-back");android.view.View freshTarget=awaitUi("shortcut-target-21");
+            need(freshTarget!=oldTarget&&!oldTarget.isAttachedToWindow()&&uiWords("shortcut-origin")[0].contains("分类同名 · #7\n应用：应用同名 · #10")&&Arrays.equals(baseline,uiCells()),"ui_shortcut_system_back_fresh_same_origin");
+            touchUi("shortcut-target-20");awaitUi("activity-fields-20");touchUi("shortcut-detail-back");android.view.View still=awaitUi("shortcut-target-20");
+            runOnMainSync(()->{lastDetail.performClick();oldTarget.performClick();});waitForIdleSync();
+            need(still==awaitUi("shortcut-target-20")&&absentUi("activity-fields-20")&&absentUi("activity-fields-21")&&Arrays.equals(baseline,uiCells()),"ui_shortcut_toolbar_back_and_stale_buttons_readonly");
+            shortcutSystemBack("shortcut-target-20");awaitUi("shortcut-manage-7");
+            need(!uiActivity.isFinishing()&&!uiActivity.isDestroyed()&&absentUi("shortcut-origin")&&Arrays.equals(baseline,uiCells()),"ui_shortcut_selector_back_does_not_exit_app");
+            touchUi("shortcut-manage-7");touchUi("shortcut-change-7-10");shortcutSystemBack("shortcut-confirm");awaitUi("shortcut-manage-7");
+            need(Arrays.equals(baseline,uiCells())&&absentUi("shortcut-confirm"),"ui_shortcut_back_on_change_is_cancel");
+            touchUi("shortcut-manage-7");touchUi("shortcut-open-7-10");touchUi("shortcut-target-21");awaitUi("activity-fields-21");
+            try(AppDatabase setup=AppDatabase.openSchema4(context,UI_DB)){assertThat(setup.setShortcut(7,10,false),"test fixture removed exactly one origin");}
+            byte[] withoutOrigin=uiCells();shortcutSystemBack("shortcut-detail-back");awaitUiText("shortcut-return-status","原快捷入口已移除");
+            need(absentUi("shortcut-target-20")&&absentUi("shortcut-target-21")&&Arrays.equals(withoutOrigin,uiCells()),"ui_shortcut_removed_origin_no_sibling_no_recreation");
+            shortcutSystemBack("shortcut-back");awaitUi("shortcut-manage-7");
+            try(AppDatabase setup=AppDatabase.openSchema4(context,UI_DB)){assertThat(setup.setShortcut(7,10,true),"restore fixture for existing stale-target case");}
+
             closeShortcutUi();launchShortcutUi();
             touchUi("shortcut-manage-7");touchUi("shortcut-open-7-10");awaitUi("shortcut-target-20");
             try(AppDatabase app=AppDatabase.openSchema4(context,UI_DB)){app.setShortcut(7,10,false);}
@@ -549,6 +581,8 @@ public final class Schema4DeviceTest extends Instrumentation {
         try{
             launchShortcutUi();touchUi("shortcut-manage-8");touchUi("shortcut-open-8-10");touchUi("shortcut-target-20");awaitUi("activity-fields-20");
             need(Arrays.equals(expected,uiCells()),"ui_separate_process_navigation_pure");
+            shortcutSystemBack("shortcut-detail-back");awaitUi("shortcut-target-21");
+            need(uiWords("shortcut-origin")[0].equals("入口分类：分类同名 · #8\n应用：应用同名 · #10")&&uiWords("shortcut-target-20")[0].endsWith("分类同名 · #7")&&Arrays.equals(expected,uiCells()),"ui_shortcut_reopened_source_not_destination_category");
         }finally{closeShortcutUi();}
         need(!getTargetContext().getDatabasePath("pocket-v12.db").exists(),"ui_separate_process_live_database_absent");
     }

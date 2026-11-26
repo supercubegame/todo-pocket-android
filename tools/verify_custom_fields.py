@@ -8,7 +8,7 @@ import verify_todo_management as runner
 import verify_category_drag as shared
 PACKAGE=runner.PACKAGE
 SCOPE="FIELD_STAGE2_GUARDED_NOTE_LINKS_AND_UI_NOT_FULL_RELEASE"
-assert hashlib.sha256(Path(shared.__file__).read_bytes()).hexdigest()=="9b1b435b21b630e1230f1e112a794962825665982ceabdbb41cc68583ce3d70d","review changed shared adapter"
+assert hashlib.sha256(Path(shared.__file__).read_bytes()).hexdigest()=="88bfa1653f6cf4e9b57a6a81c10318ebe5ad12586838dcb2c58c5b8c9e053c2b","review changed shared adapter"
 TYPES=("TEXT","LONG_TEXT","NUMBER","DATE","SELECT","MULTI_SELECT","LINK","BOOLEAN")
 EXPECTED={
  "seed":[action+"_"+kind for kind in TYPES for action in ("create","create_duplicate")]+["create_late_rollback","backend_fixture"]+[action+"_"+kind for kind in TYPES for action in ("prepare","value","replay","invalid","consumed")]+

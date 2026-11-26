@@ -58,15 +58,24 @@ public final class TodoInstrumentation extends Instrumentation {
   if(failure[0]!=null)throw new AssertionError("UI action",failure[0]);
  }
  void ready()throws Exception{
-  long end=SystemClock.elapsedRealtime()+10000;
-  while(true){boolean[] busy={true};ui(()->busy[0]=(Boolean)field(screen,"busy"));
-   if(!busy[0]){waitForIdleSync();return;}
-   need(SystemClock.elapsedRealtime()<end,"UI idle deadline");SystemClock.sleep(20);
+  final Activity owner=activity;need(owner!=null,"UI activity missing");
+  final long end=SystemClock.elapsedRealtime()+10000;boolean settled=false;
+  while(SystemClock.elapsedRealtime()<end){
+   final boolean[] idle={false};ui(()->{
+    need(activity==owner&&!owner.isDestroyed()&&!owner.isFinishing(),"UI activity ended");
+    Object live=field(owner,"screen");
+    need(screen==null||screen==live,"UI screen changed");
+    if(live!=null){screen=live;idle[0]=!((Boolean)field(live,"busy"));}
+   });
+   if(SystemClock.elapsedRealtime()>=end)break;
+   if(idle[0]){if(settled)return;waitForIdleSync();settled=true;continue;}
+   settled=false;SystemClock.sleep(20);
   }
+  throw new AssertionError("UI idle deadline");
  }
  void launch()throws Exception{
   activity=startActivitySync(new Intent().setClassName(getTargetContext(),"com.supercubegame.pockettodo.MainActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-  screen=field(activity,"screen");ready();
+  screen=null;ready();
  }
  View root(){return activity.getWindow().getDecorView();}
  void find(View v,String key,boolean desc,List<View> out){

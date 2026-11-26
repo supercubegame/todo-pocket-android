@@ -834,9 +834,76 @@ public final class AppDatabase extends SQLiteOpenHelper {
     public synchronized List<String> tags(long activity){return orderedStrings("tags",activity);}
     private static void utf8(DataOutputStream out,String value)throws IOException{byte[] bytes=value.getBytes(StandardCharsets.UTF_8);out.writeInt(bytes.length);out.write(bytes);}
     private static byte[] payload(List<Ledger.Entry> rows){try{ByteArrayOutputStream bytes=new ByteArrayOutputStream();DataOutputStream out=new DataOutputStream(bytes);out.writeInt(rows.size());for(Ledger.Entry row:rows){utf8(out,row.id);out.writeLong(row.activityId);utf8(out,row.date.toString());utf8(out,row.kind.name());out.writeLong(row.cents);utf8(out,row.memo);}out.flush();return bytes.toByteArray();}catch(IOException e){throw new IllegalStateException(e);}}
-    public synchronized boolean recordBatch(String key,List<Ledger.Entry> rows){Ledger.identifier(key);if(rows==null||rows.isEmpty()||Ledger.hasNull(rows))throw new IllegalArgumentException("记账批次不能为空");List<Ledger.Entry> owned=new ArrayList<>(rows);byte[] encoded=payload(owned);return tx(db->{try(Cursor c=db.rawQuery("SELECT payload,undone FROM batches WHERE id=?",new String[]{key})){if(c.moveToFirst()){if(!Arrays.equals(c.getBlob(0),encoded)||c.getInt(1)!=0)throw new IllegalStateException("批次已用于其他内容或已撤销");return false;}}long next=bump(db);db.execSQL("INSERT INTO batches VALUES(?,?,?,0)",new Object[]{key,encoded,next});for(int i=0;i<owned.size();i++){Ledger.Entry r=owned.get(i);exists(db,"activities",r.activityId);db.execSQL("INSERT INTO ledger VALUES(?,?,?,?,?,?,?,?)",new Object[]{r.id,r.activityId,r.date.toString(),r.kind.name(),r.cents,r.memo,key,i});}return true;});}
+    public synchronized boolean recordBatch(String key,List<Ledger.Entry> rows){Ledger.identifier(key);if(rows==null||rows.isEmpty()||Ledger.hasNull(rows))throw new IllegalArgumentException("记账批次不能为空");List<Ledger.Entry> owned=new ArrayList<>(rows);byte[] encoded=payload(owned);return tx(db->writeMoneyRows(db,key,owned,encoded));}
+    private static boolean writeMoneyRows(SQLiteDatabase db,String key,List<Ledger.Entry> owned,byte[] encoded){try(Cursor c=db.rawQuery("SELECT payload,undone FROM batches WHERE id=?",new String[]{key})){if(c.moveToFirst()){if(!Arrays.equals(c.getBlob(0),encoded)||c.getInt(1)!=0)throw new IllegalStateException("批次已用于其他内容或已撤销");return false;}}long next=bump(db);db.execSQL("INSERT INTO batches VALUES(?,?,?,0)",new Object[]{key,encoded,next});for(int i=0;i<owned.size();i++){Ledger.Entry r=owned.get(i);exists(db,"activities",r.activityId);db.execSQL("INSERT INTO ledger VALUES(?,?,?,?,?,?,?,?)",new Object[]{r.id,r.activityId,r.date.toString(),r.kind.name(),r.cents,r.memo,key,i});}return true;}
     private static Ledger.Entry entry(Cursor c){return new Ledger.Entry(c.getString(0),c.getLong(1),LocalDate.parse(c.getString(2)),Ledger.Kind.valueOf(c.getString(3)),c.getLong(4),c.getString(5));}
-    public synchronized void undoBatch(String key){Ledger.identifier(key);tx(db->{byte[] expected;try(Cursor c=db.rawQuery("SELECT payload,revision,undone FROM batches WHERE id=?",new String[]{key})){if(!c.moveToFirst()||c.getInt(2)!=0||c.getLong(1)!=revision(db))throw new IllegalStateException("只能撤销最新且未修改的批次");expected=c.getBlob(0);}List<Ledger.Entry> current=new ArrayList<>();try(Cursor c=db.rawQuery("SELECT id,activity_id,day,kind,cents,memo FROM ledger WHERE batch_id=? ORDER BY position",new String[]{key})){while(c.moveToNext())current.add(entry(c));}if(!Arrays.equals(expected,payload(current)))throw new IllegalStateException("批次内容已变化");db.delete("ledger","batch_id=?",new String[]{key});db.execSQL("UPDATE batches SET undone=1 WHERE id=?",new Object[]{key});bump(db);return null;});}
+    public synchronized void undoBatch(String key){Ledger.identifier(key);tx(db->undoMoneyRows(db,key));}
+    private static Void undoMoneyRows(SQLiteDatabase db,String key){byte[] expected;try(Cursor c=db.rawQuery("SELECT payload,revision,undone FROM batches WHERE id=?",new String[]{key})){if(!c.moveToFirst()||c.getInt(2)!=0||c.getLong(1)!=revision(db))throw new IllegalStateException("只能撤销最新且未修改的批次");expected=c.getBlob(0);}List<Ledger.Entry> current=new ArrayList<>();try(Cursor c=db.rawQuery("SELECT id,activity_id,day,kind,cents,memo FROM ledger WHERE batch_id=? ORDER BY position",new String[]{key})){while(c.moveToNext())current.add(entry(c));}if(!Arrays.equals(expected,payload(current)))throw new IllegalStateException("批次内容已变化");db.delete("ledger","batch_id=?",new String[]{key});db.execSQL("UPDATE batches SET undone=1 WHERE id=?",new Object[]{key});bump(db);return null;}
+    /** The calendar never edits historical journal payloads. This only appends a new
+     * reviewed batch, or consumes the latest untouched batch belonging to one activity. */
+    private static void activeMoneyOwner(SQLiteDatabase db,long activity){
+        try(Cursor c=db.rawQuery("SELECT archived FROM activities WHERE id=?",new String[]{Long.toString(activity)})){
+            if(!c.moveToFirst()||c.getInt(0)!=0)throw new IllegalStateException("活动不存在或已归档，账本未修改");
+        }
+    }
+    private static List<Ledger.Entry> orderedMoneyRows(SQLiteDatabase db,String key){
+        List<Ledger.Entry> out=new ArrayList<>();
+        try(Cursor c=db.rawQuery("SELECT id,activity_id,day,kind,cents,memo,position FROM ledger WHERE batch_id=? ORDER BY position",new String[]{key})){
+            while(c.moveToNext()){
+                if(c.getLong(6)!=out.size())throw new IllegalStateException("批次行顺序已变化");
+                out.add(entry(c));
+            }
+        }return out;
+    }
+    public synchronized boolean recordActivityBatch(long activity,String key,List<Ledger.Entry> entries){
+        Ledger.positive(activity);Ledger.identifier(key);
+        if(entries==null||entries.isEmpty())throw new IllegalArgumentException("请先加入至少一行账目");
+        final List<Ledger.Entry> rows=new ArrayList<>(entries);Set<String> ids=new HashSet<>();
+        for(Ledger.Entry e:rows)if(e==null||e.activityId!=activity||!ids.add(e.id))throw new IllegalArgumentException("批次包含其他活动或重复行");
+        final byte[] encoded=payload(rows);
+        return tx(db->{
+            activeMoneyOwner(db,activity);long before=revision(db);
+            boolean inserted=writeMoneyRows(db,key,rows,encoded);long after=revision(db);
+            if(after!=(inserted?Math.incrementExact(before):before)||!rows.equals(orderedMoneyRows(db,key)))throw new IllegalStateException("批次写后核对失败");
+            try(Cursor c=db.rawQuery("SELECT payload,revision,undone FROM batches WHERE id=?",new String[]{key})){
+                if(!c.moveToFirst()||!Arrays.equals(c.getBlob(0),encoded)||c.getLong(2)!=0||c.getLong(1)<=0||c.getLong(1)>after||(inserted&&c.getLong(1)!=after))throw new IllegalStateException("批次日志核对失败");
+            }return inserted;
+        });
+    }
+    public static final class MoneyUndoReview{
+        final AppDatabase owner;final Object session;final long activity,revision;final String key;
+        final List<Ledger.Entry> rows;private boolean consumed;
+        private MoneyUndoReview(AppDatabase owner,long activity,long revision,String key,List<Ledger.Entry> rows){
+            this.owner=owner;this.session=owner.restoreSession;this.activity=activity;this.revision=revision;this.key=key;
+            this.rows=Collections.unmodifiableList(new ArrayList<>(rows));
+        }
+    }
+    public synchronized MoneyUndoReview latestMoneyUndo(long activity){
+        Ledger.positive(activity);SQLiteDatabase db=getReadableDatabase();db.beginTransactionNonExclusive();
+        try{
+            activeMoneyOwner(db,activity);long rev=revision(db);MoneyUndoReview value=null;
+            try(Cursor c=db.rawQuery("SELECT b.id,b.payload FROM batches b WHERE b.revision=? AND b.undone=0 ORDER BY b.id",new String[]{Long.toString(rev)})){
+                if(c.moveToFirst()){
+                    String key=c.getString(0);byte[] wire=c.getBlob(1);if(c.moveToNext())throw new IllegalStateException("最新批次标识不唯一");
+                    List<Ledger.Entry> rows=orderedMoneyRows(db,key);boolean own=!rows.isEmpty();for(Ledger.Entry row:rows)own&=row.activityId==activity;
+                    if(own&&Arrays.equals(wire,payload(rows)))value=new MoneyUndoReview(this,activity,rev,key,rows);
+                }
+            }db.setTransactionSuccessful();return value;
+        }finally{db.endTransaction();}
+    }
+    public synchronized void undoActivityBatch(MoneyUndoReview plan){
+        if(plan==null||plan.owner!=this||plan.session!=restoreSession||plan.consumed)throw new IllegalStateException("撤销预览已失效");
+        plan.consumed=true;
+        tx(db->{activeMoneyOwner(db,plan.activity);
+            if(revision(db)!=plan.revision||!plan.rows.equals(orderedMoneyRows(db,plan.key)))throw new IllegalStateException("账目已变化，请重新核对");
+            undoMoneyRows(db,plan.key);
+            if(revision(db)!=Math.incrementExact(plan.revision)||!orderedMoneyRows(db,plan.key).isEmpty())throw new IllegalStateException("撤销结果核对失败");
+            try(Cursor c=db.rawQuery("SELECT payload,revision,undone FROM batches WHERE id=?",new String[]{plan.key})){
+                if(!c.moveToFirst()||!Arrays.equals(c.getBlob(0),payload(plan.rows))||c.getLong(1)!=plan.revision||c.getLong(2)!=1)throw new IllegalStateException("撤销日志核对失败");
+            }return null;
+        });
+    }
+
     public synchronized long total(long activity,Set<LocalDate> dates,String metric){Ledger ledger=new Ledger();List<Ledger.Entry> rows=new ArrayList<>();try(Cursor c=getReadableDatabase().rawQuery("SELECT id,activity_id,day,kind,cents,memo FROM ledger",null)){while(c.moveToNext())rows.add(entry(c));}if(!rows.isEmpty())ledger.recordBatch("snapshot",rows);return ledger.total(activity,dates,metric);}
     public synchronized void putMark(CalendarRules.Mark mark){if(mark==null||mark.recordedAt==null)throw new IllegalArgumentException("需要真实录入时间");tx(db->{exists(db,"activities",mark.activityId);db.delete("checkins","activity_id=? AND day=?",new String[]{Long.toString(mark.activityId),mark.date.toString()});if(mark.status!=CalendarRules.Status.UNRECORDED)db.execSQL("INSERT INTO checkins VALUES(?,?,?,?,?)",new Object[]{mark.activityId,mark.date.toString(),mark.status.name(),mark.memo,mark.recordedAt.toString()});bump(db);return null;});}
     public synchronized List<CalendarRules.Mark> marks(long activity){SQLiteDatabase db=getReadableDatabase();exists(db,"activities",activity);List<CalendarRules.Mark> out=new ArrayList<>();try(Cursor c=db.rawQuery("SELECT day,status,memo,recorded_at FROM checkins WHERE activity_id=? ORDER BY day",new String[]{Long.toString(activity)})){while(c.moveToNext())out.add(new CalendarRules.Mark(activity,LocalDate.parse(c.getString(0)),CalendarRules.Status.valueOf(c.getString(1)),c.getString(2),Instant.parse(c.getString(3))));}return Collections.unmodifiableList(out);}

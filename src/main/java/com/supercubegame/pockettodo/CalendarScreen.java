@@ -31,7 +31,7 @@ public final class CalendarScreen {
     private static final class State {
         final List<Ledger.Entry> entries=new ArrayList<>();
         final Set<LocalDate> actual=new HashSet<>(),planned=new HashSet<>();
-        final long[] totals=new long[6];int actualSelected;
+        final long[] totals=new long[6];int actualSelected;AppDatabase.MoneyUndoReview latest;
     }
     CalendarScreen(TodayScreen host,long activityId,String title,Runnable back){this.host=host;this.activityId=activityId;this.title=title;this.back=back;}
     static String yuan(long cents){return BigDecimal.valueOf(cents,2).toPlainString();}
@@ -47,7 +47,7 @@ public final class CalendarScreen {
             }
             if(!state.entries.isEmpty())ledger.recordBatch("view",state.entries);
             for(int i=0;i<METRICS.length;i++)state.totals[i]=ledger.total(activityId,dates,METRICS[i]);
-            state.actualSelected=ledger.recordedActualDates(activityId,dates).size();return state;
+            state.actualSelected=ledger.recordedActualDates(activityId,dates).size();state.latest=host.db.latestMoneyUndo(activityId);return state;
         },this::render,null);
     }
     private void render(State state){
@@ -59,6 +59,8 @@ public final class CalendarScreen {
         LinearLayout actions=new LinearLayout(host.activity);
         actions.addView(host.button("选择日期",()->chooseDates(state)),new LinearLayout.LayoutParams(0,host.dp(48),1));
         actions.addView(host.button("记一笔",this::entryDialog),new LinearLayout.LayoutParams(0,host.dp(48),1));body.addView(actions);
+        Button batch=host.button("批量记账",()->{});batch.setOnClickListener(v->openBatch(batch));actions.addView(batch,new LinearLayout.LayoutParams(0,host.dp(48),1));
+        if(state.latest!=null){Button undo=host.button("撤销最近批次",()->{});undo.setOnClickListener(v->openUndo(undo,state.latest));header.addView(undo,new LinearLayout.LayoutParams(0,host.dp(48),1));}
         TextView scope=host.text("已选 "+selected.size()+" 天 · 仅汇总，不批量写入",14,TodayScreen.MUTED);scope.setContentDescription("selected-days");body.addView(scope);
         for(int row=0;row<3;row++){
             LinearLayout line=new LinearLayout(host.activity);
@@ -123,6 +125,91 @@ public final class CalendarScreen {
         catch(RuntimeException e){feedback.setText("日期范围为 0001-01 至 9999-12");}
     }
     private void hideKeyboard(View view){((InputMethodManager)host.activity.getSystemService(android.app.Activity.INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(view.getWindowToken(),0);}
+    /** One explicitly opened draft, not a transformation of the date filter. */
+    static final class BatchDraft {
+        final long activity;final String key=UUID.randomUUID().toString();
+        private final ArrayList<Ledger.Entry> rows=new ArrayList<>();
+        private List<Ledger.Entry> review;private boolean closed,submitted,inFlight;
+        BatchDraft(long activity){this.activity=Ledger.positive(activity);}
+        void add(String day,Ledger.Kind kind,String amount,String memo){
+            if(closed||review!=null||submitted)throw new IllegalStateException("批次不再可编辑");
+            LocalDate date=Ledger.validDate(LocalDate.parse(day));if(!date.toString().equals(day))throw new IllegalArgumentException("日期格式错误");
+            rows.add(new Ledger.Entry(UUID.randomUUID().toString(),activity,date,kind,Ledger.parseCents(amount),memo));
+        }
+        void removeLast(){if(closed||review!=null||submitted||rows.isEmpty())throw new IllegalStateException("没有可移除的草稿行");rows.remove(rows.size()-1);}
+        List<Ledger.Entry> rows(){return Collections.unmodifiableList(new ArrayList<>(rows));}
+        void freeze(){if(closed||review!=null||rows.isEmpty())throw new IllegalStateException("批次为空或已核对");
+            long[] totals=new long[Ledger.Kind.values().length];for(Ledger.Entry e:rows)totals[e.kind.ordinal()]=Math.addExact(totals[e.kind.ordinal()],e.cents);
+            Math.subtractExact(Math.addExact(totals[Ledger.Kind.INCOME.ordinal()],totals[Ledger.Kind.REFUND.ordinal()]),totals[Ledger.Kind.EXPENSE.ordinal()]);
+            review=rows();
+        }
+        void editAgain(){if(closed||submitted||review==null)throw new IllegalStateException("请使用同一份核对结果");review=null;}
+        List<Ledger.Entry> begin(){if(closed||inFlight||review==null)throw new IllegalStateException("批次未核对或已提交");inFlight=true;submitted=true;return review;}
+        void failed(){if(!closed)inFlight=false;}
+        void close(){closed=true;rows.clear();review=null;}
+    }
+    private MoneyWindow activeMoney;
+    private final class MoneyWindow implements View.OnAttachStateChangeListener {
+        final Button anchor;final BatchDraft draft;AlertDialog box;boolean dead;
+        MoneyWindow(Button anchor,BatchDraft draft){this.anchor=anchor;this.draft=draft;activeMoney=this;anchor.addOnAttachStateChangeListener(this);}
+        boolean live(){return !dead&&activeMoney==this&&anchor.isAttachedToWindow()&&!host.activity.isFinishing()&&!host.activity.isDestroyed();}
+        boolean input(View v){return live()&&anchor.isEnabled()&&box!=null&&box.isShowing()&&v.isAttachedToWindow()&&v.isEnabled();}
+        void close(){if(dead)return;dead=true;if(activeMoney==this)activeMoney=null;anchor.removeOnAttachStateChangeListener(this);if(draft!=null)draft.close();
+            AlertDialog d=box;box=null;if(d!=null){d.setOnDismissListener(null);if(d.isShowing())d.dismiss();}}
+        @Override public void onViewAttachedToWindow(View v){}
+        @Override public void onViewDetachedFromWindow(View v){close();}
+        void show(AlertDialog d){box=d;d.setOnDismissListener(x->close());try{d.show();}catch(android.view.WindowManager.BadTokenException|IllegalStateException stale){close();}}
+    }
+    private boolean moneyEntryReady(Button b){return activeMoney==null&&b.isEnabled()&&b.isAttachedToWindow()&&!host.activity.isDestroyed()&&!host.activity.isFinishing();}
+    private static String batchLines(List<Ledger.Entry> rows){
+        if(rows.isEmpty())return "尚未加入账目。";StringBuilder text=new StringBuilder();int i=0;
+        for(Ledger.Entry e:rows){if(i>0)text.append('\n');text.append(++i).append(". ").append(e.date).append("  ").append(LABELS[e.kind.ordinal()]).append(" ¥").append(yuan(e.cents));if(!e.memo.isEmpty())text.append("  ").append(e.memo);}
+        return text.toString();
+    }
+    private void openBatch(Button anchor){
+        if(!moneyEntryReady(anchor))return;
+        BatchDraft draft=new BatchDraft(activityId);MoneyWindow window=new MoneyWindow(anchor,draft);
+        LinearLayout body=host.column();body.setPadding(host.dp(16),host.dp(4),host.dp(16),host.dp(8));body.setFocusableInTouchMode(true);
+        TextView intro=host.text("逐行加入日期和金额。这里不会自动套用日历所选日期，也不会打卡。",14,TodayScreen.MUTED);body.addView(intro);
+        LinearLayout edit=host.column();body.addView(edit);EditText date=host.field("批次日期",false);date.setHint("YYYY-MM-DD");date.setText(LocalDate.now(ZoneId.of("Asia/Shanghai")).toString());edit.addView(date);
+        RadioGroup kinds=new RadioGroup(host.activity);kinds.setOrientation(RadioGroup.HORIZONTAL);
+        for(Ledger.Kind kind:Ledger.Kind.values()){RadioButton b=new RadioButton(host.activity);b.setId(View.generateViewId());b.setTag(kind);b.setText(LABELS[kind.ordinal()]);b.setTextSize(14);kinds.addView(b,new RadioGroup.LayoutParams(0,host.dp(48),1));if(kind==Ledger.Kind.EXPENSE)kinds.check(b.getId());}edit.addView(kinds);
+        EditText amount=host.field("批次金额（元）",false);amount.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL);amount.setHint("逐笔输入，0 元也需明确填写");edit.addView(amount);
+        LinearLayout presets=new LinearLayout(host.activity);for(String yuan:new String[]{"0","5","10","20"}){Button p=host.button(yuan+" 元",()->{});p.setOnClickListener(v->{if(window.input(v)){amount.setText(yuan);amount.setSelection(amount.length());}});presets.addView(p,new LinearLayout.LayoutParams(0,host.dp(48),1));}edit.addView(presets);
+        EditText memo=host.field("批次备注",false);memo.setHint("此行备注（可留空）");edit.addView(memo);
+        LinearLayout actions=new LinearLayout(host.activity);Button add=host.button("加入本行",()->{}),remove=host.button("移除末行",()->{});actions.addView(add,new LinearLayout.LayoutParams(0,host.dp(48),1));actions.addView(remove,new LinearLayout.LayoutParams(0,host.dp(48),1));edit.addView(actions);
+        TextView lines=host.text("尚未加入账目。",15,TodayScreen.INK);body.addView(lines);
+        TextView note=host.text("尚未记账。",14,TodayScreen.MUTED);note.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);body.addView(note);
+        Button revise=host.button("返回修改草稿",()->{});revise.setVisibility(View.GONE);body.addView(revise);
+        Runnable redraw=()->{lines.setText(batchLines(draft.rows()));remove.setEnabled(!draft.rows.isEmpty());};redraw.run();
+        add.setOnClickListener(v->{if(!window.input(v))return;try{
+            RadioButton choice=kinds.findViewById(kinds.getCheckedRadioButtonId());draft.add(date.getText().toString(),(Ledger.Kind)choice.getTag(),amount.getText().toString(),memo.getText().toString());
+            amount.setText("");memo.setText("");redraw.run();note.setText("已加入草稿，还未记账。");
+        }catch(java.time.DateTimeException|IllegalArgumentException|ArithmeticException invalid){note.setText("本行未加入：请填真实日期及非负金额，金额最多两位小数。");}});
+        remove.setOnClickListener(v->{if(!window.input(v))return;draft.removeLast();redraw.run();note.setText("已移除草稿末行，账本未改变。");});
+        ScrollView scroll=new ScrollView(host.activity);scroll.addView(body);
+        AlertDialog d=new AlertDialog.Builder(host.activity).setTitle("批量记账").setView(scroll).setNegativeButton("取消",null).setPositiveButton("核对批次",null).create();
+        revise.setOnClickListener(v->{if(!window.input(v))return;draft.editAgain();edit.setVisibility(View.VISIBLE);revise.setVisibility(View.GONE);d.setTitle("批量记账");d.getButton(AlertDialog.BUTTON_POSITIVE).setText("核对批次");note.setText("修改后需重新核对。");});
+        d.setOnShowListener(x->{Button submit=d.getButton(AlertDialog.BUTTON_POSITIVE);submit.setOnClickListener(v->{if(!window.input(v)||draft.inFlight)return;
+            if(draft.review==null){
+                if(amount.length()!=0||memo.length()!=0){note.setText("当前行尚未加入。请先点“加入本行”，或清空本行金额和备注。");return;}
+                try{draft.freeze();}catch(IllegalStateException|ArithmeticException invalid){note.setText("不能提交：请至少加入一行，并检查合计是否过大。");return;}
+                hideKeyboard(amount);edit.setVisibility(View.GONE);revise.setVisibility(View.VISIBLE);d.setTitle("核对批次");note.setText("活动："+title+"。核对以上 "+draft.review.size()+" 行后再记账。预计不算实际收支。");submit.setText("确认记账");scroll.smoothScrollTo(0,0);return;
+            }
+            final List<Ledger.Entry> frozen=draft.begin();final String key=draft.key;submit.setEnabled(false);revise.setVisibility(View.GONE);d.setCancelable(false);d.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);
+            host.work(()->host.db.recordActivityBatch(activityId,key,frozen),inserted->{if(!window.live())return;window.close();host.message(inserted?"已保存整个批次，共 "+frozen.size()+" 笔。":"相同批次已保存，没有重复记账。",false);load();},()->{
+                if(!window.live())return;draft.failed();d.setCancelable(true);d.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);submit.setEnabled(true);submit.setText("重试同一批次");note.setText("未能确认保存结果。重试只使用已核对的同一批次，不另记一份。");
+            });
+        });});window.show(d);body.requestFocus();
+    }
+    private void openUndo(Button anchor,AppDatabase.MoneyUndoReview plan){
+        if(!moneyEntryReady(anchor)||plan==null||plan.activity!=activityId)return;MoneyWindow window=new MoneyWindow(anchor,null);
+        AlertDialog d=new AlertDialog.Builder(host.activity).setTitle("撤销最近批次？").setMessage("活动："+title+"。只撤销下面 "+plan.rows.size()+" 笔，其他账目和打卡不变。\n"+batchLines(plan.rows)).setNegativeButton("取消",null).setPositiveButton("确认撤销",null).create();
+        d.setOnShowListener(x->d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{if(!window.input(v))return;v.setEnabled(false);d.setCancelable(false);d.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);
+            host.work(()->{host.db.undoActivityBatch(plan);return true;},o->{if(window.live()){window.close();load();}},()->{if(window.live()){window.close();load();host.message("账目可能已变化，未撤销；请重新核对。",true);}});
+        }));window.show(d);
+    }
+
     private void entryDialog(){
         LinearLayout body=host.column();body.setPadding(host.dp(16),host.dp(4),host.dp(16),host.dp(4));
         body.addView(host.text("仅新增一笔，不向所选多日批量写入。",14,TodayScreen.MUTED));

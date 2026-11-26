@@ -452,6 +452,6 @@ public final class TodayScreen {
     int dp(int value){return Math.round(value*activity.getResources().getDisplayMetrics().density);}
     boolean awaitShortcutClose()throws InterruptedException{return io.awaitTermination(10,java.util.concurrent.TimeUnit.SECONDS);}
     public void save(Bundle out){rememberDraft();out.putInt("page",page);out.putInt("filter",filter);out.putString("draft",draft);out.putLong("activity",activities.selected);}
-    public boolean back(){if(busy)return true;if(page==1&&activities.selected!=0){activities.selected=0;activities.load();return true;}return false;}
+    public boolean back(){if(busy)return true;if(page==1&&activities.backFromCategoryOrder())return true;if(page==1&&activities.selected!=0){activities.selected=0;activities.load();return true;}return false;}
     public void close(){if(closed)return;closed=true;clearRestorePreview();clearActivation();leaveTodoSession();io.execute(db::close);io.shutdown();}
 }

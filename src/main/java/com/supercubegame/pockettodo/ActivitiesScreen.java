@@ -18,6 +18,8 @@ public final class ActivitiesScreen {
     private final TodayScreen host;
     long selected;
     private boolean backupPanel, historyPanel, archivePanel;
+    private boolean compactOrder;
+    private int compactScrollY;
     private static final ZoneId CN=ZoneId.of("Asia/Shanghai");
     ActivitiesScreen(TodayScreen host){this.host=host;}
     private static final class Item {
@@ -51,9 +53,17 @@ public final class ActivitiesScreen {
         },this::renderCategories,null);
     }
     private void renderCategories(List<Category> categories){
-        LinearLayout body=host.content();body.addView(host.text("长期的事，慢慢积累",22,TodayScreen.INK));
+        LinearLayout body=host.content();
         List<Long> shown=new ArrayList<>();for(Category cat:categories)shown.add(cat.id);
         CategorySession session=new CategorySession(shown);categorySession=session;
+        final boolean orderOnly=compactOrder;
+        LinearLayout title=new LinearLayout(host.activity);title.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        title.addView(host.text(orderOnly?"分类排序":"长期的事，慢慢积累",22,TodayScreen.INK),new LinearLayout.LayoutParams(0,-2,1));
+        Button mode=host.button(orderOnly?"返回活动":"分类排序",()->setCategoryOrderMode(session,title,!orderOnly));
+        mode.setContentDescription(orderOnly?"category-order-leave":"category-order-enter");
+        categorySpeech(mode,orderOnly?"返回活动列表":"整理分类顺序");
+        title.addView(mode,new LinearLayout.LayoutParams(-2,-2));body.addView(title);
+        if(orderOnly){renderCompactOrder(body,categories,session);return;}
         List<android.view.View> groups=new ArrayList<>();
         LinearLayout top=new LinearLayout(host.activity);
         top.addView(host.button("新建分类",()->host.editor("新建分类","分类名称","",false,value->host.db.addCategory(nextId("categories"),value),this::load)),new LinearLayout.LayoutParams(0,host.dp(48),1));
@@ -96,10 +106,72 @@ public final class ActivitiesScreen {
         CategorySession(List<Long> order){this.order=new ArrayList<>(order);}
     }
     private CategorySession categorySession;
-    private boolean categoryCurrent(CategorySession session,android.view.View anchor){
-        return categorySession==session&&session.alive&&!session.submitted&&selected==0&&!backupPanel
+    private boolean categoryHere(CategorySession session,android.view.View anchor){
+        return categorySession==session&&session.alive&&selected==0&&!backupPanel
             &&!archivePanel&&anchor.isAttachedToWindow()&&anchor.isEnabled()
             &&!host.activity.isFinishing()&&!host.activity.isDestroyed();
+    }
+    private boolean categoryCurrent(CategorySession session,android.view.View anchor){
+        return !session.submitted&&categoryHere(session,anchor);
+    }
+    /** Navigation has no write. A failed order can still leave the sorting view. */
+    private void setCategoryOrderMode(CategorySession session,android.view.View anchor,boolean next){
+        if(!categoryHere(session,anchor)||compactOrder==next)return;
+        changeCategoryOrderMode(session,next);
+    }
+    private void changeCategoryOrderMode(CategorySession session,boolean next){
+        session.alive=false;compactOrder=next;compactScrollY=0;load();
+    }
+    boolean backFromCategoryOrder(){
+        CategorySession current=categorySession;
+        if(!compactOrder||current==null||!current.alive||selected!=0||backupPanel||archivePanel
+                ||host.activity.isFinishing()||host.activity.isDestroyed())return false;
+        changeCategoryOrderMode(current,false);return true;
+    }
+    private static void categorySpeech(android.view.View view,String label){
+        view.setAccessibilityDelegate(new android.view.View.AccessibilityDelegate(){
+            @Override public void onInitializeAccessibilityNodeInfo(android.view.View source,android.view.accessibility.AccessibilityNodeInfo info){
+                super.onInitializeAccessibilityNodeInfo(source,info);info.setContentDescription(label);
+            }
+        });
+    }
+    static boolean compactSortStacked(int widthDp,float fontScale){
+        return widthDp<300||fontScale>=1.3f;
+    }
+    private void renderCompactOrder(LinearLayout body,List<Category> categories,CategorySession session){
+        body.addView(host.text("长按拖动到目标分类，或用上移、下移。",14,TodayScreen.MUTED));
+        ScrollView scroll=new ScrollView(host.activity);scroll.setContentDescription("category-order-scroll");
+        LinearLayout list=host.column();scroll.addView(list);body.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        final int restoreY=compactScrollY;
+        scroll.setOnScrollChangeListener((v,x,y,oldX,oldY)->{
+            if(compactOrder&&categorySession==session&&session.alive&&scroll.isAttachedToWindow())compactScrollY=y;
+        });
+        if(restoreY>0)scroll.addOnLayoutChangeListener(new android.view.View.OnLayoutChangeListener(){
+            public void onLayoutChange(android.view.View v,int l,int t,int r,int b,int ol,int ot,int orr,int ob){
+                if(b<=t)return;scroll.removeOnLayoutChangeListener(this);
+                if(compactOrder&&categorySession==session&&session.alive&&scroll.isAttachedToWindow())scroll.scrollTo(0,restoreY);
+            }
+        });
+        if(categories.isEmpty()){list.addView(host.text("还没有分类。返回活动页可新建。",16,TodayScreen.MUTED));return;}
+        boolean stacked=compactSortStacked(host.activity.getResources().getConfiguration().screenWidthDp,
+                host.activity.getResources().getConfiguration().fontScale);
+        List<android.view.View> groups=new ArrayList<>();
+        for(int i=0;i<categories.size();i++){
+            Category category=categories.get(i);final long id=category.id;final int position=i;
+            LinearLayout card=host.column();card.setContentDescription("category-order-row-"+id);
+            card.setBackground(host.shape(TodayScreen.WHITE,12));card.setPadding(host.dp(6),host.dp(2),host.dp(6),host.dp(2));
+            card.setImportantForAccessibility(android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+            groups.add(card);LinearLayout line=new LinearLayout(host.activity);line.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            TextView name=host.text(category.name,17,TodayScreen.INK);name.setContentDescription("category-name-"+id);
+            if(stacked)card.addView(name,new LinearLayout.LayoutParams(-1,-2));else line.addView(name,new LinearLayout.LayoutParams(0,-2,1));
+            Button drag=categoryHandle(id,session,list,groups);drag.setText("拖动");
+            Button up=host.button("上移",()->moveCategory(id,position-1,session,list));up.setContentDescription("category-up-"+id);up.setEnabled(i>0);
+            Button down=host.button("下移",()->moveCategory(id,position+1,session,list));down.setContentDescription("category-down-"+id);down.setEnabled(i+1<categories.size());
+            String spoken=category.name+"，第"+(i+1)+"项，共"+categories.size()+"项";
+            categorySpeech(name,spoken);categorySpeech(drag,"长按拖动："+spoken);categorySpeech(up,"上移："+spoken);categorySpeech(down,"下移："+spoken);
+            for(Button control:new Button[]{drag,up,down})line.addView(control,stacked?new LinearLayout.LayoutParams(0,-2,1):new LinearLayout.LayoutParams(host.dp(control==drag?60:48),-2));
+            card.addView(line,new LinearLayout.LayoutParams(-1,-2));host.addRow(list,card);
+        }
     }
     private void moveCategory(long id,int position,CategorySession session,android.view.View anchor){
         if(!categoryCurrent(session,anchor)||position<0||position>=session.order.size()

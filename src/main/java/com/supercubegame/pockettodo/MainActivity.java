@@ -514,19 +514,16 @@ public final class MainActivity extends Activity {
         }catch(Exception e){ticket.close();for(android.graphics.Bitmap b:images)b.recycle();screen.message("预览无法完整显示，未导出；请减少选项",true);return;}
         body.addView(screen.text(format==0?"以上是实际包内Markdown源码和图片缩略图。仅导出所选非私有内容；图片重新编码不等于自动脱敏。完整备份、账目和原图文件不在包内。":
             "以上是实际导出文件的全部分页缩略图，不是重新生成的示意图。仅含所选非私有内容；请核对遮挡效果。完整备份、账目和原图文件不在其中。",14,TodayScreen.MUTED));
-        android.widget.CheckBox consent=new android.widget.CheckBox(this);consent.setText(format==0?"我已核对内容与图片，可保存此包":"我已核对预览，接下来由我选择保存或发送");body.addView(consent);
+        android.widget.CheckBox consent=new android.widget.CheckBox(this);consent.setText(format==0?"我已核对内容与图片，接下来由我选择保存或发送":"我已核对预览，接下来由我选择保存或发送");body.addView(consent);
         final int pages=images.size();
         final boolean[] sending={false};
-        android.widget.Button send=null;
-        if(format!=0){
-            body.addView(screen.text("发送会打开系统分享面板。附件以临时只读方式提供，接收方可保留副本。",14,TodayScreen.MUTED));
-            send=new android.widget.Button(this);send.setText(format==1?"发送 PDF":"按页发送图片");body.addView(send);
-        }
+        body.addView(screen.text("发送会打开系统分享面板。附件以临时只读方式提供，接收方可保留副本。",14,TodayScreen.MUTED));
+        android.widget.Button send=new android.widget.Button(this);send.setText(format==0?"发送 Markdown 图片包":format==1?"发送 PDF":"按页发送图片");body.addView(send);
         android.widget.ScrollView scroll=new android.widget.ScrollView(this);scroll.addView(body);
         android.app.AlertDialog d=new android.app.AlertDialog.Builder(this).setTitle(SHARE_FORMATS[format]+"预览").setView(scroll)
             .setNegativeButton("取消",null).setPositiveButton("选择保存位置",null).create();
         shareDialogs.add(d);
-        if(send!=null)send.setOnClickListener(view->{
+        send.setOnClickListener(view->{
             if(!consent.isChecked()){screen.message("请先核对并勾选确认",true);return;}
             if(sending[0]||pendingShare!=null)return;
             sending[0]=true;long epoch; synchronized(sendOwner){epoch=sendEpoch;}

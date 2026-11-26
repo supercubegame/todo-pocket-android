@@ -23,7 +23,7 @@ public final class PagedShareProvider extends ContentProvider {
     // Proposed handoff window, not a measured receiver performance promise.
     static final long WINDOW_MS=30L*60*1000, BYTE_LIMIT=16L*1024*1024;
     static final Pattern SESSION=Pattern.compile("export-[0-9A-Za-z_-]{1,80}");
-    static final Pattern PATH=Pattern.compile("/exports/(export-[0-9A-Za-z_-]{1,80})/(PocketTodo-notes\\.pdf|page-[0-9]{3}\\.png)");
+    static final Pattern PATH=Pattern.compile("/exports/(export-[0-9A-Za-z_-]{1,80})/(PocketTodo-notes\\.pdf|PocketTodo-notes\\.zip|page-[0-9]{3}\\.png)");
     private static final String MARKER=".share-ready";
     static void require(boolean v)throws IOException{if(!v)throw new IOException("Unavailable share output");}
     @Override public void attachInfo(Context c,ProviderInfo p){
@@ -55,13 +55,14 @@ public final class PagedShareProvider extends ContentProvider {
     static List<Uri> makeReady(Context c,FinalShareAttachments.Batch batch)throws IOException{
         Path root=outbox(c),dir=batch.directory;String session=dir.getFileName().toString();
         require(root.equals(dir.getParent())&&SESSION.matcher(session).matches()&&Files.isDirectory(dir,LinkOption.NOFOLLOW_LINKS));
-        boolean pdf="application/pdf".equals(batch.mime);int count=batch.files.size();require((pdf&&count==1)||("image/png".equals(batch.mime)&&count>0&&count<=64));
+        boolean pdf="application/pdf".equals(batch.mime),zip="application/zip".equals(batch.mime);int count=batch.files.size();require(((pdf||zip)&&count==1)||("image/png".equals(batch.mime)&&count>0&&count<=64));
         Path marker=dir.resolve(MARKER);List<Uri> uris=new ArrayList<>();long total=0;
         ByteArrayOutputStream sink=new ByteArrayOutputStream();
         try(DataOutputStream m=new DataOutputStream(sink)){
-            m.writeInt(1);m.writeLong(System.currentTimeMillis());m.writeLong(SystemClock.elapsedRealtime());m.writeBoolean(pdf);m.writeInt(count);
+            // Preserve version 1 PDF/PNG markers, including those already granted. Version 2 is exactly one Markdown ZIP.
+            m.writeInt(zip?2:1);m.writeLong(System.currentTimeMillis());m.writeLong(SystemClock.elapsedRealtime());if(!zip)m.writeBoolean(pdf);m.writeInt(count);
             for(int i=0;i<count;i++){
-                String n=name(pdf,i);Path f=dir.resolve(n);require(f.equals(batch.files.get(i))&&Files.isRegularFile(f,LinkOption.NOFOLLOW_LINKS));long b=Files.size(f);require(b>0&&b<=BYTE_LIMIT-total);total+=b;m.writeLong(b);
+                String n=zip?"PocketTodo-notes.zip":name(pdf,i);Path f=dir.resolve(n);require(f.equals(batch.files.get(i))&&Files.isRegularFile(f,LinkOption.NOFOLLOW_LINKS));long b=Files.size(f);require(b>0&&b<=BYTE_LIMIT-total);total+=b;m.writeLong(b);
                 uris.add(new Uri.Builder().scheme("content").authority(c.getPackageName()+".exports").appendPath("exports").appendPath(session).appendPath(n).build());
             }
         }
@@ -76,8 +77,8 @@ public final class PagedShareProvider extends ContentProvider {
         require(Files.isRegularFile(marker,LinkOption.NOFOLLOW_LINKS)&&Files.size(marker)<=600L);
         FileInfo selected=null;long total=0;
         try(DataInputStream in=new DataInputStream(Files.newInputStream(marker,LinkOption.NOFOLLOW_LINKS))){
-            require(in.readInt()==1&&alive(in.readLong(),in.readLong(),wall,mono));boolean pdf=in.readBoolean();int count=in.readInt();require(pdf?count==1:count>0&&count<=64);
-            for(int i=0;i<count;i++){long b=in.readLong();require(b>0&&b<=BYTE_LIMIT-total);total+=b;String n=name(pdf,i);if(n.equals(target))selected=new FileInfo(dir.resolve(n),n,pdf?"application/pdf":"image/png",b);}
+            int version=in.readInt();require((version==1||version==2)&&alive(in.readLong(),in.readLong(),wall,mono));boolean zip=version==2,pdf=!zip&&in.readBoolean();int count=in.readInt();require((pdf||zip)?count==1:count>0&&count<=64);
+            for(int i=0;i<count;i++){long b=in.readLong();require(b>0&&b<=BYTE_LIMIT-total);total+=b;String n=zip?"PocketTodo-notes.zip":name(pdf,i);if(n.equals(target))selected=new FileInfo(dir.resolve(n),n,zip?"application/zip":pdf?"application/pdf":"image/png",b);}
             require(in.read()==-1);
         }
         require(selected!=null&&Files.isRegularFile(selected.path,LinkOption.NOFOLLOW_LINKS)&&Files.size(selected.path)==selected.size);return selected;

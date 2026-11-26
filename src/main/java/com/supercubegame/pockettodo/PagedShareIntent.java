@@ -13,8 +13,8 @@ import java.util.Locale;
 final class PagedShareIntent {
     static Intent chooser(String packageName,String mime,List<Uri> ready) {
         if(packageName==null||packageName.isEmpty()||ready==null)throw new IllegalArgumentException("missing export identity");
-        boolean pdf="application/pdf".equals(mime);List<Uri> input=new ArrayList<>(ready);
-        if(input.isEmpty()||input.size()>64||(pdf&&input.size()!=1)||(!pdf&&!"image/png".equals(mime)))throw new IllegalArgumentException("invalid export MIME/count");
+        boolean pdf="application/pdf".equals(mime),zip="application/zip".equals(mime);List<Uri> input=new ArrayList<>(ready);
+        if(input.isEmpty()||input.size()>64||((pdf||zip)&&input.size()!=1)||(!pdf&&!zip&&!"image/png".equals(mime)))throw new IllegalArgumentException("invalid export MIME/count");
         String authority=packageName+".exports",session=null;ArrayList<Uri> streams=new ArrayList<>(input.size());
         for(int i=0;i<input.size();i++){
             Uri u=input.get(i);
@@ -22,7 +22,7 @@ final class PagedShareIntent {
             String raw=u.getEncodedPath();String[] s=raw==null?new String[0]:raw.split("/",-1);
             if(s.length!=4||!s[0].isEmpty()||!s[1].equals("exports")||!s[2].matches("export-[0-9A-Za-z_-]{1,80}"))throw new IllegalArgumentException("non-export path");
             if(i==0)session=s[2];
-            String name=pdf?"PocketTodo-notes.pdf":String.format(Locale.ROOT,"page-%03d.png",i+1);
+            String name=zip?"PocketTodo-notes.zip":pdf?"PocketTodo-notes.pdf":String.format(Locale.ROOT,"page-%03d.png",i+1);
             if(!session.equals(s[2])||!name.equals(s[3]))throw new IllegalArgumentException("wrong export session, document or order");
             streams.add(u);
         }

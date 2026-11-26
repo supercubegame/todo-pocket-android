@@ -367,12 +367,12 @@ public final class PagedContractTest {
   }
  }
  static void receiverUi(android.app.Instrumentation inst,File root,String filename,String nonce)throws Exception{
-  if(!nonce.matches("[0-9a-f]{32}")||!Arrays.asList("paged.pdf","picture.zip","paged.zip").contains(filename))throw new AssertionError("fixture identity");
-  boolean pdf=filename.endsWith(".pdf");Class<?> cl=Class.forName("com.supercubegame.pockettodo.MainActivity");
+  if(!nonce.matches("[0-9a-f]{32}")||!Arrays.asList("paged.pdf","picture.zip","paged.zip","share.zip").contains(filename))throw new AssertionError("fixture identity");
+  boolean pdf=filename.endsWith(".pdf"),md=filename.equals("share.zip");final int requested=md?0:pdf?1:2;Class<?> cl=Class.forName("com.supercubegame.pockettodo.MainActivity");
   android.app.Activity a=inst.startActivitySync(new android.content.Intent().setClassName(inst.getTargetContext(),cl.getName()).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
   try{awaitPreviewScreen(inst,a);byte[] current=state(inst,a),bytes=read(new File(root,filename));
    java.lang.reflect.Method preview=privateMethod(cl,"previewShare",byte[][].class,int.class);
-   final String label=pdf?"发送 PDF":"按页发送图片";
+   final String label=md?"发送 Markdown 图片包":pdf?"发送 PDF":"按页发送图片";
    final java.util.concurrent.atomic.AtomicInteger forbidden=new java.util.concurrent.atomic.AtomicInteger();
    android.app.Instrumentation.ActivityMonitor guard=new android.app.Instrumentation.ActivityMonitor(){
     @Override public android.app.Instrumentation.ActivityResult onStartActivity(android.content.Intent i){if(android.content.Intent.ACTION_CHOOSER.equals(i.getAction())){forbidden.incrementAndGet();return new android.app.Instrumentation.ActivityResult(android.app.Activity.RESULT_CANCELED,null);}return null;}};
@@ -380,14 +380,16 @@ public final class PagedContractTest {
    try{
     final byte[] stale=current.clone();stale[0]^=1;
     for(boolean expired:new boolean[]{false,true}){
-     onUi(inst,()->{preview.invoke(a,new byte[][]{expired?stale:current,bytes},pdf?1:2);android.app.AlertDialog d=(android.app.AlertDialog)((List<?>)field(a,"shareDialogs")).get(0);
+     onUi(inst,()->{preview.invoke(a,new byte[][]{expired?stale:current,bytes},requested);android.app.AlertDialog d=(android.app.AlertDialog)((List<?>)field(a,"shareDialogs")).get(0);
       android.view.View decor=d.getWindow().getDecorView();List<android.widget.CheckBox> cb=new ArrayList<>();collect(decor,new ArrayList<>(),cb);android.widget.Button send=findSend(decor,label);
       if(send==null||cb.size()!=1||cb.get(0).isChecked())throw new AssertionError("fresh consent");
       if(expired){cb.get(0).setChecked(true);send.performClick();}else{send.performClick();if(!d.isShowing())throw new AssertionError("unchecked send dismissed preview");d.cancel();}});
      awaitPreviewScreen(inst,a);if(expired)onUi(inst,()->{android.widget.TextView status=(android.widget.TextView)field(field(a,"screen"),"status");if(!status.getText().toString().contains("未能完成分享"))throw new AssertionError("stale ticket refusal missing");});if(forbidden.get()!=0)throw new AssertionError("cancelled or stale share launched chooser");
     }
+    if(md){onUi(inst,()->{preview.invoke(a,new byte[][]{current,bytes},0);android.app.AlertDialog d=(android.app.AlertDialog)((List<?>)field(a,"shareDialogs")).get(0);List<android.widget.CheckBox> cb=new ArrayList<>();collect(d.getWindow().getDecorView(),new ArrayList<>(),cb);if(cb.size()!=1||cb.get(0).isChecked())throw new AssertionError("fresh Markdown consent");cb.get(0).setChecked(true);d.cancel();});awaitPreviewScreen(inst,a);
+     if(forbidden.get()!=0||!Arrays.equals(current,state(inst,a)))throw new AssertionError("cancelled Markdown wrote or launched chooser");System.out.println("MARKDOWN_GUARDS "+nonce+" unchecked_cancel_stale_no_chooser");}
    }finally{inst.removeMonitor(guard);}
-   onUi(inst,()->{preview.invoke(a,new byte[][]{current,bytes},pdf?1:2);List<?> ds=(List<?>)field(a,"shareDialogs");if(ds.size()!=1)throw new AssertionError("one preview");android.app.AlertDialog d=(android.app.AlertDialog)ds.get(0);android.view.View decor=d.getWindow().getDecorView();List<android.widget.CheckBox> boxes=new ArrayList<>();collect(decor,new ArrayList<>(),boxes);android.widget.Button send=findSend(decor,pdf?"发送 PDF":"按页发送图片");if(boxes.size()!=1||boxes.get(0).isChecked()||send==null)throw new AssertionError("initial send controls");send.performClick();if(!d.isShowing())throw new AssertionError("unchecked send");boxes.get(0).setChecked(true);send.performClick();});
+   onUi(inst,()->{preview.invoke(a,new byte[][]{current,bytes},requested);List<?> ds=(List<?>)field(a,"shareDialogs");if(ds.size()!=1)throw new AssertionError("one preview");android.app.AlertDialog d=(android.app.AlertDialog)ds.get(0);android.view.View decor=d.getWindow().getDecorView();List<android.widget.CheckBox> boxes=new ArrayList<>();collect(decor,new ArrayList<>(),boxes);android.widget.Button send=findSend(decor,label);if(boxes.size()!=1||boxes.get(0).isChecked()||send==null)throw new AssertionError("initial send controls");send.performClick();if(!d.isShowing())throw new AssertionError("unchecked send");boxes.get(0).setChecked(true);send.performClick();});
    final boolean canReveal=DrawerReveal.fixtureScope(android.os.Build.VERSION.SDK_INT,inst.getTargetContext().getPackageName(),android.os.Build.HARDWARE,filename);
    long end=android.os.SystemClock.elapsedRealtime()+20000;boolean picked=false;ChooserChoice.Gate choice=new ChooserChoice.Gate();String last="not_observed";DrawerReveal reveal=new DrawerReveal();
    try{while(android.os.SystemClock.elapsedRealtime()<end&&!picked){
@@ -888,8 +890,8 @@ def paged_signing_selftest():
     print("PAGED_SIGNING_HOST " + str(len(labels)) + " controls " + str(killed) +
           " implementation mutants; 2 caller wiring checks PASS NOT_GRADLE_OR_ANDROID", flush=True)
 
-RECEIVER_JAVA = 'package com.supercubegame.pockettodo.exportprobe;\n\nimport android.app.Activity;\nimport android.content.ClipData;\nimport android.content.Intent;\nimport android.content.pm.PackageManager;\nimport android.database.Cursor;\nimport android.net.Uri;\nimport android.os.Bundle;\nimport android.os.Process;\nimport android.provider.OpenableColumns;\nimport org.json.JSONArray;\nimport org.json.JSONObject;\nimport java.io.*;\nimport java.nio.charset.StandardCharsets;\nimport java.nio.file.*;\nimport java.security.MessageDigest;\nimport java.util.*;\n\n/** Synthetic CI receiver only; never part of the production APK. Expected outputs are\n * seeded separately into this receiver\'s private directory by the fixture runner, not\n * provided in extras by the sender. Receipt contains metadata, not file contents. */\npublic final class ReceiverActivity extends Activity {\n    private static void need(boolean ok,String msg)throws IOException { if(!ok)throw new IOException(msg); }\n    private static String hex(byte[] data){StringBuilder s=new StringBuilder();for(byte b:data)s.append(String.format(Locale.ROOT,"%02x",b&255));return s.toString();}\n    @Override public void onCreate(Bundle saved){super.onCreate(saved);\n        final Intent received=getIntent();final Path root=getFilesDir().toPath(), result=root.resolve("receipt.json");\n        new Thread(()->{JSONObject out=new JSONObject();boolean ok=false;\n            try {\n                need(!Files.exists(result),"old receipt");Path ready=root.resolve("expected.json");\n                need(Files.isRegularFile(ready) && Files.size(ready)>0 && Files.size(ready)<65536,"missing bounded receiver-side expectation");\n                JSONObject e=new JSONObject(new String(Files.readAllBytes(ready),StandardCharsets.UTF_8));\n                String pkg=e.getString("sender"), mime=e.getString("mime"),nonce=e.getString("nonce");\n                need(e.getInt("api")==android.os.Build.VERSION.SDK_INT && nonce.matches("[0-9a-f]{32}") && e.getString("source").matches("[0-9a-f]{40}") && e.getString("run").matches("[0-9]+"),"wrong acceptance identity");\n                out.put("source",e.getString("source"));out.put("run",e.getString("run"));out.put("nonce",nonce);out.put("api",android.os.Build.VERSION.SDK_INT);\n                // The fixture runner records the sender UID independently when seeding expected.json.\n                need(Process.myUid()!=e.getInt("sender_uid"),"receiver must have a different UID");\n                need(("application/pdf".equals(mime)||"image/png".equals(mime)) && mime.equals(received.getType()),"wrong MIME");\n                JSONArray items=e.getJSONArray("files");int count=items.length();need(count>=1&&count<=64&&(!"application/pdf".equals(mime)||count==1),"invalid count");\n                boolean single=count==1;need((single?Intent.ACTION_SEND:Intent.ACTION_SEND_MULTIPLE).equals(received.getAction()),"wrong action");\n                int flags=received.getFlags();need((flags&Intent.FLAG_GRANT_READ_URI_PERMISSION)!=0 && (flags&(Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION|Intent.FLAG_GRANT_PREFIX_URI_PERMISSION))==0,"not a temporary exact read grant");\n                List<Uri> uris=single?Collections.singletonList((Uri)received.getParcelableExtra(Intent.EXTRA_STREAM)):received.getParcelableArrayListExtra(Intent.EXTRA_STREAM);\n                ClipData clip=received.getClipData();need(uris!=null && uris.size()==count && clip!=null && clip.getItemCount()==count,"stream/clip count");\n                JSONArray observed=new JSONArray();long total=0;\n                for(int i=0;i<count;i++){\n                    JSONObject w=items.getJSONObject(i);Uri uri=uris.get(i);\n                    need(uri!=null && uri.equals(clip.getItemAt(i).getUri()) && "content".equals(uri.getScheme()) && (pkg+".exports").equals(uri.getAuthority()),"unexpected stream or clip");\n                    need(checkUriPermission(uri,Process.myPid(),Process.myUid(),Intent.FLAG_GRANT_READ_URI_PERMISSION)==PackageManager.PERMISSION_GRANTED && checkUriPermission(uri,Process.myPid(),Process.myUid(),Intent.FLAG_GRANT_WRITE_URI_PERMISSION)!=PackageManager.PERMISSION_GRANTED,"wrong actual grant");\n                    Uri sibling=uri.buildUpon().appendPath("unlisted-synthetic").build();\n                    need(checkUriPermission(sibling,Process.myPid(),Process.myUid(),Intent.FLAG_GRANT_READ_URI_PERMISSION)!=PackageManager.PERMISSION_GRANTED,"unexpected sibling grant");\n                    need(mime.equals(getContentResolver().getType(uri)),"provider MIME mismatch");String canonical="application/pdf".equals(mime)?"PocketTodo-notes.pdf":String.format(Locale.ROOT,"page-%03d.png",i+1);\n                    need(canonical.equals(w.getString("name")),"bad independent name");long bytes=w.getLong("bytes");need(bytes>0&&bytes<=16777216-total,"invalid expected size");\n                    try(Cursor c=getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME,OpenableColumns.SIZE},null,null,null)){\n                        need(c!=null&&c.moveToFirst()&&canonical.equals(c.getString(0))&&c.getLong(1)==bytes&&!c.moveToNext(),"provider name or size mismatch");}\n                    MessageDigest hash=MessageDigest.getInstance("SHA-256");long read=0;\n                    try(InputStream in=getContentResolver().openInputStream(uri)){need(in!=null,"receiver could not open stream");byte[] buf=new byte[16384];int n;while((n=in.read(buf))!=-1){need(n>0&&n<=bytes-read,"receiver length mismatch");hash.update(buf,0,n);read+=n;}}\n                    String sha=hex(hash.digest());need(read==bytes && sha.equals(w.getString("sha256")),"receiver byte identity mismatch");total+=read;\n                    observed.put(new JSONObject().put("name",canonical).put("bytes",read).put("sha256",sha));\n                }\n                out.put("observed",observed);out.put("scope","SYNTHETIC_DISTINCT_UID_RECEIVER_NOT_REAL_APP_UX");out.put("status","PASS");ok=true;\n            } catch(Exception failure){try{out.put("status","FAIL");out.put("error",failure.getClass().getSimpleName()+": "+failure.getMessage());}catch(Exception ignored){}}\n            // Exclusive create; even on duplicate invocation the original first receipt survives.\n            // The host reads only after the independent checksum completion marker exists.\n            try {byte[] body=out.toString().getBytes(StandardCharsets.UTF_8);\n                Files.write(result,body,StandardOpenOption.CREATE_NEW,StandardOpenOption.WRITE);\n                String checksum=hex(MessageDigest.getInstance("SHA-256").digest(body));\n                Files.write(root.resolve("receipt.complete"),checksum.getBytes(StandardCharsets.US_ASCII),StandardOpenOption.CREATE_NEW,StandardOpenOption.WRITE);\n            }catch(Exception publication){ok=false;}\n            final boolean success=ok;runOnUiThread(()->{setResult(success?RESULT_OK:RESULT_CANCELED);finish();});\n        },"read-export-probe").start();\n    }\n}\n'
-RECEIVER_MANIFEST = '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.supercubegame.pockettodo.exportprobe">\n  <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34" />\n  <application android:label="PocketTodo CI Receiver" android:allowBackup="false" android:debuggable="true">\n    <activity android:name=".ReceiverActivity" android:exported="true">\n      <intent-filter><action android:name="android.intent.action.SEND"/><category android:name="android.intent.category.DEFAULT"/><data android:mimeType="application/pdf"/><data android:mimeType="image/png"/></intent-filter>\n      <intent-filter><action android:name="android.intent.action.SEND_MULTIPLE"/><category android:name="android.intent.category.DEFAULT"/><data android:mimeType="image/png"/></intent-filter>\n    </activity>\n  </application>\n</manifest>\n'
+RECEIVER_JAVA = 'package com.supercubegame.pockettodo.exportprobe;\n\nimport android.app.Activity;\nimport android.content.ClipData;\nimport android.content.Intent;\nimport android.content.pm.PackageManager;\nimport android.database.Cursor;\nimport android.net.Uri;\nimport android.os.Bundle;\nimport android.os.Process;\nimport android.provider.OpenableColumns;\nimport org.json.JSONArray;\nimport org.json.JSONObject;\nimport java.io.*;\nimport java.nio.charset.StandardCharsets;\nimport java.nio.file.*;\nimport java.security.MessageDigest;\nimport java.util.*;\n\n/** Synthetic CI receiver only; never part of the production APK. Expected outputs are\n * seeded separately into this receiver\'s private directory by the fixture runner, not\n * provided in extras by the sender. Receipt contains metadata, not file contents. */\npublic final class ReceiverActivity extends Activity {\n    private static void need(boolean ok,String msg)throws IOException { if(!ok)throw new IOException(msg); }\n    private static String hex(byte[] data){StringBuilder s=new StringBuilder();for(byte b:data)s.append(String.format(Locale.ROOT,"%02x",b&255));return s.toString();}\n    private static String sum(byte[] b)throws Exception{return hex(MessageDigest.getInstance("SHA-256").digest(b));}\n    /** This oracle is for the small public CI selection only. It is not present in the product APK. */\n    static JSONObject inspectMarkdown(byte[] body,JSONObject want)throws Exception{\n        need(body.length>0&&body.length<=65536,"unexpected CI ZIP budget");byte[][] values=new byte[2][];String[] names={"notes.md","assets/image-1.png"};\n        try(java.util.zip.ZipInputStream in=new java.util.zip.ZipInputStream(new ByteArrayInputStream(body))){\n            for(int i=0;i<names.length;i++){\n                java.util.zip.ZipEntry e=in.getNextEntry();need(e!=null&&!e.isDirectory()&&names[i].equals(e.getName()),"selected member order");\n                ByteArrayOutputStream w=new ByteArrayOutputStream();byte[] buf=new byte[2048];int n;while((n=in.read(buf))!=-1){need(n>0&&n<=65536-w.size(),"CI member exceeded budget");w.write(buf,0,n);}in.closeEntry();values[i]=w.toByteArray();\n            }need(in.getNextEntry()==null,"extra CI member");\n        }\n        String md=StandardCharsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(values[0])).toString();String ref="![Image](assets/image-1.png)";\n        int refs=md.split(java.util.regex.Pattern.quote(ref),-1).length-1;need(refs==2&&!md.contains("PRIVATE_NOTE_SECRET")&&!md.contains("UNSELECTED_ORIGINAL_SECRET"),"wrong referenced selection");\n        android.graphics.Bitmap pic=android.graphics.BitmapFactory.decodeByteArray(values[1],0,values[1].length);\n        need(pic!=null,"invalid received PNG");int w,h;byte[] rgba=new byte[48];try{\n            w=pic.getWidth();h=pic.getHeight();need(w==4&&h==3,"wrong derivative geometry");int[] pixels=new int[12];pic.getPixels(pixels,0,4,0,0,4,3);\n            for(int i=0;i<pixels.length;i++){int c=pixels[i];rgba[4*i]=(byte)(c>>>16);rgba[4*i+1]=(byte)(c>>>8);rgba[4*i+2]=(byte)c;rgba[4*i+3]=(byte)(c>>>24);}\n        }finally{pic.recycle();}\n        JSONObject seen=new JSONObject().put("members",new JSONArray().put(names[0]).put(names[1])).put("markdown_bytes",values[0].length).put("markdown_sha256",sum(values[0])).put("asset_sha256",sum(values[1])).put("pixel_sha256",sum(rgba)).put("width",w).put("height",h).put("references",refs);\n        for(String k:new String[]{"markdown_sha256","asset_sha256","pixel_sha256"})need(seen.getString(k).equals(want.getString(k)),"independent "+k);\n        for(String k:new String[]{"markdown_bytes","width","height","references"})need(seen.getInt(k)==want.getInt(k),"independent "+k);\n        need(seen.getJSONArray("members").toString().equals(want.getJSONArray("members").toString()),"independent members");return seen;\n    }\n    @Override public void onCreate(Bundle saved){super.onCreate(saved);\n        final Intent received=getIntent();final Path root=getFilesDir().toPath(), result=root.resolve("receipt.json");\n        new Thread(()->{JSONObject out=new JSONObject();boolean ok=false;\n            try {\n                need(!Files.exists(result),"old receipt");Path ready=root.resolve("expected.json");\n                need(Files.isRegularFile(ready) && Files.size(ready)>0 && Files.size(ready)<65536,"missing bounded receiver-side expectation");\n                JSONObject e=new JSONObject(new String(Files.readAllBytes(ready),StandardCharsets.UTF_8));\n                String pkg=e.getString("sender"), mime=e.getString("mime"),nonce=e.getString("nonce");\n                need(e.getInt("api")==android.os.Build.VERSION.SDK_INT && nonce.matches("[0-9a-f]{32}") && e.getString("source").matches("[0-9a-f]{40}") && e.getString("run").matches("[0-9]+"),"wrong acceptance identity");\n                out.put("source",e.getString("source"));out.put("run",e.getString("run"));out.put("nonce",nonce);out.put("api",android.os.Build.VERSION.SDK_INT);\n                // The fixture runner records the sender UID independently when seeding expected.json.\n                need(Process.myUid()!=e.getInt("sender_uid"),"receiver must have a different UID");\n                boolean md="application/zip".equals(mime);need((md||"application/pdf".equals(mime)||"image/png".equals(mime)) && mime.equals(received.getType()),"wrong MIME");\n                JSONArray items=e.getJSONArray("files");int count=items.length();need(count>=1&&count<=64&&((!md&&!"application/pdf".equals(mime))||count==1),"invalid count");\n                boolean single=count==1;need((single?Intent.ACTION_SEND:Intent.ACTION_SEND_MULTIPLE).equals(received.getAction()),"wrong action");\n                int flags=received.getFlags();need((flags&Intent.FLAG_GRANT_READ_URI_PERMISSION)!=0 && (flags&(Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION|Intent.FLAG_GRANT_PREFIX_URI_PERMISSION))==0,"not a temporary exact read grant");\n                List<Uri> uris=single?Collections.singletonList((Uri)received.getParcelableExtra(Intent.EXTRA_STREAM)):received.getParcelableArrayListExtra(Intent.EXTRA_STREAM);\n                ClipData clip=received.getClipData();need(uris!=null && uris.size()==count && clip!=null && clip.getItemCount()==count,"stream/clip count");\n                JSONArray observed=new JSONArray();long total=0;\n                for(int i=0;i<count;i++){\n                    JSONObject w=items.getJSONObject(i);Uri uri=uris.get(i);\n                    need(uri!=null && uri.equals(clip.getItemAt(i).getUri()) && "content".equals(uri.getScheme()) && (pkg+".exports").equals(uri.getAuthority()),"unexpected stream or clip");\n                    need(checkUriPermission(uri,Process.myPid(),Process.myUid(),Intent.FLAG_GRANT_READ_URI_PERMISSION)==PackageManager.PERMISSION_GRANTED && checkUriPermission(uri,Process.myPid(),Process.myUid(),Intent.FLAG_GRANT_WRITE_URI_PERMISSION)!=PackageManager.PERMISSION_GRANTED,"wrong actual grant");\n                    Uri sibling=uri.buildUpon().appendPath("unlisted-synthetic").build();\n                    need(checkUriPermission(sibling,Process.myPid(),Process.myUid(),Intent.FLAG_GRANT_READ_URI_PERMISSION)!=PackageManager.PERMISSION_GRANTED,"unexpected sibling grant");\n                    need(mime.equals(getContentResolver().getType(uri)),"provider MIME mismatch");String canonical=md?"PocketTodo-notes.zip":"application/pdf".equals(mime)?"PocketTodo-notes.pdf":String.format(Locale.ROOT,"page-%03d.png",i+1);\n                    need(canonical.equals(w.getString("name")),"bad independent name");long bytes=w.getLong("bytes");need(bytes>0&&bytes<=16777216-total,"invalid expected size");\n                    try(Cursor c=getContentResolver().query(uri,new String[]{OpenableColumns.DISPLAY_NAME,OpenableColumns.SIZE},null,null,null)){\n                        need(c!=null&&c.moveToFirst()&&canonical.equals(c.getString(0))&&c.getLong(1)==bytes&&!c.moveToNext(),"provider name or size mismatch");}\n                    if(md){need(bytes<=65536&&uri.getEncodedPath().matches("/exports/export-[0-9A-Za-z_-]{1,80}/PocketTodo-notes\\\\.zip")&&uri.getEncodedFragment()==null&&uri.getEncodedQuery()==null,"exact Markdown stream");}\n                    ByteArrayOutputStream captured=md?new ByteArrayOutputStream():null;MessageDigest hash=MessageDigest.getInstance("SHA-256");long read=0;\n                    try(InputStream in=getContentResolver().openInputStream(uri)){need(in!=null,"receiver could not open stream");byte[] buf=new byte[16384];int n;while((n=in.read(buf))!=-1){need(n>0&&n<=bytes-read,"receiver length mismatch");hash.update(buf,0,n);if(captured!=null)captured.write(buf,0,n);read+=n;}}\n                    String sha=hex(hash.digest());need(read==bytes && sha.equals(w.getString("sha256")),"receiver byte identity mismatch");total+=read;\n                    if(md){out.put("markdown_archive",inspectMarkdown(captured.toByteArray(),e.getJSONObject("markdown_archive")));out.put("run_attempt",e.getString("run_attempt"));out.put("receiver_uid",Process.myUid());out.put("action",received.getAction());out.put("mime",received.getType());out.put("readonly_exact",true);}\n                    observed.put(new JSONObject().put("name",canonical).put("bytes",read).put("sha256",sha));\n                }\n                out.put("observed",observed);out.put("scope","SYNTHETIC_DISTINCT_UID_RECEIVER_NOT_REAL_APP_UX");out.put("status","PASS");ok=true;\n            } catch(Exception failure){try{out.put("status","FAIL");out.put("error",failure.getClass().getSimpleName()+": "+failure.getMessage());}catch(Exception ignored){}}\n            // Exclusive create; even on duplicate invocation the original first receipt survives.\n            // The host reads only after the independent checksum completion marker exists.\n            try {byte[] body=out.toString().getBytes(StandardCharsets.UTF_8);\n                Files.write(result,body,StandardOpenOption.CREATE_NEW,StandardOpenOption.WRITE);\n                String checksum=hex(MessageDigest.getInstance("SHA-256").digest(body));\n                Files.write(root.resolve("receipt.complete"),checksum.getBytes(StandardCharsets.US_ASCII),StandardOpenOption.CREATE_NEW,StandardOpenOption.WRITE);\n            }catch(Exception publication){ok=false;}\n            final boolean success=ok;runOnUiThread(()->{setResult(success?RESULT_OK:RESULT_CANCELED);finish();});\n        },"read-export-probe").start();\n    }\n}\n'
+RECEIVER_MANIFEST = '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.supercubegame.pockettodo.exportprobe">\n  <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34" />\n  <application android:label="PocketTodo CI Receiver" android:allowBackup="false" android:debuggable="true">\n    <activity android:name=".ReceiverActivity" android:exported="true">\n      <intent-filter><action android:name="android.intent.action.SEND"/><category android:name="android.intent.category.DEFAULT"/><data android:mimeType="application/pdf"/><data android:mimeType="application/zip"/><data android:mimeType="image/png"/></intent-filter>\n      <intent-filter><action android:name="android.intent.action.SEND_MULTIPLE"/><category android:name="android.intent.category.DEFAULT"/><data android:mimeType="image/png"/></intent-filter>\n    </activity>\n  </application>\n</manifest>\n'
 
 def publish_receiver_ack(marker,write_verified,rename):
     assert re.fullmatch(r'cache/paged-contract-[0-9]+/ack-[a-f0-9]{32}',marker), 'unknown sender ack path'
@@ -1118,7 +1120,7 @@ def failure_evidence_selftest():
 
 def consent_checkbox(nodes,kind,package):
     if kind not in ("MARKDOWN","PDF","PNG_ZIP"):raise ValueError("unknown preview format")
-    expected="我已核对内容与图片，可保存此包" if kind=="MARKDOWN" else "我已核对预览，接下来由我选择保存或发送"
+    expected="我已核对内容与图片，接下来由我选择保存或发送" if kind=="MARKDOWN" else "我已核对预览，接下来由我选择保存或发送"
     matches=[n for n in nodes if n.get("package")==package and n.get("class")=="android.widget.CheckBox"]
     if not matches:return None
     assert len(matches)==1,"ambiguous preview checkbox"
@@ -1127,7 +1129,7 @@ def consent_checkbox(nodes,kind,package):
     return n
 
 def consent_copy_selftest():
-    kind=("MARKDOWN","PDF","PNG_ZIP");copy=["我已核对内容与图片，可保存此包","我已核对预览，接下来由我选择保存或发送","我已核对预览，接下来由我选择保存或发送"]
+    kind=("MARKDOWN","PDF","PNG_ZIP");copy=["我已核对内容与图片，接下来由我选择保存或发送","我已核对预览，接下来由我选择保存或发送","我已核对预览，接下来由我选择保存或发送"]
     path=Path(__file__).resolve().parents[1]/"src/main/java/com/supercubegame/pockettodo/MainActivity.java"
     method=path.read_text().split("private void previewShare(byte[][] prepared,int format){",1)[1].split("private void finishShare(",1)[0]
     expression=re.findall(r'consent\.setText\(([^;]+)\);body\.addView\(consent\);',method);assert len(expression)==1
@@ -1198,6 +1200,58 @@ def note_pdf_miss(output,filename,prefix,api,product,receiver,probe=pdf_route_af
     except Exception:r={'scope':'unavailable'}  # Keep the original exception, never substitute diagnostic success.
     print('RECEIVER_ROUTE_AFTER_MISS '+json.dumps(r,sort_keys=True),flush=True)
 
+MD_PROBE_TEXT=("# Pocket Todo\n\nVisible &#33;&#91;bad&#93;&#40;&#46;&#46;&#47;original&#46;png&#41;\n"
+               "&lt;img src&#61;&#34;secret&#34;&gt; &amp; 中文\n\n![Image](assets/image-1.png)\n\nSelected caption\n\n"
+               "![Image](assets/image-1.png)\n\nRepeated caption\n\n").encode('utf-8')
+MD_PROBE_ARGB=(0xff0a141e,0xff000000,0xff000000,0xff0d1a27,0xff112233,0xff000000,0xff000000,0xff000000,0xff183048,0xff19324b,0xff000000,0xff000000)
+def markdown_probe_expected(raw,verified_png):
+    """Exact known public selection, not the sender's description of its own outgoing Intent."""
+    import io
+    assert 0<len(raw)<=65536 and raw[-22:-18]==b'PK\x05\x06' and raw[-2:]==b'\0\0','noncanonical CI archive end'
+    with zipfile.ZipFile(io.BytesIO(raw)) as z:
+        names=z.namelist();assert names==['notes.md','assets/image-1.png'] and z.comment==b'','selected Markdown members'
+        for e in z.infolist():assert not e.is_dir() and e.comment==b'' and 0<e.file_size<=65536
+        doc=z.read(names[0]);png=z.read(names[1]);assert doc==MD_PROBE_TEXT,'exact selected text, literal escaping and ordered duplicate references';assert png==verified_png and png.startswith(b'\x89PNG\r\n\x1a\n'),'independently decoded derivative bytes'
+    rgba=bytes(q for c in MD_PROBE_ARGB for q in ((c>>16)&255,(c>>8)&255,c&255,(c>>24)&255));sha=lambda b:hashlib.sha256(b).hexdigest()
+    return dict(members=names,markdown_bytes=len(doc),markdown_sha256=sha(doc),asset_sha256=sha(png),pixel_sha256=sha(rgba),width=4,height=3,references=2)
+
+def markdown_receiver_selftest():
+    # Exercise the real receiver-side expectation reader and report verifier. Android pixel decoding is a separate device obligation.
+    import io,copy,base64
+    known=base64.b64decode('iVBORw0KGgo=')+b'fixture-already-decoded-by-independent-codec'
+    def make(members):
+        b=io.BytesIO()
+        with zipfile.ZipFile(b,'w',zipfile.ZIP_DEFLATED) as z:
+            for k,v in members:z.writestr(k,v)
+        return b.getvalue()
+    parts=[('notes.md',MD_PROBE_TEXT),('assets/image-1.png',known)];wire=make(parts);doc=markdown_probe_expected(wire,known)
+    e=dict(nonce='1'*32,api=26,source='a'*40,run='123',run_attempt='1',mime='application/zip',sender_uid=10077,markdown_archive=doc,files=[dict(name='PocketTodo-notes.zip',bytes=len(wire),sha256=hashlib.sha256(wire).hexdigest())]);r={k:e[k] for k in ('nonce','api','source','run','run_attempt')};r.update(status='PASS',scope='SYNTHETIC_DISTINCT_UID_RECEIVER_NOT_REAL_APP_UX',observed=copy.deepcopy(e['files']),receiver_uid=10079,mime='application/zip',action='android.intent.action.SEND',readonly_exact=True,markdown_archive=copy.deepcopy(doc))
+    assert markdown_receive_check(r,e,10077,10079)['receiver_uid']==10079
+    denies=0
+    for items in [[(parts[0][0],MD_PROBE_TEXT+b'Unselected'),parts[1]],[(parts[0][0],MD_PROBE_TEXT.replace(b'Repeated caption',b'PRIVATE_NOTE_SECRET')),parts[1]],[parts[1],parts[0]],parts+[('extra',b'public fixture')],[parts[0],(parts[1][0],known+b'changed')],parts[:1]]:
+        try:markdown_probe_expected(make(items),known)
+        except AssertionError:denies+=1
+        else:raise AssertionError('unexpected ZIP content was accepted')
+    for k,val in [('nonce','2'*32),('api',34),('source','b'*40),('run','456'),('run_attempt','2'),('status','FAIL'),('scope','HOST'),('receiver_uid',10077),('action','android.intent.action.SEND_MULTIPLE'),('mime','image/png'),('readonly_exact',1),('observed',[]),('observed',r['observed']*2),('observed',[dict(r['observed'][0],sha256='d'*64)]),('markdown_archive',dict(doc,pixel_sha256='e'*64)),('markdown_archive',dict(doc,members=['notes.md'])),('markdown_archive',dict(doc,references=1))]:
+        altered=copy.deepcopy(r);altered[k]=val
+        try:markdown_receive_check(altered,e,10077,10079)
+        except AssertionError:denies+=1
+        else:raise AssertionError('accepted an unrelated or incomplete receipt: '+k)
+    for sender,receiver in [(10077,10077),(999,10079),(10077,0)]:
+        try:markdown_receive_check(r,e,sender,receiver)
+        except AssertionError:denies+=1
+        else:raise AssertionError('unusable receiver identity')
+    assert denies==26;print('MD_RECEIPT_HOST exact document and receipt positives; 26 refused; synthetic bytes not Android image decoding',flush=True)
+
+def markdown_receive_check(r,e,sender_uid,receiver_uid):
+    assert type(sender_uid) is int and type(receiver_uid) is int and sender_uid>=10000 and receiver_uid>=10000 and sender_uid!=receiver_uid
+    assert r['status']=='PASS' and all(r[k]==e[k] for k in ('nonce','api','source','run','run_attempt'))
+    assert r['scope']=='SYNTHETIC_DISTINCT_UID_RECEIVER_NOT_REAL_APP_UX' and r['observed']==e['files'] and len(r['observed'])==1
+    assert e['mime']=='application/zip' and r['observed'][0]['name']=='PocketTodo-notes.zip' and e['sender_uid']==sender_uid
+    assert r['receiver_uid']==receiver_uid and r['mime']=='application/zip' and r['action']=='android.intent.action.SEND' and r['readonly_exact'] is True
+    assert r['markdown_archive']==e['markdown_archive'] and type(r['markdown_archive']['markdown_bytes']) is int
+    return dict(r,sender_uid=sender_uid,receiver_uid=receiver_uid)
+
 def test_receiver_cases(folder,prefix,gate,work,root,args,component,cache):
     """Only the generated receiver on a disposable emulator. No user media, implicit recipient or phone."""
     import secrets,time,io
@@ -1215,15 +1269,18 @@ def test_receiver_cases(folder,prefix,gate,work,root,args,component,cache):
         cmd='run-as '+shlex.quote(p)+' sh -c '+shlex.quote('umask 077; cat > '+shlex.quote(path));subprocess.run([*prefix,'shell',cmd],input=raw,check=True,timeout=20)
         assert read(p,path)==raw
     def read(p,path):return subprocess.check_output([*prefix,'exec-out','run-as',p,'cat',path],timeout=20)
-    receipts=[];shell('run-as',pkg,'mkdir','-p','files')
-    for filename in ('paged.pdf','picture.zip','paged.zip'):
+    receipts=[];markdown=None;shell('run-as',pkg,'mkdir','-p','files')
+    for filename in ('paged.pdf','picture.zip','paged.zip','share.zip'):
         raw=(folder/filename).read_bytes(); pdf=filename.endswith('.pdf'); nonce=secrets.token_hex(16)
-        if pdf:parts=[('PocketTodo-notes.pdf',raw)]
+        md=filename=='share.zip'
+        if md:parts=[('PocketTodo-notes.zip',raw)]
+        elif pdf:parts=[('PocketTodo-notes.pdf',raw)]
         else:
             with zipfile.ZipFile(io.BytesIO(raw)) as z:
                 names=z.namelist();assert names==['pages/page-%03d.png'%i for i in range(1,1+len(names))];parts=[(n.split('/')[1],z.read(n)) for n in names]
         assert len(parts)==(3 if filename=='paged.zip' else 1)
-        e={'nonce':nonce,'source':os.environ['GITHUB_SHA'],'run':os.environ['GITHUB_RUN_ID'],'api':gate.API,'sender':gate.PKG,'sender_uid':sender_uid,'mime':'application/pdf' if pdf else 'image/png','files':[dict(name=n,bytes=len(v),sha256=hashlib.sha256(v).hexdigest()) for n,v in parts]}
+        e={'nonce':nonce,'source':os.environ['GITHUB_SHA'],'run':os.environ['GITHUB_RUN_ID'],'api':gate.API,'sender':gate.PKG,'sender_uid':sender_uid,'mime':'application/zip' if md else 'application/pdf' if pdf else 'image/png','files':[dict(name=n,bytes=len(v),sha256=hashlib.sha256(v).hexdigest()) for n,v in parts]}
+        if md:e.update(run_attempt=os.environ['GITHUB_RUN_ATTEMPT'],markdown_archive=markdown_probe_expected(raw,(folder/'share-derived.png').read_bytes()))
         for n in ('receipt.complete','receipt.json'):
             shell('run-as',pkg,'rm','-f','files/'+n)
         seed(pkg,'files/expected.json',json.dumps(e).encode());marker=cache+'/ack-'+nonce
@@ -1239,17 +1296,23 @@ def test_receiver_cases(folder,prefix,gate,work,root,args,component,cache):
                     time.sleep(.3)
                 actual=read(pkg,'files/receipt.json');assert read(pkg,'files/receipt.complete')==hashlib.sha256(actual).hexdigest().encode();r=json.loads(actual)
                 assert r.get('status')=='PASS' and all(r[k]==e[k] for k in ('nonce','source','run','api')) and r['observed']==e['files'],r
-                print('RECEIVER_BYTES_VERIFIED '+json.dumps(dict(r,sender_uid=sender_uid,receiver_uid=receiver_uid)),flush=True)
+                if md:markdown=markdown_receive_check(r,e,sender_uid,receiver_uid)
+                else:print('RECEIVER_BYTES_VERIFIED '+json.dumps(dict(r,sender_uid=sender_uid,receiver_uid=receiver_uid)),flush=True)
                 publish_receiver_ack(marker,lambda temp:seed(gate.PKG,temp,b'checked'),lambda temp,final:shell('run-as',gate.PKG,'mv',temp,final))
                 assert read(gate.PKG,marker)==b'checked', 'sender ack post-rename readback'
                 assert proc.wait(timeout=20)==0
                 out.seek(0);output=out.read().decode(errors='replace');assert output.count('CHOOSER_TILE_CLICK '+nonce+' ')==1 and 'SEND_PROBE '+nonce in output and 'INSTRUMENTATION_CODE: -1' in output and 'PAGED_FAILED' not in output,output
-                receipts.append(dict(r,sender_uid=sender_uid,receiver_uid=receiver_uid))
+                if md:
+                    assert output.count('MARKDOWN_GUARDS '+nonce+' unchecked_cancel_stale_no_chooser')==1
+                    markdown.update(preview_guards='UNCHECKED_CANCEL_STALE_NO_CHOOSER',completion='SENDER_ACK_EXACT_AND_TERMINAL_INSTRUMENTATION')
+                    Path('markdown-system-send.json').write_text(json.dumps(markdown,indent=2)+'\n');print('MARKDOWN_RECEIVER_BYTES_VERIFIED '+json.dumps(markdown),flush=True)
+                else:receipts.append(dict(r,sender_uid=sender_uid,receiver_uid=receiver_uid))
             finally:
                 if proc.poll() is None:proc.kill();proc.wait()
                 out.seek(0);output=out.read()[-4000:].decode(errors='replace');print('RECEIVER_INSTRUMENTATION',filename,output,flush=True)
                 note_pdf_miss(output,filename,prefix,gate.API,gate.PKG,pkg)
-    return receipts
+    assert len(receipts)==3 and markdown is not None
+    return receipts,markdown
 
 
 def instrumentation(folder,prefix,gate):
@@ -1268,7 +1331,7 @@ def instrumentation(folder,prefix,gate):
     nonce="paged-contract-"+os.environ["GITHUB_RUN_ID"]
     cache="cache/"+nonce
     run([*prefix,"shell","run-as",gate.PKG,"mkdir",cache])
-    for name in ("derived.png","over.png"):
+    for name in ("derived.png","over.png","share.zip"):
         data=(folder/name).read_bytes()
         command="run-as "+shlex.quote(gate.PKG)+" sh -c "+shlex.quote("umask 077; cat > "+cache+"/"+name)
         subprocess.run([*prefix,"shell",command],input=data,check=True,timeout=30)
@@ -1323,7 +1386,7 @@ def instrumentation(folder,prefix,gate):
             data=subprocess.check_output([*prefix,"exec-out","run-as",gate.PKG,"cat",cache+"/unmarked.pdf"],timeout=30)
             assert 0<len(data)<=16777216
             (folder/"unmarked.pdf").write_bytes(data)
-            receiver_receipts=test_receiver_cases(folder,prefix,gate,work,root,args,component,cache)
+            receiver_receipts,markdown_receipt=test_receiver_cases(folder,prefix,gate,work,root,args,component,cache)
             assert installed_app()==before
         finally:
             assert backup.read_bytes()==saved
@@ -1331,7 +1394,7 @@ def instrumentation(folder,prefix,gate):
             test.write_bytes(saved)
             require_registration(prefix[0],gate,"paged-restored","V12DeviceTest")
             assert app.read_bytes()==before and test.read_bytes()==saved
-    return labels,{"runtime":"TARGET_APP_INSTRUMENTATION","diagnostic_failure_rejected":True,"external_receiver":receiver_receipts,
+    return labels,{"runtime":"TARGET_APP_INSTRUMENTATION","diagnostic_failure_rejected":True,"external_receiver":receiver_receipts,"markdown_system_send":markdown_receipt,
                    "product_apk_sha256":hashlib.sha256(before).hexdigest(),
                    "product_apk_bytes":len(before),
                    "installed_product_readback":"EXACT_BEFORE_AND_AFTER",
@@ -1515,7 +1578,66 @@ def share_png_fixture_selftest():
     return {"positive":2,"negative":len(cases)}
 
 
+MD_WIRE_HOST = r'''
+package com.supercubegame.pockettodo;
+import android.content.*;import android.net.Uri;import java.util.*;import java.util.zip.*;import java.io.*;import java.nio.file.*;import java.nio.charset.StandardCharsets;import java.security.*;import javax.imageio.ImageIO;
+public class MarkdownWireHost{
+ static final String DOC="PocketTodo-notes.zip",ZIP="application/zip",START="# Pocket Todo\n\n",REF="![Image](assets/image-1.png)\n\n",PKG="com.example.fixture";static int n;static Path root;static Context ctx;
+ interface Op{void go()throws Exception;}static void ok(boolean v,String s){if(!v)throw new AssertionError(s);n++;System.out.println("MD_HOST "+s);}
+ static void reject(Op o,String stage,String name)throws Exception{try{o.go();}catch(IOException|IllegalArgumentException e){if(!stage.isEmpty()&&!String.valueOf(e.getMessage()).contains(stage))throw new AssertionError("wrong cause "+name,e);ok(true,name);return;}throw new AssertionError("accepted "+name);}
+ static byte[] text(String s){return s.getBytes(StandardCharsets.UTF_8);}static byte[] png(int rgb)throws Exception{var b=new java.awt.image.BufferedImage(4,3,java.awt.image.BufferedImage.TYPE_INT_ARGB);for(int y=0;y<3;y++)for(int x=0;x<4;x++)b.setRGB(x,y,0xff000000|(x+y+rgb));var out=new ByteArrayOutputStream();ImageIO.write(b,"png",out);return out.toByteArray();}
+ static byte[] zip(String comment,String[] names,byte[]... bodies)throws Exception{var sink=new ByteArrayOutputStream();try(var z=new ZipOutputStream(sink)){if(comment!=null)z.setComment(comment);for(int i=0;i<names.length;i++){var e=new ZipEntry(names[i]);e.setTime(0);z.putNextEntry(e);z.write(bodies[i]);z.closeEntry();}}return sink.toByteArray();}
+ static byte[] pack(byte[] doc,byte[]... images)throws Exception{var names=new String[1+images.length];var body=new byte[names.length][];names[0]="notes.md";body[0]=doc;for(int i=0;i<images.length;i++){names[i+1]="assets/image-"+(i+1)+".png";body[i+1]=images[i];}return zip(null,names,body);}
+ static FinalShareAttachments.Batch stage(byte[] raw,int count)throws Exception{return FinalShareAttachments.stage(root,0,count,raw,FinalShareAttachments.digest(raw));}
+ static int folders()throws Exception{try(var s=Files.list(root)){return (int)s.count();}}
+ static void bad(byte[] raw,int count,String cause,String id)throws Exception{int before=folders();reject(()->stage(raw,count),cause,id);ok(before==folders(),id+"_no_partial");}
+ static Uri uri(String path){return Uri.parse("content://"+PKG+".exports"+path);}
+ public static void main(String[] argv)throws Exception{ctx=new Context(new File(argv[0]),PKG);root=PagedShareProvider.outbox(ctx);byte[] a=png(25),b=png(69),doc=text(START+REF+"Reviewed\n\n"+REF+"Again\n\n"),one=pack(doc,a),two=pack(text(START+REF+REF+"![Image](assets/image-2.png)\n\n"),a,b);int ix=0;
+  for(byte[] wire:Arrays.asList(pack(text(START+"Plain\n\n")),one,two)){
+    try(var batch=stage(wire,ix)){ok(batch.mime.equals(ZIP)&&batch.files.size()==1&&batch.files.get(0).getFileName().toString().equals(DOC)&&Arrays.equals(wire,Files.readAllBytes(batch.files.get(0))),"exact_bytes_"+ix);
+     var uris=PagedShareProvider.makeReady(ctx,batch);ok(uris.size()==1,"one_ready_uri_"+ix);var u=uris.get(0);var f=PagedShareProvider.lookup(root,u.getEncodedPath(),System.currentTimeMillis(),android.os.SystemClock.elapsedRealtime());ok(f.name.equals(DOC)&&f.mime.equals(ZIP)&&f.size==wire.length&&Arrays.equals(wire,Files.readAllBytes(f.path)),"provider_final_only_"+ix);
+     var intent=PagedShareIntent.chooser(PKG,ZIP,uris);ok(intent.target.action.equals(Intent.ACTION_SEND)&&ZIP.equals(intent.target.type)&&intent.target.flags==1&&intent.flags==1&&intent.target.extras.size()==1&&intent.target.extras.get(Intent.EXTRA_STREAM)==u&&intent.clip==intent.target.clip&&intent.clip.list.size()==1&&intent.clip.list.get(0).uri==u,"single_readonly_clip_"+ix);
+     String path=u.getEncodedPath(),base=path.substring(0,path.lastIndexOf('/')+1);reject(()->PagedShareProvider.lookup(root,base+"page-001.png",System.currentTimeMillis(),android.os.SystemClock.elapsedRealtime()),"","zip_rejects_page_"+ix);reject(()->PagedShareProvider.lookup(root,base+"PocketTodo-notes.pdf",System.currentTimeMillis(),android.os.SystemClock.elapsedRealtime()),"","zip_rejects_pdf_"+ix);
+     reject(()->PagedShareProvider.lookup(root,path,System.currentTimeMillis()+PagedShareProvider.WINDOW_MS+1000,android.os.SystemClock.elapsedRealtime()),"","wall_expiry_"+ix);reject(()->PagedShareProvider.lookup(root,path,System.currentTimeMillis(),android.os.SystemClock.elapsedRealtime()+PagedShareProvider.WINDOW_MS+1000),"","mono_expiry_"+ix);
+     var dup=Arrays.asList(u,u);reject(()->PagedShareIntent.chooser(PKG,ZIP,dup),"count","zip_not_multiple_"+ix);reject(()->PagedShareIntent.chooser(PKG,"image/png",uris),"wrong export","zip_not_png_"+ix);reject(()->PagedShareIntent.chooser(PKG,ZIP,Collections.singletonList(uri(base+"PocketTodo-notes.pdf"))),"wrong export","zip_not_pdf_name_"+ix);
+    }ok(folders()==0,"unlaunched_disposal_"+ix);ix++;
+  }
+  byte[] p=pack(text(START+"Hello\n\n"));bad(p,1,"reference","wrong_reviewed_asset_count");bad(one,0,"reference","hidden_extra_image");bad(pack(text(START+"Plain\n\n"),a),1,"unreferenced","orphan_image");bad(pack(text(START+"![Image](assets/image-2.png)\n\n"),a,b),2,"reference","reference_gap");bad(zip(null,new String[]{"data.log"},doc),0,"member","not_document");bad(zip(null,new String[]{"notes.md","image.png"},doc,a),1,"member","wrong_asset_name");bad(zip(null,new String[]{"notes.md","extra.txt"},text(START+"Hello"),text("omitted")),0,"extra","extra_member");bad(zip("out-of-document",new String[]{"notes.md"},text(START+"Hello")),0,"outside","archive_metadata");bad(Arrays.copyOf(p,p.length+5),0,"outside","after_end");bad(Arrays.copyOf(p,p.length-3),0,"outside","missing_end");bad(pack(text("Not a rendered document")),0,"unrecognized","wrong_document");bad(pack(new byte[]{(byte)0xc3}),0,"","invalid_utf8");bad(pack(text(START+REF),Arrays.copyOf(a,a.length+7)),1,"end","extra_image_bytes");byte[] wrong=a.clone();wrong[wrong.length-1]^=1;bad(pack(text(START+REF),wrong),1,"integrity","png_crc");bad(pack(new byte[1048577]),0,"budget","oversize_document");reject(()->FinalShareAttachments.stage(root,0,0,p,new byte[32]),"differs","wrong_preview_digest");ok(folders()==0,"negative_cleanup");
+  try(var batch=FinalShareAttachments.stage(root,1,1,text("%PDF-1.4\n"),FinalShareAttachments.digest(text("%PDF-1.4\n")))){var list=PagedShareProvider.makeReady(ctx,batch);String raw=list.get(0).getEncodedPath();var fi=PagedShareProvider.lookup(root,raw,System.currentTimeMillis(),android.os.SystemClock.elapsedRealtime());ok(fi.mime.equals("application/pdf"),"v1_pdf_marker_still_readable");reject(()->PagedShareProvider.lookup(root,raw.replace(".pdf",".zip"),System.currentTimeMillis(),android.os.SystemClock.elapsedRealtime()),"","v1_no_zip");}
+  var batches=new ArrayList<FinalShareAttachments.Batch>();for(int i=0;i<4;i++){PagedShareProvider.prune(root);var x=stage(p,0);PagedShareProvider.makeReady(ctx,x);batches.add(x);}reject(()->PagedShareProvider.prune(root),"","fifth_not_evicting_live");ok(folders()==4,"four_live_stay");for(var x:batches)x.close();System.out.println("MD_HOST_OK "+n+" SYNTHETIC_FS_AND_ANDROID_DOUBLES_NOT_DEVICE");
+ }
+}
+'''
+
+def markdown_wire_selftest():
+    # Compile actual sender classes on native Java with explicit Android API doubles. These cannot establish platform permission or receiver UX.
+    src=Path(__file__).resolve().parents[1]/'src/main/java/com/supercubegame/pockettodo';files={
+        'android/content/Intent.java': 'package android.content;import android.net.Uri;import java.util.*;\npublic final class Intent {public static final String ACTION_SEND="android.intent.action.SEND",ACTION_SEND_MULTIPLE="android.intent.action.SEND_MULTIPLE",ACTION_CHOOSER="android.intent.action.CHOOSER",EXTRA_STREAM="android.intent.extra.STREAM";public static final int FLAG_GRANT_READ_URI_PERMISSION=1,FLAG_GRANT_WRITE_URI_PERMISSION=2; public final String action;public String type;public int flags;public ClipData clip;public Intent target;public final Map<String,Object> extras=new HashMap<>();public Intent(String a){action=a;}public Intent setType(String t){type=t;return this;}public Intent putExtra(String k,Uri v){extras.put(k,v);return this;}public Intent putParcelableArrayListExtra(String k,ArrayList<Uri> v){extras.put(k,new ArrayList<>(v));return this;}public void setClipData(ClipData c){clip=c;}public Intent addFlags(int f){flags|=f;return this;}public static Intent createChooser(Intent v,CharSequence t){Intent c=new Intent(ACTION_CHOOSER);c.target=v;return c;} }\n',
+        'android/content/ClipData.java': 'package android.content;import android.net.Uri;import java.util.*;\npublic final class ClipData {public static final class Item {public final Uri uri;public Item(Uri u){uri=u;}} public final List<Item> list=new ArrayList<>();public final String[] types;public ClipData(CharSequence l,String[] t,Item i){list.add(i);types=t.clone();}public void addItem(Item i){list.add(i);} }\n',
+        'android/net/Uri.java': 'package android.net; import java.net.URI;\npublic final class Uri { final URI u; private Uri(String x){u=URI.create(x);} public static Uri parse(String x){return new Uri(x);}public String getScheme(){return u.getScheme();} public String getEncodedAuthority(){return u.getRawAuthority();}public String getEncodedQuery(){return u.getRawQuery();}public String getEncodedFragment(){return u.getRawFragment();}public String getEncodedPath(){return u.getRawPath();} public String toString(){return u.toString();} public static final class Builder {String scheme,authority,paths="";public Builder scheme(String v){scheme=v;return this;}public Builder authority(String v){authority=v;return this;}public Builder appendPath(String v){paths+="/"+v;return this;}public Uri build(){return parse(scheme+"://"+authority+paths);} } }',
+        'android/content/Context.java': 'package android.content;import java.io.*;public class Context{final File d;final String p;public Context(File d,String p){this.d=d;this.p=p;}public String getPackageName(){return p;}public File getCacheDir(){return d;}}',
+        'android/content/ContentProvider.java': 'package android.content;import android.net.Uri;import android.database.Cursor;import android.os.ParcelFileDescriptor;import android.content.pm.ProviderInfo;public abstract class ContentProvider{Context c;public void attachInfo(Context c,ProviderInfo p){this.c=c;}public Context getContext(){return c;}public abstract boolean onCreate();public abstract String getType(Uri u);public abstract ParcelFileDescriptor openFile(Uri u,String mode)throws java.io.FileNotFoundException;public abstract Cursor query(Uri u,String[]p,String s,String[]a,String o);public abstract Uri insert(Uri u,ContentValues v);public abstract int delete(Uri u,String s,String[]a);public abstract int update(Uri u,ContentValues v,String s,String[]a);}',
+        'android/content/pm/ProviderInfo.java': 'package android.content.pm;public class ProviderInfo{public boolean exported,grantUriPermissions;public String authority;}',
+        'android/content/ContentValues.java': 'package android.content;public class ContentValues{}',
+        'android/database/Cursor.java': 'package android.database;public interface Cursor{}',
+        'android/database/MatrixCursor.java': 'package android.database;public class MatrixCursor implements Cursor{public MatrixCursor(String[] k,int n){}public void addRow(Object[] row){}}',
+        'android/os/ParcelFileDescriptor.java': 'package android.os;public class ParcelFileDescriptor{public static final int MODE_READ_ONLY=1;public static ParcelFileDescriptor open(java.io.File f,int m)throws java.io.FileNotFoundException{return new ParcelFileDescriptor();}}',
+        'android/os/SystemClock.java': 'package android.os;public class SystemClock{public static long elapsedRealtime(){return System.nanoTime()/1000000;}}',
+        'android/provider/OpenableColumns.java': 'package android.provider;public class OpenableColumns{public static final String SIZE="_size",DISPLAY_NAME="_display_name";}',
+        'com/supercubegame/pockettodo/MarkdownWireHost.java': MD_WIRE_HOST,
+    }
+    with tempfile.TemporaryDirectory() as td:
+        root=Path(td);out=root/'classes';out.mkdir();inputs=[]
+        for name,body in files.items():
+            f=root/name;f.parent.mkdir(parents=True,exist_ok=True);f.write_text(body,encoding='utf-8');inputs.append(str(f))
+        for n in ('FinalShareAttachments','PagedShareIntent','PagedShareProvider'):inputs.append(str(src/(n+'.java')))
+        javac=['javac'] if shutil.which('javac') else ['java','-m','jdk.compiler/com.sun.tools.javac.Main'];subprocess.run([*javac,'-encoding','UTF-8','-d',str(out),*inputs],check=True,timeout=40)
+        drive=root/'drive';drive.mkdir();v=subprocess.run(['java','-Djava.awt.headless=true','-cp',str(out),'com.supercubegame.pockettodo.MarkdownWireHost',str(drive)],text=True,capture_output=True,timeout=25)
+        labels=re.findall(r'^MD_HOST (.+)$',v.stdout,re.M);assert v.returncode==0 and len(labels)==len(set(labels)) and len(labels)==72 and v.stdout.splitlines()[-1]=='MD_HOST_OK '+str(len(labels))+' SYNTHETIC_FS_AND_ANDROID_DOUBLES_NOT_DEVICE',(v.stdout[-1400:],v.stderr[-1100:]);print(v.stdout.splitlines()[-1],flush=True)
+
 def selftest():
+    markdown_receiver_selftest()
+    markdown_wire_selftest()
     consent_copy_selftest()
     chooser_tile_selftest()
     failure_evidence_selftest()

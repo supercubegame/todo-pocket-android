@@ -874,7 +874,7 @@ def native_share_ui(adb, gate):
         for attempt in range(8):
             current = nodes()
             for n in current:
-                if n.get("text") == "我已核对内容与图片，可保存此包":
+                if n.get("text") == "我已核对内容与图片，接下来由我选择保存或发送":
                     bounds=list(map(int,re.findall(r"\d+",n.get("bounds"))))
                     if bounds[2]>bounds[0] and bounds[3]>bounds[1]:
                         assert n.get("checked") == "false", "consent not initially empty"

@@ -2276,6 +2276,59 @@ def cancel_fixture_image_picker(read_nodes,back,records,case,product,api,serial,
     except Exception as e:
         row['status']='FAIL';row['exception']=type(e).__name__;raise
 
+_IMAGE_FIXTURES=frozenset(('pocket-broken.png','pocket-wide.png','pocket-large.png','pocket-selected.png','pocket-first.jpg','pocket-pixel-over.png','pocket-pixel-limit.png','pocket-derive-valid.png','pocket-derive-source.jpg'))
+
+def _fixture_rectangle(n):
+    if n is None or n.get('enabled')!='true' or n.get('visible-to-user')=='false':return None
+    hit=re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]',n.get('bounds',''))
+    if not hit:return None
+    x,y,r,b=map(int,hit.groups());return (x,y,r,b) if x<r and y<b else None
+
+def select_ci_image(name,choose,read,act,hash_on_device,expected,records,product,api,serial,ci,clock=time.monotonic,pause=time.sleep):
+    """CI-only public synthetic fixture in Download. One confirmed parent navigation at most; never guess a path, file or recipient."""
+    if (product,api,serial,ci)!=('com.supercubegame.pockettodo.v12.preview',34,'emulator-5554',True) or name not in _IMAGE_FIXTURES or (not choose and name!='pocket-first.jpg') or not re.fullmatch('[0-9a-f]{64}',expected):raise ValueError('outside staged image fixture')
+    end=clock()+20;parent=(_IMAGE_CANCEL_ROOT,'Download');child=parent+(_IMAGE_CANCEL_FOLDER,);state={'name':name,'choose':choose,'status':'PENDING','actions':[]};records.append(state)
+    sent_parent=False;at_parent=False;sent_list=False;seen=False;held=None;since=0.;owner=None
+    try:
+        # Only a build-produced name in the exact public CI directory can reach this read.
+        if hash_on_device('/sdcard/Download/'+name,end-clock())!=expected:raise AssertionError('staged fixture bytes differ')
+        state['sha256']=expected
+        while clock()<end:
+            frame=read();kind,who,path=_ci_image_surface(frame,product);now=clock()
+            if now>=end:break
+            action=None;target=None;signature=None
+            if not seen and kind=='application':pass
+            elif kind!='directory' or path not in (child,parent) or (seen and who!=owner):raise AssertionError('unexpected picker, folder or window')
+            else:
+                seen=True;owner=who
+                if path==child:
+                    if at_parent:raise AssertionError('folder changed after reaching Download')
+                    if not sent_parent:action='PARENT'
+                else:
+                    at_parent=True
+                    dirs=[n for n in frame if n.get('resource-id')==who+':id/dir_list'];rows=[n for n in frame if n.get('text')==name and n.get('resource-id')=='android:id/title'];mode=[n for n in frame if n.get('resource-id')==who+':id/sub_menu_list' and n.get('content-desc')=='List view'];
+                    if len(rows)>1 or len(dirs)>1 or len(mode)>1:raise AssertionError('ambiguous picker evidence')
+                    if rows:
+                        target=rows[0];box=_fixture_rectangle(target);containers=[] if not dirs else [n for n in dirs[0].iter('node') if n.get('resource-id')==who+':id/item_root' and n.get('clickable')=='true' and any(k is target for k in n.iter('node'))];outer=_fixture_rectangle(containers[0]) if len(containers)==1 else None
+                        if box and outer and target.get('class')=='android.widget.TextView' and outer[0]<=box[0] and outer[1]<=box[1] and box[2]<=outer[2] and box[3]<=outer[3]:action='CHOOSE' if choose else 'OBSERVE'
+                    elif mode and not sent_list and _fixture_rectangle(mode[0]) and mode[0].get('clickable')=='true':action='LIST';target=mode[0]
+                signature=(path,action,_fixture_rectangle(target))
+            if signature!=held:held=signature;since=now
+            elif action and now-since>=.15:
+                left=end-clock()
+                if left<=0:break
+                if action=='OBSERVE':state['status']='VISIBLE_NOT_SELECTED';return True
+                state['actions'].append(action)
+                if action=='PARENT':sent_parent=True
+                if action=='LIST':sent_list=True
+                act(action,target,left)
+                if action=='CHOOSE':state['status']='SELECTED_ONCE_NOT_IMPORT_ACCEPTANCE';return True
+                held=None
+            pause(min(.2,max(0,end-clock())))
+        raise TimeoutError('staged file not confirmed in Download within original 20s')
+    except Exception as err:
+        state['status']='FAIL';state['error']=type(err).__name__;raise
+
 def image_cancel_selftest():
     import copy
     P='com.supercubegame.pockettodo.v12.preview';S='com.google.android.documentsui';R=_IMAGE_CANCEL_ROOT;L=_IMAGE_CANCEL_FOLDER
@@ -2330,7 +2383,44 @@ def image_cancel_selftest():
     tree=ast.parse(Path(__file__).read_text());native=next(x for x in tree.body if isinstance(x,ast.FunctionDef) and x.name=='_verify_native_ui');xs=list(ast.walk(native));calls=[x for x in xs if isinstance(x,ast.Call) and isinstance(x.func,ast.Name) and x.func.id=='cancel_note_picker'];assert [ast.literal_eval(x.args[0]) for x in calls]==['existing_note','first_image'];assert sum(isinstance(x,ast.Call) and isinstance(x.func,ast.Name) and x.func.id=='cancel_fixture_image_picker' for x in xs)==1
     print('IMAGE_CANCEL_HOST 31 scenarios, 4 off-scope refusals, both original paths present; 20 s per cancel; modeled normal directory navigation, not Android',flush=True)
 
+def image_fixture_target_selftest():
+    from copy import deepcopy
+    own='com.supercubegame.pockettodo.v12.preview';system='com.google.android.documentsui';chain=(_IMAGE_CANCEL_ROOT,'Download',_IMAGE_CANCEL_FOLDER);name='pocket-broken.png';digest=hashlib.sha256(b'not a PNG').hexdigest()
+    def frame(level=2,mode='ok',item=name):
+        def add(p,**changes):
+            attrs={'package':system,'bounds':'[0,0][60,30]','enabled':'true','class':'android.widget.TextView'};attrs.update(changes);return ET.SubElement(p,'node',attrs)
+        root=ET.Element('hierarchy');v=add(root);add(v,**{'resource-id':system+':id/toolbar'});h=add(v,**{'resource-id':system+':id/directory_header'});b=add(h,**{'resource-id':system+':id/horizontal_breadcrumb'})
+        for txt in chain[:level]:add(b,text=txt,**{'resource-id':system+':id/breadcrumb_text'})
+        d=add(v,**{'resource-id':system+':id/dir_list'});c=add(d,clickable='true',**{'resource-id':system+':id/item_root'});typ={'resource-id':'android:id/title','text':item}
+        if mode in ('ok','disabled','twins','foreign','flat','hidden','clipped'):t=add(v if mode=='flat' else c,**typ)
+        if mode=='disabled':t.set('enabled','false')
+        if mode=='hidden':t.set('visible-to-user','false')
+        if mode=='clipped':t.set('bounds','[0,0][65,31]')
+        if mode=='twins':add(c,**typ)
+        if mode=='foreign':t.set('package','not.the.picker')
+        if mode=='grid':add(v,clickable='true',**{'resource-id':system+':id/sub_menu_list','content-desc':'List view'})
+        return list(root.iter('node'))
+    P=frame();C=frame(3,'empty');G=frame(2,'grid');cases=[]
+    def test(key,seq,want,success,wrong_hash=False,late=False,choose=True):
+        t=[0.];events=[];state=[];i=[0];fn=name if choose else 'pocket-first.jpg'
+        def read():
+            n=i[0];i[0]+=1
+            if late and n==1:t[0]+=21
+            return seq[min(n,len(seq)-1)]
+        def hs(path,left):assert path=='/sdcard/Download/'+fn;return digest if not wrong_hash else '0'*64
+        try:ok=select_ci_image(fn,choose,read,lambda k,n,l:events.append(k),hs,digest,state,own,34,'emulator-5554',True,lambda:t[0],lambda x:t.__setitem__(0,t[0]+x))
+        except (AssertionError,TimeoutError):ok=False
+        assert bool(ok)==success and events==want,(key,state,events);cases.append(key)
+    test('already parent',[P],['CHOOSE'],True);test('visible parent after Back',[C,C,C,P,P],['PARENT','CHOOSE'],True);test('grid once',[G,G,G,P,P],['LIST','CHOOSE'],True);test('observed only',[frame(item='pocket-first.jpg')],[],True,choose=False);test('same child forever',[C],['PARENT'],False);test('same grid',[G],['LIST'],False);test('unexpected grandparent',[C,C,frame(1)],['PARENT'],False);test('parent withdrawn',[P,C,C],[],False);test('wrong bytes',[P],[],False,wrong_hash=True);test('late',[P],[],False,late=True);test('wrong filename',[frame(item='some-file.png')],[],False)
+    for k in ('disabled','twins','foreign','flat','hidden','clipped'):test(k,[frame(mode=k)],[],False)
+    for n,product,api,serial,ci in [('unknown.png',own,34,'emulator-5554',True),(name,own,26,'emulator-5554',True),(name,'foreign',34,'emulator-5554',True),(name,own,34,'phone',True),(name,own,34,'emulator-5554',False)]:
+        try:select_ci_image(n,True,None,None,None,digest,[],product,api,serial,ci)
+        except ValueError:continue
+        raise AssertionError('off-scope file or environment allowed')
+    print('IMAGE_FIXTURE_TARGET_HOST %d selection/observation cases and 5 off-scope refusals; no device'%len(cases),flush=True)
+
 def parser_selftest():
+    image_fixture_target_selftest()
     image_cancel_selftest()
     calendar_draft_selftest()
     activity_navigation_selftest()
@@ -2646,6 +2736,7 @@ def _verify_native_ui(adb,nodes):
     process_stops = []
     restore_picker_traces = []
     summary_navigation_traces = []
+    image_fixture_navigation=[]
     image_picker_cancels=[]
     directory_traces = []
     hard_checks = []
@@ -2973,9 +3064,21 @@ public class VerifyNotePng {
         # API34 image grids expose a description, not a text node; select in list view.
         # Use the same shell tap as the verified SAF backup flow. The legacy finger
         # helper remains untouched in ui_test.py; its API34 exit 137 is not diagnosed.
+        def checked_fixture(name,choose):
+            def stage_sha(path,left):
+                return subprocess.check_output([str(adb),'-s',SERIAL,'shell','sha256sum',path],text=True,timeout=left).split()[0]
+            def act(action,target,left):
+                if action=='PARENT':args=['input','keyevent','KEYCODE_BACK']
+                else:
+                    l,t,r,b=_fixture_rectangle(target);args=['input','tap',str((l+r)//2),str((t+b)//2)]
+                subprocess.run([str(adb),'-s',SERIAL,'shell',*args],timeout=left,check=True)
+            assert name in _IMAGE_FIXTURES
+            digest=hashlib.sha256((fixture_dir/name).read_bytes()).hexdigest()
+            return select_ci_image(name,choose,nodes,act,stage_sha,digest,image_fixture_navigation,PKG,API,SERIAL,os.environ.get('GITHUB_ACTIONS')=='true')
         def pick_image(name=None):
             tap('加入图片'); tap('从文件选择')
             if name is not None:
+                if API==34:return checked_fixture(name,True)
                 for n in nodes():
                     if n.get('content-desc')=='List view':
                         tap_node(n);break
@@ -3083,7 +3186,7 @@ public class ImageImportFixture {
             start();tap('活动');ready();tap_node(reveal_activity(nodes,swipe_summary,PKG,identity=first_desc));ready();tap('笔记');ready()
         first_screen();ok(find(text='写点什么，或加一张图。') is not None,'image-first activity shows genuine empty note before any import')
         pick_image()
-        ok(find(text='pocket-first.jpg').get('package','').endswith('documentsui'),'first-image cancellation waits for a visible system picker before pressing Back')
+        ok((checked_fixture('pocket-first.jpg',False) if API==34 else find(text='pocket-first.jpg').get('package','').endswith('documentsui')),'first-image cancellation waits for a visible system picker before pressing Back')
         ok(cancel_note_picker('first_image'),'canceling first image reports no note change')
         stop();ok(state_read('first-image-cancel.db')==first_base,'first-image cancel creates no orphan note media block or revision')
         for filename,label in [('pocket-broken.png','malformed first image'),('pocket-pixel-over.png','20005000-pixel first image')]:
@@ -3479,12 +3582,14 @@ public class ImageImportFixture {
         result['restore_picker_traces']=restore_picker_traces
         result['summary_navigation_traces']=summary_navigation_traces
         result['image_picker_cancels']=image_picker_cancels
+        result['image_fixture_navigation']=image_fixture_navigation
         result['database_directory_traces']=directory_traces
     except Exception as exc:
         result={'status':'FAIL','api':API,'count':len(checks),'checks':checks,'error':repr(exc),'screenshots':shots,'infra_retries':infra_retries,'release_ready':False,'process_stops':process_stops}
         result['restore_picker_traces']=restore_picker_traces
         result['summary_navigation_traces']=summary_navigation_traces
         result['image_picker_cancels']=image_picker_cancels
+        result['image_fixture_navigation']=image_fixture_navigation
         result['database_directory_traces']=directory_traces
         if 'derive_geometry' in locals():result['derivative_geometry']=derive_geometry
         result['derivative_hardening_partial']=list(hard_checks)

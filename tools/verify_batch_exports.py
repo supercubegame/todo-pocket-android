@@ -344,7 +344,150 @@ def deletion_ui_sample():
             "state": "EXACT_TARGET_ROWS_ONE_REVISION_ALL_MEDIA_PRESERVED"}
 
 
+# Read-only observations for exactly one synthetic note confirmation. Never reopen the stopped app.
+_NOTE_DIAG_PKG='com.supercubegame.pockettodo.v12.preview'
+
+def _delete_command(adb,serial):
+    def read(args,cap,seconds):
+        import tempfile
+        if not 0<seconds<=6:raise ValueError('no diagnostic time')
+        with tempfile.TemporaryFile() as f,tempfile.TemporaryFile() as e:
+            c=subprocess.run([str(adb),'-s',serial,*args],stdin=subprocess.DEVNULL,stdout=f,stderr=e,timeout=seconds)
+            if f.tell()>cap or e.tell():raise ValueError('incomplete diagnostic response')
+            f.seek(0);return c.returncode,f.read()
+    return read
+
+def _note_diag_bind(read,api,serial,pkg,ci,clock=time.monotonic):
+    if (api,serial,pkg,ci)!=(26,'emulator-5554',_NOTE_DIAG_PKG,True):return None
+    end=clock()+5
+    def get(*args,cap=256):
+        rc,b=read(list(args),cap,min(2,end-clock()));assert rc==0;return b
+    assert get('shell','getprop','ro.kernel.qemu').strip()==b'1'
+    pid=get('shell','pidof',pkg).strip();assert re.fullmatch(b'[1-9][0-9]{0,6}',pid);n=pid.decode()
+    uid=get('shell','run-as',pkg,'id','-u').strip();assert uid.isdigit() and int(uid)>=10000
+    cmd=get('exec-out','run-as',pkg,'cat','/proc/'+n+'/cmdline',cap=1024);assert cmd.startswith(pkg.encode()+b'\0') and not cmd[len(pkg):].strip(b'\0')
+    status=get('exec-out','run-as',pkg,'cat','/proc/'+n+'/status',cap=16384);ids=[v.split()[1:] for v in status.splitlines() if v.startswith(b'Uid:')];assert ids==[[uid]*4]
+    start=get('shell','date','+%s.%N').strip().decode('ascii');assert re.fullmatch(r'[0-9]{10}\.[0-9]{9}',start)
+    return dict(pid=n,uid=int(uid),start=start,armed_at=clock())
+
+def _note_crash_frames(raw,pid,start,end):
+    # A PID by itself is not ownership. Require a single contiguous AndroidRuntime fatal block
+    # with the exact package/PID header, within the device-clock window. Never publish free text.
+    from decimal import Decimal
+    lo,hi=map(Decimal,(start,end));assert 0<=hi-lo<=70
+    pattern=re.compile(r'^\s*([0-9]{10}\.[0-9]+)\s+(\d+)\s+(\d+)\s+E\s+AndroidRuntime\s*:\s?(.*)$');owned=[]
+    for line in raw.decode('utf-8','strict').splitlines():
+        m=pattern.fullmatch(line)
+        if m and lo<=Decimal(m[1]) and Decimal(m[1])<=hi and m[2]==pid:owned.append((m[3],m[4]))
+    starts=[i for i,(_,s) in enumerate(owned) if s.startswith('FATAL EXCEPTION:')]
+    if len(starts)!=1:return {'status':'NO_UNIQUE_OWNED_FATAL'}
+    tid=owned[starts[0]][0];lines=[s.strip() for t,s in owned[starts[0]+1:] if t==tid]
+    if [s for s in lines if s.startswith('Process: ')]!=['Process: '+_NOTE_DIAG_PKG+', PID: '+pid]:return {'status':'NO_UNIQUE_OWNED_FATAL'}
+    if not lines or lines[0]!='Process: '+_NOTE_DIAG_PKG+', PID: '+pid:return {'status':'NO_UNIQUE_OWNED_FATAL'}
+    name=r'(?:java|android|androidx|com\.supercubegame\.pockettodo)(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+';classes=[];frames=[]
+    for s in lines[1:]:
+        m=re.fullmatch(r'(?:Caused by:\s*)?('+name+r')(?::.*)?',s)
+        if m and len(classes)<4:classes.append(m[1])
+        m=re.fullmatch(r'at ('+name+r')\(([A-Za-z_$][A-Za-z0-9_$]*\.java:[0-9]{1,6}|Native Method|Unknown Source)\)',s)
+        if m and len(frames)<16:frames.append(m[1]+'('+m[2]+')')
+    return {'status':'OWNED_FATAL_HEADER','exception_types':classes,'frames':frames}
+
+def _note_db_state(read,clock,end,pkg,initial,note,sibling,owner):
+    # Two byte-identical DB/WAL reads bracketed by positive observations of no live package PID.
+    # Offline query only, no SQLite opens on the device. Do not infer physical media integrity.
+    import tempfile
+    def obs(args,cap=512):return read(args,cap,min(2,end-clock()))
+    def get(args,cap):
+        rc,b=obs(args,cap);assert rc==0;return b
+    def stopped():return obs(['shell','pidof',pkg])==(1,b'')
+    prefix=['exec-out','run-as',pkg];base='pocket-v12.db';assert stopped();caps={base:4194304,base+'-wal':8388608}
+    def image():
+        ns=get(prefix+['ls','-1','databases'],8192).decode('ascii').splitlines();assert base in ns and base+'-journal' not in ns
+        files={n:get(prefix+['cat','databases/'+n],cap) for n,cap in caps.items() if n in ns};assert len(files[base])>=100;return files
+    x=image();y=image();assert x==y and stopped();assert clock()<end
+    with tempfile.TemporaryDirectory(prefix='pocket-note-state-') as t:
+        path=Path(t)/base
+        for n,b in x.items():(Path(t)/n).write_bytes(b)
+        with sqlite3.connect(path.as_uri()+'?mode=ro',uri=True) as con:
+            con.execute('PRAGMA query_only=ON');assert con.execute('PRAGMA quick_check').fetchall()==[('ok',)]
+            names=[v[0] for v in con.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")];assert set(names)==set(initial) and all(re.fullmatch('[A-Za-z0-9_]+',i) for i in names)
+            data={i:con.execute('SELECT * FROM "'+i+'" ORDER BY rowid').fetchall() for i in names}
+    assert sum(r[0]==note and r[1]==owner for r in initial['notes'])==sum(r[0]==sibling and r[1]==owner for r in initial['notes'])==1 and note!=sibling
+    expected=deletion_expected((initial,{},{}),note,owner)[0]
+    return {'status':('DB_EXACT_BEFORE' if data==initial else 'DB_EXACT_ONE_DELETION' if data==expected else 'DB_OTHER_OBSERVED'),'target_rows':sum(r[0]==note for r in data['notes']),'sibling_rows':sum(r[0]==sibling for r in data['notes']),'physical_media':'NOT_OBSERVED','wal':base+'-wal' in x}
+
+def _note_confirm_once(tap_confirm,ready,output,adb,serial,api,pkg,ci,initial,note,sibling,owner,*,reader=None,clock=time.monotonic):
+    if (api,serial,pkg,ci)!=(26,'emulator-5554',_NOTE_DIAG_PKG,True):tap_confirm();ready();return
+    read=reader or _delete_command(adb,serial);d={'scope':'SYNTHETIC_NOTE_CONFIRM_OBSERVATION_NOT_ACCEPTANCE','status':'NOT_BOUND'};output['confirm_diagnostic']=d;binding=None
+    try:binding=_note_diag_bind(read,api,serial,pkg,ci,clock);d.update(status='BOUND',pid=binding['pid'],uid=binding['uid'])
+    except Exception as ex:d['bind_error']=type(ex).__name__
+    try:tap_confirm();ready()
+    except Exception:
+        if binding is not None:
+            deadline=clock()+12
+            try:
+                assert clock()-binding['armed_at']<=70;rc,b=read(['shell','date','+%s.%N'],64,min(2,deadline-clock()));stop=b.strip().decode('ascii');assert rc==0 and re.fullmatch(r'[0-9]{10}\.[0-9]{9}',stop) and 0<=float(stop)-float(binding['start'])<=70
+                rc,raw=read(['logcat','-b','crash','-d','--pid='+binding['pid'],'-v','epoch','-T',binding['start'],'AndroidRuntime:E','*:S'],32768,min(5,deadline-clock()));assert rc==0;d['crash']=_note_crash_frames(raw,binding['pid'],binding['start'],stop)
+            except Exception as ex:d['crash']={'status':'NOT_OBSERVED','reason':type(ex).__name__}
+            try:
+                assert clock()-binding['armed_at']<=70
+                d['database']=_note_db_state(read,clock,deadline,pkg,initial,note,sibling,owner)
+            except Exception as ex:d['database']={'status':'NOT_VERIFIED','reason':type(ex).__name__}
+        raise
+    else:d['returned_to_app']=True
+
+def _note_diag_selftest():
+    import tempfile
+    p=_NOTE_DIAG_PKG;pid='5371';t='1795650000.125000000';t2='1795650002.000000000';boot=b'Name:\tapp\nUid:\t10077\t10077\t10077\t10077\n';first=b'1795650001.350  5371  5371 E AndroidRuntime: ';fatal=b'\n'.join(first+s for s in [b'FATAL EXCEPTION: main',b'Process: '+p.encode()+b', PID: 5371',b'java.lang.IllegalStateException: never publish private fixture message',b'    at com.supercubegame.pockettodo.Example.finish(Example.java:91)']);scope=(26,'emulator-5554',p,True);seen={};
+    with tempfile.TemporaryDirectory() as directory:
+        path=Path(directory)/'pocket-v12.db';db=sqlite3.connect(path);db.executescript('CREATE TABLE notes(id,owner,title);CREATE TABLE blocks(id,data);CREATE TABLE field_notes(id,field);CREATE TABLE revision(id,value);CREATE TABLE other(id,value);INSERT INTO notes VALUES("a",1,"same"),("b",1,"same");INSERT INTO blocks VALUES("a","one"),("b","two");INSERT INTO field_notes VALUES("a",2);INSERT INTO revision VALUES(1,11);INSERT INTO other VALUES(1,"unchanged");');db.commit();before={q:db.execute('select * from '+q+' order by rowid').fetchall() for q in ['notes','blocks','field_notes','revision','other']};plain=path.read_bytes();assert db.execute('pragma journal_mode=wal').fetchone()==('wal',);db.execute('pragma wal_autocheckpoint=0');db.execute('delete from notes where id="a"');db.execute('delete from blocks where id="a"');db.execute('delete from field_notes where id="a"');db.execute('update revision set value=12');db.commit();base=path.read_bytes();wal=Path(str(path)+'-wal').read_bytes();assert wal;db.execute('update other set value="wrong"');db.commit();altered=Path(str(path)+'-wal').read_bytes();db.close()
+        def check(mode,api=26,serial='emulator-5554',owner=p,ci=True,success=False):
+            calls=[];events=[];proof={};dates=0;pids=0;dbreads=0;now=[0.];err=RuntimeError('original ready failure');bound=(api,serial,owner,ci)==scope
+            def read(args,cap,seconds):
+                nonlocal dates,pids,dbreads
+                calls.append(args);assert bound and 0<seconds<=6;word=' '.join(args)
+                if word=='shell getprop ro.kernel.qemu':return 0,(b'0' if mode=='outside' else b'1')
+                if word=='shell pidof '+p:
+                    pids+=1
+                    if pids==1:return (0,b'5371 77' if mode=='multipid' else pid.encode())
+                    return ((255,b'') if mode=='unreachable' else (0,b'5371') if mode=='still_running' else (1,b''))
+                if word=='shell run-as '+p+' id -u':return 0,b'10077'
+                if args[-1]=='/proc/5371/cmdline':return 0,(b'other\0' if mode=='other_cmd' else p.encode()+b'\0\0')
+                if args[-1]=='/proc/5371/status':return 0,boot if mode!='other_uid' else boot.replace(b'10077',b'10079')
+                if word=='shell date +%s.%N':dates+=1;return 0,(t if dates==1 else t2).encode()
+                if args[0]=='logcat':
+                    assert args==['logcat','-b','crash','-d','--pid=5371','-v','epoch','-T',t,'AndroidRuntime:E','*:S'];return (0,(b'' if mode=='empty' else fatal.replace(p.encode(),b'other') if mode=='wrong_header' else fatal))
+                if word=='exec-out run-as '+p+' ls -1 databases':return 0,b'pocket-v12.db\npocket-v12.db-journal' if mode=='journal' else b'pocket-v12.db' if mode=='unchanged' else b'pocket-v12.db\npocket-v12.db-wal'
+                if args[-1]=='databases/pocket-v12.db':
+                    dbreads+=1;return (0,plain if mode=='unchanged' else (base+b'!' if mode=='changing' and dbreads==2 else base))
+                if args[-1]=='databases/pocket-v12.db-wal':return 0,(altered if mode=='sibling_changed' else wal)
+                raise AssertionError('unexpected read '+word)
+            def tap():events.append('tap')
+            def ready():
+                events.append('ready')
+                if not success:raise err
+            try:_note_confirm_once(tap,ready,proof,'adb',serial,api,owner,ci,before,'a','b',1,reader=read,clock=lambda:now[0])
+            except Exception as ex:assert not success and ex is err
+            else:assert success
+            assert events==['tap','ready'];assert 'private fixture message' not in str(proof);assert all(a[0] in ('shell','exec-out','logcat') for a in calls);d=proof.get('confirm_diagnostic',{})
+            if not bound:assert not calls and not d
+            elif mode in ('outside','multipid','other_cmd','other_uid'):assert d['status']=='NOT_BOUND' and 'database' not in d and not any(a[0]=='logcat' for a in calls)
+            elif success:assert d.get('returned_to_app') is True and not any(a[0]=='logcat' for a in calls)
+            else:
+                assert d['status']=='BOUND';dbstat=d['database']['status'];log=d['crash']['status'];assert dbstat==('NOT_VERIFIED' if mode in ('still_running','unreachable','changing','journal') else 'DB_OTHER_OBSERVED' if mode=='sibling_changed' else 'DB_EXACT_BEFORE' if mode=='unchanged' else 'DB_EXACT_ONE_DELETION'),(mode,d)
+                if dbstat!='NOT_VERIFIED':assert d['database']['physical_media']=='NOT_OBSERVED'
+                assert log==('NO_UNIQUE_OWNED_FATAL' if mode in ('empty','wrong_header') else 'OWNED_FATAL_HEADER')
+                if log=='OWNED_FATAL_HEADER':assert d['crash']['exception_types']==['java.lang.IllegalStateException'] and d['crash']['frames']==['com.supercubegame.pockettodo.Example.finish(Example.java:91)']
+            seen[mode+str(api)+serial+owner+str(ci)+str(success)]=1
+        for mode in ['exact','unchanged','sibling_changed','changing','journal','unreachable','still_running','empty','wrong_header','outside','multipid','other_cmd','other_uid']:check(mode)
+        check('success',success=True);check('other_api',api=34);check('phone',serial='phone');check('off_ci',ci=False);check('other_pkg',owner='example')
+    for bad in [fatal.replace(b'1795650001.350',b'1795600000.000'),fatal.replace(b'1795650001.350',b'1795655000.000'),fatal.replace(b'  5371  5371',b'  9991  5371'),fatal+b'\n'+fatal,fatal.replace(b'Process: ',b'NOT A PROCESS: '),fatal.replace(b'E AndroidRuntime:',b'I AndroidRuntime:')]:
+        assert _note_crash_frames(bad,pid,t,t2)=={'status':'NO_UNIQUE_OWNED_FATAL'}
+    assert len(seen)==18;print('NOTE_CONFIRM_OBSERVATION_HOST 18 delivery/binding/state cases, real SQLite WAL and 6 log negatives; no Android root cause inferred',flush=True)
+
+
 def deletion_ui_selftest():
+    _note_diag_selftest()
     before = ({"notes": [("a", 1, "Same"), ("b", 1, "Same"), ("c", 2, "Same")],
         "blocks": [("a", "image", 0, "IMAGE", None, "asset", "", 0, None),
                    ("b", "image", 0, "IMAGE", None, "asset", "", 0, None),
@@ -1768,7 +1911,8 @@ def native(adb, gate):
         # start() above only establishes the post-restart root; detail() can reuse it.
         consent = preview(); passed("fresh_preview_unchecked")
         click(consent); assert find(**{"content-desc": "note-delete-consent"}).get("checked") == "true"
-        tap("确认删除"); ready()
+        _note_confirm_once(lambda:tap("确认删除"),ready,proof,adb,gate.SERIAL,gate.API,gate.PKG,
+                           os.environ.get("GITHUB_ACTIONS")=="true",initial[0],note,sibling[0],owner)
         stop(); deleted = state()
         deletion_readback_check(initial, deleted, note, owner)
         assert sibling in deleted[0]["notes"]

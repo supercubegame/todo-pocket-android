@@ -2210,7 +2210,128 @@ def calendar_draft_selftest():
         subprocess.run(jc+[str(probe),str(base/'Ledger.java')],check=True,timeout=30)
         subprocess.run(['java','-cp',temp,'com.supercubegame.pockettodo.MoneyProbe'],check=True,timeout=15)
 
+# API34 CI only. Scope is normal cancellation of this test's OPEN_DOCUMENT dialog, not arbitrary system navigation.
+_IMAGE_CANCEL_ROOT='sdk_gphone64_x86_64'
+_IMAGE_CANCEL_FOLDER='pocket-append-ci-api34'
+_IMAGE_CANCEL_TEXT='已取消选图，没有改变笔记'
+
+def _ci_image_surface(frame,product):
+    system={'com.android.documentsui','com.google.android.documentsui'}
+    def live(n):
+        m=re.fullmatch(r'\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]',n.get('bounds',''))
+        return bool(m and int(m[3])>int(m[1]) and int(m[4])>int(m[2]) and n.get('visible-to-user')!='false')
+    owners={n.get('package') for n in frame};owner=next(iter(owners)) if len(owners)==1 else None
+    if owner==product:
+        status=[n for n in frame if n.get('content-desc')=='v12-status'];done=len(status)==1 and status[0].get('class')=='android.widget.TextView' and status[0].get('text')==_IMAGE_CANCEL_TEXT and live(status[0]);return ('returned' if done else 'application',product,())
+    if owner not in system or not frame or frame[0].get('package')!=owner:return ('other','',())
+    if any(n.get('resource-id') in ('android:id/alertTitle','android:id/aerr_close','android:id/button1') for n in frame):return ('other','',())
+    def at(n,key):return n.get('resource-id')==owner+':id/'+key
+    bars=[n for n in frame if at(n,'toolbar') and live(n)];headers=[n for n in frame if at(n,'directory_header') and live(n)]
+    if len(bars)!=1 or len(headers)!=1:return ('other','',())
+    strips=[n for n in headers[0].iter('node') if at(n,'horizontal_breadcrumb') and live(n)]
+    if len(strips)!=1:return ('other','',())
+    raw=[n.get('text','') for n in strips[0].iter('node') if at(n,'breadcrumb_text') and n.get('class')=='android.widget.TextView']
+    # A clipped leading crumb may be present in the accessibility tree; never infer a missing parent.
+    chain=(_IMAGE_CANCEL_ROOT,'Download',_IMAGE_CANCEL_FOLDER);known=tuple(raw)
+    crumbs=[n for n in strips[0].iter('node') if at(n,'breadcrumb_text')]
+    if not raw or len(raw)!=len(crumbs) or not live(crumbs[-1]) or not raw[-1]:return ('other','',())
+    if known in (chain[:1],chain[:2],chain):return ('directory',owner,known)
+    return ('unbound',owner,())
+
+def cancel_fixture_image_picker(read_nodes,back,records,case,product,api,serial,ci,clock=time.monotonic,pause=time.sleep):
+    """One original Back; at most two further navigation actions, each authorized ONLY by a distinct observed parent transition. 20 seconds total."""
+    if (product,api,serial,ci)!=('com.supercubegame.pockettodo.v12.preview',34,'emulator-5554',True) or case not in ('existing_note','first_image'):raise ValueError('outside image cancel CI fixture')
+    end=clock()+20;row={'case':case,'api':api,'status':'PENDING','samples':0,'transitions':[],'backs':[]};records.append(row)
+    key=None;since=0.;previous=None;retired=False;owner=None
+    try:
+        while clock()<end:
+            kind,who,path=_ci_image_surface(read_nodes(),product);at=clock();row['samples']+=1
+            if at>=end:break
+            current=(kind,who,path)
+            if current!=key:
+                key=current;since=at
+                if len(row['transitions'])<48:row['transitions'].append([kind,list(path)])
+            if kind in ('application','returned'):
+                if previous is not None:
+                    retired=True
+                    if kind=='returned':row['status']='APP_CONFIRMED_CANCEL';return True
+            elif kind=='other':
+                raise AssertionError('outside verified normal image picker/application')
+            else:
+                if retired:raise AssertionError('picker reappeared after return to application')
+                if owner is not None and owner!=who:raise AssertionError('image picker ownership changed')
+                if previous is None:reason='INITIAL_CANCEL'
+                elif current==previous:reason=None
+                elif previous[0]=='directory' and kind=='directory' and len(previous[2])==len(path)+1 and previous[2][:-1]==path:reason='OBSERVED_PARENT'
+                else:raise AssertionError('unverified image picker path transition')
+                if at-since<.15:reason=None
+                if reason:
+                    if len(row['backs'])>=3 or path in [tuple(v['path']) for v in row['backs']]:raise AssertionError('duplicate or excessive Back')
+                    remain=end-clock()
+                    if remain<=0:break
+                    row['backs'].append({'reason':reason,'path':list(path)});owner=who;previous=current;back(remain)
+            delay=min(.20,max(0,end-clock()))
+            if delay:pause(delay)
+        raise TimeoutError('image picker did not deliver the application cancellation within 20s; see image_picker_cancels')
+    except Exception as e:
+        row['status']='FAIL';row['exception']=type(e).__name__;raise
+
+def image_cancel_selftest():
+    import copy
+    P='com.supercubegame.pockettodo.v12.preview';S='com.google.android.documentsui';R=_IMAGE_CANCEL_ROOT;L=_IMAGE_CANCEL_FOLDER
+    def node(parent=None,**attrs):
+        g={'package':S,'class':'android.view.View','bounds':'[0,0][320,640]','enabled':'true'};g.update(attrs);return ET.Element('node',g) if parent is None else ET.SubElement(parent,'node',g)
+    def dir(*path,owner=S):
+        root=node();bar=node(root,**{'resource-id':S+':id/toolbar'});header=node(root,**{'resource-id':S+':id/directory_header'});strip=node(header,**{'resource-id':S+':id/horizontal_breadcrumb'});
+        for name in path:node(strip,text=name,**{'resource-id':S+':id/breadcrumb_text','class':'android.widget.TextView'})
+        for v in root.iter('node'):
+            v.set('package',owner);v.set('resource-id',v.get('resource-id','').replace(S,owner))
+        return list(root.iter('node'))
+    app=lambda msg:[node(**{'package':P,'class':'android.widget.TextView','content-desc':'v12-status','text':msg})];A=app(_IMAGE_CANCEL_TEXT);child=dir(R,'Download',L);parent=dir(R,'Download');top=dir(R);unknown=dir(R,'unbound fixture');F=[node(**{'package':'other.fixture'})]
+    cases=[('direct',[top,A],1,True),('deep',[child,parent,top,A],3,True),('one_parent',[child,parent,A],2,True),('unbound_direct',[unknown,A],1,True),('never_change',[child,child],1,False),('unknown_then_parent',[unknown,parent],1,False),('jump_root',[child,top],1,False),('wrong_parent',[child,unknown],1,False),('wrong_owner',[child,dir(R,'Download',owner='com.android.documentsui')],1,False),('other',[F],0,False),('late_other',[child,F],1,False),('already_done',[A],0,False),('app_without_status',[top,app('未返回')],1,False),('ambiguous_status',[top,A+A],1,False),('zero_bounds',[top,[node(**{'package':P,'class':'android.widget.TextView','content-desc':'v12-status','text':_IMAGE_CANCEL_TEXT,'bounds':'[0,0][0,0]'})]],1,False)]
+    def run(frames,expected,suc,twist='',fn=cancel_fixture_image_picker):
+        t=[0.];i=[0];calls=[];tr=[];reads=[0]
+        def read():
+            reads[0]+=1
+            if twist=='borrowed_then_known' and i[0]==1:return F if reads[0]<5 else parent
+            if twist=='application_then_picker' and i[0]==1:return app('等待') if reads[0]<5 else parent
+            if twist=='slow' and reads[0]==2:t[0]=20.
+            if twist=='late_result' and i[0]==1:t[0]=20.
+            if twist=='lingering' and i[0]==1 and reads[0]<8:return frames[0]
+            if twist=='transient_leaf' and reads[0]==1:return child
+            return frames[min(i[0],len(frames)-1)]
+        def back(left):
+            assert 0<left<=20;calls.append(i[0]);i[0]+=1
+            if twist=='throw':raise OSError('synthetic key failure')
+        try:ok=fn(read,back,tr,'existing_note',P,34,'emulator-5554',True,lambda:t[0],lambda d:t.__setitem__(0,t[0]+d))
+        except (TimeoutError,AssertionError,OSError):ok=False
+        assert len(calls)==expected and bool(ok)==suc and len(tr)==1 and len(tr[0]['backs'])==expected,(twist,len(calls),expected,ok,tr);assert (tr[0]['status']=='APP_CONFIRMED_CANCEL')==suc
+        return calls
+    for name,frames,num,suc in cases:run(frames,num,suc)
+    for key in ('foreign_then_return','ambiguous_then_return','wrong_owner_then_return','jump_then_return'):
+        run([child,{'foreign_then_return':F,'ambiguous_then_return':parent+F,'wrong_owner_then_return':dir(R,'Download',owner='com.android.documentsui'),'jump_then_return':top}[key],A],1,False,key)
+    for key,frame in [('missing_header',copy.deepcopy(parent)),('missing_breadcrumb',copy.deepcopy(parent)),('clipped_leaf',copy.deepcopy(parent)),('duplicated_header',copy.deepcopy(parent)),('system_alert',copy.deepcopy(parent))]:
+        if key=='missing_header':frame=[v for v in frame if not v.get('resource-id','').endswith('/directory_header')]
+        elif key=='missing_breadcrumb':frame=[v for v in frame if not v.get('resource-id','').endswith('/directory_header')]+[node(**{'resource-id':S+':id/directory_header'})]
+        elif key=='clipped_leaf':
+            header=next(v for v in frame if v.get('resource-id','').endswith('/directory_header'));list(header.iter('node'))[-1].set('bounds','[0,0][0,0]')
+        elif key=='duplicated_header':frame.append(node(**{'resource-id':S+':id/directory_header'}))
+        else:frame.append(node(**{'resource-id':'android:id/alertTitle'}))
+        run([frame,A],0,False,key)
+    for name in ('borrowed_then_known','application_then_picker'):run([child,parent,top,A],1,False,name)
+    run([top,A],0,False,'slow');run([top,A],1,False,'throw');run([top,A],1,False,'late_result');run([child,parent,A],2,True,'lingering');run([top,A],1,True,'transient_leaf')
+    def never(*a):raise AssertionError('foreign fixture interacted')
+    for args in [(P,26,'emulator-5554',True),('other',34,'emulator-5554',True),(P,34,'phone',True),(P,34,'emulator-5554',False)]:
+        try:cancel_fixture_image_picker(never,never,[],'existing_note',*args)
+        except ValueError:pass
+        else:raise AssertionError('out-of-scope picker action')
+    # Both prior aggregate receipts may still say FAIL: only original exact labels + the subsequent independent SQL/bytes checks define acceptance.
+    import ast
+    tree=ast.parse(Path(__file__).read_text());native=next(x for x in tree.body if isinstance(x,ast.FunctionDef) and x.name=='_verify_native_ui');xs=list(ast.walk(native));calls=[x for x in xs if isinstance(x,ast.Call) and isinstance(x.func,ast.Name) and x.func.id=='cancel_note_picker'];assert [ast.literal_eval(x.args[0]) for x in calls]==['existing_note','first_image'];assert sum(isinstance(x,ast.Call) and isinstance(x.func,ast.Name) and x.func.id=='cancel_fixture_image_picker' for x in xs)==1
+    print('IMAGE_CANCEL_HOST 31 scenarios, 4 off-scope refusals, both original paths present; 20 s per cancel; modeled normal directory navigation, not Android',flush=True)
+
 def parser_selftest():
+    image_cancel_selftest()
     calendar_draft_selftest()
     activity_navigation_selftest()
     derivative_hardening_selftest()
@@ -2525,6 +2646,7 @@ def _verify_native_ui(adb,nodes):
     process_stops = []
     restore_picker_traces = []
     summary_navigation_traces = []
+    image_picker_cancels=[]
     directory_traces = []
     hard_checks = []
     directory_runner = isolated_directory_runner(adb, SERIAL, PKG, directory_traces)
@@ -2863,10 +2985,16 @@ public class VerifyNotePng {
                 assert x2>x1 and y2>y1,'document filename must have actual touch bounds'
                 print('IMAGE_PICKER_TARGET '+repr(target.attrib),flush=True)
                 tap_node(target)
+        def cancel_note_picker(case):
+            if API!=34:
+                shell('input','keyevent','KEYCODE_BACK')
+                return find(**{'content-desc':'v12-status','text':'已取消选图，没有改变笔记'}) is not None
+            def key_back(left):
+                return subprocess.check_output([str(adb),'-s',SERIAL,'shell','input','keyevent','KEYCODE_BACK'],text=True,timeout=min(40,left))
+            return cancel_fixture_image_picker(nodes,key_back,image_picker_cancels,case,PKG,API,SERIAL,os.environ.get('GITHUB_ACTIONS')=='true')
         note_screen(); pick_image()
         ok(any(n.get('package','').endswith('documentsui') for n in nodes()),'image import opens the actual system document picker')
-        shell('input','keyevent','KEYCODE_BACK')
-        ok(find(**{'content-desc':'v12-status','text':'已取消选图，没有改变笔记'}) is not None,'cancel system image picker reports no note change')
+        ok(cancel_note_picker('existing_note'),'cancel system image picker reports no note change')
         stop()
         with sqlite3.connect(copy_db('pick-cancel.db')) as db:
             baseline={t:db.execute('SELECT * FROM '+t+' ORDER BY rowid').fetchall() for t in TABLES}
@@ -2956,8 +3084,7 @@ public class ImageImportFixture {
         first_screen();ok(find(text='写点什么，或加一张图。') is not None,'image-first activity shows genuine empty note before any import')
         pick_image()
         ok(find(text='pocket-first.jpg').get('package','').endswith('documentsui'),'first-image cancellation waits for a visible system picker before pressing Back')
-        shell('input','keyevent','KEYCODE_BACK')
-        ok(find(**{'content-desc':'v12-status','text':'已取消选图，没有改变笔记'}) is not None,'canceling first image reports no note change')
+        ok(cancel_note_picker('first_image'),'canceling first image reports no note change')
         stop();ok(state_read('first-image-cancel.db')==first_base,'first-image cancel creates no orphan note media block or revision')
         for filename,label in [('pocket-broken.png','malformed first image'),('pocket-pixel-over.png','20005000-pixel first image')]:
             first_screen();pick_image(filename)
@@ -3351,11 +3478,13 @@ public class ImageImportFixture {
         result.update(derivative_geometry=derive_geometry,pixel_oracle=pixel_oracle,process_stops=process_stops)
         result['restore_picker_traces']=restore_picker_traces
         result['summary_navigation_traces']=summary_navigation_traces
+        result['image_picker_cancels']=image_picker_cancels
         result['database_directory_traces']=directory_traces
     except Exception as exc:
         result={'status':'FAIL','api':API,'count':len(checks),'checks':checks,'error':repr(exc),'screenshots':shots,'infra_retries':infra_retries,'release_ready':False,'process_stops':process_stops}
         result['restore_picker_traces']=restore_picker_traces
         result['summary_navigation_traces']=summary_navigation_traces
+        result['image_picker_cancels']=image_picker_cancels
         result['database_directory_traces']=directory_traces
         if 'derive_geometry' in locals():result['derivative_geometry']=derive_geometry
         result['derivative_hardening_partial']=list(hard_checks)

@@ -528,12 +528,49 @@ public final class V12DeviceTest extends Instrumentation {
             }return result;
         }finally{root.recycle();}
     }
+    // Use the visible target's advertised Android accessibility action. A normal
+    // instrumentation pointer belongs to this app, not the external system picker.
+    // Never click a guessed point, the whole directory, or any other filename.
+    private boolean appendFileRow(android.view.accessibility.AccessibilityNodeInfo row,String pkg,String label){
+        if(!row.isVisibleToUser()||!row.isEnabled()||!pkg.contentEquals(row.getPackageName()))return false;
+        android.view.accessibility.AccessibilityNodeInfo parent=row.getParent();boolean directItem=false;
+        try{if(parent!=null&&pkg.contentEquals(parent.getPackageName())){
+            String cls=String.valueOf(parent.getClassName()),id=String.valueOf(parent.getViewIdResourceName());
+            directItem=cls.endsWith("RecyclerView")||cls.endsWith("GridView")||cls.endsWith("ListView")||id.equals(pkg+":id/dir_list")||id.equals(pkg+":id/directory_list");
+        }}finally{if(parent!=null)parent.recycle();}
+        if(!directItem&&!(pkg+":id/item_root").equals(row.getViewIdResourceName()))return false;
+        int names=0,matched=0;
+        for(android.view.accessibility.AccessibilityNodeInfo n:row.findAccessibilityNodeInfosByViewId("android:id/title")){
+            try{if(n.isVisibleToUser()){names++;if(label.contentEquals(n.getText()==null?"":n.getText())&&pkg.contentEquals(n.getPackageName()))matched++;}}finally{n.recycle();}
+        }
+        return names==1&&matched==1;
+    }
+    private void appendSemanticClick(String text,String id,boolean system,android.graphics.Rect observed,long deadline){
+        android.view.accessibility.AccessibilityNodeInfo root=getUiAutomation().getRootInActiveWindow(),one=null,target=null;
+        appendNeed(root!=null,"missing window before click");
+        try{
+            String pkg=String.valueOf(root.getPackageName());appendNeed(system?(pkg.equals("com.android.documentsui")||pkg.equals("com.google.android.documentsui")):getTargetContext().getPackageName().equals(pkg),"window changed before click");
+            for(android.view.accessibility.AccessibilityNodeInfo n:root.findAccessibilityNodeInfosByText(text)){
+                try{if(!n.isVisibleToUser()||!n.isEnabled()||!pkg.contentEquals(n.getPackageName())||!id.equals(n.getViewIdResourceName())||!text.contentEquals(n.getText()==null?"":n.getText()))continue;
+                    android.graphics.Rect b=new android.graphics.Rect();n.getBoundsInScreen(b);appendNeed(one==null&&observed.equals(b),"ambiguous or moved target before click");one=android.view.accessibility.AccessibilityNodeInfo.obtain(n);
+                }finally{n.recycle();}
+            }
+            appendNeed(one!=null,"target disappeared");target=android.view.accessibility.AccessibilityNodeInfo.obtain(one);
+            for(int level=0;target!=null&&level<8;level++){
+                boolean owned=level==0||system&&appendFileRow(target,pkg,text);
+                if(owned&&target.isVisibleToUser()&&target.isEnabled()&&pkg.contentEquals(target.getPackageName())&&target.getActionList().contains(android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_CLICK)){
+                    appendNeed(android.os.SystemClock.uptimeMillis()<deadline,"click deadline");appendNeed(target.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK),"advertised click refused");return;
+                }
+                if(!system)break;android.view.accessibility.AccessibilityNodeInfo p=target.getParent();target.recycle();target=p;
+            }
+            throw new AssertionError("legacy append: exact item has no owned accessible click: "+id+" / "+text);
+        }finally{if(target!=null)target.recycle();if(one!=null)one.recycle();root.recycle();}
+    }
     private void appendObserve(String text,String id,boolean system,boolean click,boolean exact,long budget)throws Exception{
         long until=Math.min(budget,android.os.SystemClock.uptimeMillis()+(system?20000:10000));android.graphics.Rect last=null;
         while(android.os.SystemClock.uptimeMillis()<until){android.graphics.Rect now=appendRect(text,id,system,exact);
             if(now!=null&&now.equals(last)&&android.os.SystemClock.uptimeMillis()<until){
-                if(click){long at=android.os.SystemClock.uptimeMillis();android.view.MotionEvent d=android.view.MotionEvent.obtain(at,at,0,now.exactCenterX(),now.exactCenterY(),0),u=android.view.MotionEvent.obtain(at,at+40,1,now.exactCenterX(),now.exactCenterY(),0);
-                    try{sendPointerSync(d);sendPointerSync(u);}finally{d.recycle();u.recycle();}waitForIdleSync();}return;
+                if(click){appendSemanticClick(text,id,system,now,until);waitForIdleSync();}return;
             }last=now;android.os.SystemClock.sleep(35);
         }throw new AssertionError("legacy append visible node deadline: "+id+" / "+text);
     }
@@ -555,10 +592,9 @@ public final class V12DeviceTest extends Instrumentation {
         TodoModel old=new TodoModel();old.add("同名记录");long done=old.add("同名记录");old.toggle(done);byte[] wire=BackupCodec.encode(old);
         StringBuilder sha=new StringBuilder();for(byte b:java.security.MessageDigest.getInstance("SHA-256").digest(wire))sha.append(String.format(java.util.Locale.ROOT,"%02x",b&255));
         try(AppDatabase fresh=AppDatabase.openForStartup(c,name)){fresh.addTodo("append-local","同名记录");fresh.addCategory(7,"保留分类");fresh.addActivity(71,7,0,"保留活动");fresh.recordBatch("keep-money",List.of(row("keep-entry",71,"2028-02-29",108)));}
-        byte[] initial=appendCells(name,true),side=appendCells(name,false);String nonce=UUID.randomUUID().toString(),folder="pocket-append-ci-"+nonce,file="old-"+nonce.substring(0,8)+".txt";
-        Path external=c.getExternalFilesDir(null).toPath(),local=Files.createTempFile(external,"legacy-ci-",".txt");String dir="/sdcard/Download/"+folder,dest=dir+"/"+file;
-        appendNeed(local.toString().matches("[A-Za-z0-9_./-]+")&&dir.matches("/sdcard/Download/pocket-append-ci-[a-f0-9-]{36}"),"fixed synthetic paths");
-        try{Files.write(local,wire);appendShell("mkdir "+dir);appendShell("cp -n "+local+" "+dest);appendNeed(Arrays.equals(appendShell("cat "+dest),wire),"exact external picker fixture bytes");}finally{Files.deleteIfExists(local);}
+        byte[] initial=appendCells(name,true),side=appendCells(name,false);String folder="pocket-append-ci-api"+android.os.Build.VERSION.SDK_INT,file="old-todos.txt";
+        String dest="/sdcard/Download/"+folder+"/"+file;
+        byte[] published=appendShell("cat "+dest);appendNeed(Arrays.equals(published,wire),"exact external picker fixture bytes, expected="+wire.length+" actual="+published.length);
         java.util.concurrent.atomic.AtomicInteger opens=new java.util.concurrent.atomic.AtomicInteger();android.app.Instrumentation.ActivityMonitor monitor=new android.app.Instrumentation.ActivityMonitor(){
             @Override public android.app.Instrumentation.ActivityResult onStartActivity(android.content.Intent intent){
                 if(android.content.Intent.ACTION_OPEN_DOCUMENT.equals(intent.getAction())){
@@ -585,11 +621,99 @@ public final class V12DeviceTest extends Instrumentation {
             appendNeed(screen[0]!=null&&screen[0].awaitShortcutClose(),"native screen closed");appendRows(name,sha.toString());appendNeed(Arrays.equals(side,appendCells(name,false)),"preserved after close and independent reopen");log.append("LEGACY_APPEND_NATIVE duplicate_and_database_reopen PASS\n");
         }finally{if(ui!=null&&!ui.isFinishing()&&!ui.isDestroyed()){final MainActivity a=ui;runOnMainSync(a::finish);}MainActivity.isolatedActivationTest=false;removeMonitor(monitor);info.flags=flags;getUiAutomation().setServiceInfo(info);}
     }
+    private static void moneyNeed(boolean pass,String label){if(!pass)throw new AssertionError("calendar batch: "+label);}
+    private void moneyPass(String label){log.append("CALENDAR_BATCH_NATIVE ").append(label).append(" PASS\n");}
+    private static long scalar(SQLiteDatabase db,String query,String... args){try(android.database.Cursor c=db.rawQuery(query,args)){moneyNeed(c.moveToFirst(),"scalar row");return c.getLong(0);}}
+    private long moneyScalar(String database,String query,String... args){try(SQLiteDatabase db=SQLiteDatabase.openDatabase(getTargetContext().getDatabasePath(database).getPath(),null,SQLiteDatabase.OPEN_READONLY)){return scalar(db,query,args);}}
+    private void moneyControls()throws Exception{
+        Context c=getTargetContext();String n="calendar-contracts-ci.db";moneyNeed(!c.getDatabasePath(n).exists(),"refuse existing schema3 fixture");
+        try(AppDatabase s=AppDatabase.openForStartup(c,n)){
+            s.addCategory(7,"测试");s.addActivity(71,7,0,"同名");s.addActivity(72,7,0,"同名");s.addTodo("keep","数据保留");
+            List<Ledger.Entry> r=List.of(row("b1",71,"2028-02-29",125),row("b2",71,"2028-03-01",0));byte[] before=appendCells(n,true);SQLiteDatabase sql=s.getWritableDatabase();
+            sql.execSQL("CREATE TEMP TRIGGER money_changed AFTER INSERT ON ledger WHEN NEW.position=1 BEGIN UPDATE ledger SET cents=cents+3 WHERE id=NEW.id; END");
+            boolean exact=false;try{s.recordActivityBatch(71,"cal-1",r);}catch(IllegalStateException expected){exact="批次写后核对失败".equals(expected.getMessage());}finally{sql.execSQL("DROP TRIGGER money_changed");}
+            moneyNeed(exact&&Arrays.equals(before,appendCells(n,true)),"silent second-line amount change rolled back including journal and revision");
+            sql.execSQL("CREATE TEMP TRIGGER money_late BEFORE INSERT ON ledger WHEN NEW.position=1 BEGIN SELECT RAISE(ABORT,'money_late_fixture'); END");
+            boolean late=false;try{s.recordActivityBatch(71,"cal-1",r);}catch(RuntimeException e){for(Throwable x=e;x!=null;x=x.getCause())if(String.valueOf(x.getMessage()).contains("money_late_fixture"))late=true;}finally{sql.execSQL("DROP TRIGGER money_late");}
+            moneyNeed(late&&Arrays.equals(before,appendCells(n,true)),"late second-line failure rolled back all cells");
+            moneyNeed(s.recordActivityBatch(71,"cal-1",r),"first save");byte[] saved=appendCells(n,true);moneyNeed(!s.recordActivityBatch(71,"cal-1",r)&&Arrays.equals(saved,appendCells(n,true)),"idempotent replay exact");
+            boolean clash=false;try{s.recordActivityBatch(71,"cal-1",List.of(row("b1",71,"2028-02-29",126)));}catch(IllegalStateException e){clash=true;}
+            boolean sameId=false;try{s.recordActivityBatch(71,"cal-2",List.of(row("new-id",71,"2028-03-02",321),r.get(0)));}catch(IllegalArgumentException e){sameId=true;}
+            boolean other=false;try{s.recordActivityBatch(71,"cal-3",List.of(r.get(0),row("foreign",72,"2028-03-02",1)));}catch(IllegalArgumentException e){other=true;}
+            moneyNeed(clash&&sameId&&other&&Arrays.equals(saved,appendCells(n,true)),"same key changed, other key duplicated ID, and cross-activity rows refused");
+            AppDatabase.MoneyUndoReview stale=s.latestMoneyUndo(71);moneyNeed(stale!=null&&s.latestMoneyUndo(72)==null,"undo restricted to owner");s.addTodo("later","保留后续更改");byte[] newer=appendCells(n,true);boolean refused=false;
+            try{s.undoActivityBatch(stale);}catch(IllegalStateException e){refused=true;}moneyNeed(refused&&s.latestMoneyUndo(71)==null&&Arrays.equals(newer,appendCells(n,true)),"stale undo cannot remove later data");
+            s.recordActivityBatch(71,"cal-fresh",List.of(row("fresh",71,"2028-03-01",900)));AppDatabase.MoneyUndoReview token=s.latestMoneyUndo(71);s.undoActivityBatch(token);byte[] undone=appendCells(n,true);
+            boolean twice=false,resurrect=false;try{s.undoActivityBatch(token);}catch(IllegalStateException e){twice=true;}try{s.recordActivityBatch(71,"cal-fresh",List.of(row("fresh",71,"2028-03-01",900)));}catch(IllegalStateException e){resurrect=true;}
+            moneyNeed(twice&&resurrect&&Arrays.equals(undone,appendCells(n,true)),"consumed undo and tombstone cannot replay");
+        }moneyPass("schema3_atomic_replay_owner_and_undo_guards");
+    }
+    private static void moneyViews(android.view.View view,String id,boolean edit,boolean desc,List<android.view.View> found){
+        if(view.isAttachedToWindow()&&view.isShown()&&view.isEnabled()){
+            boolean type=edit?view instanceof android.widget.EditText:view instanceof android.widget.Button;
+            if(type){String label=String.valueOf(desc?view.getContentDescription():((android.widget.TextView)view).getText());if(id.equals(label))found.add(view);}
+        }
+        if(view instanceof android.view.ViewGroup){android.view.ViewGroup g=(android.view.ViewGroup)view;for(int i=0;i<g.getChildCount();i++)moneyViews(g.getChildAt(i),id,edit,desc,found);}
+    }
+    private android.app.AlertDialog moneyDialog(CalendarScreen cal)throws Exception{
+        java.lang.reflect.Field f=CalendarScreen.class.getDeclaredField("activeMoney");f.setAccessible(true);Object owner=f.get(cal);if(owner==null)return null;
+        java.lang.reflect.Field d=owner.getClass().getDeclaredField("box");d.setAccessible(true);return (android.app.AlertDialog)d.get(owner);
+    }
+    /** Reflection is only used to locate the current Dialog's window; all edits/clicks
+     * go through real visible widgets. The oracle opens a separate read-only SQLite handle. */
+    private void moneyAct(CalendarScreen cal,String id,String text,long end)throws Exception{
+        long until=Math.min(end,android.os.SystemClock.uptimeMillis()+7000);boolean[] done={false};
+        while(!done[0]&&android.os.SystemClock.uptimeMillis()<until){runOnMainSync(()->{
+            try{android.app.AlertDialog dlg=moneyDialog(cal);if(dlg==null||!dlg.isShowing())return;
+                List<android.view.View> found=new ArrayList<>();moneyViews(dlg.getWindow().getDecorView(),id,text!=null,text!=null,found);moneyNeed(found.size()<=1,"duplicate dialog action "+id);
+                if(found.size()==1){android.view.View v=found.get(0);v.requestRectangleOnScreen(new android.graphics.Rect(0,0,v.getWidth(),v.getHeight()),true);android.graphics.Rect visible=new android.graphics.Rect();if(!v.getGlobalVisibleRect(visible)||visible.isEmpty())return;
+                    if(text==null)done[0]=v.performClick();else{((android.widget.EditText)v).setText(text);done[0]=true;}}
+            }catch(ReflectiveOperationException e){throw new AssertionError(e);}catch(Exception e){throw new AssertionError(e);}
+        });if(!done[0])android.os.SystemClock.sleep(25);}moneyNeed(done[0],"missing visible dialog action "+id);waitForIdleSync();
+    }
+    private void moneyLine(CalendarScreen cal,String day,String kind,String amount,boolean preset,long end)throws Exception{
+        moneyAct(cal,"批次日期",day,end);moneyAct(cal,kind,null,end);if(preset)moneyAct(cal,amount+" 元",null,end);else moneyAct(cal,"批次金额（元）",amount,end);moneyAct(cal,"加入本行",null,end);
+    }
+    private byte[] moneySide(String n,long activity)throws Exception{
+        ByteArrayOutputStream bytes=new ByteArrayOutputStream();DataOutputStream out=new DataOutputStream(bytes);
+        try(SQLiteDatabase db=SQLiteDatabase.openDatabase(getTargetContext().getDatabasePath(n).getPath(),null,SQLiteDatabase.OPEN_READONLY)){
+            List<String> tables=new ArrayList<>(Arrays.asList(TABLES));tables.add("category_shortcuts");
+            for(String t:tables){if(t.equals("revision"))continue;
+                String where=t.equals("ledger")?" WHERE activity_id<>?":t.equals("batches")?" WHERE id IN (SELECT batch_id FROM ledger WHERE activity_id<>?)":"";
+                String query=t.equals("category_shortcuts")?"SELECT * FROM category_shortcuts ORDER BY category_id,application_id":"SELECT rowid,* FROM "+t+where+" ORDER BY rowid";
+                try(android.database.Cursor v=db.rawQuery(query,where.isEmpty()?null:new String[]{Long.toString(activity)})){
+                    str(out,t);out.writeInt(v.getColumnCount());out.writeInt(v.getCount());while(v.moveToNext())for(int i=0;i<v.getColumnCount();i++){int k=v.getType(i);out.writeByte(k);switch(k){case 0:break;case 1:out.writeLong(v.getLong(i));break;case 3:str(out,v.getString(i));break;case 4:bytes(out,v.getBlob(i));break;default:throw new AssertionError("type");}}
+                }
+            }
+        }out.flush();return bytes.toByteArray();
+    }
+    private void calendarBatchPhase()throws Exception{
+        Context c=getTargetContext();moneyNeed("com.supercubegame.pockettodo.v12.preview".equals(c.getPackageName())&&"ranchu".equals(android.os.Build.HARDWARE)&&android.os.Build.VERSION.SDK_INT==Integer.parseInt(args.getString("expectedApi")),"CI preview only");
+        moneyControls();String n="schema4-ui.db";moneyNeed(!c.getDatabasePath(n).exists(),"isolated native UI database must be new");
+        try(AppDatabase s=AppDatabase.openSchema4(c,n)){s.addCategory(7,"分类");s.addApplication(9,"应用","");s.addActivity(71,7,9,"同名账本");s.addActivity(72,7,9,"同名账本");s.setShortcut(7,9,true);s.addTodo("keep-ui","非空本机待办");s.recordBatch("unrelated",List.of(row("other-row",72,"2028-03-01",999)));}
+        byte[] base=appendCells(n,true),other=moneySide(n,71);long rev=moneyScalar(n,"SELECT value FROM revision WHERE id=1");long end=android.os.SystemClock.uptimeMillis()+55000;MainActivity a=null;
+        try{
+            MainActivity.isolatedShortcutTest=true;a=(MainActivity)startActivitySync(new android.content.Intent(c,MainActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));final MainActivity activity=a;final TodayScreen host=a.shortcutTestScreen();moneyNeed(host!=null,"real schema4 test workbench");
+            boolean ready=false;long until=Math.min(end,android.os.SystemClock.uptimeMillis()+7000);while(!ready&&android.os.SystemClock.uptimeMillis()<until){boolean[] seen={false};runOnMainSync(()->{List<android.widget.Button> b=new ArrayList<>();appendButtons(activity.getWindow().getDecorView(),"备份 / 恢复",b);seen[0]=b.size()==1;});ready=seen[0];if(!ready)android.os.SystemClock.sleep(25);}moneyNeed(ready,"workbench ready");
+            final CalendarScreen cal=new CalendarScreen(host,71,"同名账本",()->{});runOnMainSync(cal::load);appendClick(a,"批量记账",end);
+            moneyLine(cal,"2028-02-29","支出","5",true,end);moneyAct(cal,"核对批次",null,end);moneyNeed(Arrays.equals(base,appendCells(n,true)),"review is read-only");moneyAct(cal,"取消",null,end);moneyNeed(Arrays.equals(base,appendCells(n,true)),"cancel is read-only");moneyPass("preview_and_cancel_preserve_all_business_cells");
+            appendClick(a,"批量记账",end);String[] days={"2028-02-28","2028-02-29","2028-03-01","2028-03-01","2028-03-01","2028-03-01"},kinds={"支出","支出","支出","退款","收入","预计"},types={"EXPENSE","EXPENSE","EXPENSE","REFUND","INCOME","PLANNED"},yuan={"0","1.25","13","1","2.50","9"};long[] cents={0,125,1300,100,250,900};
+            for(int i=0;i<6;i++)moneyLine(cal,days[i],kinds[i],yuan[i],i==0,end);moneyAct(cal,"核对批次",null,end);moneyNeed(Arrays.equals(base,appendCells(n,true)),"not saved by review");moneyAct(cal,"确认记账",null,end);
+            appendClick(a,"撤销最近批次",end);String key;Set<String> ids=new HashSet<>();try(SQLiteDatabase s=SQLiteDatabase.openDatabase(c.getDatabasePath(n).getPath(),null,SQLiteDatabase.OPEN_READONLY);android.database.Cursor rows=s.rawQuery("SELECT id,day,kind,cents,position,batch_id FROM ledger WHERE activity_id=71 ORDER BY position",null)){
+                String current=null;for(int i=0;i<6;i++){moneyNeed(rows.moveToNext()&&ids.add(rows.getString(0))&&days[i].equals(rows.getString(1))&&types[i].equals(rows.getString(2))&&cents[i]==rows.getLong(3)&&i==rows.getLong(4),"exact row "+i);if(i==0)current=rows.getString(5);moneyNeed(current!=null&&current.equals(rows.getString(5)),"all rows one batch");}moneyNeed(!rows.moveToNext()&&scalar(s,"SELECT value FROM revision")==rev+1&&scalar(s,"SELECT COUNT(*) FROM ledger WHERE activity_id=71 AND day='2028-03-02'")==0,"one revision and absent day");key=current;
+                moneyNeed(scalar(s,"SELECT SUM(cents) FROM ledger WHERE activity_id=71 AND kind='EXPENSE'")==1425&&scalar(s,"SELECT count(DISTINCT day) FROM ledger WHERE activity_id=71 AND kind<>'PLANNED'")==3,"independent expense and actual days");
+            }moneyNeed(Arrays.equals(other,moneySide(n,71)),"unrelated business tables unchanged");moneyPass("six_ordered_rows_one_key_zero_missing_leap_four_kinds");
+            byte[] committed=appendCells(n,true);moneyAct(cal,"取消",null,end);moneyNeed(Arrays.equals(committed,appendCells(n,true)),"cancel undo is read-only");appendClick(a,"撤销最近批次",end);moneyAct(cal,"确认撤销",null,end);
+            until=Math.min(end,android.os.SystemClock.uptimeMillis()+8000);while(moneyScalar(n,"SELECT value FROM revision")!=rev+2&&android.os.SystemClock.uptimeMillis()<until)android.os.SystemClock.sleep(25);
+            moneyNeed(moneyScalar(n,"SELECT value FROM revision")==rev+2&&moneyScalar(n,"SELECT count(*) FROM ledger WHERE activity_id=71")==0&&moneyScalar(n,"SELECT cents FROM ledger WHERE id='other-row' AND activity_id=72")==999&&moneyScalar(n,"SELECT undone FROM batches WHERE id=?",key)==1&&Arrays.equals(other,moneySide(n,71)),"undo only exact batch with tombstone");
+            runOnMainSync(activity::finish);waitForIdleSync();moneyNeed(host.awaitShortcutClose()&&moneyScalar(n,"SELECT undone FROM batches WHERE id=?",key)==1&&moneyScalar(n,"SELECT count(*) FROM ledger")==1,"independent database reopen after finish");moneyPass("undo_cancel_then_exact_batch_only_and_reopen");
+        }finally{if(a!=null&&!a.isFinishing()&&!a.isDestroyed()){MainActivity closing=a;runOnMainSync(closing::finish);}MainActivity.isolatedShortcutTest=false;}
+    }
     @Override public void onStart(){
         Bundle result=new Bundle();try{
             ok(getTargetContext().getPackageName().equals("com.supercubegame.pockettodo.v12.preview"),"tests target isolated v1.2 package");
             ok(android.os.Build.VERSION.SDK_INT==Integer.parseInt(args.getString("expectedApi")),"actual emulator API equals requested test matrix");
-            String phase=args.getString("phase");if("seed".equals(phase)){seed();fieldsSeed();backupSeed();guardedSeed();frozenSeed();legacyAppendNative();}else if("reopen".equals(phase)){reopen();fieldsReopen();backupReopen();guardedReopen();frozenReopen();restorePreviewOwnerReopen();}else if("prepare_ui_backup".equals(phase))prepareUiBackup();else throw new IllegalArgumentException("unknown test phase");
+            String phase=args.getString("phase");if("seed".equals(phase)){seed();fieldsSeed();backupSeed();guardedSeed();frozenSeed();legacyAppendNative();}else if("reopen".equals(phase)){reopen();fieldsReopen();backupReopen();guardedReopen();frozenReopen();restorePreviewOwnerReopen();}else if("calendar_batch".equals(phase))calendarBatchPhase();else if("prepare_ui_backup".equals(phase))prepareUiBackup();else throw new IllegalArgumentException("unknown test phase");
             log.append("DEVICE_DATABASE_RESULT ").append(phase).append(' ').append(checks).append('/').append(checks).append(" PASS\n");result.putString("stream",log.toString());finish(Activity.RESULT_OK,result);
         }catch(Throwable error){StringWriter text=new StringWriter();error.printStackTrace(new PrintWriter(text));result.putString("stream",log+"DEVICE_DATABASE_FAILED\n"+text);finish(Activity.RESULT_CANCELED,result);}
     }

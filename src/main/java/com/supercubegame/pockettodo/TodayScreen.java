@@ -244,7 +244,7 @@ public final class TodayScreen {
         nav.addView(button("导出笔记",()->{leaveTodoSession();((MainActivity)activity).openNoteShare();}),new LinearLayout.LayoutParams(0,dp(52),1));root.addView(nav);
         refresh();
     }
-    private void navigate(int next){if(busy)return;if(page==1&&next!=1)activities.leaveSearch();rememberDraft();leaveTodoSession();page=next;refresh();}
+    private void navigate(int next){if(busy)return;if(page==1&&next!=1)activities.leaveActivityNavigation();rememberDraft();leaveTodoSession();page=next;refresh();}
     void refresh(){if(page==1)activities.load();else loadTodos();}
     LinearLayout content(){todoView=new Object();clearTodoPreview();if(page!=0)clearTodoUndo();input=null;content.removeAllViews();return content;}
     private void rememberDraft(){if(input!=null)draft=input.getText().toString();}
@@ -452,6 +452,6 @@ public final class TodayScreen {
     int dp(int value){return Math.round(value*activity.getResources().getDisplayMetrics().density);}
     boolean awaitShortcutClose()throws InterruptedException{return io.awaitTermination(10,java.util.concurrent.TimeUnit.SECONDS);}
     public void save(Bundle out){rememberDraft();out.putInt("page",page);out.putInt("filter",filter);out.putString("draft",draft);out.putLong("activity",activities.selected);}
-    public boolean back(){if(busy)return true;if(page==1&&activities.backFromSearch())return true;if(page==1&&activities.backFromCategoryOrder())return true;if(page==1&&activities.selected!=0){activities.selected=0;activities.load();return true;}return false;}
-    public void close(){if(closed)return;closed=true;activities.leaveSearch();clearRestorePreview();clearActivation();leaveTodoSession();io.execute(db::close);io.shutdown();}
+    public boolean back(){if(busy)return true;if(page==1&&activities.backFromShortcut())return true;if(page==1&&activities.backFromSearch())return true;if(page==1&&activities.backFromCategoryOrder())return true;if(page==1&&activities.selected!=0){activities.selected=0;activities.load();return true;}return false;}
+    public void close(){if(closed)return;closed=true;activities.leaveActivityNavigation();clearRestorePreview();clearActivation();leaveTodoSession();io.execute(db::close);io.shutdown();}
 }

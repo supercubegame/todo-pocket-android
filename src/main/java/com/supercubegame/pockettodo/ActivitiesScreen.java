@@ -99,7 +99,7 @@ public final class ActivitiesScreen {
         void addPage(String label,boolean next,long lower,long ticket){Button b=host.button(label,()->{if(!active()||s.epoch!=ticket)return;if(next)s.pages.add(lower);else s.pages.remove(s.pages.size()-1);submit(false);});b.setTag(next?"activity-search-next":"activity-search-previous");rows.addView(b,new LinearLayout.LayoutParams(-1,-2));}
     }
 
-    void load(){if(categorySession!=null)categorySession.alive=false;if(backupPanel)renderBackup();else if(selected==0){if(archivePanel)loadArchivedActivities();else if(searchFlow!=null)new SearchPage(searchFlow);else loadCategories();}else if(historyPanel)loadHistory(selected);else loadDetail(selected);}
+    void load(){if(shortcutOrigin!=null&&selected!=shortcutOrigin.target)shortcutOrigin=null;if(categorySession!=null)categorySession.alive=false;if(backupPanel)renderBackup();else if(selected==0){if(archivePanel)loadArchivedActivities();else if(searchFlow!=null)new SearchPage(searchFlow);else loadCategories();}else if(historyPanel)loadHistory(selected);else loadDetail(selected);}
     private long nextId(String table){
         // Only fixed internal table names, and one UI writer on the shared executor.
         if(!table.equals("categories")&&!table.equals("activities"))throw new IllegalArgumentException();
@@ -154,7 +154,7 @@ public final class ActivitiesScreen {
             for(Button b:new Button[]{add,rename,up,down})actions.addView(b,new LinearLayout.LayoutParams(0,host.dp(48),1));group.addView(actions);
             if(host.db.shortcutsEnabled()){
                 Button shortcuts=host.button("快捷入口",()->openShortcuts(cat.id,session,group));
-                shortcuts.setContentDescription("shortcut-manage-"+cat.id);
+                shortcuts.setContentDescription("shortcut-manage-"+cat.id);categorySpeech(shortcuts,"管理快捷入口，分类 "+cat.name+"，编号 "+cat.id);
                 group.addView(shortcuts,new LinearLayout.LayoutParams(-1,-2));
             }
             if(cat.items.isEmpty())group.addView(host.text("还没有活动",16,TodayScreen.MUTED));
@@ -308,16 +308,55 @@ public final class ActivitiesScreen {
                                   boolean enabled,boolean finishing,boolean destroyed){
         return alive&&!submitted&&attached&&enabled&&!finishing&&!destroyed;
     }
+    /** Transient origin for a detail opened through a shortcut. No persistence and no reusable DB permission. */
+    private static final class ShortcutOrigin {
+        final long category,application,target;android.view.View back;
+        ShortcutOrigin(long c,long a,long t){category=c;application=a;target=t;}
+    }
+    private ShortcutOrigin shortcutOrigin;
+    private ShortcutPage shortcutShowing;
+    private ShortcutOrigin shortcutFor(long id){return id>0&&selected==id&&shortcutOrigin!=null&&shortcutOrigin.target==id?shortcutOrigin:null;}
+    void leaveActivityNavigation(){leaveSearch();shortcutOrigin=null;if(shortcutShowing!=null)shortcutShowing.close();}
+    private boolean usableShortcut(){return !host.activity.isFinishing()&&!host.activity.isDestroyed();}
+    private boolean returnFromShortcut(ShortcutOrigin from,android.view.View back){
+        if(from==null||back==null||from!=shortcutFor(selected)||from.back!=back||!back.isAttachedToWindow()||!back.isShown()||!back.isEnabled()||!usableShortcut())return false;
+        // Consume the origin before posting work. The old selector and its plan were closed on entry.
+        from.back=null;shortcutOrigin=null;selected=0;historyPanel=false;archivePanel=false;
+        ShortcutPage pending=shortcutPage("返回快捷目标");
+        TextView hint=host.text("正在核对原来的快捷入口…",16,TodayScreen.MUTED);hint.setTag("shortcut-return-status");hint.setAccessibilityLiveRegion(android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE);pending.root.addView(hint);
+        Runnable unavailable=()->{if(!pending.current(pending.root))return;hint.setText("原快捷入口已移除或不可用，请返回分类。");host.message("未打开其他活动，也未修改数据。",false);};
+        host.work(()->host.db.prepareShortcut(from.category,from.application),fresh->{
+            if(!pending.current(pending.root)){fresh.close();return;}
+            if(!fresh.enabled||fresh.category!=from.category||fresh.application!=from.application){fresh.close();unavailable.run();return;}
+            showShortcutTargets(fresh);
+        },unavailable,AppDatabase.ShortcutPlan::close);return true;
+    }
+    boolean backFromShortcut(){
+        if(!usableShortcut())return false;
+        ShortcutPage p=shortcutShowing;
+        if(p!=null&&p.current(p.root)){p.close();shortcutOrigin=null;selected=0;historyPanel=false;archivePanel=false;load();return true;}
+        ShortcutOrigin from=shortcutFor(selected);return from!=null&&returnFromShortcut(from,from.back);
+    }
+    private Button detailBack(long id,boolean archived){
+        final ShortcutOrigin from=shortcutFor(id);String label=from!=null?"返回快捷目标":searchDetail(id)?"返回搜索":archived?"返回归档列表":"返回分类";
+        Button back=host.button(label,()->{});if(from!=null){from.back=back;back.setTag("shortcut-detail-back");}
+        back.setOnClickListener(v->{if(!back.isEnabled()||!back.isAttachedToWindow()||!back.isShown()||!usableShortcut()||selected!=id)return;
+            if(from!=null){returnFromShortcut(from,back);return;}if(searchDetail(id)){backFromSearch();return;}
+            selected=0;archivePanel=archived;historyPanel=false;load();});return back;
+    }
+    private static final String SHORTCUT_TARGET_SQL="SELECT a.title,c.name,c.id FROM activities a JOIN categories c ON c.id=a.category_id WHERE a.id=? AND a.application_id=? AND a.archived=0";
+    static String shortcutOriginLabel(String category,long cid,String app,long aid){return "入口分类："+category+" · #"+cid+"\n应用："+app+" · #"+aid;}
+    static String shortcutTargetLabel(String title,long id,String category,long cid){return title+" · 活动 #"+id+"\n所属分类："+category+" · #"+cid;}
     private final class ShortcutPage {
         final LinearLayout root;
         AppDatabase.ShortcutPlan plan;
         boolean alive=true,submitted;
         ShortcutPage(LinearLayout root){this.root=root;}
         boolean current(android.view.View control){
-            return shortcutCanAct(alive,submitted,root.isAttachedToWindow(),
+            return shortcutShowing==this&&shortcutCanAct(alive,submitted,root.isAttachedToWindow(),
                 control.isAttachedToWindow()&&control.isEnabled(),host.activity.isFinishing(),host.activity.isDestroyed());
         }
-        void close(){alive=false;if(plan!=null){plan.close();plan=null;}}
+        void close(){alive=false;if(shortcutShowing==this)shortcutShowing=null;if(plan!=null){plan.close();plan=null;}}
     }
     private static final class ShortcutEntry {
         final long id;final String name;final boolean enabled;
@@ -325,14 +364,14 @@ public final class ActivitiesScreen {
     }
     private ShortcutPage shortcutPage(String title){
         LinearLayout body=host.content(),root=host.column();body.addView(root,new LinearLayout.LayoutParams(-1,-1));
-        ShortcutPage p=new ShortcutPage(root);
+        ShortcutPage p=new ShortcutPage(root);shortcutShowing=p;
         root.addOnAttachStateChangeListener(new android.view.View.OnAttachStateChangeListener(){
             @Override public void onViewAttachedToWindow(android.view.View v){}
             @Override public void onViewDetachedFromWindow(android.view.View v){p.close();}
         });
         root.addView(host.text(title,24,TodayScreen.INK));
         Button back=host.button("返回分类",()->{if(p.current(root)){p.close();selected=0;load();}});
-        back.setContentDescription("shortcut-back");root.addView(back,new LinearLayout.LayoutParams(-1,-2));
+        back.setContentDescription("shortcut-back");categorySpeech(back,"返回分类");root.addView(back,new LinearLayout.LayoutParams(-1,-2));
         return p;
     }
     private LinearLayout shortcutScroll(ShortcutPage p){
@@ -356,19 +395,19 @@ public final class ActivitiesScreen {
             return entries;
         },entries->{
             if(!categoryCurrent(session,anchor))return;
-            ShortcutPage p=shortcutPage("分类快捷入口");
+            ShortcutPage p=shortcutPage("分类快捷入口 · 分类 #"+category);
             LinearLayout rows=shortcutScroll(p);
             rows.addView(host.text("仅跳转到本应用内已有活动，不启动其他 App，不自动记账或打卡。",16,TodayScreen.MUTED));
             if(entries.isEmpty())rows.addView(host.text("应用目录还是空的，请先返回添加应用。",16,TodayScreen.MUTED));
             for(ShortcutEntry item:entries){
                 rows.addView(host.text(item.name+" · #"+item.id,18,TodayScreen.INK));
                 Button change=host.button(item.enabled?"移除快捷入口":"添加快捷入口",()->{});
-                change.setContentDescription("shortcut-change-"+category+"-"+item.id);
+                change.setContentDescription("shortcut-change-"+category+"-"+item.id);categorySpeech(change,(item.enabled?"移除":"添加")+"快捷入口，应用 "+item.name+"，编号 "+item.id);
                 change.setOnClickListener(v->prepareShortcutPage(p,change,category,item,false));
                 rows.addView(change,new LinearLayout.LayoutParams(-1,-2));
                 if(item.enabled){
-                    Button open=host.button("打开 "+item.name,()->{});
-                    open.setContentDescription("shortcut-open-"+category+"-"+item.id);
+                    Button open=host.button("打开 "+item.name+" · #"+item.id,()->{});
+                    open.setContentDescription("shortcut-open-"+category+"-"+item.id);categorySpeech(open,"打开应用 "+item.name+" 的活动，应用编号 "+item.id);
                     open.setOnClickListener(v->prepareShortcutPage(p,open,category,item,true));
                     rows.addView(open,new LinearLayout.LayoutParams(-1,-2));
                 }
@@ -392,7 +431,7 @@ public final class ActivitiesScreen {
         rows.addView(host.text(plan.categoryName+" · #"+plan.category+"\n"+plan.applicationName+" · #"+plan.application,18,TodayScreen.INK));
         rows.addView(host.text("只改变这一条快捷关联，不删除应用、活动、笔记或任何历史记录。",16,TodayScreen.MUTED));
         Button save=host.button("确认"+(plan.enabled?"移除":"添加"),()->{});
-        save.setContentDescription("shortcut-confirm");
+        save.setContentDescription("shortcut-confirm");categorySpeech(save,(plan.enabled?"确认移除":"确认添加")+"快捷入口，分类 "+plan.categoryName+"，编号 "+plan.category+"，应用 "+plan.applicationName+"，编号 "+plan.application);
         save.setOnClickListener(v->{
             if(!p.current(save)||p.plan!=plan)return;
             p.submitted=true;
@@ -409,15 +448,14 @@ public final class ActivitiesScreen {
     private void showShortcutTargets(AppDatabase.ShortcutPlan plan){
         ShortcutPage p=shortcutPage("选择要打开的活动");p.plan=plan;
         LinearLayout rows=shortcutScroll(p);
-        rows.addView(host.text(plan.applicationName+" · #"+plan.application,18,TodayScreen.INK));
+        TextView origin=host.text(shortcutOriginLabel(plan.categoryName,plan.category,plan.applicationName,plan.application),18,TodayScreen.INK);origin.setTag("shortcut-origin");rows.addView(origin);
         host.work(()->{
             List<ShortcutEntry> targets=new ArrayList<>();
             synchronized(host.db){
                 for(long id:host.db.activityTargets(plan.category,plan.application)){
                     try(Cursor c=host.db.getReadableDatabase().rawQuery(
-                        "SELECT a.title,c.name FROM activities a JOIN categories c ON c.id=a.category_id WHERE a.id=? AND a.archived=0",
-                        new String[]{Long.toString(id)})){
-                        if(c.moveToFirst())targets.add(new ShortcutEntry(id,c.getString(1)+" / "+c.getString(0),true));
+                        SHORTCUT_TARGET_SQL,new String[]{Long.toString(id),Long.toString(plan.application)})){
+                        if(c.moveToFirst())targets.add(new ShortcutEntry(id,shortcutTargetLabel(c.getString(0),id,c.getString(1),c.getLong(2)),true));
                     }
                 }
             }
@@ -426,14 +464,14 @@ public final class ActivitiesScreen {
             if(!p.alive||!p.root.isAttachedToWindow()){plan.close();return;}
             if(targets.isEmpty())rows.addView(host.text("没有可打开的活动：可能已归档或移除。不会自动新建。",16,TodayScreen.MUTED));
             for(ShortcutEntry target:targets){
-                Button open=host.button(target.name+" · #"+target.id,()->{});
-                open.setContentDescription("shortcut-target-"+target.id);
+                Button open=host.button(target.name,()->{});
+                open.setContentDescription("shortcut-target-"+target.id);categorySpeech(open,"打开 "+target.name.replace(" · 活动 #","，活动编号 ").replace("\n所属分类：","，所属分类 ").replace(" · #","，分类编号 "));
                 open.setOnClickListener(v->{
                     if(!p.current(open)||p.plan!=plan)return;
                     p.submitted=true;
                     host.work(()->host.db.navigateShortcut(plan,target.id),id->{
                         p.plan=null;if(!p.alive||!p.root.isAttachedToWindow())return;
-                        p.close();selected=id;historyPanel=false;archivePanel=false;load();
+                        p.close();shortcutOrigin=new ShortcutOrigin(plan.category,plan.application,id);selected=id;historyPanel=false;archivePanel=false;load();
                     },()->{
                         plan.close();p.plan=null;
                         if(p.alive){p.submitted=false;for(int i=0;i<rows.getChildCount();i++)rows.getChildAt(i).setEnabled(false);
@@ -605,7 +643,7 @@ public final class ActivitiesScreen {
     private void renderDetail(long id,Detail d){
         if(d.archived){renderArchived(id,d);return;}
         LinearLayout body=host.content();LinearLayout toolbar=new LinearLayout(host.activity);
-        toolbar.addView(host.button(searchDetail(id)?"返回搜索":"返回分类",()->{if(searchDetail(id)){backFromSearch();return;}selected=0;archivePanel=false;historyPanel=false;load();}),new LinearLayout.LayoutParams(0,host.dp(48),1));
+        Button back=detailBack(id,false);if(shortcutFor(id)!=null)body.addView(back,new LinearLayout.LayoutParams(-1,-2));else toolbar.addView(back,new LinearLayout.LayoutParams(0,host.dp(48),1));
         toolbar.addView(host.button("日历账本",()->new CalendarScreen(host,id,d.title,this::load).load()),new LinearLayout.LayoutParams(0,host.dp(48),1));body.addView(toolbar);
         FieldScreen fields=new FieldScreen(host,id,this::load);
         Button fieldEntry=host.button("字段",()->{});fieldEntry.setContentDescription("activity-fields-"+id);
@@ -886,8 +924,8 @@ public final class ActivitiesScreen {
     }
     private void renderArchived(long id,Detail d){
         LinearLayout body=host.content();body.addView(host.text("已归档 · 只读历史",24,TodayScreen.INK));
-        Button back=host.button(searchDetail(id)?"返回搜索":"返回归档列表",()->{if(searchDetail(id)){backFromSearch();return;}selected=0;historyPanel=false;archivePanel=true;load();});
-        back.setContentDescription("archive-detail-back");body.addView(back);
+        Button back=detailBack(id,true);
+        back.setContentDescription("archive-detail-back");if(shortcutFor(id)!=null)categorySpeech(back,"返回快捷目标");body.addView(back);
         ArchiveAction action=new ArchiveAction(host,id,d.title,true,this::load);
         Button restore=host.button("恢复活动",()->{});restore.setContentDescription("activity-restore-"+id);
         restore.setOnClickListener(v->action.open(restore));body.addView(restore);

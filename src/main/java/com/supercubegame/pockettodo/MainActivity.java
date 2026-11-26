@@ -17,6 +17,9 @@ public final class MainActivity extends Activity {
     // In-process instrumentation hook only: no intent, exported component, file flag
     // or persisted preference can enable this. It accepts no caller-selected path.
     static boolean isolatedShortcutTest;
+    // Same-process instrumentation only. No intent, external path or preference can select this database.
+    static volatile boolean isolatedActivitySearchTest;
+    static final String ACTIVITY_SEARCH_TEST_DB="schema4-activity-search-ci.db";
     static boolean isolatedStartupTest;
     static boolean isolatedActivationTest;
     TodayScreen shortcutTestScreen(){return screen;}
@@ -31,6 +34,9 @@ public final class MainActivity extends Activity {
     @Override protected void onPause(){synchronized(sendOwner){sendEpoch++;}super.onPause();}
     @Override public void onCreate(Bundle saved){super.onCreate(saved);if(isolatedShortcutTest){
         screen=new TodayScreen(this,AppDatabase.openSchema4(this,"schema4-ui.db"));
+        Bundle isolated=new Bundle();isolated.putInt("page",1);screen.show(isolated);
+    }else if(isolatedActivitySearchTest){
+        screen=new TodayScreen(this,AppDatabase.openSchema4(this,ACTIVITY_SEARCH_TEST_DB));
         Bundle isolated=new Bundle();isolated.putInt("page",1);screen.show(isolated);
     }else{beginDefaultStartup(saved);}}
     @Override protected void onSaveInstanceState(Bundle out){if(screen!=null)screen.save(out);else if(startupSaved!=null)out.putAll(startupSaved);super.onSaveInstanceState(out);}

@@ -1085,7 +1085,7 @@ public class Extract {
    SourcePositions p=Trees.instance(t).getSourcePositions();Set<String> wanted=new HashSet<>(Arrays.asList(a[2].split(","))),found=new HashSet<>();
    StringBuilder out=new StringBuilder();
    for(Tree member:((ClassTree)u.getTypeDecls().get(0)).getMembers()){
-    String name=member instanceof MethodTree m?m.getName().toString():member instanceof VariableTree v?v.getName().toString():"";
+    String name=member instanceof MethodTree m?m.getName().toString():member instanceof VariableTree v?v.getName().toString():member instanceof ClassTree k?k.getSimpleName().toString():"";
     if(wanted.contains(name)){
      if(!found.add(name)&&!name.equals("work"))throw new AssertionError("duplicate");
      out.append(s.substring((int)p.getStartPosition(u,member),(int)p.getEndPosition(u,member))).append("\n");
@@ -2176,7 +2176,42 @@ def derivative_hardening_selftest():
     else:raise AssertionError('hardening recording omission survived')
     print('DERIVATIVE_HARDENING_SELFTEST_PASS orientations=8 messages=6 java_mutants=%d fixed_native_labels_untouched'%len(mutations),flush=True)
 
+CALENDAR_DRAFT_PROBE=r'''
+package com.supercubegame.pockettodo;
+import java.util.*;import java.time.*;
+public class MoneyProbe{
+/*SOURCE*/
+static int checks;
+static void need(boolean b,String label){if(!b)throw new AssertionError(label);checks++;}
+static void reject(Runnable r,String why){try{r.run();}catch(IllegalArgumentException|IllegalStateException|ArithmeticException|java.time.DateTimeException|UnsupportedOperationException expected){checks++;return;}throw new AssertionError(why);}
+public static void main(String[] a){
+  BatchDraft d=new BatchDraft(71);reject(d::begin,"unreviewed write");reject(d::freeze,"empty draft");reject(d::removeLast,"empty remove");
+  for(String s:new String[]{"","-1","1.001","1e2","NaN","92233720368547758.08"})reject(()->d.add("2028-02-29",Ledger.Kind.EXPENSE,s,""),"invalid amount accepted: "+s);
+  for(String s:new String[]{"2027-02-29","2028-02-30","0000-01-01","2028-2-29"})reject(()->d.add(s,Ledger.Kind.EXPENSE,"1",""),"invalid date accepted: "+s);
+  need(d.rows().isEmpty(),"failed rows mutated draft");d.add("2028-02-28",Ledger.Kind.EXPENSE,"0","zero");d.add("2028-02-29",Ledger.Kind.EXPENSE,"1.25","leap");d.add("2028-03-01",Ledger.Kind.EXPENSE,"13","expense");d.add("2028-03-01",Ledger.Kind.REFUND,"1","refund");d.add("2028-03-01",Ledger.Kind.INCOME,"2.50","income");d.add("2028-03-01",Ledger.Kind.PLANNED,"9","planned");
+  List<Ledger.Entry> six=d.rows();String key=d.key;d.add("2028-03-02",Ledger.Kind.EXPENSE,"20","remove me");d.removeLast();need(six.equals(d.rows()),"remove last mutated other rows");
+  Set<String> ids=new HashSet<>();long[] cents={0,125,1300,100,250,900};String[] dates={"2028-02-28","2028-02-29","2028-03-01","2028-03-01","2028-03-01","2028-03-01"};Ledger.Kind[] kinds={Ledger.Kind.EXPENSE,Ledger.Kind.EXPENSE,Ledger.Kind.EXPENSE,Ledger.Kind.REFUND,Ledger.Kind.INCOME,Ledger.Kind.PLANNED};for(int i=0;i<6;i++){Ledger.Entry row=six.get(i);need(row.activityId==71&&row.cents==cents[i]&&row.kind==kinds[i]&&row.date.toString().equals(dates[i])&&ids.add(row.id),"row identity or values "+i);}
+  reject(()->six.clear(),"mutable row exposure");d.freeze();reject(()->d.add("2028-03-02",Ledger.Kind.EXPENSE,"2",""),"frozen edit");d.editAgain();d.freeze();List<Ledger.Entry> reviewed=d.begin();need(reviewed.equals(six)&&!key.isEmpty(),"review changed before confirm");
+  reject(d::begin,"duplicate confirmation");reject(d::editAgain,"post-submit edit");reject(()->reviewed.remove(0),"mutable submitted rows");d.failed();need(d.begin()==reviewed&&key.equals(d.key),"retry changed key or payload");d.close();reject(d::begin,"abandoned confirmation");need(reviewed.size()==6,"close revoked handed-off write");
+  BatchDraft canceled=new BatchDraft(71);canceled.add("2028-03-02",Ledger.Kind.EXPENSE,"1","");canceled.freeze();canceled.close();reject(canceled::begin,"canceled confirmation");need(!canceled.key.equals(key),"cross-draft key reuse");
+  Ledger ledger=new Ledger();ledger.recordBatch(key,reviewed);Set<LocalDate> sel=new TreeSet<>();for(String day:new String[]{"2028-02-28","2028-02-29","2028-03-01","2028-03-02"})sel.add(LocalDate.parse(day));long[] metrics={1425,100,250,900,1325,-1075};String[] names={"EXPENSE","REFUND","INCOME","PLANNED","NET_EXPENSE","NET_CASH"};for(int i=0;i<6;i++)need(ledger.total(71,sel,names[i])==metrics[i],"wrong independent metric "+names[i]);need(ledger.recordedActualDates(71,sel).equals(Set.of(LocalDate.parse("2028-02-28"),LocalDate.parse("2028-02-29"),LocalDate.parse("2028-03-01"))),"missing versus zero");
+  BatchDraft big=new BatchDraft(71);big.add("2028-02-28",Ledger.Kind.EXPENSE,"92233720368547758.07","");big.add("2028-02-29",Ledger.Kind.EXPENSE,"0.01","");reject(big::freeze,"category sum overflow ignored");System.out.println("CALENDAR_DRAFT_HOST "+checks+" PASS actual Java draft, not UI/SQL");
+}}
+'''
+
+def calendar_draft_selftest():
+    import tempfile
+    base=ROOT/'src/main/java/com/supercubegame/pockettodo'
+    with tempfile.TemporaryDirectory(prefix='calendar-batch-') as temp:
+        work=Path(temp);jc=['java','-m','jdk.compiler/com.sun.tools.javac.Main','-encoding','UTF-8','-d',temp]
+        extract=work/'Extract.java';extract.write_text(RESULT_UI_EXTRACTOR);subprocess.run(jc+[str(extract)],check=True,timeout=30)
+        member=work/'members';subprocess.run(['java','-cp',temp,'Extract',str(base/'CalendarScreen.java'),str(member),'BatchDraft'],check=True,timeout=20)
+        probe=work/'MoneyProbe.java';probe.write_text(CALENDAR_DRAFT_PROBE.replace('/*SOURCE*/',member.read_text()))
+        subprocess.run(jc+[str(probe),str(base/'Ledger.java')],check=True,timeout=30)
+        subprocess.run(['java','-cp',temp,'com.supercubegame.pockettodo.MoneyProbe'],check=True,timeout=15)
+
 def parser_selftest():
+    calendar_draft_selftest()
     activity_navigation_selftest()
     derivative_hardening_selftest()
     relation_input_selftest()
@@ -2214,6 +2249,38 @@ def run(args, timeout=60, capture=False, **kwargs):
     return subprocess.run(list(map(str, args)), check=True, timeout=timeout,
                           text=True, stdout=subprocess.PIPE if capture else None, **kwargs)
 
+def legacy_public_fixture(adb):
+    """Publish only known synthetic legacy bytes in a NEW directory on our disposable emulator.
+    The app still receives a real user-selected content URI. No app/URI permissions are changed.
+    The device independently builds the expected file with the original Java codec.
+    """
+    import base64, struct, tempfile
+    assert os.environ.get('GITHUB_ACTIONS')=='true' and SERIAL=='emulator-5554' and API in (26,34) and PKG=='com.supercubegame.pockettodo.v12.preview'
+    def shellprop(key):return subprocess.check_output([str(adb),'-s',SERIAL,'shell','getprop',key],text=True,timeout=15).strip()
+    assert shellprop('ro.kernel.qemu')=='1' and shellprop('ro.build.version.sdk')==str(API), 'not isolated matrix emulator'
+    title='同名记录'.encode('utf-8') # chosen BMP characters have identical UTF-8 and Java writeUTF bodies
+    plain=struct.pack('>IqI',0x544f4431,3,2)+b''.join(struct.pack('>qH',i,len(title))+title+bytes((done,)) for i,done in ((1,0),(2,1)))
+    payload=base64.b64encode(plain);wire=b'POCKET_TODO_BACKUP\n1\n'+hashlib.sha256(payload).hexdigest().encode('ascii')+b'\n'+payload+b'\n'
+    directory='/sdcard/Download/pocket-append-ci-api'+str(API);dest=directory+'/old-todos.txt'
+    with tempfile.TemporaryDirectory(prefix='pocket-append-fixture-') as td:
+        local=Path(td)/'old-todos.txt';local.write_bytes(wire)
+        run([adb,'-s',SERIAL,'shell','mkdir',directory],timeout=20) # fail if it existed; no replacement or deletion
+        run([adb,'-s',SERIAL,'push',local,dest],timeout=20)
+    actual=subprocess.check_output([str(adb),'-s',SERIAL,'exec-out','cat',dest],timeout=20)
+    proof={'commit':os.environ.get('GITHUB_SHA'),'run_id':os.environ['GITHUB_RUN_ID'],'api':API,'expected':hashlib.sha256(wire).hexdigest(),'observed':hashlib.sha256(actual).hexdigest(),'bytes':len(actual),'source':'CI_SYNTHETIC_PUBLIC_DOWNLOAD_ONLY'}
+    Path('device-legacy-fixture.txt').write_text(json.dumps(proof,sort_keys=True)+'\n')
+    assert actual==wire,'public legacy fixture bytes differ; see device-legacy-fixture.txt'
+
+
+def verify_calendar_batch_device(adb):
+    """Separate phase before the original seed/reopen. Keep its raw receipt even if another phase fails."""
+    expected=['schema3_atomic_replay_owner_and_undo_guards','preview_and_cancel_preserve_all_business_cells','six_ordered_rows_one_key_zero_missing_leap_four_kinds','undo_cancel_then_exact_batch_only_and_reopen']
+    out=run_database_phase([adb,'-s',SERIAL,'shell','am','instrument','-w','-r','-e','phase','calendar_batch','-e','expectedApi',str(API),PKG+'.test/com.supercubegame.pockettodo.V12DeviceTest'],timeout=125,capture=True,phase='calendar-batch').stdout
+    Path('device-calendar-batch.txt').write_text(out);print(out,flush=True)
+    labels=re.findall(r'(?m)^(?:INSTRUMENTATION_RESULT: stream=)?CALENDAR_BATCH_NATIVE ([a-z0-9_]+) PASS\s*$',out)
+    assert re.findall(r'(?m)^INSTRUMENTATION_CODE: (-?\d+)\s*$',out)==['-1'] and 'DEVICE_DATABASE_FAILED' not in out and labels==expected and 'DEVICE_DATABASE_RESULT calendar_batch 2/2 PASS' in out,'calendar native phase not accepted; see device-calendar-batch.txt'
+
+
 def verify_database(adb):
     apks = list(Path('build/outputs/apk/debug').glob('*.apk'))
     tests = list(Path('build/outputs/apk/androidTest/debug').glob('*.apk'))
@@ -2229,6 +2296,11 @@ def verify_database(adb):
     Path('device-package.txt').write_text(badging + '\n' + permissions + '\n' + signature)
     for apk in [apks[0], tests[0]]:
         run([adb, '-s', SERIAL, 'install', '-t', str(apk)], timeout=120)
+    calendar_error=None
+    try:verify_calendar_batch_device(adb)
+    except Exception as exc:
+        calendar_error=exc;print('CALENDAR_PHASE_NOT_ACCEPTED '+repr(exc),flush=True)
+    legacy_public_fixture(adb)
     results = {}
     for phase in ('seed', 'reopen'):
         if phase == 'reopen':
@@ -2242,6 +2314,7 @@ def verify_database(adb):
         'scope': 'ANDROID_SCHEMA2_DATABASE_AND_MEDIA_BYTES', 'ui': 'SEE_NATIVE_UI_RESULT', 'image_decoding': 'NOT_TESTED',
         'full_backup_restore': RESTORE_SCOPE, 'saf_restore_ui': 'SEE_NATIVE_UI_RESULT', 'power_loss': 'NOT_TESTED',
         'release_ready': False}, indent=2))
+    if calendar_error is not None:raise calendar_error
 
 def derivative_checker():
     """Compile and prove the actual pixel oracle before slow native UI work."""

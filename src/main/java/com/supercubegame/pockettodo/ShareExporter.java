@@ -90,9 +90,7 @@ public final class ShareExporter {
             count++;
             if(item.image==null)md.append(literal(item.text)).append("\n\n");
             else{
-                BitmapFactory.Options header=new BitmapFactory.Options();header.inJustDecodeBounds=true;
-                BitmapFactory.decodeByteArray(item.image,0,item.image.length,header);
-                byte[] clean=png(item.image,0,0,header.outWidth,header.outHeight,new int[0][],MAX_PIXELS);
+                byte[] clean=fullVisualPng(item.image);
                 int index=-1;
                 for(int i=0;i<assets.size();i++)if(java.util.Arrays.equals(assets.get(i),clean)){index=i;break;}
                 if(index<0){
@@ -136,15 +134,16 @@ public final class ShareExporter {
      * Bounded JPEG segment walk, not a general EXIF reader. Ambiguity fails closed.
      * EXIF without an explicit primary orientation is not editable in this stage.
      */
-    private static void jpegOrientation(byte[] b)throws IOException {
+    private static void jpegOrientation(byte[] b)throws IOException { jpegTag(b,true); }
+    private static int jpegTag(byte[] b,boolean rawOnly)throws IOException {
         if(b.length<4||(b[0]&255)!=255||(b[1]&255)!=216)throw new IOException("Invalid JPEG");
-        int p=2,exifCount=0;
+        int p=2,exifCount=0,direction=1;
         while(p<b.length) {
             if((b[p++]&255)!=255)throw new IOException("Invalid JPEG marker");
             while(p<b.length&&(b[p]&255)==255)p++;
             if(p>=b.length)throw new IOException("Truncated JPEG marker");
             int marker=b[p++]&255;
-            if(marker==218||marker==217)return; // Do not scan entropy-coded image bytes.
+            if(marker==218||marker==217)return direction; // Do not scan entropy-coded image bytes.
             if(marker==1||(marker>=208&&marker<=215))continue;
             if(marker==0||marker==216||p>b.length-2)throw new IOException("Invalid JPEG segment");
             int n=u16(b,p,false);
@@ -168,7 +167,11 @@ public final class ShareExporter {
                     if(seen||u16(b,q+2,little)!=3||u32(b,q+4,little)!=1)
                         throw new IOException("Ambiguous primary orientation");
                     seen=true;
-                    if(u16(b,q+8,little)!=1)throw new IOException("Image orientation must be normalized before editing");
+                    direction=u16(b,q+8,little);
+                    if(u16(b,q+8,little)!=1){
+                        if(rawOnly)throw new IOException("Image orientation must be normalized before editing");
+                        if(direction<2||direction>8)throw new IOException("Invalid EXIF orientation");
+                    }
                 }
                 if(!seen)throw new IOException("EXIF orientation cannot be confirmed");
             }
@@ -200,6 +203,50 @@ public final class ShareExporter {
         }
     }
 
+    /** Visual coordinates have a separate entry point; callers of the raw codec still fail closed. */
+    static int visualOrientation(byte[] source,String mime)throws IOException {
+        if(source==null||source.length==0||source.length>MAX_BYTES)throw new IOException("Invalid image byte budget");
+        if("image/png".equals(mime)){orientation(source,mime);return 1;}
+        if(!"image/jpeg".equals(mime))throw new IOException("Only PNG/JPEG supported");
+        int primary=jpegTag(source,false);
+        int reported=new ExifInterface(new ByteArrayInputStream(source)).getAttributeInt(ExifInterface.TAG_ORIENTATION,ExifInterface.ORIENTATION_UNDEFINED);
+        // Older readers may have no opinion. A concrete disagreement is never guessed away.
+        if(reported!=ExifInterface.ORIENTATION_UNDEFINED&&reported!=primary)throw new IOException("Conflicting EXIF orientation");
+        return primary;
+    }
+    static int visualWidth(int width,int height,int direction){return direction>=5?height:width;}
+    static int visualHeight(int width,int height,int direction){return direction>=5?width:height;}
+    /** A single visual raster and one scanline, with no interpolation. Source bitmap is borrowed. */
+    private static int[] visualPixels(Bitmap input,int direction,long budget)throws IOException {
+        int w=input.getWidth(),h=input.getHeight();
+        if(direction<1||direction>8||w<1||h<1||budget<=0||budget>1048576L||(long)w*h>budget)throw new IOException("Visual raster outside budget");
+        int[] out=new int[w*h];
+        if(direction==1){input.getPixels(out,0,w,0,0,w,h);return out;}
+        int[] row=new int[w];int stride=visualWidth(w,h,direction);
+        for(int y=0;y<h;y++){
+            input.getPixels(row,0,w,0,y,w,1);
+            int first,step;
+            switch(direction){
+                case 2:first=y*w+w-1;step=-1;break;
+                case 3:first=(h-y)*w-1;step=-1;break;
+                case 4:first=(h-1-y)*w;step=1;break;
+                case 5:first=y;step=stride;break;
+                case 6:first=h-1-y;step=stride;break;
+                case 7:first=(w-1)*stride+h-1-y;step=-stride;break;
+                case 8:first=(w-1)*stride+y;step=-stride;break;
+                default:throw new IOException("Invalid EXIF orientation");
+            }
+            for(int x=0;x<w;x++)out[first+x*step]=row[x];
+        }
+        return out;
+    }
+    static Bitmap uprightPreview(Bitmap input,int direction)throws IOException {
+        if(direction==1)return input;
+        return Bitmap.createBitmap(visualPixels(input,direction,1048576),visualWidth(input.getWidth(),input.getHeight(),direction),visualHeight(input.getWidth(),input.getHeight(),direction),Bitmap.Config.ARGB_8888);
+    }
+    static byte[] fullVisualPng(byte[] source)throws IOException {return encode(source,0,0,0,0,new int[0][],MAX_PIXELS,true,true);}
+    static byte[] visualPng(byte[] source,int l,int t,int r,int b,int[][] masks,long limit)throws IOException {return encode(source,l,t,r,b,masks,limit,true,false);}
+
     /**
      * Rectangles use exclusive right/bottom; masks are in cropped OUTPUT coordinates.
      * Source bytes are never modified. Returns only a newly encoded PNG, no original
@@ -208,6 +255,9 @@ public final class ShareExporter {
      */
     public static byte[] png(byte[] source,int left,int top,int right,int bottom,
                              int[][] masks,long maxOutputPixels)throws IOException {
+        return encode(source,left,top,right,bottom,masks,maxOutputPixels,false,false);
+    }
+    private static byte[] encode(byte[] source,int left,int top,int right,int bottom,int[][] masks,long maxOutputPixels,boolean visual,boolean whole)throws IOException {
         if(source==null||source.length==0||source.length>MAX_BYTES)
             throw new IllegalArgumentException("Source byte budget exceeded");
         if(masks==null||maxOutputPixels<=0||maxOutputPixels>MAX_PIXELS)
@@ -218,7 +268,10 @@ public final class ShareExporter {
            (long)header.outWidth*header.outHeight>MAX_PIXELS||
            !("image/png".equals(header.outMimeType)||"image/jpeg".equals(header.outMimeType)))
             throw new IOException("Only PNG/JPEG up to 1 million pixels and edge 2048 can be edited");
-        rect(left,top,right,bottom,header.outWidth,header.outHeight);
+        int direction=visual?visualOrientation(source,header.outMimeType):1;
+        int vw=visualWidth(header.outWidth,header.outHeight,direction),vh=visualHeight(header.outWidth,header.outHeight,direction);
+        if(whole){right=vw;bottom=vh;}
+        rect(left,top,right,bottom,vw,vh);
         int w=right-left,h=bottom-top;
         if((long)w*h>maxOutputPixels)throw new IllegalArgumentException("Output pixel budget exceeded");
         List<ExportRenderer.Rect> regions=new ArrayList<>();
@@ -227,7 +280,7 @@ public final class ShareExporter {
             rect(mask[0],mask[1],mask[2],mask[3],w,h);
             regions.add(new ExportRenderer.Rect(mask[0],mask[1],mask[2],mask[3]));
         }
-        orientation(source,header.outMimeType);
+        if(!visual)orientation(source,header.outMimeType);
         Bitmap decoded=null,output=null;
         try {
             BitmapFactory.Options options=new BitmapFactory.Options();
@@ -235,10 +288,9 @@ public final class ShareExporter {
             decoded=BitmapFactory.decodeByteArray(source,0,source.length,options);
             if(decoded==null||decoded.getWidth()!=header.outWidth||decoded.getHeight()!=header.outHeight||
                decoded.getAllocationByteCount()>4*MAX_PIXELS)throw new IOException("Unexpected decoded image");
-            int[] pixels=new int[header.outWidth*header.outHeight];
-            decoded.getPixels(pixels,0,header.outWidth,0,0,header.outWidth,header.outHeight);
+            int[] pixels=visualPixels(decoded,direction,MAX_PIXELS);
             decoded.recycle();decoded=null;
-            ExportRenderer.Raster raster=ExportRenderer.render(pixels,header.outWidth,header.outHeight,
+            ExportRenderer.Raster raster=ExportRenderer.render(pixels,vw,vh,
                 new ExportRenderer.Rect(left,top,right,bottom),regions,maxOutputPixels);
             output=Bitmap.createBitmap(raster.copyPixels(),w,h,Bitmap.Config.ARGB_8888);
             ByteArrayOutputStream encoded=new ByteArrayOutputStream();

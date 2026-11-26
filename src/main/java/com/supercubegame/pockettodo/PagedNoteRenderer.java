@@ -162,9 +162,7 @@ public final class PagedNoteRenderer {
             if(!wanted.contains(b.key)||b.secret)continue;
             if(b.image==null)plan.text(plain(b.text));
             else{
-                BitmapFactory.Options o=new BitmapFactory.Options();o.inJustDecodeBounds=true;
-                BitmapFactory.decodeByteArray(b.image,0,b.image.length,o);
-                byte[] clean=ShareExporter.png(b.image,0,0,o.outWidth,o.outHeight,new int[0][],1000000);
+                byte[] clean=ShareExporter.fullVisualPng(b.image);
                 encoded+=clean.length;if(encoded>MAX_BYTES)throw new IOException("Paged clean image budget exceeded");
                 plan.image(clean);plan.text(plain(b.caption));
             }

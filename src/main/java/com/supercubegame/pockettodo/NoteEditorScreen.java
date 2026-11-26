@@ -19,7 +19,7 @@ import java.util.UUID;
 
 /** Native activity note editor: stable note selection and ordered text/image blocks.
  * SAF-selected PNG/JPEG originals are private immutable copies, with bounded previews.
- * Camera and EXIF orientation remain subsequent work; crop and opaque redaction
+ * Confirmed primary JPEG orientation is used across previews and exports; crop and opaque redaction
  * run through the guarded derivative backend behind real touch selection.
  * Writes go through validated AppDatabase APIs; UI read queries never mutate raw SQL.
  */
@@ -40,7 +40,7 @@ public final class NoteEditorScreen {
             this.app=app;this.media=media;
             synchronized(app){
                 connection=app.getWritableDatabase();
-                if(connection.getVersion()!=3)throw new IllegalArgumentException("Editor requires schema3");
+                if(connection.getVersion()!=3&&connection.getVersion()!=4)throw new IllegalArgumentException("Editor requires an origin-aware database");
             }
         }
         private void active(){
@@ -79,18 +79,26 @@ public final class NoteEditorScreen {
             if(!java.util.Arrays.equals(plan.before,app.exportState()))throw new IllegalStateException("Database changed; review image again");
         }
         public synchronized Preview prepare(String note,String block,int left,int top,int right,int bottom,int[][] masks)throws IOException{
+            return prepareChecked(note,block,null,left,top,right,bottom,masks);
+        }
+        synchronized Preview prepareDisplayed(String note,NoteDocument.Block shown,int left,int top,int right,int bottom,int[][] masks)throws IOException{
+            if(shown==null||shown.kind!=NoteDocument.Kind.IMAGE)throw new IllegalArgumentException("Displayed image required");
+            return prepareChecked(note,shown.id,shown,left,top,right,bottom,masks);
+        }
+        private Preview prepareChecked(String note,String block,NoteDocument.Block shown,int left,int top,int right,int bottom,int[][] masks)throws IOException{
             synchronized(app){
                 active();noOuter();
                 byte[] before;NoteDocument.ImageEdit edit;long currentSize,originalSize;
                 connection.beginTransaction();
                 try{
                     before=app.exportState();edit=target(note,block);
+                    if(shown!=null&&(!shown.assetId.equals(edit.revision().assetId)||!shown.caption.equals(edit.caption)||shown.privateContent!=edit.privateContent))throw new IllegalStateException("Database changed; review image again");
                     currentSize=registeredSize(edit.revision().assetId);originalSize=registeredSize(edit.revision().originalAssetId);
                     connection.setTransactionSuccessful();
                 }finally{connection.endTransaction();}
                 byte[] source=actual(edit.revision().assetId,currentSize);
                 if(!edit.revision().assetId.equals(edit.revision().originalAssetId))actual(edit.revision().originalAssetId,originalSize);
-                byte[] output=ShareExporter.png(source,left,top,right,bottom,masks,1000000L);
+                byte[] output=ShareExporter.visualPng(source,left,top,right,bottom,masks,1000000L);
                 Preview plan=new Preview(this,before,edit,output,currentSize,originalSize);
                 try{
                     connection.beginTransaction();
@@ -235,7 +243,7 @@ public final class NoteEditorScreen {
                     ImageView view=new ImageView(host.activity);
                     view.setImageBitmap(image);view.setAdjustViewBounds(true);view.setMaxHeight(host.dp(220));
                     view.setContentDescription("note-image-"+b.id);row.addView(view);
-                }else{TextView broken=host.text("图片副本不可用",15,TodayScreen.ERROR);broken.setContentDescription("note-image-"+b.id);row.addView(broken);}
+                }else{TextView broken=host.text("图片副本不可用或方向无法确认",15,TodayScreen.ERROR);broken.setContentDescription("note-image-"+b.id);row.addView(broken);}
                 list.addView(row);
             }
         }
@@ -524,10 +532,9 @@ public final class NoteEditorScreen {
      * privacy and siblings stay untouched; abandoned previews never write. */
     private void deriveImage(State s,NoteDocument.Block block){
         final android.graphics.Bitmap shown=s.previews.get(block.id);
-        if(shown==null){host.message("图片副本不可用，无法裁剪",true);return;}
+        if(shown==null){host.message("图片无法解码或方向不明，无法裁剪；原图未改动",true);return;}
         host.work(()->{
-            android.graphics.BitmapFactory.Options size=bounds(s.media.path(block.assetId));
-            return new int[]{size.outWidth,size.outHeight};
+            return visualSize(s.media.path(block.assetId));
         },size->showDerive(s,block,shown,size[0],size[1]),null);
     }
     private void showDerive(State s,NoteDocument.Block block,android.graphics.Bitmap shown,int srcW,int srcH){
@@ -575,7 +582,7 @@ public final class NoteEditorScreen {
             host.work(()->{
                 try{
                     session.editor=new Editor(host.db,s.media);
-                    session.preview=session.editor.prepare(s.noteId,block.id,target.left,target.top,target.right,target.bottom,maskArray);
+                    session.preview=session.editor.prepareDisplayed(s.noteId,block,target.left,target.top,target.right,target.bottom,maskArray);
                     byte[] png=session.preview.png();
                     android.graphics.Bitmap decoded=android.graphics.BitmapFactory.decodeByteArray(png,0,png.length);
                     if(decoded==null)throw new IOException("派生预览解码失败");
@@ -607,8 +614,23 @@ public final class NoteEditorScreen {
             (long)o.outWidth*o.outHeight>IMAGE_PIXELS||!("image/png".equals(o.outMimeType)||"image/jpeg".equals(o.outMimeType)))throw new IOException("图片格式或尺寸无效");
         return o;
     }
-    private static android.graphics.Bitmap decodePreview(Path path)throws IOException{
-        android.graphics.BitmapFactory.Options header=bounds(path),o=new android.graphics.BitmapFactory.Options();
+    private static int displayDirection(Path path,android.graphics.BitmapFactory.Options header)throws IOException{
+        long len=java.nio.file.Files.size(path);if(len<1||len>IMAGE_BYTES)throw new IOException("图片字节超限");
+        byte[] source=new byte[(int)len];
+        try(java.io.DataInputStream in=new java.io.DataInputStream(java.nio.file.Files.newInputStream(path,java.nio.file.StandardOpenOption.READ,java.nio.file.LinkOption.NOFOLLOW_LINKS))){in.readFully(source);if(in.read()!=-1)throw new IOException("图片长度已变化");}
+        return ShareExporter.visualOrientation(source,header.outMimeType);
+    }
+    static int[] visualSize(Path path)throws IOException{
+        android.graphics.BitmapFactory.Options header=bounds(path);int o=displayDirection(path,header);
+        return new int[]{ShareExporter.visualWidth(header.outWidth,header.outHeight,o),ShareExporter.visualHeight(header.outWidth,header.outHeight,o)};
+    }
+    static android.graphics.Bitmap decodePreview(Path path)throws IOException{
+        android.graphics.BitmapFactory.Options header=bounds(path);int direction=displayDirection(path,header);
+        android.graphics.Bitmap raw=rawPreview(path,header);if(direction==1)return raw;
+        try{return ShareExporter.uprightPreview(raw,direction);}finally{raw.recycle();}
+    }
+    private static android.graphics.Bitmap rawPreview(Path path,android.graphics.BitmapFactory.Options header)throws IOException{
+        android.graphics.BitmapFactory.Options o=new android.graphics.BitmapFactory.Options();o.inScaled=false;
         o.inSampleSize=1;o.inPreferredConfig=android.graphics.Bitmap.Config.ARGB_8888;
         while((header.outWidth+o.inSampleSize-1)/o.inSampleSize>PREVIEW_EDGE||(header.outHeight+o.inSampleSize-1)/o.inSampleSize>PREVIEW_EDGE)o.inSampleSize*=2;
         android.graphics.Bitmap image=android.graphics.BitmapFactory.decodeFile(path.toString(),o);
@@ -627,8 +649,8 @@ public final class NoteEditorScreen {
                     byte[] buffer=new byte[16384];long size=0;int n;
                     while((n=in.read(buffer))!=-1){if(n==0||n>IMAGE_BYTES-size)throw new IOException("图片读取超限");out.write(buffer,0,n);size+=n;}
                 }
-                String mime=bounds(temp).outMimeType;
-                android.graphics.Bitmap probe=decodePreview(temp);probe.recycle();
+                android.graphics.BitmapFactory.Options checked=bounds(temp);String mime=checked.outMimeType;
+                android.graphics.Bitmap probe=rawPreview(temp,checked);probe.recycle();
                 String assetId;
                 try(java.io.InputStream in=java.nio.file.Files.newInputStream(temp)){assetId=s.media.copy(in);}
                 android.database.sqlite.SQLiteDatabase sql=host.db.getWritableDatabase();
@@ -644,7 +666,7 @@ public final class NoteEditorScreen {
     }
     /** Original retained privately; backups include it and any metadata. No share path yet. */
     private void addImage(State s){
-        AlertDialog pick=new AlertDialog.Builder(host.activity).setTitle("加入图片").setMessage("选择 PNG/JPEG，最大 8 MiB、2000 万像素、单边 16384。保留本机原图副本及元数据，完整备份也会包含；尚不支持相机、旋转校正或分享。")
+        AlertDialog pick=new AlertDialog.Builder(host.activity).setTitle("加入图片").setMessage("选择 PNG/JPEG，最大 8 MiB、2000 万像素、单边 16384。本机保留原图和元数据，完整备份也会包含。JPEG 按可确认的方向显示、裁剪和分享；方向不明时不猜测。不调用相机。")
             .setNegativeButton("取消",null).setNeutralButton("从文件选择",(dialog,which)->((MainActivity)host.activity).chooseNoteImage(uri->importImage(s,uri)))
             .setPositiveButton("加入合成图",null).create();
         pick.setOnShowListener(unused->pick.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{

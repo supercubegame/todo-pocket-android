@@ -310,6 +310,9 @@ jobs:
           if os.environ.get("BUILD_429_EXECUTE") == "true":
               log = Path(os.environ["BUILD_LOG"])
               command = ["gradle", "--no-daemon", "--console=plain", "assembleDebug", "assembleDebugAndroidTest"]
+              if os.environ.get("BUILD_ROLE") == "PINNED_OLD_SINGLETON":
+                  assert os.environ.get("BUILD_LINT") != "true"
+                  command = ["gradle", "--no-daemon", "--console=plain", "assembleDebug"]
               if os.environ.get("BUILD_LINT") == "true":
                   command.append("lintDebug")
               def invoke(command, number):
@@ -323,8 +326,11 @@ jobs:
                   record = {"scope": "BUILD_CONFIGURATION_RETRY_NOT_DEVICE_RETRY",
                             "commit": os.environ["GITHUB_SHA"], "run_id": os.environ["GITHUB_RUN_ID"],
                             "api": int(os.environ["TEST_API"]), "attempts": attempts}
+                  if os.environ.get("BUILD_ROLE") == "PINNED_OLD_SINGLETON":
+                      record.update(api=None, role="PINNED_OLD_SINGLETON", run_attempt=os.environ["GITHUB_RUN_ATTEMPT"])
                   line = "BUILD_ATTEMPTS " + json.dumps(record) + "\n"
                   with log.open("a") as stream:
+                      if os.environ.get("BUILD_ROLE") == "PINNED_OLD_SINGLETON": stream.write("\n")
                       stream.write(line)
                   print(line, flush=True)
               raise SystemExit(execute_build(command, invoke, time.sleep, emit))
@@ -1222,7 +1228,7 @@ jobs:
           (folder/'SHA256SUMS.txt').write_text(digest+'  '+name+'\n')
           (folder/'signature.txt').write_text(signature)
           (folder/'package.txt').write_text(package+'\n'+permissions)
-          meta={'commit':os.environ['GITHUB_SHA'],'run_id':os.environ['GITHUB_RUN_ID'],'apk':name,'sha256':digest,'bytes':target.stat().st_size,'certificate_sha256':certs[0],'package':'com.supercubegame.pockettodo.v12.preview','version_name':'1.2','version_code':3,'exact_binary_device_api':34,'release_ready':False,'durable_upgrade_ready':False}
+          meta={'commit':os.environ['GITHUB_SHA'],'run_id':os.environ['GITHUB_RUN_ID'],'run_attempt':os.environ['GITHUB_RUN_ATTEMPT'],'apk':name,'sha256':digest,'bytes':target.stat().st_size,'certificate_sha256':certs[0],'package':'com.supercubegame.pockettodo.v12.preview','version_name':'1.2','version_code':3,'exact_binary_device_api':34,'release_ready':False,'durable_upgrade_ready':False}
           (folder/'preview.json').write_text(json.dumps(meta,indent=2)+'\n')
           (folder/'README.txt').write_text('口袋待办 v1.2 阶段开发预览，不是完整正式版。\n与旧版隔离安装；仅用于试用，请先备份。\n固定预览签名；覆盖安装仅验证过同一固定密钥重建的旧源码，不代表兼容此前临时签名包。请勿为安装直接卸载有数据的旧预览；先导出完整备份。\n完整备份包含私有内容、原图与元数据，未加密。私有图片标记不是加密，分享过滤尚未实现。\n已接通待办、活动、打卡历史、日期账目、多笔记、PNG/JPEG导入、图片说明和私有标记、备份确认恢复。\n裁剪遮挡、PDF/图片/Markdown分享、应用目录与字段完整UI、恢复撤销、搜索模板日程、稳定签名和真机验收尚未完成。\n不含账号、网络权限或遥测。不要输入无法承担丢失风险的重要数据。\n此APK是API34实际测试过的同一字节；API26测试同源码的独立构建。源码和摘要见preview.json、SHA256SUMS.txt。\n下载Actions产物需要GitHub登录；压缩包解压后安装.apk，不要安装测试instrumentation包。\n',encoding='utf-8')
           print('PREVIEW_CANDIDATE '+json.dumps(meta))
@@ -1262,17 +1268,18 @@ jobs:
       - name: Remove temporary signing material
         if: always()
         run: python3 tools/verify_upgrade.py cleanup-signing
-  upgrade:
+  upgrade_baseline:
+    # Do not add a fifth concurrent Gradle resolver or build an old APK when the current candidate is blocked.
     needs: [core, database]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
-    strategy:
-      fail-fast: false
-      matrix:
-        api: [26, 34]
+    outputs:
+      apk_sha256: ${{ steps.freeze.outputs.apk_sha256 }}
+      manifest_sha256: ${{ steps.freeze.outputs.manifest_sha256 }}
     env:
-      TEST_API: ${{ matrix.api }}
+      # Existing fixed signing workspace slot; this singleton does not run an Android device.
+      TEST_API: '34'
       POCKET_STABLE_SIGNING: '1'
     steps:
       - name: Initialize fixed signing directory
@@ -1295,11 +1302,7 @@ jobs:
           ref: f42e88e10052a4c71e21b83aa0d4475849b807a0
           path: upgrade-old
           persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: internal-preview-candidate
-          path: upgrade-candidate
-      - name: Fixed Android build setup for upgrade probe
+      - name: Fixed build tools for pinned baseline
         run: *upgrade_build_setup
       - name: Initialize bounded upgrade evidence
         run: mkdir upgrade-evidence
@@ -1311,13 +1314,62 @@ jobs:
           POCKET_PREVIEW_KEY_PASSWORD: ${{ secrets.POCKET_PREVIEW_KEY_PASSWORD }}
           POCKET_PREVIEW_CERT_SHA256: ${{ secrets.POCKET_PREVIEW_CERT_SHA256 }}
         run: python3 tools/verify_upgrade.py prepare-signing
-      - name: Build pinned historical source with same fixed key
+      - name: Build pinned historical source with same fixed key, once per run attempt
         run: python3 tools/verify_upgrade.py build-old
-      - name: Actual retained-data overwrite on the exact candidate APK
-        run: python3 tools/verify_upgrade.py android
+      - name: Freeze only verified old APK and manifest
+        id: freeze
+        run: python3 tools/verify_upgrade.py freeze-old
       - name: Remove temporary signing material
         if: always()
         run: python3 tools/verify_upgrade.py cleanup-signing
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: upgrade-baseline-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            baseline-transfer/legacy.apk
+            baseline-transfer/baseline.json
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && hashFiles('upgrade-evidence/old-build.log') != ''
+        with:
+          name: upgrade-baseline-log-${{ github.run_id }}-${{ github.run_attempt }}
+          path: upgrade-evidence/old-build.log
+          if-no-files-found: error
+          retention-days: 14
+  upgrade:
+    needs: [core, database, upgrade_baseline]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [26, 34]
+    env:
+      TEST_API: ${{ matrix.api }}
+      EXPECTED_BASELINE_APK_SHA256: ${{ needs.upgrade_baseline.outputs.apk_sha256 }}
+      EXPECTED_BASELINE_MANIFEST_SHA256: ${{ needs.upgrade_baseline.outputs.manifest_sha256 }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: upgrade-baseline-${{ github.run_id }}-${{ github.run_attempt }}
+          path: upgrade-input
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: internal-preview-candidate
+          path: upgrade-candidate
+      - name: Fixed device validation tools (no build, no key material)
+        run: |
+          set -euo pipefail
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_17_X64/bin" >> "$GITHUB_PATH"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+      - name: Initialize bounded upgrade evidence
+        run: mkdir upgrade-evidence
+      - name: Actual retained-data overwrite on the exact candidate APK
+        run: python3 tools/verify_upgrade.py android
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -1326,7 +1378,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   report:
-    needs: [core, database, export_probe, export_feedback, upgrade]
+    needs: [core, database, export_probe, export_feedback, upgrade_baseline, upgrade]
     if: always() && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -1883,6 +1935,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           NEEDS_JSON: ${{ toJSON(needs) }}
+          EXPECTED_BASELINE_APK_SHA256: ${{ needs.upgrade_baseline.outputs.apk_sha256 }}
+          EXPECTED_BASELINE_MANIFEST_SHA256: ${{ needs.upgrade_baseline.outputs.manifest_sha256 }}
         run: python3 tools/verify_upgrade.py report
       - name: Require both current-source devices before preview delivery
         env:

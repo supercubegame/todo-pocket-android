@@ -296,7 +296,8 @@ public final class NoteEditorScreen {
         validation.setContentDescription("note-draft-status");
         Button save=host.button("存草稿",()->{}),recover=host.button("恢复草稿",()->{}),discard=host.button("丢弃草稿",()->{});
         save.setContentDescription("note-draft-save");recover.setContentDescription("note-draft-recover");discard.setContentDescription("note-draft-discard");
-        for(Button b:new Button[]{save,recover,discard})body.addView(b,new LinearLayout.LayoutParams(-1,host.dp(48)));
+        // Keep the shared 48dp minimum; let the actual text and font metrics set any taller height.
+        for(Button b:new Button[]{save,recover,discard})body.addView(b,new LinearLayout.LayoutParams(-1,LinearLayout.LayoutParams.WRAP_CONTENT));
         // Feedback precedes the input, not the off-screen tail of the actions.
         body.addView(validation,0);
         ScrollView scroll=new ScrollView(host.activity);scroll.addView(body);
@@ -367,6 +368,7 @@ public final class NoteEditorScreen {
         // save/cancel bar behind the keyboard. Keep typing and native touch enabled.
         dialog.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         dialog.show();
+        MainActivity.observeDraftFontDialog(dialog);
     }
     /** Own dialog, not the shared editor helper: that one intentionally accepts blank
      * multiline input for path clearing, while a note text block must never be blank. */

@@ -20,6 +20,11 @@ public final class MainActivity extends Activity {
     static volatile boolean isolatedRestoreUndoTest; // fixed synthetic database only, no external entry
     static volatile boolean isolatedScheduleBookTest; // same-process instrumentation only, never read from Intent or preferences
     // Same-process instrumentation only. No intent, external path or preference can select this database.
+    // Same-process test observer, no Intent, provider, preference, permission or external path. Normal users retain no references.
+    static volatile int isolatedDraftFontScale;
+    static volatile java.lang.ref.WeakReference<android.app.AlertDialog> draftFontDialog;
+    static String draftFontDb(int scale){switch(scale){case 100:return "draft-font-100-ci.db";case 130:return "draft-font-130-ci.db";case 200:return "draft-font-200-ci.db";default:throw new IllegalArgumentException("unknown synthetic font");}}
+    static void observeDraftFontDialog(android.app.AlertDialog dialog){if(isolatedDraftFontScale!=0)draftFontDialog=new java.lang.ref.WeakReference<>(dialog);}
     static volatile boolean isolatedCategoryImpactTest; // fixed, private synthetic DB only; never read from an Intent
     static volatile boolean isolatedActivitySearchTest;
     static volatile boolean isolatedActivityTemplateTest;
@@ -44,6 +49,8 @@ public final class MainActivity extends Activity {
     }else if(isolatedShortcutTest){
         screen=new TodayScreen(this,AppDatabase.openSchema4(this,"schema4-ui.db"));
         Bundle isolated=new Bundle();isolated.putInt("page",1);screen.show(isolated);
+    }else if(isolatedDraftFontScale!=0){
+        screen=new TodayScreen(this,AppDatabase.openSchema4(this,draftFontDb(isolatedDraftFontScale)));Bundle isolated=new Bundle();isolated.putInt("page",1);screen.show(isolated);
     }else if(isolatedCategoryImpactTest){
         screen=new TodayScreen(this,AppDatabase.openSchema4(this,"category-impact-ui-ci.db"));Bundle isolated=new Bundle();isolated.putInt("page",1);screen.show(isolated);
     }else if(isolatedActivitySearchTest){

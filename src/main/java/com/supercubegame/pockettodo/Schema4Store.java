@@ -418,6 +418,24 @@ public final class Schema4Store extends SQLiteOpenHelper {
         try(SQLiteDatabase checked=Schema3Store.stateCandidate(base)){}
         return Wire.encode(base,links(db));
     }
+    /** Narrow bridge for a separately created v5 workspace. The old live schema checks and
+     * decoders stay strict; a schedule projection is never offered as a complete v5 backup. */
+    static byte[] scheduleProjection(SQLiteDatabase db){
+        if(db.getVersion()==4)return encodeState(db);
+        require(db.getVersion()==5&&db.inTransaction(),"Isolated schedule snapshot required");
+        byte[] encoded=Wire.encode(baseWire(db),links(db));
+        try(SQLiteDatabase checked=stateCandidate(encoded)){}return encoded;
+    }
+    static void seedFreshScheduleCopy(SQLiteDatabase destination,SQLiteDatabase verifiedBase){
+        require(destination.getVersion()==5&&destination.inTransaction()&&verifiedBase.getVersion()==4,"Fresh v5 copy required");
+        for(String name:tables())try(Cursor c=destination.rawQuery("SELECT count(*) FROM "+name,null)){
+            require(c.moveToFirst()&&c.getLong(0)==(name.equals("revision")?1:0),"Schedule destination is not empty");
+        }
+        require(revision(destination)==0,"New schedule destination revision");
+        try(Cursor c=destination.rawQuery("SELECT count(*) FROM activity_schedules",null)){require(c.moveToFirst()&&c.getLong(0)==0,"Schedule destination already has rules");}
+        byte[] expected=encodeState(verifiedBase);replaceRows(destination,verifiedBase);
+        require(Arrays.equals(expected,scheduleProjection(destination)),"Historical copy readback differs");
+    }
     static SQLiteDatabase stateCandidate(byte[] input){
         require(input!=null&&input.length>=12&&input.length<=Wire.LIMIT,"Schema4 state validation failed: input budget");
         byte[] owned=input.clone();SQLiteDatabase stage=null;boolean success=false;

@@ -1,0 +1,63 @@
+name: Dispatch the reviewed draft test once
+on:
+  push:
+    branches: [ci/draft-font-once-bee5711]
+    paths: [.github/workflows/dispatch-draft-font-once.yml]
+permissions:
+  contents: read
+  actions: write
+concurrency:
+  group: pocket-draft-font-once-bee5711
+  cancel-in-progress: false
+jobs:
+  dispatch:
+    if: github.repository == 'supercubegame/todo-pocket-android' && github.actor == 'supercubegame' && github.run_attempt == 1 && github.event.before == 'bee571194a0a4f6e8e0e148e0883f638d243c007'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Verify the review ref; reuse or request the first draft run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, subprocess, time
+          R='supercubegame/todo-pocket-android'; B='feature/draft-font-0467700'; S='bee571194a0a4f6e8e0e148e0883f638d243c007'
+          W=371338208; F='.github/workflows/note-drafts.yml'; H='.github/workflows/dispatch-draft-font-once.yml'
+          def need(value,message):
+              if not value: raise RuntimeError(message)
+          def api(path,method='GET',fields=()):
+              return subprocess.run(['gh','api','--method',method,'repos/'+R+'/'+path,*fields],capture_output=True,text=True,timeout=20)
+          def get(path):
+              p=api(path);need(p.returncode==0,'GitHub read failed: '+path);return json.loads(p.stdout)
+          def bound():
+              need(get('git/ref/heads/'+B)['object']['sha']==S,'review branch moved')
+          def observe():
+              page=get('actions/workflows/'+str(W)+'/runs?event=workflow_dispatch&branch=feature%2Fdraft-font-0467700&head_sha='+S+'&per_page=3')
+              runs=page['workflow_runs'];need(page['total_count']==len(runs) and len(runs)<=1,'incomplete or duplicate runs')
+              if not runs:return None
+              x=runs[0]; i=x['id'];url='https://github.com/'+R+'/actions/runs/'+str(i)
+              need(type(i) is int and i>0 and x['html_url']==url and x['workflow_id']==W and x['path']==F and x['event']=='workflow_dispatch' and x['head_sha']==S and x['head_branch']==B and x['run_attempt']==1,'unexpected run identity or attempt')
+              return url
+          need(os.environ['GITHUB_REF']=='refs/heads/ci/draft-font-once-bee5711' and os.environ['GITHUB_RUN_ATTEMPT']=='1','unexpected bridge ref or replay')
+          outer=os.environ['GITHUB_SHA'];c=get('commits/'+outer)
+          need(c['sha']==outer and [p['sha'] for p in c['parents']]==[S] and [(f['filename'],f['status']) for f in c['files']]==[(H,'added')],'bridge must add only its own file to the pinned parent')
+          need(get('git/commits/'+S)['tree']['sha']=='987ba3daefb56831535680ddce193a58b79fdb85','review tree changed')
+          bound(); w=get('actions/workflows/'+str(W));need((w['id'],w['path'],w['state'])==(W,F,'active'),'wrong workflow')
+          need(get('contents/'+F+'?ref='+S)['sha']=='21922203cc64c340dcfb2c3909a7da68dc41025a','draft workflow bytes differ')
+          url=observe(); prior=url is not None
+          if not prior:
+              bound()
+              try:
+                  p=api('actions/workflows/'+str(W)+'/dispatches','POST',('-f','ref='+B));print('single dispatch request exit:',p.returncode,flush=True)
+                  if p.returncode:print(p.stderr.strip()[:600],flush=True)
+              except subprocess.TimeoutExpired: print('single dispatch request timed out; reading back only',flush=True)
+              for i in range(8):
+                  bound();url=observe()
+                  if url:break
+                  if i<7:time.sleep(5)
+          need(url is not None,'no matching run observed; do not re-dispatch automatically')
+          print('existing' if prior else 'observed after one request',S,url,flush=True)
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as summary:
+              print(('Reused' if prior else 'Observed')+' [draft run]('+url+') for `'+S+'`. Dispatch receipt only; not device acceptance.',file=summary)
+          PY

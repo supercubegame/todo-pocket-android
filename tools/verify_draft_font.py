@@ -20,6 +20,30 @@ def parse(text,api,pct,nonce):
         l,t,x,b,il,it,ix,ib,minimum,lines,chars,scrolls=map(int,hit.groups());need(minimum>0 and x-l>=minimum and b-t>=minimum and l>=0 and t>=0 and ix>il>=0 and ib>it>=0 and (x<=il or ix<=l or b<=it or ib<=t) and lines>0 and chars==(3 if key=='note-draft-save' else 4) and 0<=scrolls<=12,'bad target, IME, text length or scroll measurement');obs.append({'id':key,'button':[l,t,x,b],'ime':[il,it,ix,ib],'minimum_px':minimum,'lines':lines,'utf16':chars,'actual_touch_scrolls':scrolls})
     return {'api':api,'pct':pct,'nonce':nonce,'cases':list(CASES),'geometry':obs,'scope':'NATIVE_LAYOUT_IME_TOUCH_AND_FILE_SQL_NOT_RASTER_OEM'}
 
+def _setting_value(key,v):
+    # Only two known setting keys. Do not print arbitrary state, errors, commands or device content.
+    if v=='null':return v
+    if key==KEYS[1] and v in ('0','1'):return v
+    if key==KEYS[0] and isinstance(v,str) and re.fullmatch(r'[0-9](?:\.[0-9]{1,8})?',v) and .5<=float(v)<=3:return v
+    return 'unexpected'
+
+def _restore_owned(cmd,get,key,original,owned):
+    r={'original':_setting_value(key,original),'last_owned':_setting_value(key,owned),'seen_before':None,'after':None,'decision':'no_write','write_confirmed':False,'restored':False,'failed_stage':None,'error_class':None,'child_exit':None};stage='read_before'
+    try:
+        seen=get(key);r['seen_before']=_setting_value(key,seen)
+        if seen==original:r['decision']='already_original'
+        else:
+            if seen!=owned:r['decision']='foreign_refused';stage='owner_guard';raise AssertionError('intervening change left untouched')
+            stage='write';r['decision']='delete' if original=='null' else 'put'
+            if original=='null':cmd('settings','delete',*key)
+            else:cmd('settings','put',*key,original)
+            r['write_confirmed']=True # command returned; only the following exact read can confirm restoration
+        stage='read_after';actual=get(key);r['after']=_setting_value(key,actual);stage='verify';need(actual==original,'exact setting not restored');r['restored']=True
+    except Exception as e:
+        r['error_class']=type(e).__name__;r['failed_stage']=stage
+        if isinstance(e,subprocess.CalledProcessError):r['child_exit']=e.returncode
+    return r
+
 def matrix(cmd,run_one,collect,serial,pkg,api,env):
     need(env.get('GITHUB_ACTIONS')=='true' and serial=='emulator-5554' and pkg==PKG and type(api)==int and api in (26,34),'disposable CI only');rid=env['GITHUB_RUN_ID'];att=env['GITHUB_RUN_ATTEMPT'];src=env['GITHUB_SHA'];need(re.fullmatch(r'[0-9]+',rid) and re.fullmatch(r'[1-9][0-9]*',att) and re.fullmatch(r'[a-f0-9]{40}',src),'unbound run')
     for key,target in [('ro.kernel.qemu','1'),('ro.hardware','ranchu'),('ro.build.version.sdk',str(api))]:need(cmd('getprop',key).strip()==target,'unexpected emulator')
@@ -36,15 +60,12 @@ def matrix(cmd,run_one,collect,serial,pkg,api,env):
             except Exception as e:rec['error_class']=type(e).__name__;errors.append(type(e).__name__+' at '+str(pct))
             rows.append(rec)
     finally:
+        evidence={}
         for key in reversed(KEYS):
             if key not in active:continue
-            try:
-                current=get(key)
-                if current!=before[key]:
-                    need(current==active[key],'refuse to overwrite intervening setting');cmd('settings','delete',*key) if before[key]=='null' else cmd('settings','put',*key,before[key]);
-                rest[key]=get(key)==before[key];need(rest[key],'setting restoration unconfirmed')
-            except Exception as e:rest[key]=False;errors.append(type(e).__name__+' restoring '+key[1])
-        status='PASS' if not errors and len(rows)==3 and all(r['status']=='PASS' for r in rows) and all(rest.get(k,False) for k in KEYS) else 'FAIL';result={'source':src,'run_id':rid,'attempt':att,'api':api,'original':{k[1]:v for k,v in before.items()},'restored':{k[1]:v for k,v in rest.items()},'raw_series':rows,'status':status,'physical_device':False,'pixel_measurement':False,'release_ready':False};collect('font-matrix.json',json.dumps(result,indent=2)+'\n')
+            trace=_restore_owned(cmd,get,key,before[key],active[key]);evidence[key[1]]=trace;rest[key]=trace['restored']
+            if not rest[key]:errors.append(str(trace['error_class'])+' restoring '+key[1]+' at '+str(trace['failed_stage']))
+        status='PASS' if not errors and len(rows)==3 and all(r['status']=='PASS' for r in rows) and all(rest.get(k,False) for k in KEYS) else 'FAIL';result={'source':src,'run_id':rid,'attempt':att,'api':api,'original':{k[1]:v for k,v in before.items()},'restored':{k[1]:v for k,v in rest.items()},'restoration':evidence,'raw_series':rows,'status':status,'physical_device':False,'pixel_measurement':False,'release_ready':False};collect('font-matrix.json',json.dumps(result,indent=2)+'\n')
     need(result['status']=='PASS','draft font series incomplete: '+', '.join(errors));return result
 
 def device(adb,serial,pkg,api,out):
@@ -60,9 +81,16 @@ def device(adb,serial,pkg,api,out):
         with (out/n).open('x',encoding='utf-8') as f:f.write(t)
     return matrix(shell,invoke,save,serial,pkg,api,os.environ)
 
+def _confirmed_restores(j):
+    originals=j.get('original',{});r=j.get('restoration',{});need(set(originals)==set(r)=={k[1] for k in KEYS},'incomplete original or restore receipts')
+    for k,active in zip(KEYS,('2.0','1'),strict=True):
+        name=k[1];orig=originals[name];ev=r[name];need(isinstance(orig,str) and _setting_value(k,orig)==orig and orig!='unexpected' and ev['restored'] is True and j['restored'][name] is True and ev['original']==ev['after']==orig and ev['last_owned']==active and ev['failed_stage'] is None and ev['error_class'] is None and ev['child_exit'] is None,'exact restore evidence missing')
+        noop=ev['seen_before']==orig
+        need((noop or ev['seen_before']==active) and ev['decision']==('already_original' if noop else 'delete' if orig=='null' else 'put') and ev['write_confirmed'] is (not noop),'wrong owner or operation in restore receipt')
+
 def check_font_files(folder,expected,api,src,rid,att):
     """Read only these four synthetic source-bound files; never trust the matrix's PASS alone."""
-    raw=folder/'font-matrix.json';j=json.loads(raw.read_bytes());need(j.get('api')==api and j.get('source')==src and j.get('run_id')==rid and j.get('attempt')==att and j.get('status')=='PASS' and j.get('restored')=={'font_scale':True,'show_ime_with_hard_keyboard':True} and all(v is True for v in j['restored'].values()),'missing source-bound completed matrix and restored settings'); rows=j['raw_series'];need(len(rows)==3,'incomplete font series');labels=[]
+    raw=folder/'font-matrix.json';j=json.loads(raw.read_bytes());need(j.get('api')==api and j.get('source')==src and j.get('run_id')==rid and j.get('attempt')==att and j.get('status')=='PASS' and j.get('restored')=={'font_scale':True,'show_ime_with_hard_keyboard':True} and all(v is True for v in j['restored'].values()),'missing source-bound completed matrix and restored settings');_confirmed_restores(j); rows=j['raw_series'];need(len(rows)==3,'incomplete font series');labels=[]
     for row,(pct,_) in zip(rows,SCALES,strict=True):
         nonce=rid+'-'+att+'-'+str(api)+'-'+str(pct);data=(folder/f'font-{pct}.txt').read_bytes();need((row['source'],row['run_id'],row['attempt'],row['api'],row['pct'],row['nonce'],row['status'])==(src,rid,att,api,pct,nonce,'PASS') and row['raw_sha256']==hashlib.sha256(data).hexdigest(),'wrong individual run or output');parsed=parse(data.decode(),api,pct,nonce);need(parsed['cases']==row['cases'] and parsed['geometry']==row['geometry'],'raw and summarized geometry disagree');labels.append(pct)
     need(labels==[100,130,200] and set(expected)=={PKG,PKG+'.test'},'wrong package/scale set');return labels
@@ -80,10 +108,17 @@ def bind_full_endcheck(gate,root):
     def finish(adb):
         need(not once,'duplicate endcheck');once.append(True);folder=root/'build/ci-end-draft-font';folder.mkdir(parents=True,exist_ok=False);prefix=[str(adb),'-s',gate.SERIAL];record={'scope':'DISPOSABLE_FULL_JOB_FONT_ENDCHECK','source':src,'run_id':rid,'attempt':att,'api':gate.API,'expected_sha256':{k:hashlib.sha256(v).hexdigest() for k,v in expected.items()},'apk_readbacks':{},'status':'NOT_ACCEPTED','release_ready':False,'test_started':False}
         def command(argv,timeout=30):return subprocess.check_output(argv,timeout=timeout,stdin=subprocess.DEVNULL,text=True)
+        thumbnail_error=None
         try:
             regs=command(prefix+['shell','pm','list','instrumentation']);need(registration(regs,'V12DeviceTest')['status']=='PASS','final runner not restored: no font setting changed')
             for name,original in expected.items():
                 rec=[];record['apk_readbacks'][name]=rec;need(installed_readback(command,prefix,name,original,rec)==original,'installed APK identity mismatch: no settings changed')
+            # Both independent installed probes use the exact just-read product/test bytes and the registered default runner.
+            # Thumbnail-first requires no settings changes; preserve its original file even if the subsequent font probe also fails.
+            from verify_note_thumbnails import device as verify_note_page
+            try:verify_note_page(gate,adb,root)
+            except Exception as error:
+                thumbnail_error=error;print('INDEPENDENT_NOTE_THUMB_FAILURE '+type(error).__name__,flush=True)
             record['test_started']=True;device(adb,gate.SERIAL,PKG,gate.API,folder);record['accepted_scales']=check_font_files(folder,expected,gate.API,src,rid,att);record['status']='PASS'
         except Exception as exc:
             record['error_class']=type(exc).__name__;raise
@@ -95,6 +130,7 @@ def bind_full_endcheck(gate,root):
                     with (root/('device-draft-'+p.stem+'.txt')).open('xb') as out:out.write(p.read_bytes())
             with (root/'device-draft-font-binding.txt').open('x') as w:w.write(json.dumps(record,indent=2)+'\n')
             print('DRAFT_FONT_ENDCHECK '+str(record['status'])+' api='+str(gate.API),flush=True)
+        if thumbnail_error is not None:raise thumbnail_error # A font pass cannot hide a thumbnail failure.
     return finish
 
 def full_evidence_controls():
@@ -128,8 +164,15 @@ def full_evidence_controls():
             for p,_ in SCALES:
                 n=f'567-1-{api}-{p}';lines=[f'FONT_SCOPE api={api} pct={p} nonce={n} settings={p/100} applied={p/100} package={PKG} hardware=ranchu'];lines+=['FONT_CASE '+v+' PASS' if v in CASES else 'FONT_GEOMETRY '+v+' enabled=true rect=8,100,300,160 ime=0,331,320,640 min=48 lines=1 chars='+str(3 if v.endswith('save') else 4)+' scrolls=1' for v in ORDER];t='\n'.join(lines+['DEVICE_DATABASE_RESULT draft_font_ui 2/2 PASS','INSTRUMENTATION_CODE: -1']);rawfiles[p]=t.encode();s=parse(t,api,p,n);rows.append(dict(source=env['src'],run_id='567',attempt='1',status='PASS',raw_sha256=hashlib.sha256(t.encode()).hexdigest(),**s))
             base=dict(api=api,source=env['src'],run_id='567',attempt='1',status='PASS',restored={'font_scale':True,'show_ime_with_hard_keyboard':True},raw_series=rows)
-            for fault in ('none','missing_raw','wrong_hash','wrong_source','wrong_order','partial','fake_pos','foreign_attempt','not_restored','fake_bool','omitted_case','missing_terminal','wrong_apks'):
+            base['original']={'font_scale':'null','show_ime_with_hard_keyboard':'1'};base['restoration']={}
+            for k,last in zip(KEYS,('2.0','1')):
+                orig=base['original'][k[1]];base['restoration'][k[1]]=dict(original=orig,last_owned=last,seen_before=last,after=orig,decision='already_original' if last==orig else 'delete',write_confirmed=(last!=orig),restored=True,failed_stage=None,error_class=None,child_exit=None)
+            for fault in ('wrong_after','forged_write','claimed_foreign','absent_restore','none','missing_raw','wrong_hash','wrong_source','wrong_order','partial','fake_pos','foreign_attempt','not_restored','fake_bool','omitted_case','missing_terminal','wrong_apks'):
                 j=copy.deepcopy(base);b=dict(rawfiles);e=apks
+                if fault=='wrong_after':j['restoration']['font_scale']['after']='1.0'
+                if fault=='forged_write':j['restoration']['show_ime_with_hard_keyboard']['write_confirmed']=True
+                if fault=='claimed_foreign':j['restoration']['font_scale']['seen_before']='1.75'
+                if fault=='absent_restore':j['restoration'].pop('font_scale')
                 if fault=='missing_raw':del b[130]
                 if fault=='wrong_hash':j['raw_series'][2]['raw_sha256']='a'*64
                 if fault=='wrong_source':j['source']='c'*40
@@ -150,7 +193,7 @@ def full_evidence_controls():
                 try:got=check_font_files(folder,e,api,**env)
                 except (AssertionError,FileNotFoundError):assert fault!='none';count+=1
                 else:assert fault=='none' and got==[100,130,200]
-    assert count==24 and len(matrix)==4;print('FULL_FONT_HOST 2 bound matrices + 24 refusals; 4 independent result combinations; no second build or font dispatch, NOT Android')
+    assert count==32 and len(matrix)==4;print('FULL_FONT_HOST 2 bound matrices + 32 refusals; 4 independent result combinations; no second build or font dispatch, NOT Android')
 
 def host():
     full_evidence_controls()
@@ -191,4 +234,8 @@ def host():
             elif name=='restore_denied':assert state[KEYS[0]]==saved[KEYS[0]] and not r['restored']['show_ime_with_hard_keyboard']
             else:assert state==saved
         loops[name]=len(calls)
+        if name=='foreign_after':
+            ev=r['restoration']['font_scale'];assert ev['seen_before']=='1.71' and ev['decision']=='foreign_refused' and ev['failed_stage']=='owner_guard' and ev['after'] is None and not ev['write_confirmed']
+        if name=='restore_denied':
+            ev=r['restoration']['show_ime_with_hard_keyboard'];assert ev['decision']=='delete' and ev['failed_stage']=='write' and ev['error_class']=='RuntimeError' and not ev['write_confirmed']
     assert rejected==84 and len(loops)==9;print('DRAFT_FONT_HOST 6 positive / 84 rejected native receipt shapes; 9 setting lifecycle controls. HOST ONLY.')

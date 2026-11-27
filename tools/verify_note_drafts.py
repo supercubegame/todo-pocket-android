@@ -524,7 +524,9 @@ public class DraftUiContract {
   String getText(){return text;}
   void setTextColor(int x){color=x;}
  }
- static final class EditText extends TextView {}
+ static final class ConfigurationModel {float fontScale=1f;int screenWidthDp=320;}
+ static final class EditorResources {static final ConfigurationModel cfg=new ConfigurationModel();ConfigurationModel getConfiguration(){return cfg;}}
+ static final class EditText extends TextView {int minLines=3,maxLines=6;EditorResources getResources(){return new EditorResources();}void setMinLines(int n){minLines=n;}}
  static final class Button extends TextView {
   Consumer<Button> click; void setOnClickListener(Consumer<Button> x){click=x;}
   void press(){if(enabled&&click!=null)click.accept(this);}
@@ -630,6 +632,12 @@ public class DraftUiContract {
   boolean untouched(){return s.saves==0&&s.recovers==0&&s.discards==0&&s.commits==0;}
  }
  public static void main(String[] args){
+  ConfigurationModel cfg=EditorResources.cfg;
+  int[] widths={320,320,360,361,500,0};float[] scales={1f,1.3f,2f,2f,2.2f,2f};int[] minimums={3,3,2,3,3,3};
+  for(int i=0;i<minimums.length;i++){cfg.screenWidthDp=widths[i];cfg.fontScale=scales[i];Fixture k=new Fixture(null);
+    if(k.input.minLines!=minimums[i]||k.input.maxLines!=6)throw new AssertionError("two initial lines only on compact 200 percent; six-line editing remains");
+    if(!k.input.getText().equals("body")||!k.untouched())throw new AssertionError("font policy must not write content");}
+  cfg.screenWidthDp=320;cfg.fontScale=1;
   TodayScreen.themeForFixture=0; Fixture roomy=new Fixture(null);
   if(roomy.d.theme!=0||roomy.d.window.w!=0||roomy.d.window.h!=0)throw new AssertionError("wide regular editor unexpectedly took over the screen");
   TodayScreen.themeForFixture=21;Fixture f=new Fixture(null);
@@ -734,6 +742,9 @@ def ui_model_selftest():
         assert run.returncode == 0 and labels == UI_LABELS, (run.stdout, run.stderr)
         assert run.stdout.splitlines()[-1] == "DRAFT_UI_RESULT 26 PASS"
         mutations = (
+            ("field.setMinLines(2);", "field.setMinLines(3);", "two initial lines only on compact 200 percent"),
+            ("widthDp>0&&widthDp<=360", "widthDp>=0&&widthDp<=500", "two initial lines only on compact 200 percent"),
+            ("getConfiguration().fontScale>=2.0f", "getConfiguration().fontScale>=1.3f", "two initial lines only on compact 200 percent"),
             ("if(editorTheme!=0)dialog.getWindow().setLayout", "if(editorTheme==0)dialog.getWindow().setLayout", "wide regular editor unexpectedly took over the screen"),
             ("body.addView(hint);", "body.addView(hint,0);", "guidance must remain after reachable actions"),
             ("body.addView(validation,0);", "body.addView(validation);", "feedback_before_input"),

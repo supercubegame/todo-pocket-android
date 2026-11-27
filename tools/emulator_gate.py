@@ -2972,6 +2972,8 @@ def parser_selftest():
     ledger_changes_host_selftest()
     from verify_oriented_photos import host_selftest as oriented_photo_host_selftest
     oriented_photo_host_selftest()
+    from verify_note_thumbnails import host as thumbnail_host
+    thumbnail_host()
     activity_template_host_selftest()
     activity_search_host_selftest()
     image_fixture_target_selftest()

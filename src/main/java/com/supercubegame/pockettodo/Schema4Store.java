@@ -634,7 +634,8 @@ public final class Schema4Store extends SQLiteOpenHelper {
      * Revalidate staged bytes, close staging before commit, retain old media on
      * every failure. New unreachable blobs may remain; never blindly delete them.
      */
-    public synchronized void confirmRestore(RestorePlan plan,MediaRepository media)throws IOException{
+    public synchronized void confirmRestore(RestorePlan plan,MediaRepository media)throws IOException{confirmRestoreCaptured(plan,media,null);}
+    synchronized void confirmRestoreCaptured(RestorePlan plan,MediaRepository media,java.util.function.BiConsumer<SQLiteDatabase,Boolean> capture)throws IOException{
         if(plan==null||plan.owner!=this)throw new IllegalArgumentException("Restore belongs to a different helper");
         if(plan.terminal||plan.session!=session){plan.close();throw new IllegalStateException("Restore plan no longer active");}
         plan.terminal=true;
@@ -654,9 +655,9 @@ public final class Schema4Store extends SQLiteOpenHelper {
                 snapshot.close();
                 live.beginTransaction();
                 try{
-                    unchanged(live,plan);replaceRows(live,candidate);
+                    unchanged(live,plan);if(capture!=null)capture.accept(live,true);replaceRows(live,candidate);
                     require(Arrays.equals(plan.expected,encodeState(live)),"Restore transaction readback differs");
-                    businessCells(live,true);live.setTransactionSuccessful();
+                    businessCells(live,true);if(capture!=null)capture.accept(live,false);live.setTransactionSuccessful();
                 }finally{live.endTransaction();}
             }
         }

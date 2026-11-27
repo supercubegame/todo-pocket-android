@@ -49,7 +49,8 @@ public final class TodayScreen {
     private final Map<View,Boolean> paused=new IdentityHashMap<>();
     final ActivitiesScreen activities;
     private AppDatabase.RestorePlan pendingRestore;
-    private AlertDialog restoreDialog;
+    private AlertDialog restoreDialog,undoRestoreDialog;
+    private AppDatabase.RestoreUndo restoreUndo;
     private AppDatabase.TodoDeletionPlan pendingTodoDeletion;
     private AppDatabase.TodoDeletionUndo todoUndo;
     private TextView todoUndoHint;
@@ -225,7 +226,7 @@ public final class TodayScreen {
         this.activity=activity;db=database;activities=new ActivitiesScreen(this);
     }
     public void show(Bundle saved) {
-        leaveTodoSession();
+        clearRestoreUndo();io.execute(()->{try{RestoreScratch.reclaimIfIdle(activity.getCacheDir().toPath());}catch(IOException e){android.util.Log.w("PocketRestore","Unrecognized staging left untouched");}});leaveTodoSession();
         if(saved!=null){page=saved.getInt("page",0);filter=saved.getInt("filter",0);draft=saved.getString("draft","");activities.selected=saved.getLong("activity",0);}
         activity.getWindow().setStatusBarColor(BG);
         activity.getWindow().setNavigationBarColor(BG);
@@ -241,10 +242,10 @@ public final class TodayScreen {
         LinearLayout nav=new LinearLayout(activity);
         nav.addView(button("今天",()->navigate(0)),new LinearLayout.LayoutParams(0,dp(52),1));
         nav.addView(button("活动",()->navigate(1)),new LinearLayout.LayoutParams(0,dp(52),1));
-        nav.addView(button("导出笔记",()->{leaveTodoSession();((MainActivity)activity).openNoteShare();}),new LinearLayout.LayoutParams(0,dp(52),1));root.addView(nav);
+        nav.addView(button("导出笔记",()->{leaveTodoSession();clearRestoreUndo();((MainActivity)activity).openNoteShare();}),new LinearLayout.LayoutParams(0,dp(52),1));root.addView(nav);
         refresh();
     }
-    private void navigate(int next){if(busy)return;if(page==1&&next!=1)activities.leaveActivityNavigation();rememberDraft();leaveTodoSession();page=next;refresh();}
+    private void navigate(int next){if(busy)return;clearRestoreUndo();if(page==1&&next!=1)activities.leaveActivityNavigation();rememberDraft();leaveTodoSession();page=next;refresh();}
     void refresh(){if(page==1)activities.load();else loadTodos();}
     LinearLayout content(){todoView=new Object();clearTodoPreview();if(page!=0)clearTodoUndo();input=null;content.removeAllViews();return content;}
     private void rememberDraft(){if(input!=null)draft=input.getText().toString();}
@@ -376,22 +377,19 @@ public final class TodayScreen {
         }});
     }
     private void clearRestorePreview(){
+        if(closed)clearRestoreUndo(); // close both in-memory actions when this Activity leaves.
         AppDatabase.RestorePlan plan=pendingRestore;pendingRestore=null;
         AlertDialog dialog=restoreDialog;restoreDialog=null;
         try{if(dialog!=null)dialog.dismiss();}finally{if(plan!=null)disposeRestore(plan);}
     }
-    // Called synchronously by the SAF result on the UI thread. No posted plan
-    // can arrive after the owning screen and its serial worker have shut down.
-    void previewRestore(Path chosen)throws IOException{
-        AppDatabase.RestorePlan plan=null;
-        try{
-            try{
-                if(!restoreLive()||busy){if(restoreLive())message("页面正忙，请稍后重新选择备份。",true);return;}
-                plan=db.prepareRestore(chosen,activity.getCacheDir().toPath().resolve("restore-stage"),64L*1024*1024);
-            }finally{Files.deleteIfExists(chosen);}
-        }catch(IOException|RuntimeException e){if(plan!=null)disposeRestore(plan);throw e;}
-        showRestorePlan(plan);
+    // A picker URI is opened only by the serial worker while it owns a private staging lease.
+    private void prepareRestoreWork(Callable<AppDatabase.RestorePlan> create){
+        if(!restoreLive()||busy){if(restoreLive())message("页面正忙，请稍后重新选择备份。",true);return;}
+        work(create,p->{if(restoreLive())showRestorePlan(p);else disposeRestore(p);},()->message("未能校验完整备份，未恢复；请保留原数据。",true),p->{try{p.close();}catch(IOException e){android.util.Log.w("PocketRestore","Private preview cleanup incomplete");}});
     }
+    void previewRestore(RestoreScratch.Input source){prepareRestoreWork(()->RestoreScratch.prepare(activity.getCacheDir().toPath(),db,source));}
+    // Owned local test copy follows the same preparation/consent path as the native SAF result.
+    void previewRestore(Path chosen)throws IOException{if(!restoreLive()||busy){Files.deleteIfExists(chosen);return;}prepareRestoreWork(()->{AppDatabase.RestorePlan p=null;try{p=RestoreScratch.prepare(activity.getCacheDir().toPath(),db,()->Files.newInputStream(chosen,java.nio.file.StandardOpenOption.READ,java.nio.file.LinkOption.NOFOLLOW_LINKS));Files.delete(chosen);return p;}catch(Exception e){try{if(p!=null)p.close();}finally{Files.deleteIfExists(chosen);}throw e;}});}
     private void showRestorePlan(AppDatabase.RestorePlan plan){
         if(pendingRestore==plan)return;
         try{clearRestorePreview();pendingRestore=plan;buildRestoreDialog(plan);}
@@ -404,7 +402,7 @@ public final class TodayScreen {
         StringBuilder rows=new StringBuilder();
         String[] labels={"activities:活动","todos:普通待办","ledger:账目","checkins:打卡","notes:笔记","media:媒体文件"};
         for(String pair:labels){String[] parts=pair.split(":");rows.append(parts[1]).append("：本机 ").append(current.get(parts[0])).append(" → 备份 ").append(incoming.get(parts[0])).append('\n');}
-        rows.append("恢复后暂无撤销按钮；可先返回导出当前备份。");
+        rows.append("恢复后，仅在本次备份界面、数据未变化时可撤销一次。退出该页或重启后失效；建议先导出当前备份。");
         TextView counts=text(rows.toString(),15,INK);counts.setContentDescription("restore-counts");body.addView(counts);
         CheckBox consent=new CheckBox(activity);consent.setText("我明白会替换本机数据");consent.setTextSize(16);consent.setTextColor(INK);consent.setContentDescription("restore-consent");body.addView(consent);
         TextView validation=text("",14,ERROR);validation.setContentDescription("restore-validation");body.addView(validation);
@@ -415,9 +413,9 @@ public final class TodayScreen {
             if(!consent.isChecked()){validation.setText("请先勾选：我明白会替换本机数据");return;}
             dialog.setCancelable(false);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);consent.setEnabled(false);
             pendingRestore=null; // one-way handoff; dismiss/finish cannot revoke a queued commit
-            work(()->{try(AppDatabase.RestorePlan owned=plan){db.confirmRestore(owned,new MediaRepository(activity.getFilesDir().toPath().resolve("media"),64L*1024*1024));return true;}},
-                ignored->{if(restoreDialog==dialog){clearRestorePreview();if(restoreLive()){activities.selected=0;refresh();}}},
-                ()->{if(restoreDialog==dialog)clearRestorePreview();});
+            work(()->{try(AppDatabase.RestorePlan owned=plan){return db.confirmRestoreWithUndo(owned,new MediaRepository(activity.getFilesDir().toPath().resolve(MainActivity.isolatedRestoreUndoTest?"restore-undo-ui-fixture-media":"media"),64L*1024*1024));}},
+                token->{if(restoreDialog!=dialog||!restoreLive()){token.close();return;}clearRestorePreview();clearRestoreUndo();restoreUndo=token;activities.selected=0;refresh();message("已恢复完整备份；在本页可撤销一次。",false);},
+                ()->{if(restoreDialog==dialog){clearRestorePreview();message("恢复未完成，未替换本机数据。请核对备份与媒体。",true);}},AppDatabase.RestoreUndo::close);
         }));
         dialog.setOnDismissListener(unused->{
             if(restoreDialog!=dialog)return;
@@ -426,6 +424,10 @@ public final class TodayScreen {
         });
         dialog.show();
     }
+    void clearRestoreUndo(){AlertDialog d=undoRestoreDialog;undoRestoreDialog=null;if(d!=null)d.dismiss();AppDatabase.RestoreUndo t=restoreUndo;restoreUndo=null;if(t!=null)t.close();}
+    void addRestoreUndo(LinearLayout parent){final AppDatabase.RestoreUndo token=restoreUndo;if(token==null)return;Button undo=button("撤销上次整库恢复…",()->{});undo.setContentDescription("restore-undo-open");undo.setOnClickListener(v->{if(!busy&&restoreLive()&&restoreUndo==token&&v.isEnabled()&&v.isAttachedToWindow())reviewRestoreUndo(token);});parent.addView(undo);}
+    private void reviewRestoreUndo(AppDatabase.RestoreUndo token){if(undoRestoreDialog!=null||restoreUndo!=token)return;LinearLayout box=column();box.setPadding(dp(20),dp(8),dp(20),dp(8));StringBuilder msg=new StringBuilder("返回本次恢复前的完整状态，不合并。\n");String[][] names={{"todos","普通待办"},{"activities","活动"},{"ledger","账目"},{"checkins","打卡"},{"notes","笔记"},{"media","已登记媒体"}};for(String[] n:names)msg.append(n[1]).append("：当前恢复版 ").append(token.restoredCounts.get(n[0])).append(" → 恢复前 ").append(token.previousCounts.get(n[0])).append('\n');msg.append("若本机内容又有变化，将拒绝撤销。不会删除共享图片。取消可继续核对；提交撤销只允许一次。");TextView summary=text(msg.toString(),15,INK);summary.setContentDescription("restore-undo-counts");box.addView(summary);CheckBox agree=new CheckBox(activity);agree.setText("我明白会返回恢复前的本机数据");agree.setContentDescription("restore-undo-consent");box.addView(agree);TextView warn=text("",14,ERROR);warn.setContentDescription("restore-undo-warning");box.addView(warn);ScrollView scroll=new ScrollView(activity);scroll.addView(box);
+        AlertDialog dialog=new AlertDialog.Builder(activity).setTitle("撤销整库恢复？").setView(scroll).setNegativeButton("取消",null).setPositiveButton("确认撤销恢复",null).create();undoRestoreDialog=dialog;dialog.setOnDismissListener(d->{if(undoRestoreDialog==dialog)undoRestoreDialog=null;});dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{if(!restoreLive()||busy||restoreUndo!=token||undoRestoreDialog!=dialog)return;if(!agree.isChecked()){warn.setText("请先勾选，尚未撤销。");return;}restoreUndo=null;dialog.dismiss();work(()->{db.undoRestore(token);return true;},ok->{activities.selected=0;refresh();message("已撤销这次整库恢复。",false);},()->{refresh();message("无法安全撤销：本机内容或媒体可能已变化，未覆盖当前数据。",true);});}));dialog.show();}
     <T> void work(Callable<T> action,Consumer<T> success,Runnable failure){
         work(action,success,failure,ignored->{});
     }

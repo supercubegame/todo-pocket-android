@@ -498,7 +498,8 @@ public final class ActivitiesScreen {
         }));
         Button append=host.button("追加旧版待办",()->{});
         append.setOnClickListener(v->LegacyPicker.open(this,append));body.addView(append);
-        body.addView(host.button("返回活动",()->{backupPanel=false;load();}));
+        host.addRestoreUndo(body);
+        body.addView(host.button("返回活动",()->{host.clearRestoreUndo();backupPanel=false;load();}));
     }
     /** A dedicated platform Fragment owns only the append picker result. It has no
      * entry in the manifest and never receives the full-backup request code. The

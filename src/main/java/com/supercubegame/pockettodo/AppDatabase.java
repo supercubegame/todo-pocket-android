@@ -302,7 +302,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
 
     @Override public synchronized SQLiteDatabase getWritableDatabase(){return schema3==null?super.getWritableDatabase():schema3.getWritableDatabase();}
     @Override public synchronized SQLiteDatabase getReadableDatabase(){return schema3==null?super.getReadableDatabase():schema3.getReadableDatabase();}
-    @Override public synchronized void close(){restoreSession=new Object();if(startupOwned){startupClosed=true;if(startupConnection!=null){startupConnection.close();startupConnection=null;}}if(schema3!=null)schema3.close();if(schema4!=null)schema4.close();super.close();}
+    @Override public synchronized void close(){forgetRestoreUndo();restoreSession=new Object();if(startupOwned){startupClosed=true;if(startupConnection!=null){startupConnection.close();startupConnection=null;}}if(schema3!=null)schema3.close();if(schema4!=null)schema4.close();super.close();}
     private static String validName(String name) {
         if(name==null||!name.matches("[A-Za-z0-9_-]+\\.db"))throw new IllegalArgumentException("无效数据库文件名");return name;
     }
@@ -1789,7 +1789,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
             // a failed restore after the replacement has already committed.
             snapshot.close();
             for(Map.Entry<String,Long> item:registry.entrySet()){media.verify(item.getKey());if(Files.size(media.path(item.getKey()))!=item.getValue())throw new IOException("恢复媒体回读大小不一致");}
-            tx(db->{tableSet(db);deleteRows(db);copyRows(staged,db);require(Arrays.equals(encodeState(db),expected),"恢复事务回读不一致");return null;});
+            tx(db->{tableSet(db);deleteRows(db);copyRows(staged,db);require(Arrays.equals(encodeState(db),expected),"恢复事务回读不一致");return null;});forgetRestoreUndo();
         }
     }
 
@@ -1823,8 +1823,51 @@ public final class AppDatabase extends SQLiteOpenHelper {
         }
         public Map<String,Long> currentCounts(){return current;}
         public Map<String,Long> incomingCounts(){return incoming;}
-        @Override public void close()throws IOException{synchronized(owner){terminal=true;if(shortcuts!=null)shortcuts.close();else if(upgraded!=null)upgraded.close();else snapshot.close();}}
+        private java.io.Closeable scratch;
+        void ownScratch(java.io.Closeable lease){synchronized(owner){require(lease!=null&&!terminal&&scratch==null,"暂存预览已失效");scratch=lease;}}
+        private void finishScratch()throws IOException{java.io.Closeable s=scratch;scratch=null;if(s!=null)s.close();}
+        private void releaseScratch(){try{finishScratch();}catch(IOException e){throw new IllegalStateException("私有暂存未能清理，本次不恢复",e);}}
+        @Override public void close()throws IOException{synchronized(owner){terminal=true;try{if(shortcuts!=null)shortcuts.close();else if(upgraded!=null)upgraded.close();else snapshot.close();}finally{finishScratch();}}}
     }
+    /** Transient for this helper only. Kept in memory, never in preferences, saved state, a URI, or the backup wire. */
+    public static final class RestoreUndo implements AutoCloseable {
+        private final AppDatabase owner;private final Object session;private SQLiteDatabase connection;private MediaRepository media;
+        private byte[] before,after;private Map<String,Long> priorFiles;private long changes,generation;private boolean terminal;
+        public final Map<String,Long> previousCounts,restoredCounts;
+        private RestoreUndo(AppDatabase d,RestorePlan p,MediaRepository m){owner=d;session=d.restoreSession;media=m;previousCounts=Collections.unmodifiableMap(new LinkedHashMap<>(p.current));restoredCounts=Collections.unmodifiableMap(new LinkedHashMap<>(p.incoming));}
+        private void capture(SQLiteDatabase db,boolean first){require(db.inTransaction()&&db.isOpen()&&!terminal,"必须在恢复事务内记录撤销");
+            if(first){require(before==null&&after==null,"重复恢复快照");connection=db;priorFiles=registeredMedia(db);verifyUndoFiles(media,priorFiles);before=noteDeletionState(db);}
+            else{require(connection==db&&before!=null&&after==null,"恢复连接已变化");after=noteDeletionState(db);changes=restoreScalar(db,"SELECT total_changes()");generation=restoreScalar(db,"PRAGMA data_version");}}
+        @Override public void close(){synchronized(owner){terminal=true;before=null;after=null;priorFiles=null;connection=null;media=null;if(owner.activeRestoreUndo==this)owner.activeRestoreUndo=null;}}
+    }
+    private RestoreUndo activeRestoreUndo;
+    private void forgetRestoreUndo(){RestoreUndo old=activeRestoreUndo;activeRestoreUndo=null;if(old!=null)old.close();}
+    private static long restoreScalar(SQLiteDatabase db,String q){try(Cursor c=db.rawQuery(q,null)){require(c.moveToFirst()&&c.getType(0)==Cursor.FIELD_TYPE_INTEGER,"缺少数据库代次");long n=c.getLong(0);require(!c.moveToNext(),"数据库代次无效");return n;}}
+    private static void verifyUndoFiles(MediaRepository media,Map<String,Long> files){require(media!=null,"缺少当前媒体仓库");long used=0;try{
+        for(Map.Entry<String,Long> e:files.entrySet()){long size=e.getValue();require(size>0&&size<=64L*1024*1024-used,"撤销媒体超出预算");used+=size;Path file=media.path(e.getKey()),dir=file.getParent();if(!Files.isDirectory(dir,LinkOption.NOFOLLOW_LINKS)||!dir.equals(dir.toRealPath()))throw new IOException("媒体目录已变化");
+            media.verify(e.getKey());java.nio.file.attribute.BasicFileAttributes attr=Files.readAttributes(file,java.nio.file.attribute.BasicFileAttributes.class,LinkOption.NOFOLLOW_LINKS);if(!attr.isRegularFile()||attr.size()!=size)throw new IOException("已登记的媒体发生变化");}
+        }catch(IOException e){throw new IllegalStateException("撤销所需媒体缺失或已变化",e);}}
+    /** Decode ONLY our bounded, in-memory typed snapshot. Every SQL identifier comes from the verified live layout, never backup bytes. */
+    private static void putUndoRows(SQLiteDatabase db,byte[] state)throws IOException{String[] tables=comparisonTables(db.getVersion());DataInputStream in=new DataInputStream(new ByteArrayInputStream(state));require(in.readInt()==0x4e444c31&&in.readInt()==db.getVersion()&&in.readInt()==tables.length,"撤销快照不属于当前结构");
+        for(int k=tables.length-1;k>=0;k--)db.delete(tables[k],null,null);
+        for(String table:tables){String[] columns;try(Cursor c=db.rawQuery(comparisonQuery(table)+" LIMIT 0",null)){columns=c.getColumnNames();}
+            require(readText(in).equals(table)&&in.readInt()==columns.length,"撤销表结构已变化");for(String col:columns)require(readText(in).equals(col)&&col.matches("[a-z_]+"),"撤销列结构已变化");
+            String[] bound=columns.clone();if(!table.equals("category_shortcuts"))bound[0]="rowid";String[] marks=new String[bound.length];Arrays.fill(marks,"?");String sql="INSERT INTO "+table+"(\""+String.join("\",\"",bound)+"\") VALUES("+String.join(",",marks)+")";
+            int n=in.readInt();require(n>=0&&n<=in.available()/bound.length,"撤销行数量无效");for(int j=0;j<n;j++){Object[] values=new Object[bound.length];for(int i=0;i<values.length;i++){int tag=in.readUnsignedByte();switch(tag){case Cursor.FIELD_TYPE_NULL:break;case Cursor.FIELD_TYPE_INTEGER:values[i]=in.readLong();break;case Cursor.FIELD_TYPE_STRING:values[i]=readText(in);break;case Cursor.FIELD_TYPE_BLOB:values[i]=readBlob(in);break;default:throw new IOException("不支持的撤销数据类型");}}db.execSQL(sql,values);}}
+        require(in.available()==0,"撤销快照多出内容");}
+    /** A successful confirmation owns one undo only after the original transaction commits. A failed forward attempt never manufactures one. */
+    public synchronized RestoreUndo confirmRestoreWithUndo(RestorePlan p,MediaRepository media)throws IOException{
+        if(p==null||p.owner!=this||p.session!=restoreSession||p.terminal)throw new IllegalStateException("恢复预览已失效");RestoreUndo next=new RestoreUndo(this,p,media);boolean ok=false;
+        try{confirmRestoreInternal(p,media,next);forgetRestoreUndo();activeRestoreUndo=next;ok=true;return next;}finally{if(!ok)next.close();}}
+    /** User-facing caller must explicitly review and confirm. An owned attempt is terminal, including stale/failed attempts. */
+    public synchronized void undoRestore(RestoreUndo t)throws IOException{
+        if(t==null||t.owner!=this)throw new IllegalArgumentException("撤销不属于本会话");if(t!=activeRestoreUndo||t.terminal||t.session!=restoreSession){t.close();throw new IllegalStateException("撤销已失效");}
+        try{SQLiteDatabase db=getWritableDatabase();require(t.before!=null&&t.after!=null&&db==t.connection&&db.isOpen()&&!db.inTransaction(),"不是同一数据库会话");db.beginTransaction();try{
+                require(restoreScalar(db,"SELECT total_changes()")==t.changes&&restoreScalar(db,"PRAGMA data_version")==t.generation&&Arrays.equals(t.after,noteDeletionState(db)),"恢复后数据已变，未撤销");
+                verifyUndoFiles(t.media,registeredMedia(db));verifyUndoFiles(t.media,t.priorFiles);putUndoRows(db,t.before);
+                try(Cursor c=db.rawQuery("PRAGMA foreign_key_check",null)){require(!c.moveToFirst(),"撤销关联检查失败");}
+                require(Arrays.equals(t.before,noteDeletionState(db))&&registeredMedia(db).equals(t.priorFiles),"撤销读回不一致");db.setTransactionSuccessful();
+            }finally{db.endTransaction();}}finally{t.close();}}
     private static Map<String,Long> summary(SQLiteDatabase db){
         Map<String,Long> counts=new LinkedHashMap<>();for(String table:SNAPSHOT_TABLES)try(Cursor c=db.rawQuery("SELECT count(*) FROM "+table,null)){c.moveToFirst();counts.put(table,c.getLong(0));}
         return Collections.unmodifiableMap(counts);
@@ -1866,11 +1909,21 @@ public final class AppDatabase extends SQLiteOpenHelper {
      * future user-facing restoration MUST use this guarded path instead.
      */
     public synchronized void confirmRestore(RestorePlan plan,MediaRepository media)throws IOException{
+        confirmRestoreInternal(plan,media,null);forgetRestoreUndo();
+    }
+    private void confirmRestoreInternal(RestorePlan plan,MediaRepository media,RestoreUndo undo)throws IOException{
         if(plan==null||plan.owner!=this)throw new IllegalArgumentException("恢复预览不属于当前数据库");
         if(plan.terminal||plan.session!=restoreSession)throw new IllegalStateException("恢复预览已取消、使用或失效，请重新预览");
         plan.terminal=true;
-        if(plan.shortcuts!=null){try{schema4.confirmRestore(plan.shortcuts,media);}finally{plan.shortcuts.close();}return;}
-        if(plan.upgraded!=null){try{schema3.confirmRestore(plan.upgraded,media);}finally{plan.upgraded.close();}return;}
+        // The token promises a completed commit. A nested Android transaction only votes
+        // on the caller's pending transaction, and must not return such a token.
+        if(undo!=null){try{
+            if(media==null)throw new IllegalArgumentException("缺少恢复媒体仓库");
+            if(getWritableDatabase().inTransaction())throw new IllegalStateException("请先结束当前事务，再重新预览恢复");
+        }catch(RuntimeException refused){try{plan.close();}catch(IOException cleanup){refused.addSuppressed(cleanup);}throw refused;}}
+        java.util.function.BiConsumer<SQLiteDatabase,Boolean> capture=(db,first)->{if(first)plan.releaseScratch();if(undo!=null)undo.capture(db,first);};
+        if(plan.shortcuts!=null){try{schema4.confirmRestoreCaptured(plan.shortcuts,media,capture);}finally{plan.shortcuts.close();}return;}
+        if(plan.upgraded!=null){try{schema3.confirmRestoreCaptured(plan.upgraded,media,capture);}finally{plan.upgraded.close();}return;}
         try(BackupArchive.Snapshot snapshot=plan.snapshot;SQLiteDatabase staged=candidate(plan.expected)){
             if(media==null)throw new IllegalArgumentException("媒体仓库不能为空");
             // Early read avoids unnecessary publication for already stale plans. It is
@@ -1882,7 +1935,7 @@ public final class AppDatabase extends SQLiteOpenHelper {
             }
             snapshot.close();
             for(Map.Entry<String,Long> item:registry.entrySet()){media.verify(item.getKey());if(Files.size(media.path(item.getKey()))!=item.getValue())throw new IOException("恢复媒体回读大小不一致");}
-            tx(db->{unchanged(db,plan);deleteRows(db);copyRows(staged,db);require(Arrays.equals(encodeState(db),plan.expected),"恢复事务回读不一致");return null;});
+            tx(db->{unchanged(db,plan);capture.accept(db,true);deleteRows(db);copyRows(staged,db);require(Arrays.equals(encodeState(db),plan.expected),"恢复事务回读不一致");capture.accept(db,false);return null;});
         }
     }
 }

@@ -368,7 +368,8 @@ public final class Schema3Store extends SQLiteOpenHelper {
      * blobs: NEVER blindly delete them, because another writer might reference them.
      * The final complete-state comparison and replacement share one write transaction.
      */
-    public synchronized void confirmRestore(RestorePlan plan,MediaRepository media)throws IOException{
+    public synchronized void confirmRestore(RestorePlan plan,MediaRepository media)throws IOException{confirmRestoreCaptured(plan,media,null);}
+    synchronized void confirmRestoreCaptured(RestorePlan plan,MediaRepository media,java.util.function.BiConsumer<SQLiteDatabase,Boolean> capture)throws IOException{
         if(plan==null||plan.owner!=this)throw new IllegalArgumentException("Restore belongs to a different helper");
         if(plan.terminal||plan.session!=restoreSession){
             plan.close();throw new IllegalStateException("Restore plan no longer active");
@@ -393,11 +394,11 @@ public final class Schema3Store extends SQLiteOpenHelper {
                 staged.close();
                 live.beginTransaction();
                 try{
-                    restoreUnchanged(live,plan);
+                    restoreUnchanged(live,plan);if(capture!=null)capture.accept(live,true);
                     replaceWireRows(live,plan.expected);
                     validate(live);
                     require(Arrays.equals(plan.expected,wireState(live,false)),"Restore transaction readback differs");
-                    snapshot(live);
+                    snapshot(live);if(capture!=null)capture.accept(live,false);
                     live.setTransactionSuccessful();
                 }finally{live.endTransaction();}
             }

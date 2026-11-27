@@ -17,6 +17,7 @@ public final class MainActivity extends Activity {
     // In-process instrumentation hook only: no intent, exported component, file flag
     // or persisted preference can enable this. It accepts no caller-selected path.
     static boolean isolatedShortcutTest;
+    static volatile boolean isolatedRestoreUndoTest; // fixed synthetic database only, no external entry
     static volatile boolean isolatedScheduleBookTest; // same-process instrumentation only, never read from Intent or preferences
     // Same-process instrumentation only. No intent, external path or preference can select this database.
     static volatile boolean isolatedActivitySearchTest;
@@ -35,7 +36,9 @@ public final class MainActivity extends Activity {
     private final Object sendOwner=new Object();
     private long sendEpoch;
     @Override protected void onPause(){synchronized(sendOwner){sendEpoch++;}super.onPause();}
-    @Override public void onCreate(Bundle saved){super.onCreate(saved);if(isolatedScheduleBookTest){
+    @Override public void onCreate(Bundle saved){super.onCreate(saved);if(isolatedRestoreUndoTest){
+        screen=new TodayScreen(this,AppDatabase.openSchema4(this,"restore-undo-ui-ci.db"));screen.show(null);
+    }else if(isolatedScheduleBookTest){
         screen=new TodayScreen(this,AppDatabase.openSchema3(this,"schedule-book-entry-ci.db"));screen.show(null);
     }else if(isolatedShortcutTest){
         screen=new TodayScreen(this,AppDatabase.openSchema4(this,"schema4-ui.db"));
@@ -641,11 +644,8 @@ public final class MainActivity extends Activity {
                 final TodayScreen owner=screen;
                 owner.runBackupExport(()->{writeVerifiedBackup(owner,uri);return true;});
             }else if(request==IMPORT_BACKUP){
-                Path chosen=Files.createTempFile(getCacheDir().toPath(),"chosen-",".zip");boolean success=false;
-                try(InputStream in=getContentResolver().openInputStream(uri)){
-                    if(in==null)throw new IOException("无法读取所选备份");
-                    Files.copy(in,chosen,StandardCopyOption.REPLACE_EXISTING);screen.previewRestore(chosen);success=true;
-                }finally{if(!success)Files.deleteIfExists(chosen);}
+                if(!"content".equals(uri.getScheme()))throw new IOException("无效的备份来源");
+                screen.previewRestore(()->getContentResolver().openInputStream(uri));
             }
         }catch(Exception e){screen.backupFailed(e);}
     }

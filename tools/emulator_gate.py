@@ -2482,6 +2482,11 @@ def verify_oriented_photo_device(adb):
     out=run_database_phase([adb,'-s',SERIAL,'shell','am','instrument','-w','-r','-e','phase','oriented_photo','-e','expectedApi',str(API),PKG+'.test/com.supercubegame.pockettodo.V12DeviceTest'],timeout=120,capture=True,phase='oriented-photo').stdout
     Path('device-oriented-photo.txt').write_text(out);print(out,flush=True);parse_receipt(out,API)
 
+def verify_ledger_changes_device(adb):
+    from verify_ledger_changes import parse
+    out=run_database_phase([adb,'-s',SERIAL,'shell','am','instrument','-w','-r','-e','phase','ledger_changes','-e','expectedApi',str(API),PKG+'.test/com.supercubegame.pockettodo.V12DeviceTest'],timeout=120,capture=True,phase='ledger-changes').stdout
+    Path('device-ledger-changes.txt').write_text(out);print(out,flush=True);parse(out,API)
+
 def verify_schedule_book_device(adb):
     from verify_schedule_book import stage,parse
     stage(adb,SERIAL,API,PKG)
@@ -2493,6 +2498,8 @@ def parser_selftest():
     book_host_selftest()
     from verify_activity_schedules import host_selftest as activity_schedule_host_selftest
     activity_schedule_host_selftest()
+    from verify_ledger_changes import host_selftest as ledger_changes_host_selftest
+    ledger_changes_host_selftest()
     from verify_oriented_photos import host_selftest as oriented_photo_host_selftest
     oriented_photo_host_selftest()
     activity_template_host_selftest()
@@ -2618,6 +2625,10 @@ def verify_database(adb):
     try:verify_schedule_book_device(adb)
     except Exception as exc:
         book_error=exc;print('SCHEDULE_BOOK_PHASE_NOT_ACCEPTED '+repr(exc),flush=True)
+    amend_error=None
+    try:verify_ledger_changes_device(adb)
+    except Exception as exc:
+        amend_error=exc;print('LEDGER_CHANGES_PHASE_NOT_ACCEPTED '+repr(exc),flush=True)
     legacy_public_fixture(adb)
     results = {}
     for phase in ('seed', 'reopen'):
@@ -2638,6 +2649,7 @@ def verify_database(adb):
     if photo_error is not None:raise photo_error
     if schedule_error is not None:raise schedule_error
     if book_error is not None:raise book_error
+    if amend_error is not None:raise amend_error
 
 def derivative_checker():
     """Compile and prove the actual pixel oracle before slow native UI work."""

@@ -1,6 +1,7 @@
 import java.lang.reflect.*;
 import java.time.*;
 import java.util.*;
+import com.supercubegame.pockettodo.ActivityModel;
 import com.supercubegame.pockettodo.Ledger;
 import com.supercubegame.pockettodo.CalendarRules;
 import com.supercubegame.pockettodo.NoteDocument;
@@ -156,6 +157,12 @@ public final class V12CoreTest {
         call(m,"archiveActivity",new Class<?>[]{long.class,boolean.class},100L,true);
         ok(((List<?>)call(m,"activeIds",new Class<?>[]{})).isEmpty() && number(call(m,"applicationOf",new Class<?>[]{long.class},100L))==10L,"archive hides activity without destroying relationships");
     }
+    static final class CategoryRulesProbe {
+ static int checks;static void eq(Object actual,Object want,String m){if(!Objects.equals(actual,want))throw new AssertionError(m+": "+actual+" != "+want);checks++;}interface Act{void run();}static void refuse(Act a,String m){try{a.run();}catch(IllegalStateException|IllegalArgumentException e){checks++;return;}throw new AssertionError(m);}
+ static ActivityModel data(){ActivityModel m=new ActivityModel();m.addCategory(7,"同名分类");m.addCategory(8,"同名分类");m.addApplication(10,"同名应用","p.fixture.a");m.addApplication(11,"同名应用","");m.addActivity(9,7,10,"同名活动");m.addActivity(20,7,10,"同名活动");m.addActivity(21,8,10,"同名活动");m.addActivity(22,8,11,"同名活动");m.addActivity(23,7,0,"无应用");m.setShortcut(7,10,true);m.setShortcut(8,10,true);m.setShortcut(8,11,true);m.archiveActivity(9,true);return m;}
+ static void run(){ActivityModel m=data(),foreign=data();List<ActivityModel.Item> before=m.snapshot();ActivityModel.CategoryReview p=m.reviewCategory(7,true);eq(p.impact.id,7L,"stable category");eq(p.impact.active,2L,"2 active, not three");eq(p.impact.individual,1L,"already archived");eq(p.impact.otherTargets,1L,"same app elsewhere");eq(p.impact.outgoing,1L,"shortcut entries");eq(p.impact.incomingTargets,1L,"other origins affected");eq(m.categoryIds(),Arrays.asList(7L,8L),"preview no write");p.close();refuse(()->m.confirmCategory(p),"cancel reused");ActivityModel.CategoryReview owned=m.reviewCategory(7,true);refuse(()->foreign.confirmCategory(owned),"foreign owner");eq(m.confirmCategory(owned),true,"confirmed");refuse(()->m.confirmCategory(owned),"double-used");eq(m.categoryIds(),Arrays.asList(8L),"only by category id");eq(m.categoryIds(true),Arrays.asList(7L,8L),"historical order");eq(m.activeIds(),Arrays.asList(21L,22L),"effective category filter");eq(m.visibleInSearch(20,false),false,"default search");eq(m.visibleInSearch(9,true),true,"explicit history");eq(m.shortcutTargets(7,10),Collections.emptyList(),"no hidden origin");eq(m.shortcutTargets(8,10),Arrays.asList(21L),"only eligible cross-category targets");eq(m.shortcutTargets(8,11),Arrays.asList(22L),"same-name other app");eq(m.canUseTemplate(20,8),false,"hidden source template");eq(m.canUseTemplate(21,7),false,"hidden template destination");refuse(()->m.addActivity(101,7,10,"不应新增"),"created in hidden category");eq(m.shortcuts(7),Collections.singleton(10L),"underlying links intact");eq(m.applications().size(),2,"no app archived");eq(m.snapshot(),before,"no child replacements");eq(m.confirmCategory(m.reviewCategory(7,true)),false,"idempotent fresh review");ActivityModel.CategoryReview stale=m.reviewCategory(7,false);m.renameActivity(21,"新标题");refuse(()->m.confirmCategory(stale),"stale review");eq(m.confirmCategory(m.reviewCategory(7,false)),true,"restore");eq(m.activeIds(),Arrays.asList(20L,21L,22L,23L),"must not revive child");eq(m.item(9).archived,true,"raw child flag intact");eq(m.shortcutTargets(8,10),Arrays.asList(20L,21L),"global targets return");eq(m.canUseTemplate(21,7),true,"active source and target");System.out.println("CATEGORY_RULES "+checks+" PASS actual Java in memory; no device or persistence");}
+}
+
     static void fields() throws Exception {
         Object f=make("CustomFields"); Class<?>[] def={String.class,String.class,String.class,List.class}; Class<?>[] put={long.class,String.class,List.class};
         call(f,"define",def,"invite","邀请人数","NUMBER",List.of());
@@ -415,7 +422,7 @@ public final class V12CoreTest {
         ok(corrupt.closes==1&&writes[0]==1,"refused and cancelled samples never reached the approved destination");
     }
     public static void main(String[] args) throws Exception {
-        ledger(); calendar(); notes(); safety(); categories(); fields(); imageRevisions(); imageEdits(); batchShares(); noteSummaries(); legacyAppendReview();
+        ledger(); calendar(); notes(); safety(); categories(); CategoryRulesProbe.run(); fields(); imageRevisions(); imageEdits(); batchShares(); noteSummaries(); legacyAppendReview();
         System.out.println("V12_CORE_RESULT "+checks+"/"+checks+" PASS; DOMAIN_ONLY; ANDROID_EXPORT_RESTORE_NOT_TESTED");
     }
 }

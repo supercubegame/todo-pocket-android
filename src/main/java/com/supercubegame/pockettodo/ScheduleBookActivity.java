@@ -1,0 +1,60 @@
+package com.supercubegame.pockettodo;
+
+import android.app.Activity;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Bundle;
+import android.graphics.Typeface;
+import android.content.res.ColorStateList;
+import android.view.*;
+import android.widget.*;
+import java.time.*;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.function.Consumer;
+
+/** Independent local planner. A chosen full backup is a new book, not a migration or a live reference. */
+public final class ScheduleBookActivity extends Activity {
+    private static final int PICK=61,SAVE=62; private static final ExecutorService IO=Executors.newSingleThreadExecutor();
+    private static final String[] DAYS={"周一","周二","周三","周四","周五","周六","周日"};
+    private ScheduleBookHome home;private ActivityScheduleStore book;private ScheduleBookHome.Incoming incoming;private ScheduleBookHome.Outgoing outgoing;private ActivityScheduleStore.Review review;
+    private ActivityScheduleStore.BookRow row;private LinearLayout body;private TextView status;private String page="loading";private long epoch;private volatile boolean gone;private boolean busy;private int picker;private boolean due=true;private Instant asOf;private long after;private final ArrayDeque<Long> previous=new ArrayDeque<>();
+    private boolean alive(){return !gone&&!isDestroyed()&&!isFinishing();}
+    private int dp(int x){return Math.round(getResources().getDisplayMetrics().density*x);}
+    private TextView text(String s,int size){TextView t=new TextView(this);t.setText(s);t.setTextColor(TodayScreen.INK);t.setTextSize(size);t.setPadding(0,dp(4),0,dp(4));return t;}
+    private void frame(String which,String heading,String hint){page=which;++epoch;LinearLayout root=new LinearLayout(this);root.setOrientation(1);root.setPadding(dp(16),dp(12),dp(16),dp(8));root.setBackgroundColor(TodayScreen.BG);root.setFocusableInTouchMode(true);setContentView(root);
+        TextView h=text(heading,24);h.setTypeface(Typeface.create("sans-serif-medium",0));root.addView(h);TextView scope=text("独立日程簿 · 不改原库",14);scope.setTextColor(TodayScreen.ACCENT);root.addView(scope);
+        status=text(hint,15);status.setTag("book-status");status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);root.addView(status);ScrollView scroll=new ScrollView(this);scroll.setTag("book-scroll");body=new LinearLayout(this);body.setOrientation(1);scroll.addView(body);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));root.requestFocus();}
+    private TextView label(String s,String tag){TextView v=text(s,16);v.setTag(tag);body.addView(v);return v;}
+    private Button action(String title,String tag,Runnable task){Button b=new Button(this);b.setText(title);b.setAllCaps(false);b.setMinHeight(dp(48));b.setTextColor(TodayScreen.INK);b.setBackgroundTintList(ColorStateList.valueOf(TodayScreen.TINT));b.setTag(tag);long e=epoch;b.setOnClickListener(v->{if(e==epoch&&alive()&&!busy&&picker==0&&b.isAttachedToWindow()&&b.isEnabled())task.run();});body.addView(b,new LinearLayout.LayoutParams(-1,-2));return b;}
+    private static void dispose(AutoCloseable r){if(r!=null)try{r.close();}catch(Exception ex){android.util.Log.w("PocketSchedule","Could not finish private cleanup");}}
+    private static void retire(AutoCloseable r){if(r!=null)IO.execute(()->dispose(r));}
+    private <T> void work(Callable<T> task,Consumer<T> success,Runnable fail){if(busy||!alive())return;busy=true;long e=epoch;IO.execute(()->{try{T v=task.call();runOnUiThread(()->{if(e!=epoch||!alive()){if(v instanceof AutoCloseable)retire((AutoCloseable)v);return;}busy=false;success.accept(v);});}catch(Exception ex){runOnUiThread(()->{if(e==epoch&&alive()){busy=false;fail.run();}});}});}
+    private void releaseReviews(){retire(review);review=null;retire(incoming);incoming=null;retire(outgoing);outgoing=null;}
+    @Override public void onCreate(Bundle saved){super.onCreate(saved);frame("loading","日程簿","正在读取本机日程簿…");final boolean recreated=saved!=null;work(()->{home=new ScheduleBookHome(this);return home.open();},s->{book=s;if(s==null)empty(recreated?"页面已重建，请重新选择备份。":"尚未建立日程簿。");else reset(true,recreated?"已重新打开上次保存的日程簿。":"");},this::unavailable);}
+    private void unavailable(){frame("error","日程簿未打开","原数据已保留，不会重建或替换已有日程簿。");action("关闭","book-close",this::finish);}
+    private void empty(String msg){frame("empty","建立日程簿",msg);label("先在「活动 → 备份 / 恢复」导出完整备份，也可选择以前保存的日程簿 ZIP。选中的文件只在本机校验；确认建立后，日程簿与原库不再同步。","book-intro");label("完整备份可能包含私密笔记、图片和账目。日程页只显示活动名称、分类和日期规则。","book-import-warning");action("选择完整备份","book-pick",()->choose(PICK));action("返回今天","book-close",this::finish);}
+    private void choose(int kind){Intent i=new Intent(kind==PICK?Intent.ACTION_OPEN_DOCUMENT:Intent.ACTION_CREATE_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/zip");if(kind==SAVE)i.putExtra(Intent.EXTRA_TITLE,"PocketTodo-schedule-book.zip");picker=kind;try{startActivityForResult(i,kind);}catch(RuntimeException no){picker=0;if(kind==PICK)empty("无法打开文件选择器，未创建日程簿。");else{releaseReviews();reset(false,"未写入文件，请重新导出。");}}}
+    @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request!=PICK&&request!=SAVE)return;if(!alive()||request!=picker)return;picker=0;Uri uri=data==null?null:data.getData();if(result!=RESULT_OK||uri==null||!"content".equals(uri.getScheme())){releaseReviews();if(request==PICK)empty("已取消，未创建日程簿。");else reset(false,"已取消，未写出备份。");return;}
+        if(request==PICK){frame("loading","校验所选备份","先检查备份和图片，再由你确认。");work(()->home.prepare(()->getContentResolver().openInputStream(uri)),p->{incoming=p;importReview();},()->empty("无法验证整份备份；原库未改，没有建立日程簿。"));}
+        else{ScheduleBookHome.Outgoing p=outgoing;outgoing=null;if(p==null){reset(false,"导出预览已失效，请重新选择。");return;}frame("loading","导出日程簿","正在写入并重新读取所选文件…");work(()->{try(ScheduleBookHome.Outgoing plan=p){plan.deliver(()->getContentResolver().openOutputStream(uri,"wt"),()->getContentResolver().openInputStream(uri));return true;}},ok->reset(false,"完整备份已保存，并已逐字节回读。"),()->reset(false,"未能验证目标文件，可能不完整。请保留本机日程簿并另选位置。"));}}
+    private static String counts(int[] c){return "活动 "+c[0]+" 项 · 已设日程 "+c[1]+" 项 · 媒体 "+c[2]+" 份";}
+    private CheckBox check(String s,String tag){CheckBox c=new CheckBox(this);c.setText(s);c.setTag(tag);c.setTextColor(TodayScreen.INK);c.setMinHeight(dp(48));body.addView(c);return c;}
+    private void importReview(){final ScheduleBookHome.Incoming p=incoming;frame("import","确认建立独立日程簿",counts(p.counts));label("会将这份备份里的内容复制到本机应用私有目录。不会替换使用中的数据，也不会自动打卡或记账。只有点击确认才会保留。","book-import-scope");CheckBox yes=check("我同意在本机保留这份完整副本","book-consent");action("确认建立","book-import-confirm",()->{if(!yes.isChecked()){status.setText("请先勾选；未创建日程簿。");return;}incoming=null;work(()->{try(ScheduleBookHome.Incoming plan=p){plan.confirm();}return home.open();},w->{book=w;reset(false,"独立日程簿已建立。");},this::unavailable);});action("取消，不保留副本","book-cancel",()->{releaseReviews();empty("已取消，未创建日程簿。");});}
+    private void reset(boolean onlyDue,String msg){due=onlyDue;previous.clear();after=0;asOf=Instant.now();list(msg);}
+    private void list(String msg){row=null;frame("list","日程簿",msg.isEmpty()?"正在读取活动…":msg);final ActivityScheduleStore w=book;work(()->w.page(after,due,asOf),p->{String name=due?"今日到期":"全部活动";status.setText((msg.isEmpty()?"":msg+"\n")+name+" · 第 "+(previous.size()+1)+" 页 · 本页 "+p.items.size()+" 项");action(due?"查看全部活动":"只看今日到期","book-filter",()->reset(!due,""));action("刷新今日日期","book-refresh",()->reset(due,""));if(p.items.isEmpty())label(due?"没有到期的计划。去「全部活动」为活动设置日程。":"此副本没有活动。","book-empty");
+        for(ActivityScheduleStore.BookRow it:p.items)action(it.identity()+"\n"+badge(it,asOf),"book-row-"+it.id,()->form(it));if(!previous.isEmpty())action("上一页","book-prev",()->{after=previous.pop();list("");});if(p.more)action("下一页","book-next",()->{previous.push(after);after=p.items.get(p.items.size()-1).id;list("");});action("导出整本备份","book-export",()->work(()->home.export(w),q->{outgoing=q;exportReview();},()->list("无法验证本机数据；没有写出备份。")));action("返回今天","book-close",this::finish);},this::unavailable);}
+    private static String days(int mask){if(mask==127)return "每天";if(mask==31)return "工作日（周一至周五）";List<String> s=new ArrayList<>();for(int i=0;i<7;i++)if((mask&(1<<i))!=0)s.add(DAYS[i]);return String.join("、",s);}
+    private static String describe(ActivitySchedule r){return r==null?"未设置":days(r.days)+" · "+r.zone.getId()+"\n"+r.first+" 至 "+(r.last==null?"不限":r.last.toString());}
+    private static String badge(ActivityScheduleStore.BookRow b,Instant at){if(b.archived)return "已归档 · 只读";if(b.rule==null)return "未设置日程";LocalDate d=b.rule.localDay(at);return (b.rule.last!=null&&d.isAfter(b.rule.last)?"已过期":b.rule.due(d)?"今日到期":"今日未到期")+" · "+days(b.rule.days)+" · "+b.rule.zone.getId();}
+    private EditText field(String title,String value,String tag){label(title,tag+"-label");EditText e=new EditText(this);e.setSingleLine(true);e.setContentDescription(title);e.setTag(tag);e.setText(value);e.setMinHeight(dp(48));body.addView(e);return e;}
+    private void form(ActivityScheduleStore.BookRow it){row=it;frame("form","活动日程",it.identity());label(badge(it,Instant.now())+"\n当前计划："+describe(it.rule),"book-current");if(it.archived){action("返回日程簿","book-back",()->list(""));return;}
+        final CheckBox[] week=new CheckBox[7];int mask=it.rule==null?127:it.rule.days;action("每天","book-daily",()->set(week,127));action("工作日（周一至周五）","book-weekdays",()->set(week,31));for(int j=0;j<7;j++){week[j]=check(DAYS[j],"book-day-"+(j+1));week[j].setChecked((mask&(1<<j))!=0);}String zone=it.rule==null?"Asia/Shanghai":it.rule.zone.getId();EditText first=field("开始日期（年-月-日）",it.rule==null?LocalDate.now(ZoneId.of(zone)).toString():it.rule.first.toString(),"book-first"),last=field("结束日期（可留空）",it.rule==null||it.rule.last==null?"":it.rule.last.toString(),"book-last"),tz=field("地区时区（如 Asia/Shanghai 或 UTC）",zone,"book-zone");
+        action("预览计划","book-preview",()->{int m=0;for(int i=0;i<7;i++)if(week[i].isChecked())m|=1<<i;String l=last.getText().toString().trim();try{ActivitySchedule rule=new ActivitySchedule(m,first.getText().toString().trim(),l.isEmpty()?null:l,tz.getText().toString().trim());prepare(it,rule);}catch(IllegalArgumentException bad){status.setText("请至少选一天，并检查日期范围和地区时区。计划尚未保存。");}});if(it.rule!=null)action("预览清除计划","book-clear",()->prepare(it,null));action("返回，不保存","book-back",()->list(""));}
+    private static void set(CheckBox[] cs,int mask){for(int i=0;i<7;i++)cs[i].setChecked((mask&(1<<i))!=0);}
+    private void prepare(ActivityScheduleStore.BookRow it,ActivitySchedule next){final ActivityScheduleStore w=book;work(()->w.reviewShown(it,next),p->{review=p;frame("review","确认活动日程",it.identity());label("原计划："+describe(p.previous)+"\n新计划："+describe(p.proposed),"book-change");label("只改这份日程簿的计划。不会打卡、记账、改笔记或修改原库。","book-rule-scope");action("确认保存","book-confirm",()->{review=null;work(()->{try(ActivityScheduleStore.Review x=p){return w.confirm(x);}},changed->list(changed?"计划已保存。":"计划没有变化。"),()->list("计划可能已变化；请重新读取和预览。"));});action("取消，不保存","book-cancel",()->{releaseReviews();list("已取消，未保存计划。");});},()->list("活动或计划已经变化，请重新选择。"));}
+    private void exportReview(){frame("export","导出整本日程簿",counts(outgoing.counts));label("这不是公开笔记分享。完整 ZIP 可能含私密笔记、原图、账目和活动历史。请只保存到你信任的位置。","book-export-warning");CheckBox yes=check("我了解完整备份包含私密内容","book-consent");action("选择保存位置","book-destination",()->{if(!yes.isChecked()){status.setText("请先勾选；未写出文件。");return;}choose(SAVE);});action("取消导出","book-cancel",()->{releaseReviews();list("已取消，未写出备份。");});}
+    @Override protected void onResume(){super.onResume();if(book!=null&&!busy&&picker==0&&"list".equals(page)&&alive())reset(due,"");}
+    @Override public void onBackPressed(){if(busy||picker!=0)return;if(page.equals("import")){releaseReviews();empty("已取消，未创建日程簿。");}else if(page.equals("form")||page.equals("review")||page.equals("export")){releaseReviews();list("已返回，未提交更改。");}else super.onBackPressed();}
+    @Override protected void onDestroy(){gone=true;epoch++;picker=0;releaseReviews();retire(book);book=null;super.onDestroy();}
+}

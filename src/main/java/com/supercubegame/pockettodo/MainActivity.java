@@ -17,6 +17,7 @@ public final class MainActivity extends Activity {
     // In-process instrumentation hook only: no intent, exported component, file flag
     // or persisted preference can enable this. It accepts no caller-selected path.
     static boolean isolatedShortcutTest;
+    static volatile boolean isolatedScheduleBookTest; // same-process instrumentation only, never read from Intent or preferences
     // Same-process instrumentation only. No intent, external path or preference can select this database.
     static volatile boolean isolatedActivitySearchTest;
     static volatile boolean isolatedActivityTemplateTest;
@@ -34,7 +35,9 @@ public final class MainActivity extends Activity {
     private final Object sendOwner=new Object();
     private long sendEpoch;
     @Override protected void onPause(){synchronized(sendOwner){sendEpoch++;}super.onPause();}
-    @Override public void onCreate(Bundle saved){super.onCreate(saved);if(isolatedShortcutTest){
+    @Override public void onCreate(Bundle saved){super.onCreate(saved);if(isolatedScheduleBookTest){
+        screen=new TodayScreen(this,AppDatabase.openSchema3(this,"schedule-book-entry-ci.db"));screen.show(null);
+    }else if(isolatedShortcutTest){
         screen=new TodayScreen(this,AppDatabase.openSchema4(this,"schema4-ui.db"));
         Bundle isolated=new Bundle();isolated.putInt("page",1);screen.show(isolated);
     }else if(isolatedActivitySearchTest){

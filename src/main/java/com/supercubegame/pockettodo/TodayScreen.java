@@ -265,7 +265,8 @@ public final class TodayScreen {
         final Object renderedTodoView=todoView;
         List<String> ids=new ArrayList<>();for(TodoRow item:todos)ids.add(item.id);
         final List<String> renderedOrder=java.util.Collections.unmodifiableList(ids);
-        TextView summary=text("还剩 "+remaining+" 件 / 共 "+todos.size()+" 件",20,INK);summary.setPadding(dp(14),dp(12),dp(14),dp(12));summary.setBackground(shape(TINT,16));body.addView(summary);
+        TextView summary=text("还剩 "+remaining+" 件 / 共 "+todos.size()+" 件",20,INK);summary.setPadding(dp(14),dp(12),dp(14),dp(12));summary.setBackground(shape(TINT,16));LinearLayout summaryRow=new LinearLayout(activity);summaryRow.setGravity(Gravity.CENTER_VERTICAL);summaryRow.addView(summary,new LinearLayout.LayoutParams(0,-2,1));
+        Button book=button("日程簿",()->{if(busy||!todoViewCurrent(renderedTodoView))return;rememberDraft();activity.startActivity(new Intent(activity,ScheduleBookActivity.class));});book.setTag("today-schedule-book");book.setContentDescription("打开独立日程簿");summaryRow.addView(book,new LinearLayout.LayoutParams(-2,-2));body.addView(summaryRow);
         LinearLayout tabs=new LinearLayout(activity);String[] labels={"全部","待办","已完成"};
         for(int i=0;i<labels.length;i++){final int choice=i;Button b=button(labels[i],()->{filter=choice;loadTodos();});if(i==filter){b.setBackgroundTintList(ColorStateList.valueOf(ACCENT));b.setTextColor(WHITE);}tabs.addView(b,new LinearLayout.LayoutParams(0,dp(48),1));}
         body.addView(tabs);

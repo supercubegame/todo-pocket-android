@@ -16,6 +16,7 @@ public final class ActivityScheduleStore implements AutoCloseable {
     static final String DDL="CREATE TABLE activity_schedules(activity_id INTEGER PRIMARY KEY REFERENCES activities(id) CHECK(activity_id>0),days INTEGER NOT NULL CHECK(days BETWEEN 1 AND 127),first_day TEXT NOT NULL,last_day TEXT,zone_id TEXT NOT NULL)";
     private final Path dir;private final SQLiteDatabase db;private final MediaRepository media;private boolean closed;
     private ActivityScheduleStore(Path dir,SQLiteDatabase db,MediaRepository media){this.dir=dir;this.db=db;this.media=media;}
+    boolean ownsDirectory(Path expected){return dir.equals(expected);}
     public String key(){return dir.getFileName().toString();}
     private static void need(boolean b,String m){if(!b)throw new IllegalStateException(m);}
     private static Path parent(Context c)throws IOException{
@@ -37,13 +38,30 @@ public final class ActivityScheduleStore implements AutoCloseable {
     private static byte[] snapshot(SQLiteDatabase d){layout(d);return ActivitySchedule.Wire.write(Schema4Store.scheduleProjection(d),rows(d));}
     public synchronized ActivitySchedule rule(long id){live();archived(db,id);try(Cursor c=db.rawQuery("SELECT days,first_day,last_day,zone_id FROM activity_schedules WHERE activity_id=?",new String[]{Long.toString(id)})){return c.moveToFirst()?row(c,0):null;}}
     public synchronized boolean dueAt(long id,Instant moment){live();Objects.requireNonNull(moment);try(Cursor c=db.rawQuery("SELECT a.archived,s.days,s.first_day,s.last_day,s.zone_id FROM activities a LEFT JOIN activity_schedules s ON s.activity_id=a.id WHERE a.id=?",new String[]{Long.toString(id)})){need(id>0&&c.moveToFirst(),"Missing schedule activity");return c.getInt(0)==0&&!c.isNull(1)&&row(c,1).dueAt(moment);}}
+    /** This list belongs only to this private copy. No note, field, mark or ledger content is queried. */
+    static final class BookRow {
+        final ActivityScheduleStore owner; final long id,category; final String title,categoryName; final boolean archived; final ActivitySchedule rule;
+        BookRow(ActivityScheduleStore s,Cursor c){owner=s;id=c.getLong(0);title=c.getString(1);category=c.getLong(2);categoryName=c.getString(3);archived=c.getInt(4)!=0;rule=c.isNull(5)?null:row(c,5);}
+        String identity(){return title+" · #"+id+"\n"+categoryName+" · 分类 #"+category;}
+        boolean same(BookRow r){return r!=null&&owner==r.owner&&id==r.id&&category==r.category&&title.equals(r.title)&&categoryName.equals(r.categoryName)&&archived==r.archived&&Objects.equals(rule,r.rule);}
+    }
+    static final class BookPage {final List<BookRow> items;final boolean more;BookPage(List<BookRow> r,boolean b){items=Collections.unmodifiableList(r);more=b;}}
+    private static final String BOOK_SELECT="SELECT a.id,a.title,c.id,c.name,a.archived,s.days,s.first_day,s.last_day,s.zone_id FROM activities a JOIN categories c ON c.id=a.category_id LEFT JOIN activity_schedules s ON s.activity_id=a.id ";
+    synchronized BookPage page(long after,boolean today,Instant at){live();need(after>=0&&at!=null,"Invalid book page");List<BookRow> rows=new ArrayList<>();
+        try(Cursor c=db.rawQuery(BOOK_SELECT+"WHERE a.id>? "+(today?"AND a.archived=0 AND s.activity_id IS NOT NULL ":"")+"ORDER BY a.id"+(today?"":" LIMIT 25"),new String[]{Long.toString(after)})){
+            while(c.moveToNext()){BookRow r=new BookRow(this,c);if(today&&(r.rule==null||!r.rule.dueAt(at)))continue;if(rows.size()==24)return new BookPage(rows,true);rows.add(r);}return new BookPage(rows,false);}}
+    synchronized Review reviewShown(BookRow shown,ActivitySchedule proposed){need(shown!=null&&shown.owner==this,"Foreign displayed row");return reviewChecked(shown.id,shown,proposed);}
+    synchronized int[] bookCounts(){live();int[] out=new int[3];try(Cursor c=db.rawQuery("SELECT (SELECT count(*) FROM activities),(SELECT count(*) FROM activity_schedules),(SELECT count(*) FROM media)",null)){need(c.moveToFirst(),"Missing counts");for(int i=0;i<3;i++)out[i]=c.getInt(i);}return out;}
+    synchronized byte[] verifiedBookState()throws IOException{byte[] b=state();SortedMap<String,Long> assets=mediaRows(db);for(Map.Entry<String,Long> e:assets.entrySet()){media.verify(e.getKey());need(Files.size(media.path(e.getKey()))==e.getValue(),"Media length changed");}return b;}
     public static final class Review implements AutoCloseable{
         private final ActivityScheduleStore owner;public final long activity;public final ActivitySchedule previous,proposed;private byte[] before;
         private Review(ActivityScheduleStore o,long id,ActivitySchedule old,ActivitySchedule next,byte[] state){owner=o;activity=id;previous=old;proposed=next;before=state;}
         @Override public void close(){synchronized(owner){before=null;}}
     }
     /** null means explicitly review clearing the rule. It does not remove check-ins or ledger. */
-    public synchronized Review review(long id,ActivitySchedule proposed){live();outside(db);db.beginTransaction();try{
+    public synchronized Review review(long id,ActivitySchedule proposed){return reviewChecked(id,null,proposed);}
+    private Review reviewChecked(long id,BookRow shown,ActivitySchedule proposed){live();outside(db);db.beginTransaction();try{
+        if(shown!=null){try(Cursor c=db.rawQuery(BOOK_SELECT+"WHERE a.id=?",new String[]{Long.toString(id)})){need(c.moveToFirst()&&shown.same(new BookRow(this,c)),"Displayed activity or schedule changed");}}
         need(!archived(db,id),"Archived activity is read only");Review p=new Review(this,id,rule(id),proposed,snapshot(db));db.setTransactionSuccessful();return p;
     }finally{db.endTransaction();}}
     public synchronized boolean confirm(Review p){need(p!=null&&p.owner==this,"Foreign schedule review");byte[] expected=p.before;need(expected!=null,"Schedule review expired");p.before=null;live();outside(db);db.beginTransaction();try{
@@ -66,7 +84,9 @@ public final class ActivityScheduleStore implements AutoCloseable {
     /** The caller must explicitly choose a full archive. Always materializes a fresh, private workspace;
      * neither a filename from the ZIP nor a live application database can be chosen as destination. */
     public static ActivityScheduleStore importCopy(Context ctx,Path archive,long budget)throws IOException{
-        Path parent=parent(ctx);Path dir=Files.createDirectory(parent.resolve("sched-"+UUID.randomUUID()));SQLiteDatabase dest=null;boolean success=false;
+        return importFresh(parent(ctx).resolve("sched-"+UUID.randomUUID()),archive,budget);}
+    static ActivityScheduleStore importFresh(Path vacant,Path archive,long budget)throws IOException{
+        Path dir=Files.createDirectory(vacant);SQLiteDatabase dest=null;boolean success=false;
         try{Path stages=Files.createDirectory(dir.resolve("staging"));MediaRepository media=new MediaRepository(dir.resolve("media"),budget);
             try(BackupArchive.Snapshot archiveCopy=BackupArchive.read(archive,stages,budget)){
                 byte[] input=archiveCopy.state();need(input.length>=12&&ByteBuffer.wrap(input).getInt()==ActivitySchedule.Wire.MAGIC,"Invalid archive state");
@@ -86,7 +106,8 @@ public final class ActivityScheduleStore implements AutoCloseable {
         }finally{if(!success){try{if(dest!=null)dest.close();}finally{BackupArchive.deleteTree(dir);}}}
     }
     public static ActivityScheduleStore reopen(Context ctx,String key,long budget)throws IOException{
-        need(key!=null&&key.matches("sched-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"),"Unknown schedule workspace key");Path dir=parent(ctx).resolve(key),f=dir.resolve("data.db"),m=dir.resolve("media");
+        need(key!=null&&key.matches("sched-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"),"Unknown schedule workspace key");return openOwned(parent(ctx).resolve(key),budget);}
+    static ActivityScheduleStore openOwned(Path dir,long budget)throws IOException{Path f=dir.resolve("data.db"),m=dir.resolve("media");
         need(Files.isDirectory(dir,LinkOption.NOFOLLOW_LINKS)&&Files.isRegularFile(f,LinkOption.NOFOLLOW_LINKS)&&Files.size(f)>0&&Files.isDirectory(m,LinkOption.NOFOLLOW_LINKS),"Existing schedule workspace required");
         SQLiteDatabase d=SQLiteDatabase.openDatabase(f.toString(),null,SQLiteDatabase.OPEN_READWRITE);boolean ok=false;try{d.setForeignKeyConstraintsEnabled(true);ActivityScheduleStore store=new ActivityScheduleStore(dir,d,new MediaRepository(m,budget));store.state();ok=true;return store;}finally{if(!ok)d.close();}}
     @Override public synchronized void close(){if(!closed){closed=true;db.close();}}

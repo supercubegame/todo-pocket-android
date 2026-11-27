@@ -2957,6 +2957,8 @@ def broken26_host():
 
 
 def parser_selftest():
+    from verify_draft_font import full_evidence_controls
+    full_evidence_controls()
     broken26_host()
     category_impact_parser_selftest()
     restore_and_bound_pixel_selftest()
@@ -4227,6 +4229,20 @@ public class ImageImportFixture {
     (out/'native-result.json').write_text(json.dumps(result,ensure_ascii=False,indent=2))
     print('NATIVE_UI_RESULT '+json.dumps(result,ensure_ascii=False),flush=True)
 
+from contextlib import contextmanager
+# Opt-in function set only by verify_schema3.android(), not by the standalone draft or export runners.
+end_device_check=None
+@contextmanager
+def run_endcheck(adb,callback):
+    try:yield
+    except Exception:
+        if callback is not None:
+            try:callback(adb)
+            except Exception as secondary:print('SEPARATE_DRAFT_FONT_FAILURE '+type(secondary).__name__,flush=True)
+        raise # Preserve the earlier full-suite exception and its original traceback.
+    else:
+        if callback is not None:callback(adb) # A failed font check alone must also fail the job.
+
 def main():
     assert os.environ.get('GITHUB_ACTIONS') == 'true', 'disposable GitHub runner only'
     parser_selftest()
@@ -4284,8 +4300,9 @@ def main():
         else:
             raise TimeoutError('emulator boot deadline exceeded: ' + last + '; see emulator.log')
         assert run([adb, '-s', SERIAL, 'shell', 'getprop', 'ro.kernel.qemu'], capture=True).stdout.strip() == '1'
-        verify_database(adb)
-        verify_native_ui(adb)
+        with run_endcheck(adb,end_device_check):
+            verify_database(adb)
+            verify_native_ui(adb)
     finally:
         if proc.poll() is None:
             proc.terminate()

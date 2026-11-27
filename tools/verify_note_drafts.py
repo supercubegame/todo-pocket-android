@@ -535,21 +535,21 @@ public class DraftUiContract {
   void addView(Object x){children.add(x);}
   void addView(Object x,int at){children.add(at,x);}
   final Map<Object,LayoutParams> sizes=new IdentityHashMap<>(); void addView(Object x,LayoutParams p){children.add(x);sizes.put(x,p);}
-  static final class LayoutParams{static final int WRAP_CONTENT=-2; final int w,h; LayoutParams(int w,int h){this.w=w;this.h=h;}}
+  static final class LayoutParams{static final int MATCH_PARENT=-1,WRAP_CONTENT=-2; final int w,h; LayoutParams(int w,int h){this.w=w;this.h=h;}}
  }
  static final class ScrollView {
   Object child; ScrollView(Object activity){}
   void addView(Object x){child=x;}
  }
  static final class Window {
-  int softInputMode;
+  int softInputMode,w=0,h=0; void setLayout(int a,int b){w=a;h=b;}
   void setSoftInputMode(int x){softInputMode=x;}
  }
  static final class AlertDialog {
   static final int BUTTON_POSITIVE=-1,BUTTON_NEGATIVE=-2;
   static AlertDialog last;
   final Button positive=new Button(),negative=new Button();
-  final Window window=new Window();
+  final Window window=new Window(); int theme;
   Object view; String title,message; boolean showing,cancelable=true;
   Consumer<AlertDialog> shown,dismissed;
   interface Confirm{void accept(AlertDialog d,int which);}
@@ -563,7 +563,7 @@ public class DraftUiContract {
   void dismiss(){if(showing){showing=false;if(dismissed!=null)dismissed.accept(this);}}
   void back(){if(cancelable)dismiss();}
   static final class Builder {
-   final AlertDialog d=new AlertDialog(); Builder(Object activity){}
+   final AlertDialog d=new AlertDialog(); Builder(Object activity){} Builder(Object activity,int theme){d.theme=theme;}
    Builder setTitle(String x){d.title=x;return this;}
    Builder setMessage(String x){d.message=x;return this;}
    Builder setView(Object x){d.view=x;return this;}
@@ -579,7 +579,7 @@ public class DraftUiContract {
  }
  static final class TodayScreen {
   static final int MUTED=1,ERROR=2;
-  final Object activity=new Object();
+  static int themeForFixture=21; int draftEditorTheme(){return themeForFixture;} final Object activity=new Object();
   boolean defer,fail; Runnable pending; String notice; int loads;
   LinearLayout column(){return new LinearLayout();}
   int dp(int x){return x;}
@@ -630,7 +630,12 @@ public class DraftUiContract {
   boolean untouched(){return s.saves==0&&s.recovers==0&&s.discards==0&&s.commits==0;}
  }
  public static void main(String[] args){
-  Fixture f=new Fixture(null);
+  TodayScreen.themeForFixture=0; Fixture roomy=new Fixture(null);
+  if(roomy.d.theme!=0||roomy.d.window.w!=0||roomy.d.window.h!=0)throw new AssertionError("wide regular editor unexpectedly took over the screen");
+  TodayScreen.themeForFixture=21;Fixture f=new Fixture(null);
+  if(f.d.theme!=21||f.d.window.w!=-1||f.d.window.h!=-1)throw new AssertionError("small or large-font editor must use available window");
+  if(f.body.children.indexOf(f.find("note-draft-help"))<=f.body.children.indexOf(f.discard))throw new AssertionError("guidance must remain after reachable actions");
+  System.out.println("DRAFT_SURFACE explicit compact and regular window plus accessible help order");
   for(Button action:new Button[]{f.save,f.recover,f.discard}){LinearLayout.LayoutParams p=f.body.sizes.get(action);
    if(p==null||p.w!=-1||p.h!=LinearLayout.LayoutParams.WRAP_CONTENT)throw new AssertionError("draft actions wrap content");}
   System.out.println("DRAFT_ACTIONS_WRAP all 3 actual callbacks; host layout policy only");
@@ -729,6 +734,8 @@ def ui_model_selftest():
         assert run.returncode == 0 and labels == UI_LABELS, (run.stdout, run.stderr)
         assert run.stdout.splitlines()[-1] == "DRAFT_UI_RESULT 26 PASS"
         mutations = (
+            ("if(editorTheme!=0)dialog.getWindow().setLayout", "if(editorTheme==0)dialog.getWindow().setLayout", "wide regular editor unexpectedly took over the screen"),
+            ("body.addView(hint);", "body.addView(hint,0);", "guidance must remain after reachable actions"),
             ("body.addView(validation,0);", "body.addView(validation);", "feedback_before_input"),
             ("android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE", "0", "resize_window"),
             ("if(value.trim().isEmpty())", "if(false)", "blank_body_stays_open"),

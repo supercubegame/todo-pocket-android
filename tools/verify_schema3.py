@@ -1121,6 +1121,9 @@ def android():
     print("SCHEMA3_OBSERVER_SELFTEST " + json.dumps(selftest()), flush=True)
     import emulator_gate as gate
     import verify_exports
+    from verify_draft_font import bind_full_endcheck
+    assert gate.end_device_check is None,'unexpected previous full-job endcheck'
+    gate.end_device_check=bind_full_endcheck(gate,gate.ROOT)
     original = gate.verify_database
     def database_and_schema3(adb):
         original(adb)
@@ -1137,6 +1140,7 @@ def android():
     finally:
         gate.verify_native_ui = native
         gate.verify_database = original
+        gate.end_device_check = None
 
 # Independent of the device emitter: deleting its labels cannot shrink this
 # required contract. These receipts cover synthetic exports, not full delivery.

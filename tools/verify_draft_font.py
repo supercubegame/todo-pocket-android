@@ -60,7 +60,100 @@ def device(adb,serial,pkg,api,out):
         with (out/n).open('x',encoding='utf-8') as f:f.write(t)
     return matrix(shell,invoke,save,serial,pkg,api,os.environ)
 
+def check_font_files(folder,expected,api,src,rid,att):
+    """Read only these four synthetic source-bound files; never trust the matrix's PASS alone."""
+    raw=folder/'font-matrix.json';j=json.loads(raw.read_bytes());need(j.get('api')==api and j.get('source')==src and j.get('run_id')==rid and j.get('attempt')==att and j.get('status')=='PASS' and j.get('restored')=={'font_scale':True,'show_ime_with_hard_keyboard':True} and all(v is True for v in j['restored'].values()),'missing source-bound completed matrix and restored settings'); rows=j['raw_series'];need(len(rows)==3,'incomplete font series');labels=[]
+    for row,(pct,_) in zip(rows,SCALES,strict=True):
+        nonce=rid+'-'+att+'-'+str(api)+'-'+str(pct);data=(folder/f'font-{pct}.txt').read_bytes();need((row['source'],row['run_id'],row['attempt'],row['api'],row['pct'],row['nonce'],row['status'])==(src,rid,att,api,pct,nonce,'PASS') and row['raw_sha256']==hashlib.sha256(data).hexdigest(),'wrong individual run or output');parsed=parse(data.decode(),api,pct,nonce);need(parsed['cases']==row['cases'] and parsed['geometry']==row['geometry'],'raw and summarized geometry disagree');labels.append(pct)
+    need(labels==[100,130,200] and set(expected)=={PKG,PKG+'.test'},'wrong package/scale set');return labels
+
+def bind_full_endcheck(gate,root):
+    """Capture both built APKs before alternate runners can replace either. Only the full Android database job calls this."""
+    from verify_schema3 import registration
+    from verify_todo_management import installed_readback
+    env=os.environ;src,rid,att=env['GITHUB_SHA'],env['GITHUB_RUN_ID'],env['GITHUB_RUN_ATTEMPT'];owner='supercubegame/todo-pocket-android';wf=env.get('GITHUB_WORKFLOW_REF','')
+    need(env.get('GITHUB_ACTIONS')=='true' and env.get('GITHUB_REPOSITORY')==owner and env.get('GITHUB_JOB')=='database' and wf.startswith(owner+'/.github/workflows/android.yml@refs/heads/') and re.fullmatch('[0-9a-f]{40}',src) and rid.isdigit() and att.isdigit() and gate.API in (26,34) and gate.SERIAL=='emulator-5554' and gate.PKG==PKG,'not the full owned Android verification job')
+    root=Path(root);expected={}
+    for name,sub in [(PKG,'debug'),(PKG+'.test','androidTest/debug')]:
+        files=list((root/'build/outputs/apk'/sub).glob('*.apk'));need(len(files)==1,'missing unique built APK');expected[name]=files[0].read_bytes();need(bool(expected[name]),'empty built APK')
+    once=[]
+    def finish(adb):
+        need(not once,'duplicate endcheck');once.append(True);folder=root/'build/ci-end-draft-font';folder.mkdir(parents=True,exist_ok=False);prefix=[str(adb),'-s',gate.SERIAL];record={'scope':'DISPOSABLE_FULL_JOB_FONT_ENDCHECK','source':src,'run_id':rid,'attempt':att,'api':gate.API,'expected_sha256':{k:hashlib.sha256(v).hexdigest() for k,v in expected.items()},'apk_readbacks':{},'status':'NOT_ACCEPTED','release_ready':False,'test_started':False}
+        def command(argv,timeout=30):return subprocess.check_output(argv,timeout=timeout,stdin=subprocess.DEVNULL,text=True)
+        try:
+            regs=command(prefix+['shell','pm','list','instrumentation']);need(registration(regs,'V12DeviceTest')['status']=='PASS','final runner not restored: no font setting changed')
+            for name,original in expected.items():
+                rec=[];record['apk_readbacks'][name]=rec;need(installed_readback(command,prefix,name,original,rec)==original,'installed APK identity mismatch: no settings changed')
+            record['test_started']=True;device(adb,gate.SERIAL,PKG,gate.API,folder);record['accepted_scales']=check_font_files(folder,expected,gate.API,src,rid,att);record['status']='PASS'
+        except Exception as exc:
+            record['error_class']=type(exc).__name__;raise
+        finally:
+            # Existing always-upload glob device-*.txt picks up even a partial failed matrix. No settings, permission, signer or workflow changes outside the disposable AVD.
+            for leaf in ('font-100.txt','font-130.txt','font-200.txt','font-matrix.json'):
+                p=folder/leaf
+                if p.is_file():
+                    with (root/('device-draft-'+p.stem+'.txt')).open('xb') as out:out.write(p.read_bytes())
+            with (root/'device-draft-font-binding.txt').open('x') as w:w.write(json.dumps(record,indent=2)+'\n')
+            print('DRAFT_FONT_ENDCHECK '+str(record['status'])+' api='+str(gate.API),flush=True)
+    return finish
+
+def full_evidence_controls():
+    import tempfile,copy,ast
+    import emulator_gate as gates
+    old=AssertionError('primary');secondary=ValueError('secondary');matrix={}
+    for original in (True,False):
+        for final in (True,False):
+            actions=[]
+            def done(adb):
+                actions.append(adb)
+                if not final:raise secondary
+            error=None
+            try:
+                with gates.run_endcheck('sample',done):
+                    actions.append('body')
+                    if not original:raise old
+            except Exception as exc:error=exc
+            assert actions==['body','sample'] and error is (old if not original else None if final else secondary);matrix[original,final]=True
+    # Shared Android source, not a second build. Nothing in a specialized workflow registers this hook.
+    root=Path(__file__).resolve().parents[1]; tree=ast.parse((root/'tools/verify_schema3.py').read_text());runner=next(n for n in tree.body if getattr(n,'name','')=='android');st=ast.unparse(runner);assert st.count('gate.end_device_check = bind_full_endcheck(gate, gate.ROOT)')==1 and st.count('gate.end_device_check = None')==1 and st.index('bind_full_endcheck(gate, gate.ROOT)')<st.index('verify_exports.android_main()') and 'finally:' in st
+    y=(root/'.github/workflows/android.yml').read_text();beg=y.index('\n  database:\n');end=y.index('\n  upgrade_baseline:\n',beg);block=y[beg:end];assert block.count('python3 tools/verify_schema3.py android')==1 and '            device-*.txt\n' in block
+    for p in ('verify_note_drafts.py','verify_paged_exports.py'):
+        assert 'gate.end_device_check = bind_full_endcheck' not in (root/'tools'/p).read_text()
+    # Independent shape, not accepting self-reported matrix status if bytes or scope differ.
+    env=dict(src='f'*40,rid='567',att='1');apks={PKG:b'app',PKG+'.test':b'test'};count=0
+    with tempfile.TemporaryDirectory() as td:
+        folder=Path(td)
+        for api in (26,34):
+            rawfiles={};rows=[]
+            for p,_ in SCALES:
+                n=f'567-1-{api}-{p}';lines=[f'FONT_SCOPE api={api} pct={p} nonce={n} settings={p/100} applied={p/100} package={PKG} hardware=ranchu'];lines+=['FONT_CASE '+v+' PASS' if v in CASES else 'FONT_GEOMETRY '+v+' enabled=true rect=8,100,300,160 ime=0,331,320,640 min=48 lines=1 chars='+str(3 if v.endswith('save') else 4)+' scrolls=1' for v in ORDER];t='\n'.join(lines+['DEVICE_DATABASE_RESULT draft_font_ui 2/2 PASS','INSTRUMENTATION_CODE: -1']);rawfiles[p]=t.encode();s=parse(t,api,p,n);rows.append(dict(source=env['src'],run_id='567',attempt='1',status='PASS',raw_sha256=hashlib.sha256(t.encode()).hexdigest(),**s))
+            base=dict(api=api,source=env['src'],run_id='567',attempt='1',status='PASS',restored={'font_scale':True,'show_ime_with_hard_keyboard':True},raw_series=rows)
+            for fault in ('none','missing_raw','wrong_hash','wrong_source','wrong_order','partial','fake_pos','foreign_attempt','not_restored','fake_bool','omitted_case','missing_terminal','wrong_apks'):
+                j=copy.deepcopy(base);b=dict(rawfiles);e=apks
+                if fault=='missing_raw':del b[130]
+                if fault=='wrong_hash':j['raw_series'][2]['raw_sha256']='a'*64
+                if fault=='wrong_source':j['source']='c'*40
+                if fault=='wrong_order':j['raw_series'].reverse()
+                if fault=='partial':j['raw_series'].pop()
+                if fault=='fake_pos':j['raw_series'][1]['geometry'][0]['button'][0]+=1
+                if fault=='foreign_attempt':j['raw_series'][1]['attempt']='2'
+                if fault=='not_restored':j['restored']['font_scale']=False
+                if fault=='fake_bool':j['restored']['font_scale']=1
+                if fault=='omitted_case':j['raw_series'][1]['cases'].pop()
+                if fault=='missing_terminal':b[130]=b[130].replace(b'CODE: -1',b'CODE: 0');j['raw_series'][1]['raw_sha256']=hashlib.sha256(b[130]).hexdigest()
+                if fault=='wrong_apks':e={PKG:b'app'}
+                for p in rawfiles:
+                    f=folder/f'font-{p}.txt'
+                    if p in b:f.write_bytes(b[p])
+                    elif f.exists():f.unlink()
+                (folder/'font-matrix.json').write_text(json.dumps(j))
+                try:got=check_font_files(folder,e,api,**env)
+                except (AssertionError,FileNotFoundError):assert fault!='none';count+=1
+                else:assert fault=='none' and got==[100,130,200]
+    assert count==24 and len(matrix)==4;print('FULL_FONT_HOST 2 bound matrices + 24 refusals; 4 independent result combinations; no second build or font dispatch, NOT Android')
+
 def host():
+    full_evidence_controls()
     import copy
     env={'GITHUB_ACTIONS':'true','GITHUB_RUN_ID':'701','GITHUB_RUN_ATTEMPT':'1','GITHUB_SHA':'0'*40}
     def fixture(a,p,n):

@@ -1,0 +1,98 @@
+{
+  "commit": "5c1d4988ec8355cad2cfc699d4a994afea1451b4",
+  "run_id": "45960904970",
+  "status": "NOT_VERIFIED",
+  "scope": "PARALLEL_EXPORT_BACKEND_PREVIEW_AND_SYNTHETIC_NATIVE_MULTIPAGE_NOT_FULL_REGRESSION",
+  "devices": {
+    "26": {
+      "status": "FAIL",
+      "commit": "5c1d4988ec8355cad2cfc699d4a994afea1451b4",
+      "run_id": "45960904970",
+      "api": 26,
+      "scope": "PARALLEL_EXPORT_BACKEND_PREVIEW_AND_SYNTHETIC_NATIVE_MULTIPAGE_NOT_FULL_REGRESSION",
+      "release_ready": false,
+      "durable_upgrade_ready": false,
+      "preflight": {
+        "phase": "CODEC_AND_PREVIEW",
+        "apps": [
+          "build/outputs/apk/debug/todo-pocket-android-debug.apk"
+        ],
+        "tests": [
+          "build/outputs/apk/androidTest/debug/todo-pocket-android-debug-androidTest.apk"
+        ],
+        "app_certificate": "18662df677af956e8c2968f298cbf6c4e4b09ea881943c3d9bd53d09aba9c7da",
+        "test_certificate": "18662df677af956e8c2968f298cbf6c4e4b09ea881943c3d9bd53d09aba9c7da",
+        "badging": "package: name='com.supercubegame.pockettodo.v12.preview' versionCode='3' versionName='1.2' platformBuildVersionName='15' platformBuildVersionCode='35' compileSdkVersion='35' compileSdkVersionCodename='15'\nsdkVersion:'26'\ntargetSdkVersion:'34'\napplication-label:'口袋待办·预览'\napplication-icon-160:'res/drawable/ic_launcher.xml'\napplication: label='口袋待办·预览' icon='res/drawable/ic_launcher.xml'\napplication-debuggable\nlaunchable-activity: name='com.supercubegame.pockettodo.MainActivity'  label='' icon=''\nfeature-group: label=''\n  uses-feature: name='android.hardware.faketouch'\n  uses-implied-feature: name='android.hardware.faketouch' reason='default feature for all apps'\nmain\nother-activities\nsupports-screens: 'small' 'normal' 'large' 'xlarge'\nsupports-any-density: 'true'\nlocales: '--_--'\ndensities: '160'\n",
+        "apk": "build/outputs/apk/androidTest/debug/todo-pocket-android-debug-androidTest.apk",
+        "installed_path": "package:/data/app/com.supercubegame.pockettodo.v12.preview--v26AEdKWt0AAFqkLK45Ug==/base.apk",
+        "installed_transfer": {
+          "status": "PASS",
+          "method": "ADB_PULL_SINGLE_PRIMARY_EXACT_BYTES",
+          "attempts": 1,
+          "budget_seconds": 30,
+          "expected_bytes": 9526485,
+          "expected_sha256": "6436308720102006db15938da91c13d9af465a382e9794c9c55eca43603c58e3",
+          "command": [
+            "/usr/local/lib/android/sdk/platform-tools/adb",
+            "-s",
+            "emulator-5554",
+            "pull",
+            "-Z",
+            "/data/app/com.supercubegame.pockettodo.v12.preview--v26AEdKWt0AAFqkLK45Ug==/base.apk",
+            "/tmp/installed-apk-pull-w479g2rc/base.apk"
+          ],
+          "stdin": "DEVNULL",
+          "timeout_seconds": 29.993752373999996,
+          "returncode": 0,
+          "stdout_tail": "",
+          "stderr_tail": "/data/app/com.supercubegame.pockettodo.v12.preview--v26AEdKWt0AAFqkLK45Ug==/base.apk: 1 file pulled, 0 skipped. 207.7 MB/s (9526485 bytes in 0.044s)\n",
+          "actual_bytes": 9526485,
+          "file_bytes": 9526485,
+          "actual_sha256": "6436308720102006db15938da91c13d9af465a382e9794c9c55eca43603c58e3",
+          "read_limited": false,
+          "elapsed_seconds": 0.07516522500000633
+        },
+        "actual_bytes": 9526485,
+        "expected_bytes": 9526485,
+        "actual_sha256": "6436308720102006db15938da91c13d9af465a382e9794c9c55eca43603c58e3",
+        "expected_sha256": "6436308720102006db15938da91c13d9af465a382e9794c9c55eca43603c58e3"
+      },
+      "error": "RuntimeError(\"Paged command failed: ['/usr/local/lib/android/sdk/platform-tools/adb', '-s', 'emulator-5554', 'shell', 'run-as', 'com.supercubegame.pockettodo.v12.preview', 'mv', 'cache/paged-contract-45960904970/ack-1111f509eb54cfd93d8373f432d10c2d.part', 'cache/paged-contract-45960904970/ack-1111f509eb54cfd93d8373f432d10c2d']\\n\")",
+      "original_failure": {
+        "type": "RuntimeError",
+        "message": "Paged command failed: ['/usr/local/lib/android/sdk/platform-tools/adb', '-s', 'emulator-5554', 'shell', 'run-as', 'com.supercubegame.pockettodo.v12.preview', 'mv', 'cache/paged-contract-45960904970/ack-1111f509eb54cfd93d8373f432d10c2d.part', 'cache/paged-contract-45960904970/ack-1111f509eb54cfd93d8373f432d10c2d']\n",
+        "command": null,
+        "returncode": null,
+        "stdout": {
+          "captured": false,
+          "tail": null,
+          "truncated": false
+        },
+        "stderr": {
+          "captured": false,
+          "tail": null,
+          "truncated": false
+        }
+      },
+      "traceback": "Traceback (most recent call last):\n  File \"<stdin>\", line 81, in <module>\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/emulator_gate.py\", line 4042, in main\n    verify_database(adb)\n  File \"<stdin>\", line 47, in install_and_probe\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_exports.py\", line 657, in android_codec\n    paged_report=verify_paged(folder,classes,android,prefix,remote,gate)\n                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_paged_exports.py\", line 1851, in verify\n    labels,identity=instrumentation(folder,prefix,gate)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_paged_exports.py\", line 1453, in instrumentation\n    receiver_receipts,markdown_receipt=test_receiver_cases(folder,prefix,gate,work,root,args,component,cache)\n                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_paged_exports.py\", line 1365, in test_receiver_cases\n    publish_receiver_ack(marker,lambda temp:seed(gate.PKG,temp,b'checked'),lambda temp,final:shell('run-as',gate.PKG,'mv',temp,final))\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_paged_exports.py\", line 898, in publish_receiver_ack\n    temp=marker+'.part';write_verified(temp);rename(temp,marker)\n                                             ^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_paged_exports.py\", line 1365, in <lambda>\n    publish_receiver_ack(marker,lambda temp:seed(gate.PKG,temp,b'checked'),lambda temp,final:shell('run-as',gate.PKG,'mv',temp,final))\n                                                                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_paged_exports.py\", line 1331, in shell\n    def shell(*v):return run([*prefix,'shell',*v]).strip()\n                         ^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/todo-pocket-android/todo-pocket-android/tools/verify_paged_exports.py\", line 1499, in run\n    if p.returncode:raise RuntimeError(\"Paged command failed: \"+str(args)+\"\\n\"+p.stdout[-6000:])\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nRuntimeError: Paged command failed: ['/usr/local/lib/android/sdk/platform-tools/adb', '-s', 'emulator-5554', 'shell', 'run-as', 'com.supercubegame.pockettodo.v12.preview', 'mv', 'cache/paged-contract-45960904970/ack-1111f509eb54cfd93d8373f432d10c2d.part', 'cache/paged-contract-45960904970/ack-1111f509eb54cfd93d8373f432d10c2d']\n\n",
+      "elapsed_seconds": 205.609,
+      "stages": [
+        "installed_exact_product"
+      ]
+    },
+    "34": {
+      "status": "NOT_VERIFIED",
+      "error": "FileNotFoundError(2, 'No such file or directory')"
+    }
+  },
+  "observer_controls": {
+    "positive": 1,
+    "negative": 125,
+    "native_positive": 1,
+    "native_negative": 50,
+    "loss_positive": 1,
+    "loss_negative": 35
+  },
+  "release_ready": false,
+  "durable_upgrade_ready": false
+}

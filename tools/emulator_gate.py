@@ -2265,7 +2265,12 @@ def broken26_title(frame):
         if len(hits)!=1 or hits[0].get('class')!=cl or not _fixture_rectangle(hits[0]):raise AssertionError('Missing or ambiguous '+k)
         return hits[0]
     bar=unique(frame,'toolbar','android.view.ViewGroup');titles=[n.get('text') for n in bar.iter('node') if n.get('class')=='android.widget.TextView' and not n.get('resource-id') and _fixture_rectangle(n)];
-    if titles!=['Downloads'] or unique(bar.iter('node'),'menu_grid','android.widget.TextView').get('content-desc')!='Grid view':raise AssertionError('Not the Downloads list-view toolbar')
+    if titles!=['Downloads']:raise AssertionError('Not the bound Downloads toolbar')
+    # DocumentsUI names the toggle after the *other* view. Never change modes or infer a row from its filename alone.
+    modes=[q for q in bar.iter('node') if q.get('resource-id') in (rid('menu_grid'),rid('menu_list'))]
+    if len(modes)!=1 or modes[0].get('class')!='android.widget.TextView' or not _fixture_rectangle(modes[0]):raise AssertionError('Ambiguous Downloads view mode')
+    signature=(modes[0].get('resource-id'),modes[0].get('content-desc'));is_grid=signature==(rid('menu_list'),'List view')
+    if not is_grid and signature!=(rid('menu_grid'),'Grid view'):raise AssertionError('Unknown Downloads view mode')
     if unique(frame,'sort_dimen_dropdown','android.widget.TextView').get('text')!='Modified' or unique(frame,'sort_arrow','android.widget.ImageView').get('content-desc')!='Descending':raise AssertionError('Unexpected fixture ordering')
     grid=unique(frame,'dir_list','android.support.v7.widget.RecyclerView'); region=_fixture_rectangle(grid)
     exact=[n for n in frame if n.get('text')==_B26_NAME];inside=[]
@@ -2273,7 +2278,14 @@ def broken26_title(frame):
         hits=[n for n in row.iter('node') if n.get('resource-id')=='android:id/title' and n.get('class')=='android.widget.TextView' and n.get('text')==_B26_NAME];
         if not hits:continue
         if len(hits)!=1 or row.get('class')!='android.widget.LinearLayout' or not _fixture_rectangle(row):raise AssertionError('Ambiguous or disabled list row')
-        t=hits[0];box=_fixture_rectangle(t);parent=_fixture_rectangle(row);size=[s for s in row.iter('node') if s.get('resource-id')==rid('size') and s.get('class')=='android.widget.TextView' and _fixture_rectangle(s)]
+        t=hits[0];box=_fixture_rectangle(t);parent=_fixture_rectangle(row);plate=unique(row.iter('node'),'nameplate','android.widget.RelativeLayout') if is_grid else row
+        if not any(q is t for q in plate.iter('node')):raise AssertionError('Title outside its grid nameplate')
+        sizes=[q for q in row.iter('node') if q.get('resource-id') in (rid('size'),rid('details'))]
+        size=[q for q in plate.iter('node') if q.get('resource-id')==rid('details' if is_grid else 'size') and q.get('class')=='android.widget.TextView' and _fixture_rectangle(q)]
+        if len(sizes)!=1 or not size or not all(any(q is t0 for q in plate.iter('node')) for t0 in (size[0],t)):raise AssertionError('Wrong layout or ambiguous file size')
+        if is_grid:
+            thumb=unique(row.iter('node'),'thumbnail','android.widget.FrameLayout');namebox=_fixture_rectangle(plate);sizebox=_fixture_rectangle(size[0]);thumbbox=_fixture_rectangle(thumb)
+            if not box or not all(namebox[0]<=b[0]<b[2]<=namebox[2] and namebox[1]<=b[1]<b[3]<=namebox[3] for b in (box,sizebox)) or thumbbox[3]>namebox[1] or parent[0]>namebox[0] or parent[2]<namebox[2] or parent[1]>thumbbox[1] or parent[3]<namebox[3]:raise AssertionError('Grid tile and file metadata do not belong together')
         if len(size)!=1 or re.fullmatch(r'9(?:[.,]0+)?\s*(?:B|bytes?)',size[0].get('text','').strip(),re.I) is None or not box or any(not(o[0]<=box[0]<box[2]<=o[2] and o[1]<=box[1]<box[3]<=o[3]) for o in (region,parent)):raise AssertionError('File row or visible title not verified')
         inside.append(t)
     if len(inside)!=len(exact) or len(inside)>1:raise AssertionError('Duplicate name or title outside owned list')
@@ -2290,7 +2302,7 @@ def choose_broken26(read,sha,tap,trace,pkg,api,serial,ci,clock=time.monotonic,pa
             if now>=end:break
             if f and {n.get('package') for n in f}=={pkg} and not seen_picker:pass
             else:
-                t=broken26_title(f);seen_picker=True;box=_fixture_rectangle(t) if t is not None else None
+                t=broken26_title(f);seen_picker=True;box=(_fixture_rectangle(t),tuple(n.get('resource-id') for n in f if n.get('resource-id') in ('com.android.documentsui:id/menu_list','com.android.documentsui:id/menu_grid'))) if t is not None else None
                 if box is not None and box==key:
                     if sha(_B26_PATH,end-clock())!=_B26_SHA:raise AssertionError('Staged file changed before select')
                     left=end-clock()
@@ -2300,6 +2312,40 @@ def choose_broken26(read,sha,tap,trace,pkg,api,serial,ci,clock=time.monotonic,pa
             pause(min(.15,max(0,end-clock())))
         raise TimeoutError('The exact CI malformed file was not confirmed visible within 20s')
     except Exception as e:trace.update(status='FAIL',error=type(e).__name__);raise
+
+class Api34ImageSlot:
+    """Stage only the current public synthetic file, then retire only our own proven bytes. No changes to product/intent/picker.
+    We never replace a pre-existing path and never list or remove unrelated files. All checks run outside the existing 20s selector."""
+    names=('pocket-broken.png','pocket-wide.png','pocket-large.png','pocket-selected.png')
+    def __init__(self,call,push,files,records,pkg,api,serial,ci):
+        if (pkg,api,serial,ci)!=('com.supercubegame.pockettodo.v12.preview',34,'emulator-5554',True) or set(files)!=set(self.names):raise ValueError('Not the isolated API34 image fixture set')
+        self.call,self.push,self.files,self.records,self.own=call,push,files,records,None
+        if call('getprop','ro.kernel.qemu').strip()!='1' or call('getprop','ro.build.version.sdk').strip()!='34':raise ValueError('Not API34 emulator')
+        for n in self.names:self.absent(self.path(n))
+    def path(self,n):
+        if n not in self.names:raise ValueError('Not an owned public test image')
+        return '/sdcard/Download/'+n
+    def absent(self,path):
+        self.call('test','!','-L',path);self.call('test','!','-e',path)
+    def signature(self,path,digest):
+        self.call('test','!','-L',path);self.call('test','-f',path)
+        if self.call('sha256sum',path).split()!=[digest,path]:raise AssertionError('Synthetic file bytes changed')
+        sig=self.call('stat','-c','%i:%s:%Y',path).strip()
+        if not re.fullmatch(r'[0-9]+:[0-9]+:[0-9]+',sig):raise AssertionError('No file identity')
+        return sig
+    def put(self,n,local):
+        path=self.path(n)
+        if self.own is not None or local.name!=n or local.read_bytes()!=self.files[n]:raise ValueError('Wrong local input or slot is busy')
+        for own in self.names:self.absent(self.path(own))
+        data=self.files[n];digest=hashlib.sha256(data).hexdigest();self.push(local,path);sig=self.signature(path,digest)
+        if int(sig.split(':')[1])!=len(data):raise AssertionError('Device length differs')
+        self.own=(n,digest,sig);self.records.append({'route':'api34-single-staged-file','name':n,'sha256':digest,'bytes':len(data),'identity':sig,'operation':'STAGED_ONLY'})
+    def retire(self,n):
+        path=self.path(n)
+        if self.own is None or self.own[0]!=n:raise ValueError('Unowned synthetic path')
+        _,digest,sig=self.own
+        if self.signature(path,digest)!=sig:raise AssertionError('Refuse to retire changed identity')
+        self.call('rm',path);self.absent(path);self.own=None;self.records.append({'route':'api34-single-staged-file','name':n,'sha256':digest,'operation':'RETIRED_OWN_FILE'})
 
 def _ci_image_surface(frame,product,*,pixel=False):
     system={'com.android.documentsui','com.google.android.documentsui'}
@@ -2863,6 +2909,50 @@ def broken26_host():
             assert sum(x[0]=='touch' for x in log)<=1 and file.read_bytes()==files;counts[case]=bool(taps)
         for tag in ('direct','appeared','wrong_api','non_ci','wrong_serial','wrong_pkg','hardware','symlink','mtime','wrong_stage','post_content','bad_local','foreign','wrong_folder','sort','grid','bad_size','outofbounds','disabled','dup','outside','alert','missing','changed_before_stable','hash_on_pick','hash_on_open'):run(tag,tag in ('direct','appeared'))
     assert len(counts)==26 and sum(counts.values())==2
+    # Exercise the alternative real API26 view shape. The primary assertion still requires
+    # a single matching size and title in the same nameplate within the same directory tile.
+    actual=frame(True);bar=actual[0];mode=bar[1];mode.set('resource-id',rid('menu_list'));mode.set('content-desc','List view');r=actual[-1][0];r.set('bounds','[16,276][154,469]');title,size=list(r);r.remove(title);r.remove(size);th=node('android.widget.FrameLayout',rid('thumbnail'),bounds='[16,276][154,414]');plate=node('android.widget.RelativeLayout',rid('nameplate'),bounds='[16,414][154,469]');r.extend((th,plate));title.set('bounds','[66,422][142,444]');size.set('bounds','[66,444][83,461]');size.set('resource-id',rid('details'));plate.extend((title,size));assert broken26_title(list(actual.iter('node'))) is title
+    for issue in ('two_modes','mislabeled','foreign_size','misbound_title','wrong_size','bad_plate','listed_size','wrong_owner'):
+        probe=copy.deepcopy(actual);toggle=probe[0][1];tile=probe[-1][0];pl=tile[-1];t,sz=list(pl)
+        if issue=='two_modes':probe[0].append(node('android.widget.TextView',rid('menu_grid'),**{'content-desc':'Grid view'}))
+        if issue=='mislabeled':toggle.set('content-desc','Grid view')
+        if issue=='foreign_size':pl.remove(sz);tile.append(sz)
+        if issue=='misbound_title':pl.remove(t);tile.append(t)
+        if issue=='wrong_size':sz.set('text','8 B')
+        if issue=='bad_plate':pl.set('bounds','[0,0][20,20]')
+        if issue=='listed_size':sz.set('resource-id',rid('size'))
+        if issue=='wrong_owner':t.set('package','other')
+        try:broken26_title(list(probe.iter('node')))
+        except AssertionError:pass
+        else:raise AssertionError('Invalid alternative grid '+issue)
+    # Staged files are never an acceptance signal. This only exercises ownership and retention.
+    fs={};rm=[];labels={k:k.encode() for k in Api34ImageSlot.names}
+    def localcmd(*a):
+        if a[0]=='getprop':return '34' if a[1]=='ro.build.version.sdk' else '1'
+        path=a[-1]
+        if a[0]=='test':
+            if a[1:-1]==('!','-L'):return ''
+            ok=path not in fs if a[1:-1]==('!','-e') else path in fs and a[1:-1]==('-f',)
+            if not ok:raise ValueError('synthetic path precondition')
+            return ''
+        if a[0]=='sha256sum':return hashlib.sha256(fs[path][0]).hexdigest()+'  '+path
+        if a[0]=='stat':return str(fs[path][1])+':'+str(len(fs[path][0]))+':4'
+        if a[0]=='rm':rm.append(path);del fs[path];return ''
+        raise AssertionError(a[0])
+    with tempfile.TemporaryDirectory() as dir2:
+        root=Path(dir2);log=[];ww=Api34ImageSlot(localcmd,lambda a,b:fs.update({b:(a.read_bytes(),1)}),labels,log,PKG,34,'emulator-5554',True)
+        for n in Api34ImageSlot.names:
+            src=root/n;src.write_bytes(labels[n]);ww.put(n,src);assert list(fs)==[ww.path(n)];ww.retire(n);assert not fs
+        n=Api34ImageSlot.names[0];ww.put(n,root/n);q=ww.path(n);fs[q]=(labels[n],2)
+        try:ww.retire(n)
+        except AssertionError:pass
+        else:raise AssertionError('replaced synthetic file erased')
+        assert fs[q][0]==labels[n] and len(rm)==4
+        try:Api34ImageSlot(localcmd,lambda *a:None,labels,[],PKG,34,'emulator-5554',True)
+        except ValueError:pass
+        else:raise AssertionError('previous path claimed')
+    print('API34_SLOT_HOST four distinct public fixture lifetimes, changed identity and pre-existing path refuse; NOT Android',flush=True)
+    print('API26_GRID_HOST 1 alternate layout + 8 rejected; not actual device execution',flush=True)
     print('API26_FIRST_BAD_HOST 2 valid selections + 24 refusals; no new write of image bytes; NOT Android',flush=True)
 
 
@@ -3572,7 +3662,8 @@ public class VerifyNotePng {
         fixture_dir=Path('build/ci-picked-images'); fixture_dir.mkdir(parents=True,exist_ok=True)
         for name,data in fixtures.items():
             path=fixture_dir/name;path.write_bytes(data)
-            run([adb,'-s',SERIAL,'push',path,'/sdcard/Download/'+name])
+            if API!=34:run([adb,'-s',SERIAL,'push',path,'/sdcard/Download/'+name])
+        early=Api34ImageSlot(shell,lambda local,path:run([adb,'-s',SERIAL,'push',local,path]),fixtures,image_fixture_navigation,PKG,API,SERIAL,os.environ.get('GITHUB_ACTIONS')=='true') if API==34 else None
         def note_screen():
             start(); tap('活动'); ready(); touch('activity-1'); ready(); tap('笔记'); ready()
         # API34 image grids expose a description, not a text node; select in list view.
@@ -3626,11 +3717,14 @@ public class VerifyNotePng {
             baseline={t:db.execute('SELECT * FROM '+t+' ORDER BY rowid').fetchall() for t in TABLES}
             ok(db.execute('SELECT * FROM blocks ORDER BY note_id,position').fetchall()==[tuple(row) for row in expected_blocks] and db.execute('SELECT * FROM media ORDER BY id').fetchall()==before_media,'cancel picker leaves exact blocks and media registrations unchanged')
         for filename,label in [('pocket-broken.png','malformed'),('pocket-wide.png','oversized dimensions'),('pocket-large.png','excess byte budget')]:
+            if early:early.put(filename,fixture_dir/filename)
             note_screen(); pick_image(filename)
             ok(find(**{'content-desc':'v12-status','text':'图片未加入：仅支持有效 PNG/JPEG，最大 8 MiB、2000 万像素、单边 16384'}) is not None,label+' selected image rejected visibly')
             stop()
             with sqlite3.connect(copy_db('reject-'+filename+'.db')) as db:
                 ok({t:db.execute('SELECT * FROM '+t+' ORDER BY rowid').fetchall() for t in TABLES}==baseline,label+' rejection preserves every database table including revision')
+            if early:early.retire(filename) # only after the original visible rejection AND unchanged SQLite readback
+        if early:early.put('pocket-selected.png',fixture_dir/'pocket-selected.png')
         note_screen(); pick_image('pocket-selected.png'); ready(); stop()
         chosen_id=hashlib.sha256(chosen).hexdigest()
         with sqlite3.connect(copy_db('pick-success.db')) as db:
@@ -3640,7 +3734,8 @@ public class VerifyNotePng {
             ok(all(db.execute('SELECT * FROM '+t+' ORDER BY rowid').fetchall()==baseline[t] for t in TABLES if t not in ('revision','blocks','media')),'image import preserves notes identity and all unrelated tables')
         copied=subprocess.check_output([str(adb),'-s',SERIAL,'exec-out','run-as',PKG,'cat','files/media/'+chosen_id],timeout=30)
         ok(copied==chosen,'SAF private copy equals independently generated two-color PNG byte for byte')
-        shell('rm','/sdcard/Download/pocket-selected.png')
+        if early:early.retire('pocket-selected.png')
+        else:shell('rm','/sdcard/Download/pocket-selected.png')
         note_screen(); swipe_up()
         ok(desc('note-image-'+selected_blocks[2][1]).get('class')=='android.widget.ImageView','selected image still renders after source deletion and stopped-process restart')
         shot('11-selected-image.png'); stop()
@@ -3714,6 +3809,7 @@ public class ImageImportFixture {
         ok(cancel_note_picker('first_image'),'canceling first image reports no note change')
         stop();ok(state_read('first-image-cancel.db')==first_base,'first-image cancel creates no orphan note media block or revision')
         for filename,label in [('pocket-broken.png','malformed first image'),('pocket-pixel-over.png','20005000-pixel first image')]:
+            if early and filename==_B26_NAME:early.put(filename,fixture_dir/filename)
             if API==34 and filename==_PIXEL_OVER:stage_pixel_directory(adb,fixture_dir/filename,PKG,API,SERIAL,os.environ.get('GITHUB_ACTIONS')=='true')
             b26=None
             if API==26 and filename==_B26_NAME:
@@ -3721,6 +3817,7 @@ public class ImageImportFixture {
             first_screen();pick_image(filename,broken26=b26)
             ok(find(**{'content-desc':'v12-status','text':'图片未加入：仅支持有效 PNG/JPEG，最大 8 MiB、2000 万像素、单边 16384'}) is not None,label+' rejected visibly before note creation')
             stop();ok(state_read('first-reject-'+filename+'.db')==first_base,label+' leaves every table unchanged with no orphan note or media registration')
+            if early and filename==_B26_NAME:early.retire(filename)
         first_screen();pick_image('pocket-first.jpg');ready();stop()
         first_saved=state_read('first-image-saved.db')
         new_notes=[row for row in first_saved['notes'] if row not in first_base['notes']]

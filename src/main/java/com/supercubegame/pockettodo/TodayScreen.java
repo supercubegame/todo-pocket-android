@@ -225,6 +225,10 @@ public final class TodayScreen {
     TodayScreen(Activity activity,AppDatabase database){
         this.activity=activity;db=database;activities=new ActivitiesScreen(this);
     }
+    // The brand headline is decorative; the activation entry, status, rows and navigation are not.
+    static boolean largeWorkbench(float scale){return scale>=1.3f;}
+    static boolean roomyDraftNeeded(float scale,int widthDp){return largeWorkbench(scale)||(widthDp>0&&widthDp<=360);}
+    int draftEditorTheme(){android.content.res.Configuration cfg=activity.getResources().getConfiguration();return roomyDraftNeeded(cfg.fontScale,cfg.screenWidthDp)?android.R.style.Theme_Material_Light_NoActionBar:0;}
     public void show(Bundle saved) {
         clearRestoreUndo();io.execute(()->{try{RestoreScratch.reclaimIfIdle(activity.getCacheDir().toPath());}catch(IOException e){android.util.Log.w("PocketRestore","Unrecognized staging left untouched");}});leaveTodoSession();
         if(saved!=null){page=saved.getInt("page",0);filter=saved.getInt("filter",0);draft=saved.getString("draft","");activities.selected=saved.getLong("activity",0);}
@@ -233,12 +237,13 @@ public final class TodayScreen {
         activity.getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         root=column();root.setPadding(dp(18),dp(12),dp(18),dp(10));root.setBackgroundColor(BG);root.setFocusableInTouchMode(true);
         activity.setContentView(root);root.requestFocus();
-        TextView label=text("口袋待办  /  1.2 开发预览",14,ACCENT);label.setContentDescription("v12-home");root.addView(label);
-        TextView heading=text("把今天，放进口袋",28,INK);heading.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));heading.setPadding(0,dp(8),0,dp(8));root.addView(heading);
+        boolean compact=largeWorkbench(activity.getResources().getConfiguration().fontScale);
+        TextView label=text(compact?"口袋待办":"口袋待办  /  1.2 开发预览",14,ACCENT);label.setContentDescription("v12-home");root.addView(label);
+        if(!compact){TextView heading=text("把今天，放进口袋",28,INK);heading.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));heading.setPadding(0,dp(8),0,dp(8));root.addView(heading);}
         Button activate=button("启用分类快捷入口",this::requestShortcutActivation);
         activate.setContentDescription("activation-entry");root.addView(activate);
         status=text("正在读取本机数据…",14,MUTED);status.setContentDescription("v12-status");status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);root.addView(status);
-        content=column();LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,0,1);cp.topMargin=dp(12);root.addView(content,cp);
+        content=column();LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,0,1);cp.topMargin=dp(compact?4:12);root.addView(content,cp);
         LinearLayout nav=new LinearLayout(activity);
         nav.addView(button("今天",()->navigate(0)),new LinearLayout.LayoutParams(0,dp(52),1));
         nav.addView(button("活动",()->navigate(1)),new LinearLayout.LayoutParams(0,dp(52),1));

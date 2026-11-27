@@ -291,17 +291,19 @@ public final class NoteEditorScreen {
         EditText field=host.field("文字内容",true);field.setText(session.initial);
         body.addView(field,new LinearLayout.LayoutParams(-1,-2));
         TextView hint=host.text("草稿仅在点击「存草稿」后保留在本机，不进入完整备份，卸载会丢失。取消不会自动保存或丢弃草稿。",14,TodayScreen.MUTED);
-        hint.setContentDescription("note-draft-help");body.addView(hint);
+        hint.setContentDescription("note-draft-help");
         TextView validation=host.text("",14,TodayScreen.MUTED);
         validation.setContentDescription("note-draft-status");
         Button save=host.button("存草稿",()->{}),recover=host.button("恢复草稿",()->{}),discard=host.button("丢弃草稿",()->{});
         save.setContentDescription("note-draft-save");recover.setContentDescription("note-draft-recover");discard.setContentDescription("note-draft-discard");
         // Keep the shared 48dp minimum; let the actual text and font metrics set any taller height.
         for(Button b:new Button[]{save,recover,discard})body.addView(b,new LinearLayout.LayoutParams(-1,LinearLayout.LayoutParams.WRAP_CONTENT));
+        body.addView(hint); // Keep all privacy/storage guidance, below the primary draft actions.
         // Feedback precedes the input, not the off-screen tail of the actions.
         body.addView(validation,0);
         ScrollView scroll=new ScrollView(host.activity);scroll.addView(body);
-        AlertDialog dialog=new AlertDialog.Builder(host.activity).setTitle(session.block==null?"加入文字":"修改文字")
+        final int editorTheme=host.draftEditorTheme();
+        AlertDialog dialog=new AlertDialog.Builder(host.activity,editorTheme).setTitle(session.block==null?"加入文字":"修改文字")
             .setView(scroll).setNegativeButton("取消",null).setPositiveButton("保存",null).create();
         final boolean[] busy={false};
         Runnable update=()->{
@@ -368,6 +370,7 @@ public final class NoteEditorScreen {
         // save/cancel bar behind the keyboard. Keep typing and native touch enabled.
         dialog.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         dialog.show();
+        if(editorTheme!=0)dialog.getWindow().setLayout(LinearLayout.LayoutParams.MATCH_PARENT,LinearLayout.LayoutParams.MATCH_PARENT);
         MainActivity.observeDraftFontDialog(dialog);
     }
     /** Own dialog, not the shared editor helper: that one intentionally accepts blank

@@ -23,9 +23,10 @@ public final class ActivityScheduleStore implements AutoCloseable {
         Path p=c.getApplicationContext().getDir("activity-schedule-preview",Context.MODE_PRIVATE).toPath();
         if(!Files.isDirectory(p,LinkOption.NOFOLLOW_LINKS))throw new IOException("Invalid private schedule directory");return p.toRealPath();}
     private static void schema(SQLiteDatabase d){Schema3Store.createSchema3(d);d.execSQL(Schema4Store.SHORTCUT_DDL);d.execSQL(DDL);d.setVersion(5);}
+    private static void enableCorrections(SQLiteDatabase d){need(d.getVersion()==5&&d.inTransaction(),"Only a private v5 copy can enable corrections");d.execSQL(LedgerChanges.DDL);d.setVersion(6);}
     private static List<String> signature(SQLiteDatabase d){List<String> out=new ArrayList<>();try(Cursor c=d.rawQuery("SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name",null)){
         while(c.moveToNext()){String n=c.getString(1);if(n.equals("android_metadata")||n.startsWith("sqlite_"))continue;for(int i=0;i<4;i++)out.add(c.getString(i));}}return out;}
-    private static void layout(SQLiteDatabase d){need(d.getVersion()==5,"Not a schedule workspace");try(SQLiteDatabase sample=SQLiteDatabase.create(null)){sample.setForeignKeyConstraintsEnabled(true);schema(sample);need(signature(sample).equals(signature(d)),"Unexpected schedule table layout");}
+    private static void layout(SQLiteDatabase d){need(d.getVersion()==5||d.getVersion()==6,"Not a schedule workspace");try(SQLiteDatabase sample=SQLiteDatabase.create(null)){sample.setForeignKeyConstraintsEnabled(true);schema(sample);if(d.getVersion()==6){sample.execSQL(LedgerChanges.DDL);sample.setVersion(6);}need(signature(sample).equals(signature(d)),"Unexpected schedule table layout");}
         try(Cursor c=d.rawQuery("PRAGMA foreign_key_check",null)){need(!c.moveToFirst(),"Foreign schedule or historical owner");}}
     private static void outside(SQLiteDatabase d){need(d.isOpen()&&!d.inTransaction(),"Independent schedule transaction required");}
     private void live(){need(!closed&&db.isOpen(),"Schedule workspace closed");}
@@ -35,7 +36,7 @@ public final class ActivityScheduleStore implements AutoCloseable {
         while(c.moveToNext()){long id=c.getLong(0);need(c.getType(0)==Cursor.FIELD_TYPE_INTEGER&&id>0&&m.put(id,row(c,1))==null,"Invalid schedule identity");}}return m;}
     private static void put(SQLiteDatabase d,long id,ActivitySchedule v){d.execSQL("INSERT INTO activity_schedules(activity_id,days,first_day,last_day,zone_id) VALUES(?,?,?,?,?)",new Object[]{id,v.days,v.first.toString(),v.last==null?null:v.last.toString(),v.zone.getId()});}
     private static boolean archived(SQLiteDatabase d,long id){need(id>0,"Invalid activity ID");try(Cursor c=d.rawQuery("SELECT archived FROM activities WHERE id=?",new String[]{Long.toString(id)})){need(c.moveToFirst(),"Missing schedule activity");return c.getInt(0)!=0;}}
-    private static byte[] snapshot(SQLiteDatabase d){layout(d);return ActivitySchedule.Wire.write(Schema4Store.scheduleProjection(d),rows(d));}
+    private static byte[] snapshot(SQLiteDatabase d){layout(d);byte[] original=ActivitySchedule.Wire.write(Schema4Store.scheduleProjection(d),rows(d));return d.getVersion()==5?original:LedgerChanges.pack(original,LedgerChanges.load(d).events);}
     public synchronized ActivitySchedule rule(long id){live();archived(db,id);try(Cursor c=db.rawQuery("SELECT days,first_day,last_day,zone_id FROM activity_schedules WHERE activity_id=?",new String[]{Long.toString(id)})){return c.moveToFirst()?row(c,0):null;}}
     public synchronized boolean dueAt(long id,Instant moment){live();Objects.requireNonNull(moment);try(Cursor c=db.rawQuery("SELECT a.archived,s.days,s.first_day,s.last_day,s.zone_id FROM activities a LEFT JOIN activity_schedules s ON s.activity_id=a.id WHERE a.id=?",new String[]{Long.toString(id)})){need(id>0&&c.moveToFirst(),"Missing schedule activity");return c.getInt(0)==0&&!c.isNull(1)&&row(c,1).dueAt(moment);}}
     /** This list belongs only to this private copy. No note, field, mark or ledger content is queried. */
@@ -67,17 +68,37 @@ public final class ActivityScheduleStore implements AutoCloseable {
     public synchronized boolean confirm(Review p){need(p!=null&&p.owner==this,"Foreign schedule review");byte[] expected=p.before;need(expected!=null,"Schedule review expired");p.before=null;live();outside(db);db.beginTransaction();try{
         byte[] actual=snapshot(db);need(Arrays.equals(expected,actual)&&!archived(db,p.activity),"Schedule state changed; review again");
         if(Objects.equals(p.previous,p.proposed)){db.setTransactionSuccessful();return false;}
-        ActivitySchedule.Wire prior=ActivitySchedule.Wire.read(actual);TreeMap<Long,ActivitySchedule> after=new TreeMap<>(prior.rules);long rev=revision(db),next=Math.incrementExact(rev);byte[] expectedBase;
+        LedgerChanges.Envelope history=LedgerChanges.split(actual);ActivitySchedule.Wire prior=ActivitySchedule.Wire.read(history.base);TreeMap<Long,ActivitySchedule> after=new TreeMap<>(prior.rules);long rev=revision(db),next=Math.incrementExact(rev);byte[] expectedBase;
         // Independent strict historical candidate: only its single revision cell may change.
         try(SQLiteDatabase copy=Schema4Store.stateCandidate(prior.base)){copy.execSQL("UPDATE revision SET value=? WHERE id=1",new Object[]{next});expectedBase=Schema4Store.scheduleProjection(copy);}
         int n=db.delete("activity_schedules","activity_id=?",new String[]{Long.toString(p.activity)});need(n==(p.previous==null?0:1),"Schedule write count differs");
         if(p.proposed!=null){put(db,p.activity,p.proposed);after.put(p.activity,p.proposed);}else after.remove(p.activity);
         db.execSQL("UPDATE revision SET value=? WHERE id=1 AND value=?",new Object[]{next,rev});
-        need(Arrays.equals(ActivitySchedule.Wire.write(expectedBase,after),snapshot(db)),"Schedule transaction changed other data");db.setTransactionSuccessful();return true;
+        need(Arrays.equals(LedgerChanges.pack(ActivitySchedule.Wire.write(expectedBase,after),history.events),snapshot(db)),"Schedule transaction changed other data");db.setTransactionSuccessful();return true;
+    }finally{db.endTransaction();}}
+    static final class MoneyPage {
+        private final ActivityScheduleStore owner;final BookRow activity;final LedgerChanges.Page data;
+        private MoneyPage(ActivityScheduleStore w,BookRow b,LedgerChanges.Page p){owner=w;activity=b;data=p;}
+    }
+    private void sameShown(BookRow shown){need(shown!=null&&shown.owner==this,"Other private copy");try(Cursor c=db.rawQuery(BOOK_SELECT+"WHERE a.id=?",new String[]{Long.toString(shown.id)})){need(c.moveToFirst()&&shown.same(new BookRow(this,c)),"Displayed activity changed");}}
+    synchronized MoneyPage moneyPage(BookRow shown,java.time.LocalDate date,int index){live();outside(db);db.beginTransactionNonExclusive();try{sameShown(shown);MoneyPage value=new MoneyPage(this,shown,new LedgerChanges.Page(LedgerChanges.load(db),shown.id,date,index));db.setTransactionSuccessful();return value;}finally{db.endTransaction();}}
+    static final class MoneyReview implements AutoCloseable {
+        final ActivityScheduleStore owner;final LedgerChanges.Event event;final boolean first;private byte[] before;
+        private MoneyReview(ActivityScheduleStore w,LedgerChanges.Event e,byte[] b,boolean first){owner=w;event=e;before=b;this.first=first;}
+        public void close(){synchronized(owner){before=null;}}
+    }
+    synchronized MoneyReview reviewMoney(MoneyPage screen,LedgerChanges.Row shown,LedgerChanges.Op op,Ledger.Entry replacement){
+        live();need(screen!=null&&screen.owner==this&&shown!=null&&screen.data.rows.contains(shown)&&op!=null,"Displayed entry does not belong to this page");outside(db);db.beginTransactionNonExclusive();try{sameShown(screen.activity);need(!archived(db,screen.activity.id)&&shown.original.activityId==screen.activity.id,"Archived or foreign ledger");byte[] before=snapshot(db);LedgerChanges.Trace t=LedgerChanges.load(db);LedgerChanges.Row now=t.rows.get(shown.original.id);need(shown.same(now),"Displayed ledger entry changed");
+            need(op==LedgerChanges.Op.EDIT?replacement!=null:replacement==null,"Invalid operation values");if(op==LedgerChanges.Op.UNDO)need(now.canUndo(),"No change to undo");Ledger.Entry after=op==LedgerChanges.Op.UNDO?now.last.before:replacement;String ref=op==LedgerChanges.Op.UNDO?now.last.id:null;
+            LedgerChanges.Event e=new LedgerChanges.Event(UUID.randomUUID().toString(),now.original.id,screen.activity.id,op,ref,now.current,after);t.apply(e);LedgerChanges.pack(LedgerChanges.split(before).base,t.events);MoneyReview r=new MoneyReview(this,e,before,db.getVersion()==5);db.setTransactionSuccessful();return r;
+        }finally{db.endTransaction();}}
+    synchronized void confirmMoney(MoneyReview p,boolean acceptedNewFormat){need(p!=null&&p.owner==this&&p.before!=null,"Ledger preview expired");byte[] before=p.before;p.before=null;live();outside(db);db.beginTransaction();try{
+        need(Arrays.equals(before,snapshot(db))&&!archived(db,p.event.owner),"Ledger preview is stale");need(!p.first||acceptedNewFormat,"Explicit consent to new private format required");LedgerChanges.Trace t=LedgerChanges.load(db);t.apply(p.event);byte[] expected=LedgerChanges.pack(LedgerChanges.split(before).base,t.events);
+        if(db.getVersion()==5)enableCorrections(db);LedgerChanges.insert(db,t.events.size(),p.event);need(Arrays.equals(expected,snapshot(db)),"Other data changed or event differs");db.setTransactionSuccessful();
     }finally{db.endTransaction();}}
     public synchronized byte[] state(){live();outside(db);db.beginTransaction();try{byte[] x=snapshot(db);db.setTransactionSuccessful();return x;}finally{db.endTransaction();}}
     private static SortedMap<String,Long> mediaRows(SQLiteDatabase base){TreeMap<String,Long> m=new TreeMap<>();try(Cursor c=base.rawQuery("SELECT id,bytes FROM media ORDER BY id",null)){while(c.moveToNext()){String id=c.getString(0);long n=c.getLong(1);MediaRepository.validId(id);need(n>0&&m.put(id,n)==null,"Invalid media registry");}}return m;}
-    public synchronized void exportBackup(Path destination)throws IOException{byte[] s=state();ActivitySchedule.Wire w=ActivitySchedule.Wire.read(s);try(SQLiteDatabase base=Schema4Store.stateCandidate(w.base)){
+    public synchronized void exportBackup(Path destination)throws IOException{byte[] s=state();ActivitySchedule.Wire w=ActivitySchedule.Wire.read(LedgerChanges.split(s).base);try(SQLiteDatabase base=Schema4Store.stateCandidate(w.base)){
         SortedMap<String,Long> assets=mediaRows(base);for(Map.Entry<String,Long> e:assets.entrySet()){String id=e.getKey();media.verify(id);need(Files.size(media.path(id))==e.getValue(),"Registered media length differs");}
         BackupArchive.write(destination,s,assets.keySet(),media);
     }}
@@ -90,15 +111,16 @@ public final class ActivityScheduleStore implements AutoCloseable {
         try{Path stages=Files.createDirectory(dir.resolve("staging"));MediaRepository media=new MediaRepository(dir.resolve("media"),budget);
             try(BackupArchive.Snapshot archiveCopy=BackupArchive.read(archive,stages,budget)){
                 byte[] input=archiveCopy.state();need(input.length>=12&&ByteBuffer.wrap(input).getInt()==ActivitySchedule.Wire.MAGIC,"Invalid archive state");
-                int wire=ByteBuffer.wrap(input).getInt(4);ActivitySchedule.Wire w=wire==4?ActivitySchedule.Wire.read(input):null;
+                int wire=ByteBuffer.wrap(input).getInt(4);LedgerChanges.Envelope history=(wire==4||wire==5)?LedgerChanges.split(input):null;ActivitySchedule.Wire w=history==null?null:ActivitySchedule.Wire.read(history.base);
                 try(SQLiteDatabase base=Schema4Store.stateCandidate(w==null?input:w.base)){
                     SortedMap<String,Long> assets=mediaRows(base);need(assets.keySet().equals(archiveCopy.assets().keySet()),"Unexpected or missing media");
                     for(Map.Entry<String,Long> e:assets.entrySet()){String id=e.getKey();Path file=archiveCopy.assets().get(id);need(Files.size(file)==e.getValue(),"Archive media length differs");try(InputStream in=Files.newInputStream(file,StandardOpenOption.READ,LinkOption.NOFOLLOW_LINKS)){need(id.equals(media.copy(in)),"Archive media differs");}media.verify(id);}
                     SortedMap<Long,ActivitySchedule> rules=w==null?new TreeMap<>():w.rules;byte[] expected=ActivitySchedule.Wire.write(Schema4Store.scheduleProjection(base),rules);
-                    if(w!=null)need(Arrays.equals(expected,input),"Historical schedule archive differs");
+                    if(history!=null)expected=LedgerChanges.pack(expected,history.events);if(w!=null)need(Arrays.equals(expected,input),"Historical schedule archive differs");
                     dest=SQLiteDatabase.openOrCreateDatabase(dir.resolve("data.db").toFile(),null);dest.setForeignKeyConstraintsEnabled(true);dest.beginTransaction();try{
                         schema(dest);Schema4Store.seedFreshScheduleCopy(dest,base);for(Map.Entry<Long,ActivitySchedule> e:rules.entrySet())put(dest,e.getKey(),e.getValue());
-                        need(Arrays.equals(expected,snapshot(dest)),"Imported schedules differ");dest.setTransactionSuccessful();
+                        if(history!=null&&!history.events.isEmpty()){enableCorrections(dest);int n=0;for(LedgerChanges.Event e:history.events)LedgerChanges.insert(dest,++n,e);}
+                        need(Arrays.equals(expected,snapshot(dest)),"Imported schedules or ledger changes differ");dest.setTransactionSuccessful();
                     }finally{dest.endTransaction();}
                 }
             }

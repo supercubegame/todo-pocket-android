@@ -79,6 +79,7 @@ public final class CalendarScreen {
             row.addView(host.text(e.date+"  "+LABELS[e.kind.ordinal()]+" ¥"+yuan(e.cents),16,TodayScreen.INK));
             if(!e.memo.isEmpty())row.addView(host.text(e.memo,14,TodayScreen.MUTED));host.addRow(rows,row);
         }
+        Button corrections=host.button("历史单笔更正：打开独立日程簿",()->{});corrections.setTag("calendar-book-corrections");corrections.setOnClickListener(v->{if(v.isEnabled()&&v.isAttachedToWindow()){android.content.Intent i=new android.content.Intent(host.activity,ScheduleBookActivity.class);host.activity.startActivity(i);}});host.addRow(rows,corrections);
     }
     private void chooseDates(State state){
         Set<LocalDate> draft=new TreeSet<>(selected);

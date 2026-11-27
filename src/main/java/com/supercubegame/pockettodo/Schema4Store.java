@@ -422,7 +422,7 @@ public final class Schema4Store extends SQLiteOpenHelper {
      * decoders stay strict; a schedule projection is never offered as a complete v5 backup. */
     static byte[] scheduleProjection(SQLiteDatabase db){
         if(db.getVersion()==4)return encodeState(db);
-        require(db.getVersion()==5&&db.inTransaction(),"Isolated schedule snapshot required");
+        require((db.getVersion()==5||db.getVersion()==6)&&db.inTransaction(),"Isolated schedule snapshot required");
         byte[] encoded=Wire.encode(baseWire(db),links(db));
         try(SQLiteDatabase checked=stateCandidate(encoded)){}return encoded;
     }

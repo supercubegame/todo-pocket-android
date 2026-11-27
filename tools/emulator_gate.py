@@ -2228,7 +2228,7 @@ _IMAGE_CANCEL_ROOT='sdk_gphone64_x86_64'
 _IMAGE_CANCEL_FOLDER='pocket-append-ci-api34'
 _IMAGE_CANCEL_TEXT='已取消选图，没有改变笔记'
 
-def _ci_image_surface(frame,product):
+def _ci_image_surface(frame,product,*,pixel=False):
     system={'com.android.documentsui','com.google.android.documentsui'}
     def live(n):
         m=re.fullmatch(r'\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]',n.get('bounds',''))
@@ -2248,7 +2248,7 @@ def _ci_image_surface(frame,product):
     chain=(_IMAGE_CANCEL_ROOT,'Download',_IMAGE_CANCEL_FOLDER);known=tuple(raw)
     crumbs=[n for n in strips[0].iter('node') if at(n,'breadcrumb_text')]
     if not raw or len(raw)!=len(crumbs) or not live(crumbs[-1]) or not raw[-1]:return ('other','',())
-    if known in (chain[:1],chain[:2],chain):return ('directory',owner,known)
+    if known in (chain[:1],chain[:2],chain) or (pixel and known==chain[:2]+(_PIXEL_DIR,)):return ('directory',owner,known)
     return ('unbound',owner,())
 
 def cancel_fixture_image_picker(read_nodes,back,records,case,product,api,serial,ci,clock=time.monotonic,pause=time.sleep):
@@ -2296,6 +2296,111 @@ def _fixture_rectangle(n):
     hit=re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]',n.get('bounds',''))
     if not hit:return None
     x,y,r,b=map(int,hit.groups());return (x,y,r,b) if x<r and y<b else None
+
+# Both observers are strictly test-only. UI acknowledgments never replace DB/media/business assertions.
+_RESTORED_STATUS='已恢复完整备份；在本页可撤销一次。'
+_PIXEL_DIR='00-pocket-pixels-api34'
+_PIXEL_OVER='pocket-pixel-over.png'
+_PIXEL_NEXT='pocket-first.jpg'
+_PIXEL_HASH='a27f9ab3b57b8a3e6cc787a03e3d98659d85c738b26489e31d41c8910a3795b8'
+
+def restored_backup_frame(frame,product):
+    if not frame or {n.get('package') for n in frame}!={product}:return False
+    if any(n.get('resource-id') in ('android:id/alertTitle','android:id/aerr_close') or n.get('content-desc')=='restore-consent' for n in frame):return False
+    def exactly(key,kind,text,click=False):
+        rows=[n for n in frame if n.get('content-desc')==key]
+        return len(rows)==1 and rows[0].get('class')==kind and rows[0].get('text')==text and bool(_fixture_rectangle(rows[0])) and (not click or rows[0].get('clickable')=='true')
+    return exactly('v12-status','android.widget.TextView',_RESTORED_STATUS) and exactly('restore-undo-open','android.widget.Button','撤销上次整库恢复…',True)
+
+def await_restore_readback(read,product,clock=time.monotonic,pause=time.sleep):
+    if product!='com.supercubegame.pockettodo.v12.preview':raise ValueError('Outside restore UI fixture')
+    deadline=clock()+20
+    while clock()<deadline:
+        frame=read()
+        if clock()>=deadline:break
+        if any(n.get('resource-id')=='android:id/aerr_close' for n in frame):raise AssertionError('Crash dialog during restore observation')
+        if restored_backup_frame(frame,product):return
+        pause(min(.25,max(0,deadline-clock())))
+    raise AssertionError('Exact committed restore status and enabled undo entry not observed within 20s; no substitute action')
+
+def stage_pixel_directory(adb,local,product,api,serial,ci):
+    if (product,api,serial,ci)!=('com.supercubegame.pockettodo.v12.preview',34,'emulator-5554',True) or local.name!=_PIXEL_OVER or hashlib.sha256(local.read_bytes()).hexdigest()!=_PIXEL_HASH:raise ValueError('Outside verified pixel fixture')
+    prefix=[str(adb),'-s',serial];folder='/sdcard/Download/'+_PIXEL_DIR;dest=folder+'/'+_PIXEL_OVER
+    def shell(*args):return subprocess.check_output([*prefix,'shell',*args],timeout=15,text=True).strip()
+    if shell('getprop','ro.kernel.qemu')!='1' or shell('getprop','ro.build.version.sdk')!='34':raise ValueError('Requires disposable API34 emulator')
+    # An existing directory or any other entry fails. Do not clear, replace or use it.
+    shell('mkdir',folder);subprocess.run([*prefix,'push',str(local),dest],check=True,timeout=20)
+    if shell('ls','-A',folder).splitlines()!=[_PIXEL_OVER] or shell('sha256sum',dest).split()[:1]!=[_PIXEL_HASH]:raise AssertionError('Private-to-test public fixture listing or bytes differ')
+
+def _owned_fixture_row(frame,who,name,only):
+    dirs=[n for n in frame if n.get('resource-id')==who+':id/dir_list'];matches=[n for n in frame if n.get('resource-id')=='android:id/title' and n.get('text')==name];
+    if len(dirs)>1 or len(matches)>1:raise AssertionError('Ambiguous fixture list or exact name')
+    if not dirs:return None
+    d=dirs[0];area=_fixture_rectangle(d)
+    if d.get('class') not in ('android.widget.GridView','android.widget.ListView','androidx.recyclerview.widget.RecyclerView') or not area:return None
+    rows=[n for n in d.iter('node') if n.get('resource-id')==who+':id/item_root'];
+    if only and len(rows)>1:raise AssertionError('Unexpected second entry in dedicated image directory')
+    if not matches:return None
+    title=matches[0];owners=[n for n in rows if any(u is title for u in n.iter('node'))];box=_fixture_rectangle(title)
+    if len(owners)!=1 or not box or title.get('package')!=who or title.get('class')!='android.widget.TextView':return None
+    owner=owners[0];outer=_fixture_rectangle(owner);titles=[u for u in owner.iter('node') if u.get('resource-id')=='android:id/title']
+    if len(titles)!=1 or not outer or owner.get('clickable')!='true' or owner.get('package')!=who:return None
+    def inside(a,b):return a[0]<=b[0]<b[2]<=a[2] and a[1]<=b[1]<b[3]<=a[3]
+    return title if inside(area,outer) and inside(outer,box) else None
+
+def select_bound_pixel(name,read,act,device_hash,expected,records,product,api,serial,ci,clock=time.monotonic,pause=time.sleep):
+    if (product,api,serial,ci)!=('com.supercubegame.pockettodo.v12.preview',34,'emulator-5554',True) or name not in (_PIXEL_OVER,_PIXEL_NEXT) or not re.fullmatch('[0-9a-f]{64}',expected):raise ValueError('Outside verified image transition')
+    over=name==_PIXEL_OVER
+    if over and expected!=_PIXEL_HASH:raise ValueError('Wrong oversize fixture')
+    if not over and not _after_bound_pixel(records):raise ValueError('Return to JPEG requires the previous selected owned boundary fixture')
+    end=clock()+20;parent=(_IMAGE_CANCEL_ROOT,'Download');child=parent+(_PIXEL_DIR,);file='/sdcard/Download/'+(_PIXEL_DIR+'/' if over else '')+name
+    row={'name':name,'choose':True,'route':'pixel-v1','status':'PENDING','actions':[]};records.append(row);owner=None;sent_folder=sent_parent=arrived=False;mode_pages=set();held=None;since=0.;origin=None
+    try:
+        if device_hash(file,end-clock())!=expected:raise AssertionError('Selected staged bytes differ')
+        row['sha256']=expected
+        while clock()<end:
+            f=read();now=clock();kind,who,path=_ci_image_surface(f,product,pixel=True)
+            if now>=end:break
+            action=None;target=None
+            if kind=='application' and owner is None:pass
+            elif kind!='directory' or path not in (parent,child) or owner is not None and owner!=who:raise AssertionError('Outside verified pixel directory or changed window')
+            else:
+                owner=who
+                if origin is None:origin=path
+                if over and path==child and not sent_folder:raise AssertionError('Entered pixel folder without exact observed selection')
+                if not over and origin==child and path==parent and not sent_parent:raise AssertionError('Unverified return to Download')
+                goal=child if over else parent
+                if arrived and path!=goal:raise AssertionError('Left observed goal directory')
+                if path==goal:arrived=True;label=name;desired='CHOOSE'
+                elif over:label=_PIXEL_DIR;desired='FOLDER' if not sent_folder else None
+                else:
+                    # One normal Back only when reopening from the last proven child's breadcrumb.
+                    label=None;desired='PARENT' if not sent_parent else None
+                if desired=='PARENT':action=desired
+                elif desired:
+                    target=_owned_fixture_row(f,who,label,over and arrived)
+                    if target is not None:action=desired
+                    elif path not in mode_pages:
+                        items=[x for x in f if x.get('resource-id')==who+':id/sub_menu_list' and x.get('content-desc')=='List view'];
+                        if len(items)>1:raise AssertionError('Ambiguous layout toggle')
+                        if items and items[0].get('clickable')=='true' and _fixture_rectangle(items[0]):action='LIST';target=items[0]
+            sig=(who,path,action,_fixture_rectangle(target));
+            if sig!=held:held=sig;since=now
+            elif action and now-since>=.15:
+                left=end-clock()
+                if left<=0:break
+                row['actions'].append(action)
+                if action=='FOLDER':sent_folder=True
+                elif action=='PARENT':sent_parent=True
+                elif action=='LIST':mode_pages.add(path)
+                act(action,target,left);held=None
+                if action=='CHOOSE':row['status']='SELECTED_ONCE_NOT_IMPORT_ACCEPTANCE';return True
+            pause(min(.2,max(0,end-clock())))
+        raise TimeoutError('Owned pixel file or JPEG return not verified within original 20s')
+    except Exception as e:row['status']='FAIL';row['error']=type(e).__name__;raise
+
+def _after_bound_pixel(records):
+    return bool(records and records[-1].get('route')=='pixel-v1' and records[-1].get('name')==_PIXEL_OVER and records[-1].get('status')=='SELECTED_ONCE_NOT_IMPORT_ACCEPTANCE' and records[-1].get('sha256')==_PIXEL_HASH and records[-1].get('actions',[])[-1:]==['CHOOSE'])
 
 def _fixture_scroll_box(d,who):
     # Only a single real directory contents widget with multiple owned visible item rows.
@@ -2550,7 +2655,62 @@ def verify_schedule_book_device(adb):
     out=run_database_phase([adb,'-s',SERIAL,'shell','am','instrument','-w','-r','-e','phase','schedule_book_ui','-e','expectedApi',str(API),PKG+'.test/com.supercubegame.pockettodo.V12DeviceTest'],timeout=120,capture=True,phase='schedule-book').stdout
     Path('device-schedule-book.txt').write_text(out);print(out,flush=True);parse(out,API)
 
+def restore_and_bound_pixel_selftest():
+    import copy
+    P='com.supercubegame.pockettodo.v12.preview';S='com.google.android.documentsui';base=(_IMAGE_CANCEL_ROOT,'Download');dig=_PIXEL_HASH;jpg=hashlib.sha256(b'host-only synthetic JPG stand-in').hexdigest();out={}
+    def node(parent=None,**attrs):
+        a={'package':S,'class':'android.view.View','enabled':'true','bounds':'[0,0][320,640]'};a.update(attrs);return ET.Element('node',a) if parent is None else ET.SubElement(parent,'node',a)
+    def restored():return [node(**{'package':P,'class':'android.widget.TextView','content-desc':'v12-status','text':_RESTORED_STATUS}),node(**{'package':P,'class':'android.widget.Button','content-desc':'restore-undo-open','clickable':'true','text':'撤销上次整库恢复…'})]
+    good=restored();assert restored_backup_frame(good,P)
+    for idx,k,v in ((0,'text','已保存到本机'),(1,'text','撤销'),(0,'text','正在恢复…'),(0,'class','android.widget.Button'),(0,'package','com.android.systemui'),(1,'class','android.widget.TextView'),(1,'clickable','false'),(1,'enabled','false'),(0,'bounds','[0,0][0,0]'),(1,'visible-to-user','false')):
+        f=restored();f[idx].set(k,v);assert not restored_backup_frame(f,P)
+    for f in (good[:1],good[1:],good+[good[0]],good+[good[1]],good+[node(**{'package':P,'content-desc':'restore-consent'})]):assert not restored_backup_frame(f,P)
+    def directory(path,names,other=None):
+        root=node();node(root,**{'resource-id':S+':id/toolbar'});h=node(root,**{'resource-id':S+':id/directory_header'});crumb=node(h,**{'resource-id':S+':id/horizontal_breadcrumb'});
+        for part in path:node(crumb,text=part,**{'class':'android.widget.TextView','resource-id':S+':id/breadcrumb_text'})
+        d=node(root,**{'resource-id':S+':id/dir_list','class':'android.widget.GridView','scrollable':'false'});
+        for i,s in enumerate(names):
+            row=node(d,**{'resource-id':S+':id/item_root','clickable':'true','bounds':f'[0,{100+80*i}][320,{178+80*i}]'});node(row,text=s,**{'resource-id':'android:id/title','class':'android.widget.TextView','bounds':f'[4,{110+80*i}][250,{145+80*i}]'})
+        if other:
+            for n in root.iter('node'):n.set('package',other);n.set('resource-id',n.get('resource-id','').replace(S,other))
+        return list(root.iter('node'))
+    pr=directory(base,[_PIXEL_DIR,_PIXEL_NEXT]);ch=directory(base+(_PIXEL_DIR,),[_PIXEL_OVER]);table={};previous=None
+    def attempt(label,name,start,trans,expected_actions,want,mode=None,history=None):
+        clock=[0.];frame=[start];events=[];records=[] if history is None else list(history);paths=[]
+        def read():return frame[0]
+        def act(k,n,remaining):
+            assert k in ('FOLDER','CHOOSE','PARENT','LIST') and 0<remaining<=20
+            if k!='PARENT':assert n is not None
+            if k=='FOLDER':assert n.get('text')==_PIXEL_DIR
+            if k=='CHOOSE':assert n.get('text')==name
+            events.append(k);frame[0]=trans.get(k,frame[0]);
+        exp=dig if name==_PIXEL_OVER else jpg
+        def hashed(path,left):
+            paths.append(path)
+            if mode=='late':clock[0]=20.01
+            return '0'*64 if mode=='wrong_hash' else exp
+        caught=None
+        try:select_bound_pixel(name,read,act,hashed,exp,records,P,34,'emulator-5554',True,lambda:clock[0],lambda n:clock.__setitem__(0,clock[0]+n))
+        except (ValueError,AssertionError,TimeoutError) as e:caught=type(e).__name__
+        assert events==expected_actions and (caught is None)==want,(label,caught,events);assert not want or records[-1]['status']=='SELECTED_ONCE_NOT_IMPORT_ACCEPTANCE'
+        if paths:assert paths==['/sdcard/Download/'+(_PIXEL_DIR+'/' if name==_PIXEL_OVER else '')+name]
+        if caught=='TimeoutError':assert 20<=clock[0]<=20.02
+        table[label]=(caught,events);return records
+    prev=attempt('pick_over',_PIXEL_OVER,pr,{'FOLDER':ch},['FOLDER','CHOOSE'],True)
+    attempt('next_from_child',_PIXEL_NEXT,ch,{'PARENT':pr},['PARENT','CHOOSE'],True,history=prev);attempt('next_from_parent',_PIXEL_NEXT,pr,{},['CHOOSE'],True,history=prev)
+    for label,frame in [('launcher',[node(**{'package':'com.google.android.apps.nexuslauncher'})]),('unknown',directory(('Other',),[_PIXEL_DIR])),('wrong_parent',directory((base[0],'Pictures'),[_PIXEL_DIR])),('duplicate_folder',directory(base,[_PIXEL_DIR,_PIXEL_DIR])),('stale_child',ch),('foreign',directory(base,[_PIXEL_DIR],'test.example'))]:attempt(label,_PIXEL_OVER,frame,{},[],False)
+    for label,second in [('duplicate_file',directory(base+(_PIXEL_DIR,),[_PIXEL_OVER,_PIXEL_OVER])),('unexpected_sibling',directory(base+(_PIXEL_DIR,),[_PIXEL_OVER,'other.png'])),('wrong_child',directory(base+('wrong',),[_PIXEL_OVER])),('wrong_file',directory(base+(_PIXEL_DIR,),['pocket-pixel-limit.png'])),('left_window',[node(**{'package':'com.google.android.apps.nexuslauncher'})]),('never_opened',pr)]:attempt(label,_PIXEL_OVER,pr,{'FOLDER':second},['FOLDER'],False)
+    for attr,bad in [('enabled','false'),('bounds','[0,0][0,0]'),('visible-to-user','false'),('class','android.widget.Button')]:
+        fresh=directory(base+(_PIXEL_DIR,),[_PIXEL_OVER]);[n for n in fresh if n.get('text')==_PIXEL_OVER][0].set(attr,bad);attempt(attr,_PIXEL_OVER,pr,{'FOLDER':fresh},['FOLDER'],False)
+    attempt('hash',_PIXEL_OVER,pr,{},[],False,'wrong_hash');attempt('late',_PIXEL_OVER,pr,{},[],False,'late');attempt('no_previous',_PIXEL_NEXT,pr,{},[],False)
+    attempt('bad_jpeg_return',_PIXEL_NEXT,ch,{'PARENT':directory(base+('wrong',),[_PIXEL_NEXT])},['PARENT'],False,history=prev)
+    assert len(table)==23 and sum(v[0] is None for v in table.values())==3
+    # Every older first-image assertion, including the wrong-file rejection plus exact state, remains below the actual caller.
+    print('RESTORE_ACK_AND_PIXEL_HOST restore=1+15 pixel=3+20; bounded owned states only, not installed Android',flush=True)
+
+
 def parser_selftest():
+    restore_and_bound_pixel_selftest()
     from verify_whole_restore import host_selftest as whole_restore_selftest
     whole_restore_selftest()
     from verify_schedule_book import host_selftest as book_host_selftest
@@ -3142,7 +3302,7 @@ def _verify_native_ui(adb,nodes):
         tap('确认恢复')
         ok(find(text='请先勾选：我明白会替换本机数据') is not None and find(text='确认恢复') is not None,'unchecked consent cannot restore even with visible confirmation control')
         tap('取消'); ready(); import_backup('pocket-todo-backup.zip')
-        touch('restore-consent'); tap('确认恢复'); gone('确认恢复'); ready()
+        touch('restore-consent'); tap('确认恢复'); gone('确认恢复'); await_restore_readback(nodes,PKG)
         tap('今天'); ready()
         ok(absent('After backup') and named_todo('Fresh milk') is not None,'explicit SAF consent replaces data with previewed backup')
         restart()
@@ -3266,6 +3426,8 @@ public class VerifyNotePng {
                 subprocess.run([str(adb),'-s',SERIAL,'shell',*args],timeout=left,check=True)
             assert name in _IMAGE_FIXTURES
             digest=hashlib.sha256((fixture_dir/name).read_bytes()).hexdigest()
+            if choose and (name==_PIXEL_OVER or (name==_PIXEL_NEXT and _after_bound_pixel(image_fixture_navigation))):
+                return select_bound_pixel(name,nodes,act,stage_sha,digest,image_fixture_navigation,PKG,API,SERIAL,os.environ.get('GITHUB_ACTIONS')=='true')
             return select_ci_image(name,choose,nodes,act,stage_sha,digest,image_fixture_navigation,PKG,API,SERIAL,os.environ.get('GITHUB_ACTIONS')=='true')
         def pick_image(name=None):
             tap('加入图片'); tap('从文件选择')
@@ -3363,6 +3525,7 @@ public class ImageImportFixture {
         jpeg=(fixture_dir/'pocket-first.jpg').read_bytes(); jpeg_id=hashlib.sha256(jpeg).hexdigest()
         assert jpeg[:2]==b'\xff\xd8' and len(jpeg)<8*1024*1024,'JPEG fixture must satisfy its independent byte precondition'
         for name in ('pocket-first.jpg','pocket-pixel-limit.png','pocket-pixel-over.png'):
+            if API==34 and name==_PIXEL_OVER:continue  # created in exclusive directory immediately before use
             run([adb,'-s',SERIAL,'push',fixture_dir/name,'/sdcard/Download/'+name])
         start();tap('活动');ready();touch('category-add-1');touch('活动名称');type_text('Image first');tap('保存');ready()
         first_desc=reveal_activity(nodes,swipe_summary,PKG,title='Image first').get('content-desc','')
@@ -3382,6 +3545,7 @@ public class ImageImportFixture {
         ok(cancel_note_picker('first_image'),'canceling first image reports no note change')
         stop();ok(state_read('first-image-cancel.db')==first_base,'first-image cancel creates no orphan note media block or revision')
         for filename,label in [('pocket-broken.png','malformed first image'),('pocket-pixel-over.png','20005000-pixel first image')]:
+            if API==34 and filename==_PIXEL_OVER:stage_pixel_directory(adb,fixture_dir/filename,PKG,API,SERIAL,os.environ.get('GITHUB_ACTIONS')=='true')
             first_screen();pick_image(filename)
             ok(find(**{'content-desc':'v12-status','text':'图片未加入：仅支持有效 PNG/JPEG，最大 8 MiB、2000 万像素、单边 16384'}) is not None,label+' rejected visibly before note creation')
             stop();ok(state_read('first-reject-'+filename+'.db')==first_base,label+' leaves every table unchanged with no orphan note or media registration')

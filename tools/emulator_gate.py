@@ -1122,7 +1122,7 @@ public class Harness extends Base {
   void runBackupExport(Callable<Boolean> save){throw new AssertionError("backup must not replay");}
   void backupCancelled(){throw new AssertionError("backup must not replay");}
   void exportBackup(Path p){throw new AssertionError("backup must not replay");}
-  void backupExported(){}void previewRestore(Path p){throw new AssertionError("restore must not replay");}
+  void backupExported(){}void previewRestore(RestoreScratch.Input source){throw new AssertionError("restore must not replay");}
   void backupFailed(Exception e){throw new AssertionError(e);}
   <T> void work(Callable<T> a,Consumer<T> b,Runnable c){throw new AssertionError("work must not enqueue");}
  }
@@ -1173,21 +1173,26 @@ public class Harness extends Base {
 BACKUP_SAF_HARNESS=r'''
 import java.io.*;import java.nio.file.*;import java.util.*;import java.util.concurrent.Callable;import java.util.function.Consumer;
 class Base {static final int RESULT_OK=-1;protected void onActivityResult(int x,int y,Intent z){}}
-class Uri {String getScheme(){return BackupProbe.mode.equals("bad-scheme")?"other":"content";}}
+class Uri {String getScheme(){return (BackupProbe.mode.equals("bad-scheme")||BackupProbe.mode.equals("restore-foreign"))?"other":"content";}}
 class Intent {final Uri dest=new Uri();Uri getData(){return dest;}}
 public class BackupProbe extends Base {
  static final int EXPORT_BACKUP=41,IMPORT_BACKUP=42,PICK_NOTE_IMAGE=43,EXPORT_NOTES=44;
  static final byte[] fixture=new byte[32785];static {for(int i=0;i<fixture.length;i++)fixture[i]=(byte)(11+37*i);}
+ static RestoreScratch.Input selected;static Uri expectedUri;static int cancellations,handed;
  static Path scratch;static String mode;static int success,failure,readbacks,output,writeClose,readClose,writes,notices,queued;static boolean worker,ioOnMain;static byte[] persisted;
- static class TodayScreen {boolean busy,closed;/*DISPATCH*/void backupCancelled(){throw new AssertionError("cancel inside positive flow");}void exportBackup(Path p)throws IOException{if(!worker)ioOnMain=true;Files.write(p,fixture,StandardOpenOption.CREATE_NEW);}void previewRestore(Path p){throw new AssertionError();}void backupExported(){success++;}void backupFailed(Exception e){failure++;}void message(String s,boolean err){notices++;if(err){if(!(s.contains("另选位置")||s.contains("页面正忙")))throw new AssertionError("misleading failure: "+s);failure++;}}
+ static class TodayScreen {boolean busy,closed;/*DISPATCH*/void backupCancelled(){if(!mode.equals("restore-cancel"))throw new AssertionError("cancel inside positive flow");cancellations++;}void exportBackup(Path p)throws IOException{if(!worker)ioOnMain=true;Files.write(p,fixture,StandardOpenOption.CREATE_NEW);}void previewRestore(RestoreScratch.Input in){if(!mode.startsWith("restore-"))throw new AssertionError("export attempted restore");if(++handed!=1)throw new AssertionError("duplicate handoff");selected=in;}void backupExported(){success++;}void backupFailed(Exception e){failure++;}void message(String s,boolean err){notices++;if(err){if(!(s.contains("另选位置")||s.contains("页面正忙")))throw new AssertionError("misleading failure: "+s);failure++;}}
   <T>void work(Callable<T> op,Consumer<T> done,Runnable fail){queued++;try{T t;worker=true;try{t=op.call();}finally{worker=false;}done.accept(t);}catch(Exception e){fail.run();}}}
  TodayScreen screen=new TodayScreen();int startupRefusal;Consumer<Uri> pendingImage;static class Ticket{void close(){}}Ticket pendingShare;
  boolean isDestroyed(){return false;}boolean isFinishing(){return false;}void finishShare(int r,Intent i){throw new AssertionError();}File getCacheDir(){return scratch.toFile();}
  OutputStream openDestination(Uri u)throws IOException{if(!worker)ioOnMain=true;output++;if(mode.equals("open-write-fail"))throw new IOException("no destination");return new OutputStream(){ByteArrayOutputStream b=new ByteArrayOutputStream();public void write(int x){b.write(x);}public void write(byte[] a,int off,int n)throws IOException{writes++;if(mode.equals("write-fail"))throw new IOException("test write refused");b.write(a,off,n);}public void close()throws IOException{writeClose++;if(mode.equals("close-write-fail"))throw new IOException("test close refused");persisted=b.toByteArray();if(mode.equals("truncated"))persisted=Arrays.copyOf(persisted,persisted.length-1);if(mode.equals("extended"))persisted=Arrays.copyOf(persisted,persisted.length+1);if(mode.equals("changed"))persisted[16384]^=1;}};}
- static class Resolver {InputStream openInputStream(Uri u)throws IOException{if(!worker)ioOnMain=true;readbacks++;if(writeClose!=1)throw new AssertionError("read before writer closed");if(mode.equals("no-read"))throw new IOException("no readback");if(mode.equals("null-read"))return null;return new InputStream(){int at;public int read(){return at==persisted.length?-1:persisted[at++]&255;}public int read(byte[] a,int off,int n)throws IOException{if(mode.equals("read-fail")&&at>0)throw new IOException("test stale target");if(mode.equals("stalled"))return 0;if(at==persisted.length)return -1;int c=Math.min(Math.min(n,503),persisted.length-at);System.arraycopy(persisted,at,a,off,c);at+=c;return c;}public void close()throws IOException{readClose++;if(mode.equals("close-read-fail"))throw new IOException("test read close");}};}}
+ static class Resolver {InputStream openInputStream(Uri u)throws IOException{if(mode.startsWith("restore-")){if(!worker)throw new AssertionError("RESTORE_SOURCE_EAGERLY_OPENED");if(u!=expectedUri)throw new AssertionError("WRONG_SELECTED_URI");readbacks++;if(mode.equals("restore-null"))return null;if(mode.equals("restore-provider-error"))throw new IOException("fixture-provider-refused");return new ByteArrayInputStream(fixture);}if(!worker)ioOnMain=true;readbacks++;if(writeClose!=1)throw new AssertionError("read before writer closed");if(mode.equals("no-read"))throw new IOException("no readback");if(mode.equals("null-read"))return null;return new InputStream(){int at;public int read(){return at==persisted.length?-1:persisted[at++]&255;}public int read(byte[] a,int off,int n)throws IOException{if(mode.equals("read-fail")&&at>0)throw new IOException("test stale target");if(mode.equals("stalled"))return 0;if(at==persisted.length)return -1;int c=Math.min(Math.min(n,503),persisted.length-at);System.arraycopy(persisted,at,a,off,c);at+=c;return c;}public void close()throws IOException{readClose++;if(mode.equals("close-read-fail"))throw new IOException("test read close");}};}}
  Resolver getContentResolver(){return new Resolver();}
  /*ACTUAL*/
- public static void main(String[] args)throws Exception {mode=args[0];scratch=Files.createTempDirectory("backup-readback-");try{BackupProbe h=new BackupProbe();h.screen.busy=mode.equals("busy");h.onActivityResult(EXPORT_BACKUP,RESULT_OK,new Intent());
+ public static void main(String[] args)throws Exception {mode=args[0];scratch=Files.createTempDirectory("backup-readback-");try{BackupProbe h=new BackupProbe();if(mode.startsWith("restore-")){Intent choice=new Intent();expectedUri=choice.getData();h.onActivityResult(IMPORT_BACKUP,mode.equals("restore-cancel")?0:RESULT_OK,choice);
+ if(mode.equals("restore-cancel")){if(cancellations!=1||handed!=0||readbacks!=0||failure!=0||writes!=0)throw new AssertionError("RESTORE_CANCEL_CHANGED_SOURCE");return;}
+ if(mode.equals("restore-foreign")){if(failure!=1||handed!=0||readbacks!=0||writes!=0)throw new AssertionError("RESTORE_WRONG_SCHEME_ACCEPTED");return;}
+ if(handed!=1||selected==null||readbacks!=0||failure!=0||output!=0||writes!=0||success!=0)throw new AssertionError("RESTORE_SOURCE_NOT_DEFERRED");worker=true;try{try(InputStream input=selected.open()){if(mode.equals("restore-provider-error"))throw new AssertionError("hidden refusal");if(mode.equals("restore-null")){if(input!=null)throw new AssertionError("invented stream");}else if(input==null||!Arrays.equals(input.readAllBytes(),fixture))throw new AssertionError("wrong source bytes");}}catch(IOException expected){if(!mode.equals("restore-provider-error")||!"fixture-provider-refused".equals(expected.getMessage()))throw expected;}finally{worker=false;}
+ if(readbacks!=1||success!=0||writes!=0||output!=0)throw new AssertionError("RESTORE_PROVIDER_OWNERSHIP");return;}h.screen.busy=mode.equals("busy");h.onActivityResult(EXPORT_BACKUP,RESULT_OK,new Intent());
  System.out.println(mode+" success="+success+" failure="+failure+" actual="+(persisted==null?-1:persisted.length)+" reads="+readbacks+" expected="+fixture.length+" queued="+queued+" ioOnMain="+ioOnMain);
  boolean good=mode.equals("ok");if(good){if(success!=1||failure!=0||!Arrays.equals(persisted,fixture))throw new AssertionError("valid copy lost");}else if(success!=0||failure!=1)throw new AssertionError("INVALID_COPY_REPORTED_AS_SAVED:"+mode);
  if(mode.equals("busy")||mode.equals("bad-scheme")){if(output!=0||readbacks!=0||queued!=(mode.equals("busy")?0:1))throw new AssertionError("must refuse before IO");}
@@ -1283,8 +1288,10 @@ def result_ui_selftest():
             source=ROOT/'src/main/java/com/supercubegame/pockettodo'/filename
             checked(['java','-cp',tmp,'Extract',str(source),str(root/'members.java'),names])
             extracted[filename]=(root/'members.java').read_text()
+        checked(['java','-cp',tmp,'Extract',str(ROOT/'src/main/java/com/supercubegame/pockettodo/RestoreScratch.java'),str(root/'selected-interface.java'),'Input'])
+        selected_contract='class RestoreScratch{'+(root/'selected-interface.java').read_text()+'}\n'
         def compile_run(members,template,cls,modes):
-            file=root/(cls+'.java');file.write_text(template.replace('/*ACTUAL*/',members))
+            file=root/(cls+'.java');file.write_text(template.replace('/*ACTUAL*/',members)+(selected_contract if cls in ('BackupProbe','Harness') else ''))
             checked(compiler+[str(file)])
             return {mode:subprocess.run(['java','-cp',tmp,cls,mode],capture_output=True,text=True,timeout=10) for mode in modes}
         main=extracted['MainActivity.java'];editor=extracted['TodayScreen.java']
@@ -1301,6 +1308,12 @@ def result_ui_selftest():
             result=compile_run(backup.replace(old,new,1),backup_harness,'BackupProbe',['ok',case])
             assert result['ok'].returncode==0 and result[case].returncode!=0 and 'INVALID_COPY_REPORTED_AS_SAVED' in result[case].stderr,(case,result[case].stderr)
         print('BACKUP_SAF_HOST 14 scenarios and 3 witnessed wrong-success mutants: REAL CALLBACK, SYNTHETIC PROVIDER, NOT DEVICE',flush=True)
+        incoming_modes=['restore-ok','restore-cancel','restore-foreign','restore-null','restore-provider-error']
+        cases=compile_run(backup,backup_harness,'BackupProbe',incoming_modes);assert all(p.returncode==0 for p in cases.values()),{k:v.stderr for k,v in cases.items() if v.returncode}
+        handoff='screen.previewRestore(()->getContentResolver().openInputStream(uri));';guard='if(!"content".equals(uri.getScheme()))throw new IOException("无效的备份来源");'
+        for old,new,mode,witness in [(handoff,';','restore-ok','RESTORE_SOURCE_NOT_DEFERRED'),(guard,';','restore-foreign','RESTORE_WRONG_SCHEME_ACCEPTED'),(handoff,'getContentResolver().openInputStream(uri);'+handoff,'restore-ok','RESTORE_SOURCE_EAGERLY_OPENED'),(handoff,handoff.replace('openInputStream(uri)','openInputStream(null)'),'restore-ok','WRONG_SELECTED_URI')]:
+            assert backup.count(old)==1;w=compile_run(backup.replace(old,new,1),backup_harness,'BackupProbe',['ok',mode]);assert w['ok'].returncode==0 and w[mode].returncode!=0 and witness in w[mode].stderr,(witness,w[mode].stderr)
+        print('RESTORE_CHOSEN_HANDOFF_HOST 5 provider cases and 4 witnessed wrong versions; no Android UI or process-death claim',flush=True)
         scenarios=['ready','delayed','image','backup','import','unknown','destroyed','finishing','ticket']
         results=compile_run(main,RESULT_UI_HARNESS,'Harness',scenarios)
         assert all(p.returncode==0 for p in results.values()),{k:p.stderr for k,p in results.items() if p.returncode}
@@ -2520,6 +2533,12 @@ def verify_oriented_photo_device(adb):
     out=run_database_phase([adb,'-s',SERIAL,'shell','am','instrument','-w','-r','-e','phase','oriented_photo','-e','expectedApi',str(API),PKG+'.test/com.supercubegame.pockettodo.V12DeviceTest'],timeout=120,capture=True,phase='oriented-photo').stdout
     Path('device-oriented-photo.txt').write_text(out);print(out,flush=True);parse_receipt(out,API)
 
+def verify_whole_restore_device(adb,phase):
+    from verify_whole_restore import parse,stage
+    if phase=='whole_restore_undo':stage(adb,SERIAL,API,PKG)
+    out=run_database_phase([adb,'-s',SERIAL,'shell','am','instrument','-w','-r','-e','phase',phase,'-e','expectedApi',str(API),PKG+'.test/com.supercubegame.pockettodo.V12DeviceTest'],timeout=180,capture=True,phase=phase.replace('_','-')).stdout
+    Path('device-'+phase.replace('_','-')+'.txt').write_text(out);print(out,flush=True);parse(out,API,phase)
+
 def verify_ledger_changes_device(adb):
     from verify_ledger_changes import parse
     out=run_database_phase([adb,'-s',SERIAL,'shell','am','instrument','-w','-r','-e','phase','ledger_changes','-e','expectedApi',str(API),PKG+'.test/com.supercubegame.pockettodo.V12DeviceTest'],timeout=120,capture=True,phase='ledger-changes').stdout
@@ -2532,6 +2551,8 @@ def verify_schedule_book_device(adb):
     Path('device-schedule-book.txt').write_text(out);print(out,flush=True);parse(out,API)
 
 def parser_selftest():
+    from verify_whole_restore import host_selftest as whole_restore_selftest
+    whole_restore_selftest()
     from verify_schedule_book import host_selftest as book_host_selftest
     book_host_selftest()
     from verify_activity_schedules import host_selftest as activity_schedule_host_selftest
@@ -2667,6 +2688,10 @@ def verify_database(adb):
     try:verify_ledger_changes_device(adb)
     except Exception as exc:
         amend_error=exc;print('LEDGER_CHANGES_PHASE_NOT_ACCEPTED '+repr(exc),flush=True)
+    whole_errors=[]
+    for whole_phase in ('whole_restore_model','whole_restore_undo'):
+        try:verify_whole_restore_device(adb,whole_phase)
+        except Exception as exc:whole_errors.append(exc);print('WHOLE_RESTORE_PHASE_NOT_ACCEPTED '+whole_phase+' '+repr(exc),flush=True)
     legacy_public_fixture(adb)
     results = {}
     for phase in ('seed', 'reopen'):
@@ -2688,6 +2713,7 @@ def verify_database(adb):
     if schedule_error is not None:raise schedule_error
     if book_error is not None:raise book_error
     if amend_error is not None:raise amend_error
+    if whole_errors:raise whole_errors[0]
 
 def derivative_checker():
     """Compile and prove the actual pixel oracle before slow native UI work."""

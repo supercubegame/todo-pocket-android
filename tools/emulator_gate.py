@@ -2472,12 +2472,19 @@ def activity_template_host_selftest():
         raise AssertionError('false template acceptance')
     print('ACTIVITY_TEMPLATE_HOST source/inserts/ordered children and rollback, %d invalid receipts rejected; not a device'%len(invalid),flush=True)
 
+def verify_activity_schedule_device(adb):
+    from verify_activity_schedules import parse
+    output=run_database_phase([adb,'-s',SERIAL,'shell','am','instrument','-w','-r','-e','phase','activity_schedule','-e','expectedApi',str(API),PKG+'.test/com.supercubegame.pockettodo.V12DeviceTest'],timeout=120,capture=True,phase='activity-schedule').stdout
+    print(output,flush=True);Path('device-activity-schedule.txt').write_text(output);parse(output,API)
+
 def verify_oriented_photo_device(adb):
     from verify_oriented_photos import parse_receipt
     out=run_database_phase([adb,'-s',SERIAL,'shell','am','instrument','-w','-r','-e','phase','oriented_photo','-e','expectedApi',str(API),PKG+'.test/com.supercubegame.pockettodo.V12DeviceTest'],timeout=120,capture=True,phase='oriented-photo').stdout
     Path('device-oriented-photo.txt').write_text(out);print(out,flush=True);parse_receipt(out,API)
 
 def parser_selftest():
+    from verify_activity_schedules import host_selftest as activity_schedule_host_selftest
+    activity_schedule_host_selftest()
     from verify_oriented_photos import host_selftest as oriented_photo_host_selftest
     oriented_photo_host_selftest()
     activity_template_host_selftest()
@@ -2595,6 +2602,10 @@ def verify_database(adb):
     try:verify_oriented_photo_device(adb)
     except Exception as exc:
         photo_error=exc;print('ORIENTED_PHOTO_PHASE_NOT_ACCEPTED '+repr(exc),flush=True)
+    schedule_error=None
+    try:verify_activity_schedule_device(adb)
+    except Exception as exc:
+        schedule_error=exc;print('ACTIVITY_SCHEDULE_PHASE_NOT_ACCEPTED '+repr(exc),flush=True)
     legacy_public_fixture(adb)
     results = {}
     for phase in ('seed', 'reopen'):
@@ -2613,6 +2624,7 @@ def verify_database(adb):
     if search_error is not None:raise search_error
     if template_error is not None:raise template_error
     if photo_error is not None:raise photo_error
+    if schedule_error is not None:raise schedule_error
 
 def derivative_checker():
     """Compile and prove the actual pixel oracle before slow native UI work."""

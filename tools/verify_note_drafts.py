@@ -534,8 +534,8 @@ public class DraftUiContract {
   void setPadding(int a,int b,int c,int d){}
   void addView(Object x){children.add(x);}
   void addView(Object x,int at){children.add(at,x);}
-  void addView(Object x,LayoutParams p){children.add(x);}
-  static final class LayoutParams{LayoutParams(int w,int h){}}
+  final Map<Object,LayoutParams> sizes=new IdentityHashMap<>(); void addView(Object x,LayoutParams p){children.add(x);sizes.put(x,p);}
+  static final class LayoutParams{static final int WRAP_CONTENT=-2; final int w,h; LayoutParams(int w,int h){this.w=w;this.h=h;}}
  }
  static final class ScrollView {
   Object child; ScrollView(Object activity){}
@@ -607,6 +607,7 @@ public class DraftUiContract {
  }
  final TodayScreen host=new TodayScreen();
  void load(){host.loads++;}
+ static final class MainActivity {static void observeDraftFontDialog(AlertDialog d){}}
  // ACTUAL_METHOD
  static int count;
  static void ok(boolean x,String label){if(!x)throw new AssertionError(label);count++;System.out.println("DRAFT_UI_PASS "+label);}
@@ -630,6 +631,9 @@ public class DraftUiContract {
  }
  public static void main(String[] args){
   Fixture f=new Fixture(null);
+  for(Button action:new Button[]{f.save,f.recover,f.discard}){LinearLayout.LayoutParams p=f.body.sizes.get(action);
+   if(p==null||p.w!=-1||p.h!=LinearLayout.LayoutParams.WRAP_CONTENT)throw new AssertionError("draft actions wrap content");}
+  System.out.println("DRAFT_ACTIONS_WRAP all 3 actual callbacks; host layout policy only");
   ok(f.body.children.get(0)==f.status&&f.body.children.get(1)==f.input,"feedback_before_input");
   ok(f.d.window.softInputMode==16,"resize_window");
   ok(f.input.text.equals("body")&&f.untouched(),"canonical_initial_no_autorestore");
@@ -736,6 +740,11 @@ def ui_model_selftest():
             result = build(actual.replace(before, after, 1), "negative-"+str(index))
             assert result.returncode != 0 and "AssertionError: "+expected in result.stderr, (
                 "UI mutant survived or wrong failure", expected, result.stdout, result.stderr)
+        anchor="for(Button b:new Button[]{save,recover,discard})body.addView(b,new LinearLayout.LayoutParams(-1,LinearLayout.LayoutParams.WRAP_CONTENT));"
+        assert actual.count(anchor)==1 and "DRAFT_ACTIONS_WRAP all 3 actual callbacks; host layout policy only" in run.stdout
+        for tag,mutant in [("exact",anchor.replace("LinearLayout.LayoutParams.WRAP_CONTENT","host.dp(48)")),("only-two",anchor.replace("save,recover,discard","save,recover"))]:
+            wrong=build(actual.replace(anchor,mutant,1),"wrong-height-"+tag)
+            assert wrong.returncode!=0 and ("draft actions wrap content" in wrong.stderr or "missing control note-draft-discard" in wrong.stderr)
         result = {"status": "PASS", "checks": len(labels), "labels": labels,
                   "compiled_ui_mutants": len(mutations),
                   "scope": "ACTUAL_JAVA_UI_METHOD_MODELED_WIDGETS_SESSION_NOT_ANDROID_GEOMETRY_OR_DB",
@@ -1065,6 +1074,16 @@ def device_android():
         def installed():
             return installed_readback(run,prefix,gate.PKG,product,result.setdefault("installed_readbacks",[]))
         assert installed()==product
+        # Run actual font/IME checks before any extra temporary runner build, on the already verified default test APK.
+        # If the owned emulator settings were restored, retain even a failing font matrix and let the original independent tests run.
+        from verify_draft_font import device as run_draft_font
+        font_error=None
+        try:result["font_device"]=run_draft_font(adb,gate.SERIAL,gate.PKG,gate.API,out)
+        except Exception as exc:
+            font_error=exc;raw=out/"font-matrix.json"
+            if not raw.is_file():raise
+            evidence=json.loads(raw.read_text());result["font_device"]=evidence
+            if evidence.get("restored")!={"font_scale":True,"show_ime_with_hard_keyboard":True}:raise
         key=debug_key(cert)
         nonce=result["run_id"]+"-"+result["run_attempt"]+"-"+str(gate.API)
         assert re.fullmatch(r"[0-9]+-[0-9]+-(26|34)",nonce)
@@ -1110,6 +1129,7 @@ def device_android():
                 require_registration(adb,gate,"draft-restored","V12DeviceTest")
                 assert app.read_bytes()==product and test.read_bytes()==saved and installed()==product
         result.update(product_readback="EXACT_BEFORE_AND_AFTER",default_test_restored=True,diagnostic_failure_rejected=True)
+        if font_error is not None:raise font_error
     old_database,old_native=gate.verify_database,gate.verify_native_ui
     try:
         gate.verify_database=verify
@@ -1216,6 +1236,8 @@ if __name__ == "__main__":
         selftest()
         session_selftest()
         ui_model_selftest()
+        from verify_draft_font import host as font_host
+        font_host()
         device_observer_selftest()
         installed_pull_selftest()
     elif sys.argv[1:] == ["android"]:

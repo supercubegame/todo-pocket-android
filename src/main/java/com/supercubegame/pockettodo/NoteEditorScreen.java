@@ -179,9 +179,9 @@ public final class NoteEditorScreen {
     private final String title;
     private final Runnable back;
     // Selection belongs to this screen instance; a fresh screen defaults to the first note.
-    private String selectedNote;
+    private String selectedNote,displayedNote,displayedTail;private int displayedPage,displayedCount;
     private static final class State {
-        String noteId;
+        String noteId;NoteThumbnailLoad.Page page;
         final List<String> ids=new ArrayList<>(),titles=new ArrayList<>();
         final List<NoteDocument.Block> blocks=new ArrayList<>();
         MediaRepository media;
@@ -194,23 +194,34 @@ public final class NoteEditorScreen {
         selectedNote=noteId;
         load();
     }
+    /** Select by owner and stable ID before any presentation work. This lookup never decodes media. */
     void load(){
         final String requested=selectedNote;
         host.work(()->{
             State s=new State();
-            s.media=new MediaRepository(host.activity.getFilesDir().toPath().resolve("media"),64L*1024*1024);
             try(Cursor c=host.db.getReadableDatabase().rawQuery("SELECT id,title FROM notes WHERE activity_id=? ORDER BY rowid",new String[]{Long.toString(activityId)})){while(c.moveToNext()){s.ids.add(c.getString(0));s.titles.add(c.getString(1));}}
             if(requested!=null&&!s.ids.contains(requested))throw new IllegalStateException("所选笔记已不存在，请返回活动重新打开");
             if(!s.ids.isEmpty()){s.noteId=requested==null?s.ids.get(0):requested;s.blocks.addAll(host.db.noteBlocks(s.noteId));}
-            for(NoteDocument.Block b:s.blocks)if(b.kind==NoteDocument.Kind.IMAGE){
-                try{s.previews.put(b.id,decodePreview(s.media.path(b.assetId)));}
-                catch(IOException ignored){/* Render an explicit unavailable marker, never a fake image. */}
-            }
             return s;
         },this::render,null);
     }
     private void render(State s){
-        selectedNote=s.noteId;
+        boolean same=java.util.Objects.equals(displayedNote,s.noteId);int page=same?displayedPage:0;
+        if(same&&displayedCount>0&&s.blocks.size()>displayedCount&&java.util.Objects.equals(displayedTail,s.blocks.get(displayedCount-1).id))page=Integer.MAX_VALUE;
+        preparePage(s,page,false);
+    }
+    /** Turn pages on the loaded full-note snapshot. Mutations reload the complete note. Each page owns newly read display buffers. */
+    private void preparePage(final State full,final int wanted,final boolean navigation){
+        host.work(()->{
+            State s=new State();s.noteId=full.noteId;s.ids.addAll(full.ids);s.titles.addAll(full.titles);s.blocks.addAll(full.blocks);
+            s.media=new MediaRepository(MainActivity.noteDisplayMedia(host.activity),64L*1024*1024);
+            s.page=NoteThumbnailLoad.page(s.blocks,wanted);
+            s.previews.putAll(NoteThumbnailLoad.read(s.page.blocks,id->displayBitmap(decodePreview(s.media.path(id)))));
+            return s;
+        },s->{drawPage(s);if(navigation)host.message("已切换预览页，笔记内容未修改。",false);},null);
+    }
+    private void drawPage(State s){
+        selectedNote=displayedNote=s.noteId;displayedPage=s.page.index;displayedCount=s.blocks.size();displayedTail=displayedCount==0?null:s.blocks.get(displayedCount-1).id;
         LinearLayout body=host.content();
         LinearLayout header=new LinearLayout(host.activity);
         header.addView(host.button("返回活动",back),new LinearLayout.LayoutParams(0,host.dp(48),1));
@@ -222,10 +233,14 @@ public final class NoteEditorScreen {
         LinearLayout actions=new LinearLayout(host.activity);
         actions.addView(host.button("加入文字",()->editText(s,null)),new LinearLayout.LayoutParams(0,host.dp(48),1));
         actions.addView(host.button("加入图片",()->addImage(s)),new LinearLayout.LayoutParams(0,host.dp(48),1));body.addView(actions);
+        if(s.page.count>1){LinearLayout pager=new LinearLayout(host.activity);
+            Button prev=host.button("上一页",()->{}),next=host.button("下一页",()->{});prev.setContentDescription("note-block-page-prev");next.setContentDescription("note-block-page-next");
+            TextView info=host.text("第 "+(s.page.index+1)+" / "+s.page.count+" 页，内容块 "+(s.page.first+1)+" 至 "+s.page.end+"（共 "+s.blocks.size()+"）",14,TodayScreen.MUTED);info.setContentDescription("note-block-page-info");
+            pager.addView(prev,new LinearLayout.LayoutParams(-2,-2));pager.addView(info,new LinearLayout.LayoutParams(0,-2,1));pager.addView(next,new LinearLayout.LayoutParams(-2,-2));body.addView(pager);
+            prev.setEnabled(s.page.index>0);next.setEnabled(s.page.index+1<s.page.count);prev.setOnClickListener(v->turnPage(s,prev,-1));next.setOnClickListener(v->turnPage(s,next,1));}
         ScrollView scroll=new ScrollView(host.activity);LinearLayout list=host.column();scroll.addView(list);body.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         if(s.blocks.isEmpty()){TextView empty=host.text("写点什么，或加一张图。",18,TodayScreen.MUTED);empty.setPadding(0,host.dp(24),0,0);list.addView(empty);}
-        for(int i=0;i<s.blocks.size();i++){
-            NoteDocument.Block b=s.blocks.get(i);
+        for(NoteDocument.Block b:s.page.blocks){
             if(b.kind==NoteDocument.Kind.TEXT){
                 TextView text=host.text(b.text,17,TodayScreen.INK);text.setContentDescription("note-text-"+b.id);text.setPadding(host.dp(10),host.dp(10),host.dp(10),host.dp(10));text.setBackground(host.shape(TodayScreen.WHITE,10));list.addView(text);
                 Button edit=host.button("修改文字",()->editText(s,b.id));edit.setContentDescription("note-edit-"+b.id);
@@ -248,11 +263,15 @@ public final class NoteEditorScreen {
             }
         }
     }
+    private void turnPage(State s,Button sender,int step){int dest=s.page.index+step;
+        if(!sender.isEnabled()||!sender.isAttachedToWindow()||!java.util.Objects.equals(selectedNote,s.noteId)||displayedPage!=s.page.index||dest<0||dest>=s.page.count)return;
+        preparePage(s,dest,true);
+    }
     private void chooseNote(State s){
         String[] labels=new String[s.ids.size()];
         for(int i=0;i<labels.length;i++)labels[i]=(i+1)+". "+s.titles.get(i);
         new AlertDialog.Builder(host.activity).setTitle("选择笔记").setItems(labels,(dialog,which)->{
-            selectedNote=s.ids.get(which);load();
+            displayedNote=null;displayedPage=displayedCount=0;displayedTail=null;load(s.ids.get(which));
         }).setNegativeButton("取消",null).show();
     }
     /** Creating an explicitly named empty note is intentional; cancel and blank never write.
@@ -267,7 +286,7 @@ public final class NoteEditorScreen {
             if(value.isEmpty()){validation.setText("笔记标题不能为空");validation.setTextColor(TodayScreen.ERROR);return;}
             String id=UUID.randomUUID().toString();
             dialog.setCancelable(false);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(false);field.setEnabled(false);
-            host.work(()->{host.db.createNote(id,activityId,value);return id;},created->{selectedNote=created;dialog.dismiss();load();},()->{
+            host.work(()->{host.db.createNote(id,activityId,value);return id;},created->{dialog.dismiss();load(created);},()->{
                 dialog.setCancelable(true);dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(true);field.setEnabled(true);validation.setText("未能创建，请重试");validation.setTextColor(TodayScreen.ERROR);
             });
         }));
@@ -288,7 +307,11 @@ public final class NoteEditorScreen {
     }
     private void showTextDraft(TextDraftSession session){
         LinearLayout body=host.column();body.setPadding(host.dp(20),host.dp(4),host.dp(20),host.dp(8));
-        EditText field=host.field("文字内容",true);field.setText(session.initial);
+        EditText field=host.field("文字内容",true);
+        // A short draft needn't reserve three double-height blank lines on a narrow phone. Long input still grows to the original six lines and scrolls.
+        int widthDp=field.getResources().getConfiguration().screenWidthDp;
+        if(widthDp>0&&widthDp<=360&&field.getResources().getConfiguration().fontScale>=2.0f)field.setMinLines(2);
+        field.setText(session.initial);
         body.addView(field,new LinearLayout.LayoutParams(-1,-2));
         TextView hint=host.text("草稿仅在点击「存草稿」后保留在本机，不进入完整备份，卸载会丢失。取消不会自动保存或丢弃草稿。",14,TodayScreen.MUTED);
         hint.setContentDescription("note-draft-help");
@@ -628,6 +651,15 @@ public final class NoteEditorScreen {
     static int[] visualSize(Path path)throws IOException{
         android.graphics.BitmapFactory.Options header=bounds(path);int o=displayDirection(path,header);
         return new int[]{ShareExporter.visualWidth(header.outWidth,header.outHeight,o),ShareExporter.visualHeight(header.outWidth,header.outHeight,o)};
+    }
+    /** A decoded display buffer may be reused by multiple rows. Do not publish or recycle a mutable bitmap held by a row. */
+    static android.graphics.Bitmap displayBitmap(android.graphics.Bitmap decoded)throws IOException{
+        if(decoded==null||decoded.isRecycled())throw new IOException("缩略图不可用");
+        if(!decoded.isMutable())return decoded;
+        try{android.graphics.Bitmap copy=decoded.copy(android.graphics.Bitmap.Config.ARGB_8888,false);
+            if(copy==null||copy==decoded)throw new IOException("无法生成只读缩略图");
+            if(copy.isMutable()||copy.getWidth()!=decoded.getWidth()||copy.getHeight()!=decoded.getHeight()||copy.getAllocationByteCount()>4*PREVIEW_EDGE*PREVIEW_EDGE){copy.recycle();throw new IOException("缩略图超出显示预算");}return copy;
+        }finally{decoded.recycle();}
     }
     static android.graphics.Bitmap decodePreview(Path path)throws IOException{
         android.graphics.BitmapFactory.Options header=bounds(path);int direction=displayDirection(path,header);

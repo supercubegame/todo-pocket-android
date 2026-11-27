@@ -21,6 +21,10 @@ public final class MainActivity extends Activity {
     static volatile boolean isolatedScheduleBookTest; // same-process instrumentation only, never read from Intent or preferences
     // Same-process instrumentation only. No intent, external path or preference can select this database.
     // Same-process test observer, no Intent, provider, preference, permission or external path. Normal users retain no references.
+    // Fixed, private instrumentation fixture only; never selected by a preference, IPC or Intent extra.
+    static volatile boolean isolatedNoteThumbnailTest;
+    static final String THUMB_DB="note-thumbs-ui-ci.db", THUMB_MEDIA="note-thumbs-ui-ci-media";
+    static java.nio.file.Path noteDisplayMedia(android.app.Activity owner){return owner.getFilesDir().toPath().resolve(owner instanceof MainActivity && isolatedNoteThumbnailTest ? THUMB_MEDIA : "media");}
     static volatile int isolatedDraftFontScale;
     static volatile java.lang.ref.WeakReference<android.app.AlertDialog> draftFontDialog;
     static String draftFontDb(int scale){switch(scale){case 100:return "draft-font-100-ci.db";case 130:return "draft-font-130-ci.db";case 200:return "draft-font-200-ci.db";default:throw new IllegalArgumentException("unknown synthetic font");}}
@@ -49,6 +53,8 @@ public final class MainActivity extends Activity {
     }else if(isolatedShortcutTest){
         screen=new TodayScreen(this,AppDatabase.openSchema4(this,"schema4-ui.db"));
         Bundle isolated=new Bundle();isolated.putInt("page",1);screen.show(isolated);
+    }else if(isolatedNoteThumbnailTest){
+        screen=new TodayScreen(this,AppDatabase.openSchema4(this,THUMB_DB));Bundle isolated=new Bundle();isolated.putInt("page",1);screen.show(isolated);
     }else if(isolatedDraftFontScale!=0){
         screen=new TodayScreen(this,AppDatabase.openSchema4(this,draftFontDb(isolatedDraftFontScale)));Bundle isolated=new Bundle();isolated.putInt("page",1);screen.show(isolated);
     }else if(isolatedCategoryImpactTest){

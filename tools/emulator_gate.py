@@ -2228,6 +2228,79 @@ _IMAGE_CANCEL_ROOT='sdk_gphone64_x86_64'
 _IMAGE_CANCEL_FOLDER='pocket-append-ci-api34'
 _IMAGE_CANCEL_TEXT='已取消选图，没有改变笔记'
 
+# This one API26 first-image fixture was seen twice outside the visible Downloads rows.
+# Never navigate to another provider, guess a row or touch product data. Only the existing
+# 9-byte CI fixture's mtime changes before opening; proof of rejection still comes from the app + SQLite.
+_B26_NAME='pocket-broken.png'
+_B26_PATH='/sdcard/Download/'+_B26_NAME
+_B26_DATA=b'not a PNG'
+_B26_SHA=hashlib.sha256(_B26_DATA).hexdigest()
+
+def _b26_scope(pkg,api,serial,ci):
+    if (pkg,api,serial,ci)!=('com.supercubegame.pockettodo.v12.preview',26,'emulator-5554',True):raise ValueError('Not the owned API26 first-image fixture')
+
+def _b26_sum(call):
+    if call('sha256sum',_B26_PATH).split()!=[_B26_SHA,_B26_PATH]:raise AssertionError('Wrong staged malformed fixture')
+
+def prepare_broken26(call,local,records,pkg,api,serial,ci):
+    _b26_scope(pkg,api,serial,ci)
+    if local.name!=_B26_NAME or local.read_bytes()!=_B26_DATA:raise ValueError('Wrong original malformed test input')
+    trace={'route':'first-malformed-26-v1','name':_B26_NAME,'actions':[],'status':'PREPARING'};records.append(trace)
+    try:
+        if call('getprop','ro.kernel.qemu').strip()!='1':raise AssertionError('Not an emulator')
+        call('test','-f',_B26_PATH);call('test','!','-L',_B26_PATH);_b26_sum(call)
+        dates=[int(s) for s in call('stat','-c','%Y',_B26_PATH,'/sdcard/Download/pocket-first.jpg','/sdcard/Download/pocket-pixel-limit.png','/sdcard/Download/pocket-pixel-over.png').splitlines()];assert len(dates)==4
+        call('touch','-c',_B26_PATH) # does not create, change bytes or delete anything
+        _b26_sum(call);after=int(call('stat','-c','%Y',_B26_PATH).strip());trace.update(before_mtime=dates[0],after_mtime=after,sibling_mtimes=dates[1:],sha256=_B26_SHA)
+        if after<=max(dates):raise AssertionError('Own malformed fixture not promoted above the staged boundary files')
+        trace['status']='STAGED';return trace
+    except Exception as e:trace.update(status='FAIL',error=type(e).__name__);raise
+
+def broken26_title(frame):
+    p='com.android.documentsui';rid=lambda k:p+':id/'+k
+    if not frame or {n.get('package') for n in frame}!={p}:raise AssertionError('Not the API26 DocumentsUI window')
+    if any(n.get('resource-id') in ('android:id/aerr_close','android:id/alertTitle','android:id/button1',rid('search_src_text')) for n in frame):raise AssertionError('Not the normal Downloads list')
+    def unique(where,k,cl):
+        hits=[n for n in where if n.get('resource-id')==rid(k)]
+        if len(hits)!=1 or hits[0].get('class')!=cl or not _fixture_rectangle(hits[0]):raise AssertionError('Missing or ambiguous '+k)
+        return hits[0]
+    bar=unique(frame,'toolbar','android.view.ViewGroup');titles=[n.get('text') for n in bar.iter('node') if n.get('class')=='android.widget.TextView' and not n.get('resource-id') and _fixture_rectangle(n)];
+    if titles!=['Downloads'] or unique(bar.iter('node'),'menu_grid','android.widget.TextView').get('content-desc')!='Grid view':raise AssertionError('Not the Downloads list-view toolbar')
+    if unique(frame,'sort_dimen_dropdown','android.widget.TextView').get('text')!='Modified' or unique(frame,'sort_arrow','android.widget.ImageView').get('content-desc')!='Descending':raise AssertionError('Unexpected fixture ordering')
+    grid=unique(frame,'dir_list','android.support.v7.widget.RecyclerView'); region=_fixture_rectangle(grid)
+    exact=[n for n in frame if n.get('text')==_B26_NAME];inside=[]
+    for row in list(grid):
+        hits=[n for n in row.iter('node') if n.get('resource-id')=='android:id/title' and n.get('class')=='android.widget.TextView' and n.get('text')==_B26_NAME];
+        if not hits:continue
+        if len(hits)!=1 or row.get('class')!='android.widget.LinearLayout' or not _fixture_rectangle(row):raise AssertionError('Ambiguous or disabled list row')
+        t=hits[0];box=_fixture_rectangle(t);parent=_fixture_rectangle(row);size=[s for s in row.iter('node') if s.get('resource-id')==rid('size') and s.get('class')=='android.widget.TextView' and _fixture_rectangle(s)]
+        if len(size)!=1 or re.fullmatch(r'9(?:[.,]0+)?\s*(?:B|bytes?)',size[0].get('text','').strip(),re.I) is None or not box or any(not(o[0]<=box[0]<box[2]<=o[2] and o[1]<=box[1]<box[3]<=o[3]) for o in (region,parent)):raise AssertionError('File row or visible title not verified')
+        inside.append(t)
+    if len(inside)!=len(exact) or len(inside)>1:raise AssertionError('Duplicate name or title outside owned list')
+    return inside[0] if inside else None
+
+def choose_broken26(read,sha,tap,trace,pkg,api,serial,ci,clock=time.monotonic,pause=time.sleep):
+    _b26_scope(pkg,api,serial,ci)
+    if trace.get('route')!='first-malformed-26-v1' or trace.get('name')!=_B26_NAME or trace.get('sha256')!=_B26_SHA or trace.get('status')!='STAGED' or trace.get('actions')!=[]:raise ValueError('No single fresh preparation')
+    end=clock()+20;seen_picker=False;key=None;trace['status']='OBSERVING';trace['samples']=0
+    try:
+        if sha(_B26_PATH,end-clock())!=_B26_SHA:raise AssertionError('Changed staged file')
+        while clock()<end:
+            f=read();now=clock();trace['samples']+=1
+            if now>=end:break
+            if f and {n.get('package') for n in f}=={pkg} and not seen_picker:pass
+            else:
+                t=broken26_title(f);seen_picker=True;box=_fixture_rectangle(t) if t is not None else None
+                if box is not None and box==key:
+                    if sha(_B26_PATH,end-clock())!=_B26_SHA:raise AssertionError('Staged file changed before select')
+                    left=end-clock()
+                    if left<=0:break
+                    trace['actions'].append('CHOOSE');tap(t,left);trace['status']='TARGET_SELECTED';return
+                key=box
+            pause(min(.15,max(0,end-clock())))
+        raise TimeoutError('The exact CI malformed file was not confirmed visible within 20s')
+    except Exception as e:trace.update(status='FAIL',error=type(e).__name__);raise
+
 def _ci_image_surface(frame,product,*,pixel=False):
     system={'com.android.documentsui','com.google.android.documentsui'}
     def live(n):
@@ -2728,7 +2801,73 @@ def restore_and_bound_pixel_selftest():
     print('RESTORE_ACK_AND_PIXEL_HOST restore=1+15 pixel=3+20; bounded owned states only, not installed Android',flush=True)
 
 
+def broken26_host():
+    import copy,tempfile
+    scope=('com.supercubegame.pockettodo.v12.preview',26,'emulator-5554',True);d='com.android.documentsui';rid=lambda s:d+':id/'+s
+    def node(c,i='',text='',bounds='[0,0][320,600]',**a):return ET.Element('node',dict({'class':c,'resource-id':i,'package':d,'text':text,'bounds':bounds,'enabled':'true'},**a))
+    def frame(visible):
+        root=node('android.widget.FrameLayout');bar=node('android.view.ViewGroup',rid('toolbar'));root.append(bar);bar.append(node('android.widget.TextView',text='Downloads'));bar.append(node('android.widget.TextView',rid('menu_grid'),**{'content-desc':'Grid view'}));root.append(node('android.widget.TextView',rid('sort_dimen_dropdown'),'Modified'));root.append(node('android.widget.ImageView',rid('sort_arrow'),**{'content-desc':'Descending'}));grid=node('android.support.v7.widget.RecyclerView',rid('dir_list'),bounds='[0,140][320,640]');root.append(grid)
+        row=node('android.widget.LinearLayout',bounds='[0,356][320,428]');grid.append(row);row.append(node('android.widget.TextView','android:id/title',_B26_NAME if visible else 'pocket-large.png',bounds='[76,372][205,394]'));row.append(node('android.widget.TextView',rid('size'),'9 B',bounds='[170,395][210,412]'));return root
+    class Clock:
+        x=0.
+        def now(self):return self.x
+        def sleep(self,x):self.x+=x
+    with tempfile.TemporaryDirectory() as dir:
+        file=Path(dir)/_B26_NAME;file.write_bytes(_B26_DATA);counts={}
+        def run(case,success):
+            log=[];trace=[];c=Clock();h=[0];bad=[];actual_pkg,api,serial,ci=scope
+            if case=='wrong_api':api=34
+            elif case=='non_ci':ci=False
+            elif case=='wrong_serial':serial='other'
+            elif case=='wrong_pkg':actual_pkg='other'
+            def cmd(*args):
+                log.append(args);verb=args[0]
+                if verb=='getprop':return '0' if case=='hardware' else '1'
+                if verb=='test':
+                    if case=='symlink' and '!' in args:raise ValueError('symbolic fixture')
+                    return ''
+                if verb=='touch':assert args==('touch','-c',_B26_PATH);return ''
+                if verb=='stat':return '8\n11\n12\n13\n' if len(args)>4 else ('13' if case=='mtime' else '16')
+                if verb=='sha256sum':
+                    h[0]+=1;return ('0'*64 if case=='wrong_stage' or (case=='post_content' and h[0]==2) else _B26_SHA)+'  '+_B26_PATH
+                raise AssertionError(args)
+            files=(_B26_DATA if case!='bad_local' else b'not ours');file.write_bytes(files);roots=[frame(v) for v in ((True,True) if case=='direct' else (False,True,True))];r=roots[-1];row=list(r)[-1][0];target=row[0]
+            if case=='foreign':r.set('package','other')
+            if case=='wrong_folder':r[0][0].set('text','Recent')
+            if case=='sort':r[1].set('text','Name')
+            if case=='grid':r[0][1].set('content-desc','List view')
+            if case=='bad_size':row[1].set('text','8.39 MB')
+            if case=='outofbounds':target.set('bounds','[76,625][205,670]')
+            if case=='disabled':target.set('enabled','false')
+            if case=='dup':r[-1].append(copy.deepcopy(row))
+            if case=='outside':r.append(copy.deepcopy(target))
+            if case=='alert':r.append(node('android.widget.TextView','android:id/alertTitle'))
+            if case=='missing':roots=[frame(False)]
+            if case=='changed_before_stable':roots=[frame(True),frame(False)]
+            if case=='hash_on_pick':bad=[_B26_SHA,'0'*64]
+            if case=='hash_on_open':bad=['0'*64]
+            i=[0];taps=[]
+            def read():
+                z=roots[min(i[0],len(roots)-1)];i[0]+=1;return list(z.iter('node'))
+            def digest(path,left):assert path==_B26_PATH and 0<left<=20;return bad.pop(0) if bad else _B26_SHA
+            def act(v,left):assert 0<left<=20 and v.get('text')==_B26_NAME;taps.append('target')
+            try:
+                q=prepare_broken26(cmd,file,trace,actual_pkg,api,serial,ci);choose_broken26(read,digest,act,q,*scope,c.now,c.sleep)
+            except (ValueError,AssertionError,TimeoutError):assert not success and not taps,(case,trace,taps)
+            else:
+                assert success and taps==['target'] and q['actions']==['CHOOSE'];before=i[0]
+                try:choose_broken26(read,digest,act,q,*scope,c.now,c.sleep)
+                except ValueError:pass
+                else:raise AssertionError('duplicate choice')
+                assert i[0]==before and len(taps)==1
+            assert sum(x[0]=='touch' for x in log)<=1 and file.read_bytes()==files;counts[case]=bool(taps)
+        for tag in ('direct','appeared','wrong_api','non_ci','wrong_serial','wrong_pkg','hardware','symlink','mtime','wrong_stage','post_content','bad_local','foreign','wrong_folder','sort','grid','bad_size','outofbounds','disabled','dup','outside','alert','missing','changed_before_stable','hash_on_pick','hash_on_open'):run(tag,tag in ('direct','appeared'))
+    assert len(counts)==26 and sum(counts.values())==2
+    print('API26_FIRST_BAD_HOST 2 valid selections + 24 refusals; no new write of image bytes; NOT Android',flush=True)
+
+
 def parser_selftest():
+    broken26_host()
     category_impact_parser_selftest()
     restore_and_bound_pixel_selftest()
     from verify_whole_restore import host_selftest as whole_restore_selftest
@@ -3453,9 +3592,15 @@ public class VerifyNotePng {
             if choose and (name==_PIXEL_OVER or (name==_PIXEL_NEXT and _after_bound_pixel(image_fixture_navigation))):
                 return select_bound_pixel(name,nodes,act,stage_sha,digest,image_fixture_navigation,PKG,API,SERIAL,os.environ.get('GITHUB_ACTIONS')=='true')
             return select_ci_image(name,choose,nodes,act,stage_sha,digest,image_fixture_navigation,PKG,API,SERIAL,os.environ.get('GITHUB_ACTIONS')=='true')
-        def pick_image(name=None):
+        def pick_image(name=None,broken26=None):
             tap('加入图片'); tap('从文件选择')
             if name is not None:
+                if broken26 is not None:
+                    assert name==_B26_NAME
+                    def target_hash(path,left):return subprocess.check_output([str(adb),'-s',SERIAL,'shell','sha256sum',path],text=True,timeout=left).split()[0]
+                    def select_title(t,left):
+                        l,y,r,b=_fixture_rectangle(t);subprocess.run([str(adb),'-s',SERIAL,'shell','input','tap',str((l+r)//2),str((y+b)//2)],timeout=left,check=True)
+                    return choose_broken26(nodes,target_hash,select_title,broken26,PKG,API,SERIAL,os.environ.get('GITHUB_ACTIONS')=='true')
                 if API==34:return checked_fixture(name,True)
                 for n in nodes():
                     if n.get('content-desc')=='List view':
@@ -3570,7 +3715,10 @@ public class ImageImportFixture {
         stop();ok(state_read('first-image-cancel.db')==first_base,'first-image cancel creates no orphan note media block or revision')
         for filename,label in [('pocket-broken.png','malformed first image'),('pocket-pixel-over.png','20005000-pixel first image')]:
             if API==34 and filename==_PIXEL_OVER:stage_pixel_directory(adb,fixture_dir/filename,PKG,API,SERIAL,os.environ.get('GITHUB_ACTIONS')=='true')
-            first_screen();pick_image(filename)
+            b26=None
+            if API==26 and filename==_B26_NAME:
+                b26=prepare_broken26(shell,fixture_dir/filename,image_fixture_navigation,PKG,API,SERIAL,os.environ.get('GITHUB_ACTIONS')=='true')
+            first_screen();pick_image(filename,broken26=b26)
             ok(find(**{'content-desc':'v12-status','text':'图片未加入：仅支持有效 PNG/JPEG，最大 8 MiB、2000 万像素、单边 16384'}) is not None,label+' rejected visibly before note creation')
             stop();ok(state_read('first-reject-'+filename+'.db')==first_base,label+' leaves every table unchanged with no orphan note or media registration')
         first_screen();pick_image('pocket-first.jpg');ready();stop()

@@ -2644,6 +2644,25 @@ def verify_whole_restore_device(adb,phase):
     out=run_database_phase([adb,'-s',SERIAL,'shell','am','instrument','-w','-r','-e','phase',phase,'-e','expectedApi',str(API),PKG+'.test/com.supercubegame.pockettodo.V12DeviceTest'],timeout=180,capture=True,phase=phase.replace('_','-')).stdout
     Path('device-'+phase.replace('_','-')+'.txt').write_text(out);print(out,flush=True);parse(out,API,phase)
 
+_CATEGORY_IMPACT_LABELS=('stale_category_label_rejected_without_writes','native_chooser_distinct_ids_cancel_readonly','selected_category_counts_do_not_fold_in_other_categories','return_and_other_same_title_identity','reopen_preserves_state_shortcuts_money_and_media')
+def impact_expected(api):return [f'CAT_IMPACT_SCOPE api={api} package=com.supercubegame.pockettodo.v12.preview hardware=ranchu synthetic=true',*['CAT_IMPACT_NATIVE '+v+' PASS' for v in _CATEGORY_IMPACT_LABELS],'DEVICE_DATABASE_RESULT category_impact_ui 2/2 PASS','INSTRUMENTATION_CODE: -1']
+def parse_category_impact(text,api):
+    lines=[s.removeprefix('INSTRUMENTATION_RESULT: stream=') for s in text.splitlines()];scope=[s for s in lines if s.startswith(('CAT_IMPACT_','DEVICE_DATABASE_RESULT','INSTRUMENTATION_CODE:'))];assert api in (26,34) and scope==impact_expected(api) and not re.search(r'DEVICE_DATABASE_FAILED|INSTRUMENTATION_(?:FAILED|ABORTED)|AssertionError|Exception:|Process crashed',text),'Category impact receipt is missing, incomplete, out of order or failed';return _CATEGORY_IMPACT_LABELS
+
+def category_impact_parser_selftest():
+    bad=0
+    for api in (26,34):
+        good=impact_expected(api);assert parse_category_impact('\n'.join(good),api)==_CATEGORY_IMPACT_LABELS
+        wrong=[good[:i]+good[i+1:] for i in range(len(good))]+[good+[good[-1]],good[:1]+list(reversed(good[1:-2]))+good[-2:],good+['DEVICE_DATABASE_FAILED'],impact_expected(34 if api==26 else 26),good[:-1]+['INSTRUMENTATION_CODE: 0']]
+        for rows in wrong:
+            try:parse_category_impact('\n'.join(rows),api)
+            except AssertionError:bad+=1
+            else:raise AssertionError('false category acceptance')
+    assert bad==26;print('CATEGORY_IMPACT_PARSER host positives=2 negatives=26, not device')
+
+def verify_category_impact_device(adb):
+    cmd=[adb,'-s',SERIAL,'shell','am','instrument','-w','-r','-e','phase','category_impact_ui','-e','expectedApi',str(API),PKG+'.test/com.supercubegame.pockettodo.V12DeviceTest'];out=run_database_phase(cmd,timeout=120,capture=True,phase='category-impact').stdout;Path('device-category-impact.txt').write_text(out);print(out,flush=True);parse_category_impact(out,API)
+
 def verify_ledger_changes_device(adb):
     from verify_ledger_changes import parse
     out=run_database_phase([adb,'-s',SERIAL,'shell','am','instrument','-w','-r','-e','phase','ledger_changes','-e','expectedApi',str(API),PKG+'.test/com.supercubegame.pockettodo.V12DeviceTest'],timeout=120,capture=True,phase='ledger-changes').stdout
@@ -2710,6 +2729,7 @@ def restore_and_bound_pixel_selftest():
 
 
 def parser_selftest():
+    category_impact_parser_selftest()
     restore_and_bound_pixel_selftest()
     from verify_whole_restore import host_selftest as whole_restore_selftest
     whole_restore_selftest()
@@ -2852,6 +2872,9 @@ def verify_database(adb):
     for whole_phase in ('whole_restore_model','whole_restore_undo'):
         try:verify_whole_restore_device(adb,whole_phase)
         except Exception as exc:whole_errors.append(exc);print('WHOLE_RESTORE_PHASE_NOT_ACCEPTED '+whole_phase+' '+repr(exc),flush=True)
+    impact_error=None
+    try:verify_category_impact_device(adb)
+    except Exception as exc:impact_error=exc;print('CATEGORY_IMPACT_PHASE_NOT_ACCEPTED '+repr(exc),flush=True)
     legacy_public_fixture(adb)
     results = {}
     for phase in ('seed', 'reopen'):
@@ -2873,6 +2896,7 @@ def verify_database(adb):
     if schedule_error is not None:raise schedule_error
     if book_error is not None:raise book_error
     if amend_error is not None:raise amend_error
+    if impact_error is not None:raise impact_error
     if whole_errors:raise whole_errors[0]
 
 def derivative_checker():

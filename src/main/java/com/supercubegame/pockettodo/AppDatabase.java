@@ -380,6 +380,21 @@ public final class AppDatabase extends SQLiteOpenHelper {
     }
     public synchronized void addCategory(long id,String name){Ledger.positive(id);String clean=text(name);tx(db->{db.execSQL("INSERT INTO categories(id,name,position) VALUES(?,?,(SELECT count(*) FROM categories))",new Object[]{id,clean});bump(db);return null;});}
     public synchronized void renameCategory(long id,String name){String clean=text(name);tx(db->{exists(db,"categories",id);db.execSQL("UPDATE categories SET name=? WHERE id=?",new Object[]{clean,id});bump(db);return null;});}
+    /** Read-only category impact on existing v2/v3/v4. One statement = one SQLite snapshot.
+     * Count stable activity identities once, not once per shortcut; no personal contents/media opened. */
+    public synchronized ActivityModel.CategoryImpact previewCategoryImpact(long id,String displayedName){
+        Ledger.positive(id);SQLiteDatabase sql=getReadableDatabase();int version=sql.getVersion();
+        if(version<2||version>4||sql.inTransaction())throw new IllegalStateException("无法在当前数据库状态下预览分类");
+        String links=version==4?"(SELECT count(*) FROM category_shortcuts s WHERE s.category_id=c.id),"+
+            "(SELECT count(*) FROM activities a WHERE a.category_id=c.id AND a.archived=0 AND EXISTS (SELECT 1 FROM category_shortcuts s WHERE s.category_id<>c.id AND s.application_id=a.application_id))":"0,0";
+        String select="SELECT c.name,(SELECT count(*) FROM activities a WHERE a.category_id=c.id AND a.archived=0),"+
+            "(SELECT count(*) FROM activities a WHERE a.category_id=c.id AND a.archived=1),"+
+            "(SELECT count(*) FROM activities x WHERE x.category_id<>c.id AND x.archived=0 AND EXISTS (SELECT 1 FROM activities a WHERE a.category_id=c.id AND a.archived=0 AND a.application_id=x.application_id)),"+
+            links+" FROM categories c WHERE c.id=?";
+        try(Cursor r=sql.rawQuery(select,new String[]{Long.toString(id)})){if(!r.moveToFirst()||!Objects.equals(displayedName,r.getString(0)))throw new IllegalStateException("分类已变化，请返回后重选");
+            ActivityModel.CategoryImpact out=new ActivityModel.CategoryImpact(id,r.getString(0),r.getLong(1),r.getLong(2),r.getLong(3),r.getLong(4),r.getLong(5));if(r.moveToNext())throw new IllegalStateException("分类编号不唯一");return out;}}
+    /** Metadata only, at most 24 items plus one lookahead; same-name rows are not coalesced. */
+    synchronized List<ActivityModel.Category> categoryImpactChoices(long after){if(after<0)throw new IllegalArgumentException("无效的分类页");List<ActivityModel.Category> out=new ArrayList<>();try(Cursor c=getReadableDatabase().rawQuery("SELECT id,name FROM categories WHERE id>CAST(? AS INTEGER) ORDER BY id LIMIT 25",new String[]{Long.toString(after)})){while(c.moveToNext())out.add(new ActivityModel.Category(c.getLong(0),c.getString(1)));}return Collections.unmodifiableList(out);}
     public synchronized String categoryName(long id){try(Cursor c=getReadableDatabase().rawQuery("SELECT name FROM categories WHERE id=?",new String[]{Long.toString(id)})){if(!c.moveToFirst())throw new IllegalArgumentException("分类不存在");return c.getString(0);}}
     private static List<Long> categoryIds(SQLiteDatabase db){List<Long> out=new ArrayList<>();try(Cursor c=db.rawQuery("SELECT id FROM categories ORDER BY position,id",null)){while(c.moveToNext())out.add(c.getLong(0));}return out;}
     public synchronized List<Long> categoryIds(){return Collections.unmodifiableList(categoryIds(getReadableDatabase()));}

@@ -20,6 +20,7 @@ public final class MainActivity extends Activity {
     static volatile boolean isolatedRestoreUndoTest; // fixed synthetic database only, no external entry
     static volatile boolean isolatedScheduleBookTest; // same-process instrumentation only, never read from Intent or preferences
     // Same-process instrumentation only. No intent, external path or preference can select this database.
+    static volatile boolean isolatedCategoryImpactTest; // fixed, private synthetic DB only; never read from an Intent
     static volatile boolean isolatedActivitySearchTest;
     static volatile boolean isolatedActivityTemplateTest;
     static final String ACTIVITY_TEMPLATE_TEST_DB="schema4-activity-template-ci.db";
@@ -43,6 +44,8 @@ public final class MainActivity extends Activity {
     }else if(isolatedShortcutTest){
         screen=new TodayScreen(this,AppDatabase.openSchema4(this,"schema4-ui.db"));
         Bundle isolated=new Bundle();isolated.putInt("page",1);screen.show(isolated);
+    }else if(isolatedCategoryImpactTest){
+        screen=new TodayScreen(this,AppDatabase.openSchema4(this,"category-impact-ui-ci.db"));Bundle isolated=new Bundle();isolated.putInt("page",1);screen.show(isolated);
     }else if(isolatedActivitySearchTest){
         screen=new TodayScreen(this,AppDatabase.openSchema4(this,ACTIVITY_SEARCH_TEST_DB));
         Bundle isolated=new Bundle();isolated.putInt("page",1);screen.show(isolated);

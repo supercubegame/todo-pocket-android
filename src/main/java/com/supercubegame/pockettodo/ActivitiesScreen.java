@@ -874,6 +874,37 @@ public final class ActivitiesScreen {
         }
     }
 
+    /** A real, read-only preview on the ordinary workbench. Until a backup-aware durable
+     * format is supported here, do not advertise a confirmation that cannot persist. */
+    private final class ImpactBrowser implements android.view.View.OnAttachStateChangeListener {
+        final android.view.View anchor;final ArrayList<Long> starts=new ArrayList<>();
+        android.app.AlertDialog shown;long ticket;boolean retired,loading;
+        ImpactBrowser(android.view.View anchor){this.anchor=anchor;starts.add(0L);}
+        boolean live(){return !retired&&archivePanel&&selected==0&&anchor.isAttachedToWindow()&&!host.activity.isFinishing()&&!host.activity.isDestroyed();}
+        void start(){if(!live())return;anchor.addOnAttachStateChangeListener(this);page();}
+        public void onViewAttachedToWindow(android.view.View v){}
+        public void onViewDetachedFromWindow(android.view.View v){close();}
+        void dismiss(){android.app.AlertDialog old=shown;shown=null;if(old!=null)old.dismiss();}
+        void close(){if(retired)return;retired=true;++ticket;anchor.removeOnAttachStateChangeListener(this);dismiss();}
+        void show(android.app.AlertDialog d){if(!live()){close();return;}shown=d;d.setOnDismissListener(x->{if(shown==d)close();});d.show();}
+        void failure(long t){if(live()&&ticket==t){close();host.message("无法确认这个分类的最新状态，请重新选择。没有改动数据。",true);}}
+        void page(){if(!live()||loading)return;dismiss();loading=true;long t=++ticket;long key=starts.get(starts.size()-1);
+            host.work(()->host.db.categoryImpactChoices(key),items->{if(!live()||ticket!=t)return;loading=false;LinearLayout box=host.column();box.setPadding(host.dp(16),host.dp(8),host.dp(16),host.dp(8));
+                box.addView(host.text("只查看归档会影响哪些入口；本页不会修改分类或活动。",16,TodayScreen.MUTED));if(items.isEmpty())box.addView(host.text("没有可预览的分类。",16,TodayScreen.MUTED));
+                int n=Math.min(24,items.size());for(int i=0;i<n;i++){ActivityModel.Category c=items.get(i);Button choose=host.button(c.name+" · #"+c.id,()->{});choose.setContentDescription("预览分类 "+c.name+"，编号 "+c.id);choose.setOnClickListener(v->{if(live()&&ticket==t&&v.isEnabled()&&v.isAttachedToWindow())detail(c);});box.addView(choose,new LinearLayout.LayoutParams(-1,-2));}
+                if(starts.size()>1)box.addView(host.button("上一页",()->{if(live()&&ticket==t){starts.remove(starts.size()-1);page();}}));
+                if(items.size()>n){long next=items.get(n-1).id;box.addView(host.button("下一页",()->{if(live()&&ticket==t){starts.add(next);page();}}));}
+                ScrollView sv=new ScrollView(host.activity);sv.addView(box);show(new android.app.AlertDialog.Builder(host.activity).setTitle("选择要预览的分类").setView(sv).setNegativeButton("取消",null).create());host.message("已读取分类，没有改动数据。",false);
+            },()->failure(t));host.message("正在读取分类…",false);}
+        void detail(ActivityModel.Category c){if(!live()||loading)return;dismiss();loading=true;long t=++ticket;
+            host.work(()->host.db.previewCategoryImpact(c.id,c.name),p->{if(!live()||ticket!=t)return;loading=false;LinearLayout box=host.column();box.setPadding(host.dp(16),host.dp(8),host.dp(16),host.dp(8));
+                TextView identity=host.text(p.name+" · 分类 #"+p.id,18,TodayScreen.INK);identity.setContentDescription("所选归档分类");box.addView(identity);
+                String counts="将从默认列表和搜索隐藏的活动："+p.active+"\n原本已单独归档的活动："+p.individual+"\n其他分类仍可用的同应用活动："+p.otherTargets+"\n本分类的快捷入口："+p.outgoing+"\n其他分类快捷入口中将隐藏的活动："+p.incomingTargets;
+                TextView info=host.text(counts,16,TodayScreen.INK);info.setContentDescription("分类归档影响数量");box.addView(info);
+                box.addView(host.text("恢复分类只恢复入口。原已归档的活动不会自动恢复；应用、账目、打卡、笔记、字段、路径、标签和图片都保留。当前仅预览，尚未归档。",15,TodayScreen.MUTED));ScrollView sv=new ScrollView(host.activity);sv.addView(box);
+                android.app.AlertDialog dialog=new android.app.AlertDialog.Builder(host.activity).setTitle("分类归档影响").setView(sv).setNeutralButton("返回选择",null).setNegativeButton("关闭预览",null).create();dialog.setOnShowListener(x->dialog.getButton(android.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->{if(live()&&ticket==t)page();}));show(dialog);host.message("分类影响预览，未归档。",false);
+            },()->failure(t));host.message("正在读取分类影响…",false);}
+    }
     private void loadArchivedActivities(){
         host.work(()->{
             List<Item> items=new ArrayList<>();
@@ -886,6 +917,7 @@ public final class ActivitiesScreen {
             Button back=host.button("返回分类",()->{archivePanel=false;selected=0;historyPanel=false;load();});
             back.setContentDescription("archive-list-back");body.addView(back);
             ScrollView scroll=new ScrollView(host.activity);LinearLayout list=host.column();scroll.addView(list);body.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+            Button impact=host.button("预览分类归档影响",()->{});impact.setTag("category-impact-open");impact.setContentDescription("查看分类归档的影响，不修改数据");impact.setOnClickListener(v->{if(archivePanel&&selected==0&&v.isEnabled()&&v.isAttachedToWindow())new ImpactBrowser(v).start();});list.addView(impact,new LinearLayout.LayoutParams(-1,-2));
             if(items.isEmpty())list.addView(host.text("没有已归档活动",18,TodayScreen.MUTED));
             for(Item item:items){
                 Button open=host.button(item.title+" · #"+item.id,()->{selected=item.id;historyPanel=false;load();});

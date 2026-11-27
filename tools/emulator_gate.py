@@ -2284,11 +2284,26 @@ def _fixture_rectangle(n):
     if not hit:return None
     x,y,r,b=map(int,hit.groups());return (x,y,r,b) if x<r and y<b else None
 
+def _fixture_scroll_box(d,who):
+    # Only a single real directory contents widget with multiple owned visible item rows.
+    if d.get('resource-id')!=who+':id/dir_list' or d.get('class') not in ('android.widget.GridView','androidx.recyclerview.widget.RecyclerView','android.widget.ListView') or d.get('scrollable')!='true':return None
+    area=_fixture_rectangle(d);rows=[]
+    if not area:return None
+    for n in d.iter('node'):
+        if n.get('resource-id')!=who+':id/item_root' or n.get('clickable')!='true':continue
+        box=_fixture_rectangle(n);titles=[t for t in n.iter('node') if t.get('package')==who and t.get('resource-id')=='android:id/title' and t.get('class')=='android.widget.TextView' and _fixture_rectangle(t)];
+        if box and len(titles)==1 and box[0]>=area[0] and box[2]<=area[2] and box[1]>=area[1] and box[3]<=area[3]:rows.append((titles[0].get('text',''),box))
+    if len(rows)<2 or not any(name in _IMAGE_FIXTURES for name,_ in rows):return None
+    # Find a common interior column and two observed rows separated vertically.
+    rows.sort(key=lambda r:r[1][1]);high=rows[0][1];low=rows[-1][1];left=max(high[0],low[0]);right=min(high[2],low[2]);y1=(low[1]+low[3])//2;y2=(high[1]+high[3])//2
+    if right<=left+8 or y1-y2<64:return None
+    x=(left+right)//2;return (x,y1,x,y2),(d.get('class'),area),tuple(rows)
+
 def select_ci_image(name,choose,read,act,hash_on_device,expected,records,product,api,serial,ci,clock=time.monotonic,pause=time.sleep):
     """CI-only public synthetic fixture in Download. One confirmed parent navigation at most; never guess a path, file or recipient."""
     if (product,api,serial,ci)!=('com.supercubegame.pockettodo.v12.preview',34,'emulator-5554',True) or name not in _IMAGE_FIXTURES or (not choose and name!='pocket-first.jpg') or not re.fullmatch('[0-9a-f]{64}',expected):raise ValueError('outside staged image fixture')
     end=clock()+20;parent=(_IMAGE_CANCEL_ROOT,'Download');child=parent+(_IMAGE_CANCEL_FOLDER,);state={'name':name,'choose':choose,'status':'PENDING','actions':[]};records.append(state)
-    sent_parent=False;at_parent=False;sent_list=False;seen=False;held=None;since=0.;owner=None
+    sent_parent=False;at_parent=False;sent_list=False;seen=False;held=None;since=0.;owner=None;sent_scroll=False;scroll_rows=None;scroll_owner=None
     try:
         # Only a build-produced name in the exact public CI directory can reach this read.
         if hash_on_device('/sdcard/Download/'+name,end-clock())!=expected:raise AssertionError('staged fixture bytes differ')
@@ -2311,8 +2326,14 @@ def select_ci_image(name,choose,read,act,hash_on_device,expected,records,product
                     if rows:
                         target=rows[0];box=_fixture_rectangle(target);containers=[] if not dirs else [n for n in dirs[0].iter('node') if n.get('resource-id')==who+':id/item_root' and n.get('clickable')=='true' and any(k is target for k in n.iter('node'))];outer=_fixture_rectangle(containers[0]) if len(containers)==1 else None
                         if box and outer and target.get('class')=='android.widget.TextView' and outer[0]<=box[0] and outer[1]<=box[1] and box[2]<=outer[2] and box[3]<=outer[3]:action='CHOOSE' if choose else 'OBSERVE'
-                    elif mode and not sent_list and _fixture_rectangle(mode[0]) and mode[0].get('clickable')=='true':action='LIST';target=mode[0]
-                signature=(path,action,_fixture_rectangle(target))
+                    elif mode and not sent_scroll and not sent_list and _fixture_rectangle(mode[0]) and mode[0].get('clickable')=='true':action='LIST';target=mode[0]
+                    elif choose and name=='pocket-pixel-over.png' and not sent_scroll and len(dirs)==1:
+                        info=_fixture_scroll_box(dirs[0],who)
+                        if info:action='SCROLL';target=info
+                    if sent_scroll and action=='CHOOSE':
+                        info=_fixture_scroll_box(dirs[0],who) if len(dirs)==1 else None
+                        if not info or info[1]!=scroll_owner or info[2]==scroll_rows:action=None;target=None
+                signature=(path,action,target if action=='SCROLL' else _fixture_rectangle(target))
             if signature!=held:held=signature;since=now
             elif action and now-since>=.15:
                 left=end-clock()
@@ -2321,6 +2342,7 @@ def select_ci_image(name,choose,read,act,hash_on_device,expected,records,product
                 state['actions'].append(action)
                 if action=='PARENT':sent_parent=True
                 if action=='LIST':sent_list=True
+                if action=='SCROLL':sent_scroll=True;scroll_owner,scroll_rows=target[1:];target=target[0]
                 act(action,target,left)
                 if action=='CHOOSE':state['status']='SELECTED_ONCE_NOT_IMPORT_ACCEPTANCE';return True
                 held=None
@@ -2413,6 +2435,22 @@ def image_fixture_target_selftest():
         assert bool(ok)==success and events==want,(key,state,events);cases.append(key)
     test('already parent',[P],['CHOOSE'],True);test('visible parent after Back',[C,C,C,P,P],['PARENT','CHOOSE'],True);test('grid once',[G,G,G,P,P],['LIST','CHOOSE'],True);test('observed only',[frame(item='pocket-first.jpg')],[],True,choose=False);test('same child forever',[C],['PARENT'],False);test('same grid',[G],['LIST'],False);test('unexpected grandparent',[C,C,frame(1)],['PARENT'],False);test('parent withdrawn',[P,C,C],[],False);test('wrong bytes',[P],[],False,wrong_hash=True);test('late',[P],[],False,late=True);test('wrong filename',[frame(item='some-file.png')],[],False)
     for k in ('disabled','twins','foreign','flat','hidden','clipped'):test(k,[frame(mode=k)],[],False)
+    # A missing known file in the positively identified Download listing may be off screen,
+    # not necessarily below it. Scrolling alone never satisfies the selection condition.
+    def pane(item,flags=()):
+        f=frame(2,'empty');d=next(n for n in f if n.get('resource-id')==system+':id/dir_list');d.attrib.update({'class':'android.widget.GridView','scrollable':'false' if 'locked' in flags else 'true','bounds':'[0,24][320,640]'});d.remove(list(d)[0]);names=['pocket-broken.png','pocket-first.jpg','pocket-pixel-limit.png' if item is None else item];
+        if 'duplicate' in flags:names.append(names[-1]);
+        for i,name2 in enumerate(names):
+            box='[0,%d][320,%d]'%(128+100*i,205+100*i);outer=ET.SubElement(d,'node',{'resource-id':system+':id/item_root','package':system,'enabled':'true','class':'android.widget.LinearLayout','clickable':'true','bounds':box});ET.SubElement(outer,'node',{'resource-id':'android:id/title','package':system,'enabled':'true','class':'android.widget.TextView','text':name2,'bounds':box})
+        if 'wrongpath' in flags:next(n for n in f if n.get('text')=='Download').set('text','Elsewhere')
+        if 'moved' in flags:d.set('bounds','[0,10][320,640]')
+        return list(f[0].iter('node'))
+    over='pocket-pixel-over.png';bfr=pane(None);aft=pane(over);tname=name;name=over
+    test('missing known file then exactly one scroll',[bfr,bfr,bfr,aft,aft,aft],['SCROLL','CHOOSE'],True)
+    test('scroll without reveal',[bfr],['SCROLL'],False);test('wrong row after scroll',[bfr,bfr,pane('pocket-other.png')],['SCROLL'],False)
+    test('wrong path after scroll',[bfr,bfr,pane(over,('wrongpath',))],['SCROLL'],False);test('ambiguous revealed row',[bfr,bfr,pane(over,('duplicate',))],['SCROLL'],False)
+    test('container changed after scroll',[bfr,bfr,pane(over,('moved',))],['SCROLL'],False);test('unscrollable Download',[pane(None,('locked',))],[],False);test('digest gates scroll',[bfr],[],False,wrong_hash=True)
+    name=tname
     for n,product,api,serial,ci in [('unknown.png',own,34,'emulator-5554',True),(name,own,26,'emulator-5554',True),(name,'foreign',34,'emulator-5554',True),(name,own,34,'phone',True),(name,own,34,'emulator-5554',False)]:
         try:select_ci_image(n,True,None,None,None,digest,[],product,api,serial,ci)
         except ValueError:continue
@@ -3196,6 +3234,7 @@ public class VerifyNotePng {
                 return subprocess.check_output([str(adb),'-s',SERIAL,'shell','sha256sum',path],text=True,timeout=left).split()[0]
             def act(action,target,left):
                 if action=='PARENT':args=['input','keyevent','KEYCODE_BACK']
+                elif action=='SCROLL':args=['input','swipe',*[str(x) for x in target],'300']
                 else:
                     l,t,r,b=_fixture_rectangle(target);args=['input','tap',str((l+r)//2),str((t+b)//2)]
                 subprocess.run([str(adb),'-s',SERIAL,'shell',*args],timeout=left,check=True)

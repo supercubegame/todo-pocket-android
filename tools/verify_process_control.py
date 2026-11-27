@@ -107,6 +107,44 @@ def stop_verified(adb, serial, package, *, runner=subprocess.run,
                 print("STOP_EVIDENCE_WRITE_FAILED " + repr(exc), flush=True)
 
 
+# One fixture and one boundary only: the stopped preview immediately before its
+# independent SQLite snapshot. Never fall back after a transport or protocol error.
+def snapshot_stop26(adb,serial,package,*,runner=subprocess.run,emit=None,nonce=None):
+    import uuid
+    if serial!='emulator-5554' or package!='com.supercubegame.pockettodo.v12.preview':raise ValueError('only the private API26 emulator fixture')
+    token=uuid.uuid4().hex if nonce is None else nonce
+    if not re.fullmatch('[0-9a-f]{32}',token):raise ValueError('invalid evidence nonce')
+    # The pidof child reports 1 for absence. A lost *transport* must never look
+    # like that legitimate result: demand all the framed rows AND outer success.
+    script='''tag=SNAPSHOT_TOKEN; pkg=com.supercubegame.pockettodo.v12.preview
+p=$(pidof "$pkg"); r=$?; [ "$r" = 0 ] || exit 11
+case "$p" in ''|*[!0-9]*) exit 12;; esac; [ "$p" -gt 1 ] || exit 13
+printf '%s BEFORE %s\\n' "$tag" "$p"
+am force-stop "$pkg"; r=$?; printf '%s STOP %s\\n' "$tag" "$r"; [ "$r" = 0 ] || exit 14
+i=0
+while [ "$i" -lt 120 ]; do
+ q=$(pidof "$pkg"); r=$?; printf '%s AFTER %s:%s\\n' "$tag" "$r" "$q"
+ if [ "$r" = 1 ] && [ -z "$q" ]; then printf '%s END\\n' "$tag"; exit 0; fi
+ [ "$r" = 0 ] && [ "$q" = "$p" ] || exit 15
+ i=$((i+1)); sleep 0.25 || exit 16
+done; exit 17'''.replace('SNAPSHOT_TOKEN',token)
+    record={'scope':'ONE_CONNECTION_FIXED_PREVIEW_BEFORE_SQLITE_NOT_LMK','status':'FAIL','force_stop_attempts':0,'submitted_connections':1,'nonce':token};cmd=[str(adb),'-s',serial,'shell','-n','-T',script]
+    try:
+        p=runner(cmd,text=True,capture_output=True,stdin=subprocess.DEVNULL,timeout=30);record.update(returncode=p.returncode,stdout=p.stdout,stderr=p.stderr);lines=p.stdout.splitlines();ack=token+' STOP 0';record['acknowledged_stops']=lines.count(ack);record['force_stop_attempts']=sum(s.startswith(token+' STOP ') for s in lines)
+        if p.returncode:raise subprocess.CalledProcessError(p.returncode,p.args,output=p.stdout,stderr=p.stderr)
+        if p.stderr or len(lines)<4 or len(lines)>124:raise ValueError('missing/extra checkpoint frames')
+        first=re.fullmatch(re.escape(token)+r' BEFORE ([1-9][0-9]*)',lines[0]);
+        if first is None or int(first[1])<2 or lines[1]!=ack or lines[-2:]!=[token+' AFTER 1:',token+' END'] or any(l!=token+' AFTER 0:'+first[1] for l in lines[2:-2]):raise ValueError('snapshot stop not proved')
+        record.update(status='PASS',before_pid=first[1],observed_absent=True);return record
+    except Exception as exc:
+        record['original_failure']={'type':type(exc).__name__,'detail':str(exc),'returncode':getattr(exc,'returncode',None)};raise
+    finally:
+        print('SNAPSHOT_STOP_26 '+json.dumps(record),flush=True)
+        if emit is not None:
+            try:emit(record)
+            except Exception as diag:print('SNAPSHOT_EVIDENCE_WRITE_FAILED '+repr(diag),flush=True)
+
+
 def contract(stop):
     cases = [
         ("immediate", [(0, "82\n", ""), (0, "", ""), (1, "", "")], None, 1),

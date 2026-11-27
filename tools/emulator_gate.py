@@ -2482,7 +2482,15 @@ def verify_oriented_photo_device(adb):
     out=run_database_phase([adb,'-s',SERIAL,'shell','am','instrument','-w','-r','-e','phase','oriented_photo','-e','expectedApi',str(API),PKG+'.test/com.supercubegame.pockettodo.V12DeviceTest'],timeout=120,capture=True,phase='oriented-photo').stdout
     Path('device-oriented-photo.txt').write_text(out);print(out,flush=True);parse_receipt(out,API)
 
+def verify_schedule_book_device(adb):
+    from verify_schedule_book import stage,parse
+    stage(adb,SERIAL,API,PKG)
+    out=run_database_phase([adb,'-s',SERIAL,'shell','am','instrument','-w','-r','-e','phase','schedule_book_ui','-e','expectedApi',str(API),PKG+'.test/com.supercubegame.pockettodo.V12DeviceTest'],timeout=120,capture=True,phase='schedule-book').stdout
+    Path('device-schedule-book.txt').write_text(out);print(out,flush=True);parse(out,API)
+
 def parser_selftest():
+    from verify_schedule_book import host_selftest as book_host_selftest
+    book_host_selftest()
     from verify_activity_schedules import host_selftest as activity_schedule_host_selftest
     activity_schedule_host_selftest()
     from verify_oriented_photos import host_selftest as oriented_photo_host_selftest
@@ -2606,6 +2614,10 @@ def verify_database(adb):
     try:verify_activity_schedule_device(adb)
     except Exception as exc:
         schedule_error=exc;print('ACTIVITY_SCHEDULE_PHASE_NOT_ACCEPTED '+repr(exc),flush=True)
+    book_error=None
+    try:verify_schedule_book_device(adb)
+    except Exception as exc:
+        book_error=exc;print('SCHEDULE_BOOK_PHASE_NOT_ACCEPTED '+repr(exc),flush=True)
     legacy_public_fixture(adb)
     results = {}
     for phase in ('seed', 'reopen'):
@@ -2625,6 +2637,7 @@ def verify_database(adb):
     if template_error is not None:raise template_error
     if photo_error is not None:raise photo_error
     if schedule_error is not None:raise schedule_error
+    if book_error is not None:raise book_error
 
 def derivative_checker():
     """Compile and prove the actual pixel oracle before slow native UI work."""
@@ -2979,7 +2992,10 @@ def _verify_native_ui(adb,nodes):
         ok(find(text='今天：已跳过') is not None,'skipped mark persists after process restart')
         swipe_up(); ok(find(text='2. Daily rewards') is not None,'activity path persists after process restart')
         ok(len({x['sha256'] for x in shots})==len(shots),'actual native screenshots represent distinct states')
-        stop()
+        if API==26:
+            from verify_process_control import snapshot_stop26
+            snapshot_stop26(adb,SERIAL,PKG,emit=process_stops.append)
+        else:stop()
         with sqlite3.connect(copy_db('pocket-v12.db')) as db:
             ok(db.execute('PRAGMA user_version').fetchone()==(3,) and [r[1] for r in db.execute('PRAGMA table_info(blocks)')]==['note_id','id','position','kind','text','asset_id','caption','private','original_asset_id'],'default native UI uses schema3 with exact nine-column block layout')
             ok(db.execute('SELECT id,title,done FROM todos ORDER BY position').fetchall()==[(aid,'Fresh milk',1),(bid,'Walk outside',0)],'independent SQLite read matches exact UI todo identities titles and states')

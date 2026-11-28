@@ -316,7 +316,7 @@ public final class ActivitiesScreen {
     private ShortcutOrigin shortcutOrigin;
     private ShortcutPage shortcutShowing;
     private ShortcutOrigin shortcutFor(long id){return id>0&&selected==id&&shortcutOrigin!=null&&shortcutOrigin.target==id?shortcutOrigin:null;}
-    void leaveActivityNavigation(){leaveSearch();shortcutOrigin=null;if(shortcutShowing!=null)shortcutShowing.close();}
+    void leaveActivityNavigation(){if(noteDeleteSurface!=null)noteDeleteSurface.close();leaveSearch();shortcutOrigin=null;if(shortcutShowing!=null)shortcutShowing.close();}
     private boolean usableShortcut(){return !host.activity.isFinishing()&&!host.activity.isDestroyed();}
     private boolean returnFromShortcut(ShortcutOrigin from,android.view.View back){
         if(from==null||back==null||from!=shortcutFor(selected)||from.back!=back||!back.isAttachedToWindow()||!back.isShown()||!back.isEnabled()||!usableShortcut())return false;
@@ -770,9 +770,18 @@ public final class ActivitiesScreen {
     /** A detached detail row cannot confirm an old preview. Rotation/process death
      * never persists this plan; helper close is a second backend invalidation guard.
      */
+    private NoteDeleteSurface noteDeleteSurface;
+    boolean backFromNoteDelete(){return noteDeleteSurface!=null&&noteDeleteSurface.back();}
     private void deleteNote(long owner,NoteSummary note,android.view.View anchor){
+        if(noteDeleteSurface!=null||selected!=owner)return;
         host.work(()->host.db.prepareNoteDeletion(note.id,owner),plan->{
-            if(!anchor.isAttachedToWindow()||host.activity.isFinishing()||host.activity.isDestroyed()){plan.close();return;}
+            if(!anchor.isAttachedToWindow()||selected!=owner||host.activity.isFinishing()||host.activity.isDestroyed()){plan.close();return;}
+            if(plan.activityId()!=owner||!note.id.equals(plan.noteId())||!note.title.equals(plan.title())){plan.close();host.message("笔记已变化，请重新打开；没有删除。",true);return;}
+            if(android.os.Build.VERSION.SDK_INT==26){
+                NoteDeleteSurface surface=new NoteDeleteSurface(host,host.noteReviewContainer(),anchor,plan,()->selected==owner,
+                    closed->{if(noteDeleteSurface==closed)noteDeleteSurface=null;},this::load);
+                noteDeleteSurface=surface;host.message("正在预览删除，尚未修改笔记。",false);surface.show();return;
+            }
             LinearLayout body=host.column();body.setPadding(host.dp(20),host.dp(4),host.dp(20),host.dp(8));
             TextView identity=host.text("活动："+plan.activityTitle()+"\n笔记："+plan.title()+"\n笔记标识："+plan.noteId(),15,TodayScreen.INK);
             identity.setContentDescription("note-delete-identity");body.addView(identity);
@@ -800,7 +809,7 @@ public final class ActivitiesScreen {
                 });
             }));
             dialog.show();
-        },null);
+        },null,AppDatabase.NoteDeletionPlan::close);
     }
     /** Dedicated editor owns its preview until queued work has completed.
      * Detachment closes it before execution; no old dialog can edit another activity. */

@@ -8,6 +8,7 @@ import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.view.MotionEvent;
+import android.view.Gravity;
 import android.view.View;
 import android.widget.*;
 import java.io.IOException;
@@ -326,15 +327,34 @@ public final class NoteEditorScreen {
         body.addView(validation,0);
         ScrollView scroll=new ScrollView(host.activity);scroll.addView(body);
         final int editorTheme=host.draftEditorTheme();
-        AlertDialog dialog=new AlertDialog.Builder(host.activity,editorTheme).setTitle(session.block==null?"加入文字":"修改文字")
-            .setView(scroll).setNegativeButton("取消",null).setPositiveButton("保存",null).create();
+        // Keep actual outer actions above the scrollable editor on compact modern windows.
+        final boolean compact=editorTheme!=0&&android.os.Build.VERSION.SDK_INT>=34;
+        final Button outerCancel=compact?host.button("取消",()->{}):null;
+        final Button outerSave=compact?host.button("保存",()->{}):null;
+        if(compact){outerCancel.setTag("note-draft-cancel");outerSave.setTag("note-draft-commit");}
+        final LinearLayout dialogRoot=compact?host.column():null;
+        if(compact){
+            LinearLayout top=new LinearLayout(host.activity);top.setOrientation(LinearLayout.HORIZONTAL);top.setGravity(Gravity.CENTER);
+            top.setTag("note-draft-top-actions");
+            top.addView(outerCancel,new LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1));
+            top.addView(outerSave,new LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1));
+            top.setMinimumHeight(host.dp(48));
+            dialogRoot.addView(top,new LinearLayout.LayoutParams(-1,LinearLayout.LayoutParams.WRAP_CONTENT));
+            dialogRoot.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+        }
+        AlertDialog.Builder builder=new AlertDialog.Builder(host.activity,editorTheme).setTitle(session.block==null?"加入文字":"修改文字");
+        if(compact)builder.setView(dialogRoot);
+        else builder.setView(scroll).setNegativeButton("取消",null).setPositiveButton("保存",null);
+        AlertDialog dialog=builder.create();
         final boolean[] busy={false};
         Runnable update=()->{
             boolean present=session.record.text!=null;
             recover.setEnabled(!busy[0]&&present);discard.setEnabled(!busy[0]&&present);
             save.setEnabled(!busy[0]);field.setEnabled(!busy[0]);dialog.setCancelable(!busy[0]);
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(!busy[0]);
-            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setEnabled(!busy[0]);
+            Button actionSave=compact?outerSave:dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            Button actionCancel=compact?outerCancel:dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
+            actionSave.setEnabled(!busy[0]);
+            actionCancel.setEnabled(!busy[0]);
         };
         java.util.function.Consumer<Boolean> lock=value->{busy[0]=value;update.run();};
         Runnable failed=()->{
@@ -343,6 +363,9 @@ public final class NoteEditorScreen {
         };
         dialog.setOnDismissListener(unused->session.close());
         dialog.setOnShowListener(unused->{
+            final Button actionSave=compact?outerSave:dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            final Button actionCancel=compact?outerCancel:dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
+            if(compact)actionCancel.setOnClickListener(v->{if(!dialog.isShowing()||busy[0]||!actionCancel.isEnabled())return;dialog.dismiss();});
             validation.setText(session.record.text==null?"暂无已保存草稿；正文不能为空。":"发现本机草稿，请明确恢复；当前仍显示正文。");
             update.run();
             save.setOnClickListener(v->{
@@ -378,8 +401,8 @@ public final class NoteEditorScreen {
                         },failed);
                     }).show();
             });
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
-                if(busy[0])return;
+            actionSave.setOnClickListener(v->{
+                if(!dialog.isShowing()||busy[0]||!actionSave.isEnabled())return;
                 String value=field.getText().toString();
                 if(value.trim().isEmpty()){validation.setText("内容不能为空");validation.setTextColor(TodayScreen.ERROR);return;}
                 lock.accept(true);

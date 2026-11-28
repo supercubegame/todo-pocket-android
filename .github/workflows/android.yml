@@ -1179,11 +1179,35 @@ jobs:
           POCKET_PREVIEW_CERT_SHA256: ${{ secrets.POCKET_PREVIEW_CERT_SHA256 }}
         run: python3 tools/verify_upgrade.py prepare-signing
       - name: Compile internal test APKs and lint (not deliverable)
+        id: current_db_build
         env:
           BUILD_429_EXECUTE: 'true'
           BUILD_LOG: build.log
           BUILD_LINT: 'true'
+          # #792 API26 D8 Java-heap OOM. Trial only this build's heap; API34, old APK, exports, workers and retries stay untouched.
+          GRADLE_OPTS: ${{ matrix.api == 26 && format('{0} "-Dorg.gradle.jvmargs=-Xmx1536m -Xlog:gc+init=info:file={1}/pocket-d8-heap-{2}-{3}-%p.log"', env.GRADLE_OPTS, runner.temp, github.run_id, github.run_attempt) || env.GRADLE_OPTS }}
         run: *verified_build
+      - name: Read API26 Gradle heap observation
+        if: ${{ always() && matrix.api == 26 && (steps.current_db_build.outcome == 'success' || steps.current_db_build.outcome == 'failure') }}
+        env:
+          BUILD_OUTCOME: ${{ steps.current_db_build.outcome }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import json,os,re
+          env=os.environ;rid=env['GITHUB_RUN_ID'];att=env['GITHUB_RUN_ATTEMPT'];src=env['GITHUB_SHA'];out=env['BUILD_OUTCOME']
+          assert rid.isdigit() and att.isdigit() and re.fullmatch('[a-f0-9]{40}',src) and env['TEST_API']=='26' and out in ('success','failure')
+          root=Path(env['RUNNER_TEMP']);prefix=f'pocket-d8-heap-{rid}-{att}-';rows=[];invalid=False
+          for p in sorted(root.glob(prefix+'*.log')):
+              if not re.fullmatch(re.escape(prefix)+r'[1-9][0-9]*\.log',p.name) or p.is_symlink() or not p.is_file() or p.stat().st_size>65536:invalid=True;continue
+              caps=re.findall(r'(?m)^\[[^\n]*?\] Heap Max Capacity: ([0-9]+)M\s*$',p.read_text(encoding='utf-8',errors='replace'))
+              if len(caps)!=1:invalid=True;continue
+              rows.append(int(caps[0]))
+          ok=bool(rows) and not invalid and all(i==1536 for i in rows);receipt={'scope':'API26_CURRENT_BUILD_JVM_CAP_NOT_APP_MEMORY','source':src,'run':rid,'attempt':att,'api':26,'original_build':out,'target_mib':1536,'observed_mib':rows,'attested':ok}
+          with Path('build-heap.json').open('x') as f:json.dump(receipt,f)
+          print('BUILD_HEAP '+json.dumps(receipt));assert out=='failure' or ok,'successful build without attested heap trial'
+          PY
       - name: Freeze API34 candidate bytes before device tests
         if: matrix.api == 34
         run: |
@@ -1248,6 +1272,7 @@ jobs:
             setup.log
             isolated-trace-host.log
             build.log
+            build-heap.json
             ui.log
             emulator.log
             device-*.txt

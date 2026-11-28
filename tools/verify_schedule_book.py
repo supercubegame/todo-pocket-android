@@ -21,7 +21,10 @@ def stage(adb,serial,api,pkg):
     with tempfile.TemporaryDirectory() as td:
         p=Path(td)/'schedule-input.zip';p.write_bytes(data);subprocess.run(prefix+['push',str(p),file],check=True,timeout=20)
     actual=subprocess.check_output(prefix+['exec-out','cat',file],timeout=20);assert actual==data;Path('device-book-public-fixture.txt').write_text(json.dumps({'source':os.environ.get('GITHUB_SHA'),'run':os.environ.get('GITHUB_RUN_ID'),'attempt':os.environ.get('GITHUB_RUN_ATTEMPT'),'api':api,'size':len(actual),'sha256':sha(actual),'scope':'SYNTHETIC_PUBLIC_EMULATOR_DOWNLOAD_ONLY'})+'\n')
-def required(api):return [f'BOOK_SCOPE api={api} package=com.supercubegame.pockettodo.v12.preview hardware=ranchu physical=false',*['BOOK_NATIVE '+l+' PASS' for l in LABELS],'DEVICE_DATABASE_RESULT schedule_book_ui 2/2 PASS','INSTRUMENTATION_CODE: -1']
+RACE=('target72_review_visible_before_sibling_write','sibling71_committed_reopened_target72_absent','original_target72_confirmation_once','refused_snapshot_all_bytes_and_media_unchanged')
+def required(api):
+    native=['BOOK_NATIVE '+l+' PASS' for l in LABELS];at=LABELS.index('changed_snapshot_refuses_confirmation')
+    return [f'BOOK_SCOPE api={api} package=com.supercubegame.pockettodo.v12.preview hardware=ranchu physical=false',*native[:at],*['BOOK_RACE '+r for r in RACE],*native[at:],'DEVICE_DATABASE_RESULT schedule_book_ui 2/2 PASS','INSTRUMENTATION_CODE: -1']
 def parse(text,api):
     lines=[s.removeprefix('INSTRUMENTATION_RESULT: stream=') for s in text.splitlines()];scope=[s for s in lines if s.startswith(('BOOK_','DEVICE_DATABASE_RESULT','INSTRUMENTATION_CODE:'))];
     if api not in (26,34) or scope!=required(api) or re.search(r'DEVICE_DATABASE_FAILED|INSTRUMENTATION_(?:FAILED|ABORTED)|AssertionError|Exception:|Process crashed',text):raise AssertionError('Schedule book UI not verified; see device-schedule-book.txt')
@@ -61,5 +64,12 @@ def host_selftest():
             try:parse(bad,api)
             except AssertionError:controls+=1;continue
             raise AssertionError('invalid book receipt accepted')
+    for api in (26,34):
+        lines=required(api);cuts=[i for i,v in enumerate(lines) if v.startswith('BOOK_RACE ')]
+        for a,b in zip(cuts,cuts[1:]):
+            other=lines.copy();other[a],other[b]=other[b],other[a]
+            try:parse('\n'.join(other),api)
+            except AssertionError:controls+=1;continue
+            raise AssertionError('reordered schedule race accepted')
     rows=stop_contract();print('BOOK_HOST fixed_synthetic_zip='+sha(data)+' receipt_rejections='+str(controls)+' checkpoint_shell_cases='+str(len(rows))+' NO_ANDROID',flush=True)
 if __name__=='__main__':host_selftest()

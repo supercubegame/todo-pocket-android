@@ -595,7 +595,8 @@ public class DraftUiContract {
  static final class TodayScreen {
   static final int MUTED=1,ERROR=2;
   static int themeForFixture=21;
-  int draftEditorTheme(){return themeForFixture;} final Object activity=new Object();
+  static final class EditorActivity {EditorResources getResources(){return new EditorResources();}}
+  int draftEditorTheme(){return themeForFixture;} final EditorActivity activity=new EditorActivity();
   boolean defer,fail; Runnable pending; String notice; int loads;
   LinearLayout column(){return new LinearLayout();}
   int dp(int x){return x;}
@@ -655,11 +656,22 @@ public class DraftUiContract {
   cfg.screenWidthDp=320;cfg.fontScale=1;
   TodayScreen.themeForFixture=0; Fixture roomy=new Fixture(null);
   if(roomy.d.theme!=0||roomy.d.window.w!=0||roomy.d.window.h!=0)throw new AssertionError("wide regular editor unexpectedly took over the screen");
-  TodayScreen.themeForFixture=21;android.os.Build.VERSION.SDK_INT=26;Fixture legacy=new Fixture(null);
-  ok(legacy.root==null&&legacy.top==null&&legacy.d.negative.click!=null&&legacy.d.positive.click!=null,"api26_compact_keeps_native_buttons");
+  TodayScreen.themeForFixture=21;
+  android.os.Build.VERSION.SDK_INT=26;EditorResources.cfg.screenWidthDp=320;TodayScreen.themeForFixture=0;Fixture plain26=new Fixture(null);
+  ok(plain26.root==null&&plain26.d.negative.click!=null&&plain26.d.positive.click!=null,"api26_noncompact_native_actions");TodayScreen.themeForFixture=21;
+  int[] api26Widths={0,320,360,361};
+  boolean[] expectedTop={false,true,true,false};
+  for(int i=0;i<api26Widths.length;i++){
+    EditorResources.cfg.screenWidthDp=api26Widths[i];android.os.Build.VERSION.SDK_INT=26;Fixture k=new Fixture(null);
+    ok((k.root!=null)==expectedTop[i]&&(k.d.negative.click==null)==expectedTop[i]&&(k.d.positive.click==null)==expectedTop[i],"api26_width_"+api26Widths[i]+"_layout");
+    if(expectedTop[i]){ok(k.cancel.text.equals("取消")&&k.commit.text.equals("保存"),"api26_width_"+api26Widths[i]+"_labels");k.cancel.press();ok(!k.d.showing&&k.s.closes==1&&k.untouched(),"api26_width_"+api26Widths[i]+"_cancel");}
+  }
+  EditorResources.cfg.screenWidthDp=320;android.os.Build.VERSION.SDK_INT=26;Fixture legacy=new Fixture(null);
+  ok(legacy.root!=null&&legacy.top!=null&&legacy.d.negative.click==null&&legacy.d.positive.click==null&&legacy.cancel.text.equals("取消")&&legacy.commit.text.equals("保存"),"api26_compact_uses_top_actions");
   legacy.input.setText("legacy body");legacy.cancel.press();
-  ok(!legacy.d.showing&&legacy.s.closes==1&&legacy.untouched(),"api26_native_cancel_real_callback");
-  android.os.Build.VERSION.SDK_INT=34;Fixture f=new Fixture(null);
+  ok(!legacy.d.showing&&legacy.s.closes==1&&legacy.untouched(),"api26_top_cancel_real_callback");
+  for(int sdk:new int[]{27,33}){EditorResources.cfg.screenWidthDp=320;android.os.Build.VERSION.SDK_INT=sdk;Fixture ordinary=new Fixture(null);ok(ordinary.root==null&&ordinary.d.negative.click!=null&&ordinary.d.positive.click!=null,"api"+sdk+"_ordinary_native_buttons");}
+  EditorResources.cfg.screenWidthDp=320;android.os.Build.VERSION.SDK_INT=34;Fixture f=new Fixture(null);
   if(f.d.theme!=21||f.d.window.w!=-1||f.d.window.h!=-1)throw new AssertionError("small or large-font editor must use available window");
   ok(f.root!=null&&f.top!=null&&f.top.desc.equals("")&&f.cancel.text.equals("取消")&&f.commit.text.equals("保存"),"compact_top_actions_real_controls");
   ok(f.root!=null&&f.d.negative.click==null&&f.d.positive.click==null,"no_bottom_duplicate_controls");
@@ -720,7 +732,7 @@ public class DraftUiContract {
 }
 '''
 
-UI_LABELS = """api26_compact_keeps_native_buttons api26_native_cancel_real_callback compact_top_actions_real_controls no_bottom_duplicate_controls top_actions_wrap_content feedback_before_input resize_window canonical_initial_no_autorestore
+UI_LABELS = """api26_noncompact_native_actions api26_width_0_layout api26_width_320_layout api26_width_320_labels api26_width_320_cancel api26_width_360_layout api26_width_360_labels api26_width_360_cancel api26_width_361_layout api26_compact_uses_top_actions api26_top_cancel_real_callback api27_ordinary_native_buttons api33_ordinary_native_buttons compact_top_actions_real_controls no_bottom_duplicate_controls top_actions_wrap_content feedback_before_input resize_window canonical_initial_no_autorestore
 absent_draft_controls cancel_no_draft_mutation closed_top_callbacks_do_not_write present_draft_explicit blank_body_stays_open
 save_exact_draft save_unlocks recover_requires_confirmation recover_cancel_keeps_input
 recover_exact_no_body_commit discard_requires_confirmation discard_cancel_keeps_draft
@@ -767,6 +779,9 @@ def ui_model_selftest():
         assert run.returncode == 0 and labels == UI_LABELS, (run.stdout, run.stderr)
         assert run.stdout.splitlines()[-1] == "DRAFT_UI_RESULT "+str(len(UI_LABELS))+" PASS"
         mutations = (
+            ("draftWidthDp<=360", "draftWidthDp<=361", "api26_width_361_layout"),
+            ("draftWidthDp>0&&", "", "api26_width_0_layout"),
+            ("draftApi==26", "draftApi<=33", "api27_ordinary_native_buttons"),
             ("field.setMinLines(2);", "field.setMinLines(3);", "two initial lines only on compact 200 percent"),
             ("widthDp>0&&widthDp<=360", "widthDp>=0&&widthDp<=500", "two initial lines only on compact 200 percent"),
             ("getConfiguration().fontScale>=2.0f", "getConfiguration().fontScale>=1.3f", "two initial lines only on compact 200 percent"),
@@ -776,18 +791,18 @@ def ui_model_selftest():
             ("android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE", "0", "resize_window"),
             ("if(value.trim().isEmpty())", "if(false)", "blank_body_stays_open"),
             ("String exact=field.getText().toString();", "String exact=field.getText().toString().trim();", "save_exact_draft"),
-            ("unused->session.close()", "unused->{}", "api26_native_cancel_real_callback"),
-            ("android.os.Build.VERSION.SDK_INT>=34", "android.os.Build.VERSION.SDK_INT>=26", "api26_compact_keeps_native_buttons"),
+            ("unused->session.close()", "unused->{}", "api26_width_320_cancel"),
+            ("draftApi>=34", "draftApi>=26", "api26_width_0_layout"),
             ("!dialog.isShowing()||busy[0]||!actionSave.isEnabled()", "busy[0]||!actionSave.isEnabled()", "closed_top_callbacks_do_not_write"),
         )
         for index, (before, after, expected) in enumerate(mutations):
-            assert actual.count(before) == 1, "Draft UI mutation anchor changed"
+            assert actual.count(before) == 1, ("Draft UI mutation anchor changed",before)
             result = build(actual.replace(before, after, 1), "negative-"+str(index))
             assert result.returncode != 0 and "AssertionError: "+expected in result.stderr, (
                 "UI mutant survived or wrong failure", expected, result.stdout, result.stderr)
         anchor="for(Button b:new Button[]{save,recover,discard})body.addView(b,new LinearLayout.LayoutParams(-1,LinearLayout.LayoutParams.WRAP_CONTENT));"
         assert actual.count(anchor)==1 and "DRAFT_ACTIONS_WRAP all 3 actual callbacks; host layout policy only" in run.stdout
-        assert "final boolean compact=editorTheme!=0&&android.os.Build.VERSION.SDK_INT>=34;" in actual
+        assert "final boolean compact=editorTheme!=0&&(draftApi>=34||(draftApi==26&&draftWidthDp>0&&draftWidthDp<=360));" in actual
         assert "outerCancel=compact?host.button(\"取消\",()->{}):null" in actual and "outerSave=compact?host.button(\"保存\",()->{}):null" in actual
         assert "new LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1)" in actual
         assert "new LinearLayout.LayoutParams(-1,LinearLayout.LayoutParams.WRAP_CONTENT)" in actual

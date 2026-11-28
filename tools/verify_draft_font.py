@@ -190,7 +190,7 @@ def bind_full_endcheck(gate,root):
     def finish(adb):
         need(not once,'duplicate endcheck');once.append(True);folder=root/'build/ci-end-draft-font';folder.mkdir(parents=True,exist_ok=False);prefix=[str(adb),'-s',gate.SERIAL];record={'scope':'DISPOSABLE_FULL_JOB_FONT_ENDCHECK','source':src,'run_id':rid,'attempt':att,'api':gate.API,'expected_sha256':{k:hashlib.sha256(v).hexdigest() for k,v in expected.items()},'apk_readbacks':{},'status':'NOT_ACCEPTED','release_ready':False,'test_started':False}
         def command(argv,timeout=30):return subprocess.check_output(argv,timeout=timeout,stdin=subprocess.DEVNULL,text=True)
-        thumbnail_error=None;image_attach_error=None
+        thumbnail_error=None;image_attach_error=None;delete_window_error=None
         try:
             regs=command(prefix+['shell','pm','list','instrumentation']);need(registration(regs,'V12DeviceTest')['status']=='PASS','final runner not restored: no font setting changed')
             for name,original in expected.items():
@@ -205,6 +205,13 @@ def bind_full_endcheck(gate,root):
             try:verify_image_attach(gate,adb,root)
             except Exception as error:
                 image_attach_error=error;print('INDEPENDENT_IMAGE_ATTACH_FAILURE '+type(error).__name__,flush=True)
+            # The API26 in-window check owns a different synthetic DB. Run once even if ordinary UI wasn't reached.
+            # Its receipt is not an external-tap result. Registration and both installed bytes must have matched first.
+            if gate.API==26:
+                from verify_note_delete_window import device as verify_owned_delete
+                try:verify_owned_delete(gate,adb,root,record)
+                except Exception as error:
+                    delete_window_error=error;print('INDEPENDENT_OWNED_DELETE_FAILURE '+type(error).__name__,flush=True)
             record['test_started']=True;device(adb,gate.SERIAL,PKG,gate.API,folder);record['accepted_scales']=check_font_files(folder,expected,gate.API,src,rid,att);record['status']='PASS'
         except Exception as exc:
             record['error_class']=type(exc).__name__;raise
@@ -218,6 +225,7 @@ def bind_full_endcheck(gate,root):
             print('DRAFT_FONT_ENDCHECK '+str(record['status'])+' api='+str(gate.API),flush=True)
         if thumbnail_error is not None:raise thumbnail_error # A font pass cannot hide a thumbnail failure.
         if image_attach_error is not None:raise image_attach_error
+        if delete_window_error is not None:raise delete_window_error
     return finish
 
 def absent_restore_controls():
@@ -244,6 +252,8 @@ def full_evidence_controls():
     legacy26_settings_controls()
     from verify_note_image_import import host as image_attach_host
     image_attach_host()
+    from verify_note_delete_window import host as owned_delete_host
+    owned_delete_host()
     absent_restore_controls()
     import tempfile,copy,ast
     import emulator_gate as gates

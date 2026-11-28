@@ -322,6 +322,10 @@ jobs:
                       stream.write(("\nBUILD_ATTEMPT " + str(number) + "\n").encode() + raw)
                   print(raw.decode("utf-8", errors="replace"), flush=True)
                   return result.returncode, raw.decode("utf-8", errors="replace")
+              if os.environ.get("OBSERVE_CURRENT_API34") == "1":
+                  from tools.verify_current_build_log import current_build_observer, scope_controls
+                  scope_controls()
+                  invoke = current_build_observer(command, log, os.environ)
               def emit(attempts):
                   record = {"scope": "BUILD_CONFIGURATION_RETRY_NOT_DEVICE_RETRY",
                             "commit": os.environ["GITHUB_SHA"], "run_id": os.environ["GITHUB_RUN_ID"],
@@ -1182,6 +1186,7 @@ jobs:
         id: current_db_build
         env:
           BUILD_429_EXECUTE: 'true'
+          OBSERVE_CURRENT_API34: ${{ matrix.api == 34 && '1' || '' }}
           BUILD_LOG: build.log
           BUILD_LINT: 'true'
           # #792 API26 D8 Java-heap OOM. Trial only this build's heap; API34, old APK, exports, workers and retries stay untouched.

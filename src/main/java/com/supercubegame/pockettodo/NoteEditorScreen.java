@@ -212,13 +212,13 @@ public final class NoteEditorScreen {
     }
     /** Turn pages on the loaded full-note snapshot. Mutations reload the complete note. Each page owns newly read display buffers. */
     private void preparePage(final State full,final int wanted,final boolean navigation){
-        host.work(()->{
+        host.readForDisplay(()->{
             State s=new State();s.noteId=full.noteId;s.ids.addAll(full.ids);s.titles.addAll(full.titles);s.blocks.addAll(full.blocks);
             s.media=new MediaRepository(MainActivity.noteDisplayMedia(host.activity),64L*1024*1024);
             s.page=NoteThumbnailLoad.page(s.blocks,wanted);
             s.previews.putAll(NoteThumbnailLoad.read(s.page.blocks,id->displayBitmap(decodePreview(s.media.path(id)))));
             return s;
-        },s->{drawPage(s);if(navigation)host.message("已切换预览页，笔记内容未修改。",false);},null);
+        },s->{drawPage(s);if(navigation)host.message("已切换预览页，笔记内容未修改。",false);});
     }
     private void drawPage(State s){
         selectedNote=displayedNote=s.noteId;displayedPage=s.page.index;displayedCount=s.blocks.size();displayedTail=displayedCount==0?null:s.blocks.get(displayedCount-1).id;

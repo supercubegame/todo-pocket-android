@@ -46,6 +46,7 @@ public final class TodayScreen {
     private boolean busy, closed;
     // UI-thread identity: an old load completion must not erase a newer result notice.
     private Object notice=new Object();
+    private boolean noticeError;
     private final Map<View,Boolean> paused=new IdentityHashMap<>();
     final ActivitiesScreen activities;
     private AppDatabase.RestorePlan pendingRestore;
@@ -448,7 +449,21 @@ public final class TodayScreen {
             });}
         });
     }
-    void message(String value,boolean error){notice=new Object();status.setText(value);status.setTextColor(error?ERROR:MUTED);}
+    /** Reading the selected page never produces a save notice. Preserve a newer or more specific failure. */
+    <T> void readForDisplay(Callable<T> action,Consumer<T> success){
+        if(closed||busy)return;
+        busy=true;pause(root);final Object pageNotice=notice;
+        io.execute(()->{
+            try{T page=action.call();activity.runOnUiThread(()->{
+                if(closed||activity.isDestroyed())return;
+                busy=false;resume();success.accept(page);
+            });}catch(Exception e){activity.runOnUiThread(()->{
+                if(closed||activity.isDestroyed())return;
+                busy=false;resume();if(notice==pageNotice&&!noticeError)message("未能加载本页预览，笔记内容未修改。",true);
+            });}
+        });
+    }
+    void message(String value,boolean error){notice=new Object();noticeError=error;status.setText(value);status.setTextColor(error?ERROR:MUTED);}
     private void pause(View v){paused.put(v,v.isEnabled());v.setEnabled(false);if(v instanceof ViewGroup){ViewGroup g=(ViewGroup)v;for(int i=0;i<g.getChildCount();i++)pause(g.getChildAt(i));}}
     private void resume(){for(Map.Entry<View,Boolean> state:paused.entrySet())state.getKey().setEnabled(state.getValue());paused.clear();}
     void addRow(LinearLayout parent,View view){LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.bottomMargin=dp(10);parent.addView(view,p);}

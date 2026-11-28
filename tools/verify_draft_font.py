@@ -27,18 +27,43 @@ def _setting_value(key,v):
     if key==KEYS[0] and isinstance(v,str) and re.fullmatch(r'[0-9](?:\.[0-9]{1,8})?',v) and .5<=float(v)<=3:return v
     return 'unexpected'
 
-def _restore_owned(cmd,get,key,original,owned):
+def _row(cmd,key):
+    # The getter alone cannot distinguish an absent row from a literal null. Never retain other settings.
+    need(cmd('am','get-current-user').strip()=='0','only the foreground owner of this disposable AVD')
+    ns,name=key;v=cmd('settings','--user','0','get',ns,name).strip();entries=[line[len(name)+1:] for line in cmd('settings','--user','0','list',ns).splitlines() if line.startswith(name+'=')]
+    return dict(user=0,value=_setting_value(key,v),count=len(entries),listed=_setting_value(key,entries[0]) if len(entries)==1 else None)
+
+def _exact(row,value):
+    return isinstance(row,dict) and type(row.get('user')) is int and type(row.get('count')) is int and row=={'user':0,'value':value,'count':int(value!='null'),'listed':None if value=='null' else value} and value!='unexpected'
+
+def _baseline_raw(text,api,nonce,stage):
+    need(stage in ('original','neutral') and api in (26,34) and re.fullmatch(r'[0-9]+-[1-9][0-9]*-'+str(api)+'-'+stage,nonce) is not None,'unbound runtime sample')
+    lines=[l.removeprefix('INSTRUMENTATION_RESULT: stream=') for l in text.splitlines()];w=[l for l in lines if l.startswith(('FONT_', 'DEVICE_DATABASE_', 'INSTRUMENTATION_CODE:'))]
+    marker=f'FONT_BASELINE api={api} user=0 nonce={nonce} stage={stage} package={PKG} hardware=ranchu system=1.0 target=1.0'
+    need(w==[marker,'DEVICE_DATABASE_RESULT draft_font_baseline 2/2 PASS','INSTRUMENTATION_CODE: -1'] and not re.search(r'INSTRUMENTATION_(?:ABORTED|FAILED)|Process crashed|Exception:|AssertionError',text),'runtime baseline not witnessed')
+    return dict(api=api,user=0,nonce=nonce,stage=stage,system='1.0',target='1.0',raw_sha256=hashlib.sha256(text.encode()).hexdigest())
+
+def _restore_owned(cmd,observe,key,original,owned,normalized):
     r={'original':_setting_value(key,original),'last_owned':_setting_value(key,owned),'seen_before':None,'after':None,'decision':'no_write','write_confirmed':False,'restored':False,'failed_stage':None,'error_class':None,'child_exit':None};stage='read_before'
     try:
-        seen=get(key);r['seen_before']=_setting_value(key,seen)
+        row=observe(key);r['before_row']=row;seen=r['seen_before']=row['value'];need(_exact(row,seen),'inconsistent initial setting row')
         if seen==original:r['decision']='already_original'
         else:
             if seen!=owned:r['decision']='foreign_refused';stage='owner_guard';raise AssertionError('intervening change left untouched')
-            stage='write';r['decision']='delete' if original=='null' else 'put'
-            if original=='null':cmd('settings','delete',*key)
-            else:cmd('settings','put',*key,original)
-            r['write_confirmed']=True # command returned; only the following exact read can confirm restoration
-        stage='read_after';actual=get(key);r['after']=_setting_value(key,actual);stage='verify';need(actual==original,'exact setting not restored');r['restored']=True
+            absent_font=key==KEYS[0] and original=='null'
+            if absent_font:
+                # The system can materialize a default if deletion would also change the runtime configuration.
+                # Establish the previously observed 1.0 runtime first, then make exactly one guarded delete.
+                r['decision']='normalize_delete';stage='normalize';r['normalized_written']=False
+                if seen!='1.0':cmd('settings','--user','0','put',*key,'1.0');r['normalized_written']=True
+                stage='normalize_read';r['neutral_row']=observe(key);need(_exact(r['neutral_row'],'1.0'),'neutral value not owned')
+                stage='runtime';normalized('neutral');stage='delete_guard';r['delete_guard']=observe(key);need(_exact(r['delete_guard'],'1.0'),'concurrent change: no delete')
+            else:r['decision']='delete' if original=='null' else 'put'
+            stage='write'
+            if original=='null':cmd('settings','--user','0','delete',*key)
+            else:cmd('settings','--user','0','put',*key,original)
+            r['write_confirmed']=True
+        stage='read_after';r['after_row']=observe(key);r['after']=r['after_row']['value'];stage='verify';need(_exact(r['after_row'],original),'exact row not restored');r['restored']=True
     except Exception as e:
         r['error_class']=type(e).__name__;r['failed_stage']=stage
         if isinstance(e,subprocess.CalledProcessError):r['child_exit']=e.returncode
@@ -47,10 +72,16 @@ def _restore_owned(cmd,get,key,original,owned):
 def matrix(cmd,run_one,collect,serial,pkg,api,env):
     need(env.get('GITHUB_ACTIONS')=='true' and serial=='emulator-5554' and pkg==PKG and type(api)==int and api in (26,34),'disposable CI only');rid=env['GITHUB_RUN_ID'];att=env['GITHUB_RUN_ATTEMPT'];src=env['GITHUB_SHA'];need(re.fullmatch(r'[0-9]+',rid) and re.fullmatch(r'[1-9][0-9]*',att) and re.fullmatch(r'[a-f0-9]{40}',src),'unbound run')
     for key,target in [('ro.kernel.qemu','1'),('ro.hardware','ranchu'),('ro.build.version.sdk',str(api))]:need(cmd('getprop',key).strip()==target,'unexpected emulator')
-    get=lambda key:cmd('settings','get',*key).strip();before={k:get(k) for k in KEYS};active={};errors=[];rows=[];rest={};
+    def observe(k):return _row(cmd,k)
+    def get(k):
+        r=observe(k);need(_exact(r,r['value']),'owned setting row and getter disagree');return r['value']
+    initial={k:observe(k) for k in KEYS};need(all(_exact(r,r['value']) for r in initial.values()),'conflicting original rows: no change');before={k:r['value'] for k,r in initial.items()};active={};errors=[];rows=[];rest={};runtime={}
+    def baseline(stage):
+        nonce=f'{rid}-{att}-{api}-{stage}';raw=cmd('am','instrument','--user','0','-w','-r','-e','expectedApi',str(api),'-e','phase','draft_font_baseline','-e','fontNonce',nonce,'-e','fontStage',stage,PKG+'.test/com.supercubegame.pockettodo.V12DeviceTest');collect('font-config-'+stage+'.txt',raw);runtime[stage]=_baseline_raw(raw,api,nonce,stage)
+    if before[KEYS[0]]=='null':baseline('original')
     need(before[KEYS[1]] in ('null','0','1') and (before[KEYS[0]]=='null' or (re.fullmatch(r'[0-9]+(?:\.[0-9]+)?',before[KEYS[0]]) and .5<=float(before[KEYS[0]])<=3)),'unexpected saved settings: no changes')
     def set_own(key,to):
-        need(get(key)==active.get(key,before[key]),'concurrent setting change: leave alone');active[key]=to;cmd('settings','put',*key,to);need(get(key)==to,'setting write unconfirmed')
+        need(get(key)==active.get(key,before[key]),'concurrent setting change: leave alone');active[key]=to;cmd('settings','--user','0','put',*key,to);need(get(key)==to,'setting write unconfirmed')
     try:
         set_own(KEYS[1],'1')
         for pct,value in SCALES:
@@ -63,9 +94,9 @@ def matrix(cmd,run_one,collect,serial,pkg,api,env):
         evidence={}
         for key in reversed(KEYS):
             if key not in active:continue
-            trace=_restore_owned(cmd,get,key,before[key],active[key]);evidence[key[1]]=trace;rest[key]=trace['restored']
+            trace=_restore_owned(cmd,observe,key,before[key],active[key],baseline);evidence[key[1]]=trace;rest[key]=trace['restored']
             if not rest[key]:errors.append(str(trace['error_class'])+' restoring '+key[1]+' at '+str(trace['failed_stage']))
-        status='PASS' if not errors and len(rows)==3 and all(r['status']=='PASS' for r in rows) and all(rest.get(k,False) for k in KEYS) else 'FAIL';result={'source':src,'run_id':rid,'attempt':att,'api':api,'original':{k[1]:v for k,v in before.items()},'restored':{k[1]:v for k,v in rest.items()},'restoration':evidence,'raw_series':rows,'status':status,'physical_device':False,'pixel_measurement':False,'release_ready':False};collect('font-matrix.json',json.dumps(result,indent=2)+'\n')
+        status='PASS' if not errors and len(rows)==3 and all(r['status']=='PASS' for r in rows) and all(rest.get(k,False) for k in KEYS) else 'FAIL';result={'source':src,'run_id':rid,'attempt':att,'api':api,'original':{k[1]:v for k,v in before.items()},'restored':{k[1]:v for k,v in rest.items()},'restoration':evidence,'original_rows':{k[1]:v for k,v in initial.items()},'runtime_baseline':runtime,'raw_series':rows,'status':status,'physical_device':False,'pixel_measurement':False,'release_ready':False};collect('font-matrix.json',json.dumps(result,indent=2)+'\n')
     need(result['status']=='PASS','draft font series incomplete: '+', '.join(errors));return result
 
 def device(adb,serial,pkg,api,out):
@@ -85,12 +116,18 @@ def _confirmed_restores(j):
     originals=j.get('original',{});r=j.get('restoration',{});need(set(originals)==set(r)=={k[1] for k in KEYS},'incomplete original or restore receipts')
     for k,active in zip(KEYS,('2.0','1'),strict=True):
         name=k[1];orig=originals[name];ev=r[name];need(isinstance(orig,str) and _setting_value(k,orig)==orig and orig!='unexpected' and ev['restored'] is True and j['restored'][name] is True and ev['original']==ev['after']==orig and ev['last_owned']==active and ev['failed_stage'] is None and ev['error_class'] is None and ev['child_exit'] is None,'exact restore evidence missing')
-        noop=ev['seen_before']==orig
-        need((noop or ev['seen_before']==active) and ev['decision']==('already_original' if noop else 'delete' if orig=='null' else 'put') and ev['write_confirmed'] is (not noop),'wrong owner or operation in restore receipt')
+        need(_exact(j['original_rows'][name],orig) and _exact(ev['before_row'],ev['seen_before']) and _exact(ev['after_row'],orig),'get and row membership not independently recorded')
+        noop=ev['seen_before']==orig;norm=k==KEYS[0] and orig=='null' and not noop
+        need((noop or ev['seen_before']==active) and ev['decision']==('already_original' if noop else 'normalize_delete' if norm else 'delete' if orig=='null' else 'put') and ev['write_confirmed'] is (not noop),'wrong owner or operation in restore receipt')
+        if norm:need(ev['normalized_written'] is True and _exact(ev['neutral_row'],'1.0') and _exact(ev['delete_guard'],'1.0'),'neutralization not witnessed')
 
 def check_font_files(folder,expected,api,src,rid,att):
     """Read only these four synthetic source-bound files; never trust the matrix's PASS alone."""
     raw=folder/'font-matrix.json';j=json.loads(raw.read_bytes());need(j.get('api')==api and j.get('source')==src and j.get('run_id')==rid and j.get('attempt')==att and j.get('status')=='PASS' and j.get('restored')=={'font_scale':True,'show_ime_with_hard_keyboard':True} and all(v is True for v in j['restored'].values()),'missing source-bound completed matrix and restored settings');_confirmed_restores(j); rows=j['raw_series'];need(len(rows)==3,'incomplete font series');labels=[]
+    stages=[] if j['original']['font_scale']!='null' else ['original']+(['neutral'] if j['restoration']['font_scale']['decision']=='normalize_delete' else [])
+    need(set(j['runtime_baseline'])==set(stages),'missing or unexpected baseline sample')
+    for stage in stages:
+        raw=(folder/('font-config-'+stage+'.txt')).read_bytes();n=f'{rid}-{att}-{api}-{stage}';need(_baseline_raw(raw.decode(),api,n,stage)==j['runtime_baseline'][stage],'unbound runtime raw')
     for row,(pct,_) in zip(rows,SCALES,strict=True):
         nonce=rid+'-'+att+'-'+str(api)+'-'+str(pct);data=(folder/f'font-{pct}.txt').read_bytes();need((row['source'],row['run_id'],row['attempt'],row['api'],row['pct'],row['nonce'],row['status'])==(src,rid,att,api,pct,nonce,'PASS') and row['raw_sha256']==hashlib.sha256(data).hexdigest(),'wrong individual run or output');parsed=parse(data.decode(),api,pct,nonce);need(parsed['cases']==row['cases'] and parsed['geometry']==row['geometry'],'raw and summarized geometry disagree');labels.append(pct)
     need(labels==[100,130,200] and set(expected)=={PKG,PKG+'.test'},'wrong package/scale set');return labels
@@ -124,7 +161,7 @@ def bind_full_endcheck(gate,root):
             record['error_class']=type(exc).__name__;raise
         finally:
             # Existing always-upload glob device-*.txt picks up even a partial failed matrix. No settings, permission, signer or workflow changes outside the disposable AVD.
-            for leaf in ('font-100.txt','font-130.txt','font-200.txt','font-matrix.json'):
+            for leaf in ('font-100.txt','font-130.txt','font-200.txt','font-matrix.json','font-config-original.txt','font-config-neutral.txt'):
                 p=folder/leaf
                 if p.is_file():
                     with (root/('device-draft-'+p.stem+'.txt')).open('xb') as out:out.write(p.read_bytes())
@@ -133,7 +170,28 @@ def bind_full_endcheck(gate,root):
         if thumbnail_error is not None:raise thumbnail_error # A font pass cannot hide a thumbnail failure.
     return finish
 
+def absent_restore_controls():
+    # Two independent provider observations. A command completing is never treated as a successful removal.
+    font=KEYS[0];api=34;count=0
+    for mode in ('ok','foreign','intervened','config_miss','reinserted','getter_only','already','two_rows'):
+        store={'value':'1.71' if mode=='foreign' else 'null' if mode=='already' else '2.0'};actions=[];runtime=[]
+        def row(key):
+            v=store['value'];listed='1.0' if actions and actions[-1]=='delete' and mode=='getter_only' else v
+            return dict(user=0,value=v,count=2 if mode=='two_rows' else int(listed!='null'),listed=None if listed=='null' else listed)
+        def send(*args):
+            assert args[:3]==('settings','--user','0');op,ns,k,*rest=args[3:];assert (ns,k)==font;actions.append(op)
+            store['value']=rest[0] if op=='put' else '1.0' if mode=='reinserted' else 'null'
+        def sample(stage):
+            runtime.append(stage);n='123-1-34-'+stage;t=f'FONT_BASELINE api=34 user=0 nonce={n} stage={stage} package={PKG} hardware=ranchu system=1.0 target=1.0\nDEVICE_DATABASE_RESULT draft_font_baseline 2/2 PASS\nINSTRUMENTATION_CODE: -1'
+            _baseline_raw(t.replace('target=1.0','target=2.0') if mode=='config_miss' else t,api,n,stage)
+            if mode=='intervened':store['value']='1.75'
+        r=_restore_owned(send,row,font,'null','2.0',sample);assert r['restored'] is (mode in ('ok','already'))
+        want=[] if mode in ('foreign','already','two_rows') else ['put'] if mode in ('intervened','config_miss') else ['put','delete']
+        assert actions==want and runtime==(['neutral'] if actions else []) and (mode!='intervened' or store['value']=='1.75');count+=1
+    assert all(not _exact(x,'null') for x in ({'user':False,'count':0,'value':'null','listed':None},{'user':0,'count':False,'value':'null','listed':None},{'user':0,'count':1,'value':'null','listed':'null'}));print('ABSENT_FONT_RESTORE',count,'owned/foreign/runtime/row paths, 3 false receipt shapes rejected; NOT Android',flush=True)
+
 def full_evidence_controls():
+    absent_restore_controls()
     import tempfile,copy,ast
     import emulator_gate as gates
     old=AssertionError('primary');secondary=ValueError('secondary');matrix={}
@@ -164,9 +222,10 @@ def full_evidence_controls():
             for p,_ in SCALES:
                 n=f'567-1-{api}-{p}';lines=[f'FONT_SCOPE api={api} pct={p} nonce={n} settings={p/100} applied={p/100} package={PKG} hardware=ranchu'];lines+=['FONT_CASE '+v+' PASS' if v in CASES else 'FONT_GEOMETRY '+v+' enabled=true rect=8,100,300,160 ime=0,331,320,640 min=48 lines=1 chars='+str(3 if v.endswith('save') else 4)+' scrolls=1' for v in ORDER];t='\n'.join(lines+['DEVICE_DATABASE_RESULT draft_font_ui 2/2 PASS','INSTRUMENTATION_CODE: -1']);rawfiles[p]=t.encode();s=parse(t,api,p,n);rows.append(dict(source=env['src'],run_id='567',attempt='1',status='PASS',raw_sha256=hashlib.sha256(t.encode()).hexdigest(),**s))
             base=dict(api=api,source=env['src'],run_id='567',attempt='1',status='PASS',restored={'font_scale':True,'show_ime_with_hard_keyboard':True},raw_series=rows)
-            base['original']={'font_scale':'null','show_ime_with_hard_keyboard':'1'};base['restoration']={}
+            base['original']={'font_scale':'1.25','show_ime_with_hard_keyboard':'1'};base['restoration']={};base['original_rows']={};base['runtime_baseline']={}
+            def proven(x):return {'user':0,'value':x,'count':int(x!='null'),'listed':None if x=='null' else x}
             for k,last in zip(KEYS,('2.0','1')):
-                orig=base['original'][k[1]];base['restoration'][k[1]]=dict(original=orig,last_owned=last,seen_before=last,after=orig,decision='already_original' if last==orig else 'delete',write_confirmed=(last!=orig),restored=True,failed_stage=None,error_class=None,child_exit=None)
+                orig=base['original'][k[1]];base['restoration'][k[1]]=dict(original=orig,last_owned=last,seen_before=last,after=orig,decision='already_original' if last==orig else 'put',write_confirmed=(last!=orig),restored=True,failed_stage=None,error_class=None,child_exit=None,before_row=proven(last),after_row=proven(orig));base['original_rows'][k[1]]=proven(orig)
             for fault in ('wrong_after','forged_write','claimed_foreign','absent_restore','none','missing_raw','wrong_hash','wrong_source','wrong_order','partial','fake_pos','foreign_attempt','not_restored','fake_bool','omitted_case','missing_terminal','wrong_apks'):
                 j=copy.deepcopy(base);b=dict(rawfiles);e=apks
                 if fault=='wrong_after':j['restoration']['font_scale']['after']='1.0'
@@ -215,7 +274,10 @@ def host():
         state={KEYS[0]:'1.15' if name!='unknown_original' else 'unknown',KEYS[1]:'null'};saved=state.copy();written=[];calls=[];docs={}
         def shell(*args):
             if args[0]=='getprop':return {'ro.kernel.qemu':'0' if name=='wrong_hardware' else '1','ro.hardware':'ranchu','ro.build.version.sdk':'26'}[args[1]]
-            _,op,group,k,*v=args;key=(group,k)
+            if args[:2]==('am','get-current-user'):return '0'
+            assert args[:3]==('settings','--user','0');op,group,*tail=args[3:]
+            if op=='list':return '\n'.join(k+'='+v for (ns,k),v in state.items() if ns==group and v!='null')
+            k,*v=tail;key=(group,k)
             if op=='get':return state[key]
             written.append((key,op,*v))
             if name=='restore_denied' and key==KEYS[1] and op=='delete':raise RuntimeError('simulated setting restore failure')

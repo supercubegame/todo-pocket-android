@@ -1261,6 +1261,15 @@ public class NoticeHarness {
  /*ACTUAL*/
  public static void main(String[] a){
   NoticeHarness h=new NoticeHarness();boolean newer=a[0].equals("newer");int[] success={0};
+  if(a[0].startsWith("page-")){
+   boolean fails=a[0].equals("page-fail")||a[0].equals("page-fail-no-prior");
+   boolean prior=!a[0].equals("page-fail-no-prior");if(prior)h.message("保存未完成：笔记和原图未改动，请重新打开后再试",true);
+   h.readForDisplay(()->{if(fails)throw new java.io.IOException("synthetic read");return 1;},v->success[0]++);
+   if(prior&&!h.status.value.startsWith("保存未完成"))throw new AssertionError("page erased notice at start");
+   if(a[0].equals("page-newer"))h.message("newer refusal",true);
+   h.jobs.remove(0).run();h.ui.remove(0).run();String expect=a[0].equals("page-newer")?"newer refusal":prior?"保存未完成：笔记和原图未改动，请重新打开后再试":"未能加载本页预览，笔记内容未修改。";
+   if(!expect.equals(h.status.value)||h.busy||success[0]!=(fails?0:1))throw new AssertionError("wrong page feedback: "+h.status.value);return;
+  }
   h.work(()->1,v->success[0]++,null);
   if(newer)h.message("recreated-refusal",true);
   if(h.jobs.size()!=1||!h.ui.isEmpty())throw new AssertionError("fixture scheduling");
@@ -1348,13 +1357,20 @@ def result_ui_selftest():
             assert editor.count(old)==1
             run=compile_run(editor.replace(old,new,1),EDITOR_UI_HARNESS,'EditorHarness',['empty','success'])
             assert run['empty'].returncode==0 and run['success'].returncode!=0 and 'IME/order' in run['success'].stderr,run['success'].stderr
-        checked(['java','-cp',tmp,'Extract',str(ROOT/'src/main/java/com/supercubegame/pockettodo/TodayScreen.java'),str(root/'notice.java'),'work,message,notice'])
+        checked(['java','-cp',tmp,'Extract',str(ROOT/'src/main/java/com/supercubegame/pockettodo/TodayScreen.java'),str(root/'notice.java'),'work,readForDisplay,message,notice,noticeError'])
         notice=(root/'notice.java').read_text()
         run=compile_run(notice,NOTICE_UI_HARNESS,'NoticeHarness',['normal','newer'])
         assert all(p.returncode==0 for p in run.values()),{k:p.stderr for k,p in run.items()}
         assert notice.count('if(notice==noticeAtStart)')==2
         run=compile_run(notice.replace('if(notice==noticeAtStart)',''),NOTICE_UI_HARNESS,'NoticeHarness',['normal','newer'])
         assert run['normal'].returncode==0 and run['newer'].returncode!=0 and 'notice overwritten' in run['newer'].stderr
+        checked(['java','-cp',tmp,'Extract',str(source/'NoteEditorScreen.java'),str(root/'page.java'),'preparePage'])
+        page=(root/'page.java').read_text();assert page.count('host.readForDisplay(')==1 and 'host.work(' not in page
+        pm=['page-ok','page-fail','page-newer','page-fail-no-prior']
+        pr=compile_run(notice,NOTICE_UI_HARNESS,'NoticeHarness',pm);assert all(p.returncode==0 for p in pr.values()),{k:v.stderr for k,v in pr.items()}
+        for old,new,case in [('busy=true;pause(root);final Object pageNotice=notice;','busy=true;pause(root);message("已保存到本机",false);final Object pageNotice=notice;','page-ok'),('if(notice==pageNotice&&!noticeError)','if(notice==pageNotice)','page-fail')]:
+            assert notice.count(old)==1;pr=compile_run(notice.replace(old,new),NOTICE_UI_HARNESS,'NoticeHarness',['normal',case]);assert pr['normal'].returncode==0 and pr[case].returncode!=0 and 'page' in pr[case].stderr
+        print('NOTE_PRESENTATION_NOTICE 4 original-source scenarios + 2 witnessed faulty versions; not Android',flush=True)
         extracted['TodayScreen.notice']=notice
         print('RESULT_EDITOR_HOST cases=17 original_RED=2 witnessed_mutants=8 PASS ACTUAL_SOURCE_ANDROID_DB_IME_DOUBLES_ONLY',
               {k:hashlib.sha256(v.encode()).hexdigest() for k,v in extracted.items()},flush=True)
@@ -2957,6 +2973,7 @@ def broken26_host():
 
 
 def parser_selftest():
+    late_derive_host()
     from verify_draft_font import full_evidence_controls
     full_evidence_controls()
     broken26_host()
@@ -3332,6 +3349,69 @@ def full_native_observer_selftest(native=verify_native_ui):
         else:raise AssertionError('full native wiring omission accepted '+kind)
     print('FULL_NATIVE_OBSERVER_HOST 1 positive 5 negative 2 compiled behavioral mutants 3 AST wiring omissions PASS; NOT_ANDROID',flush=True)
 
+
+def late_derive_evidence(ui_action,restore_held,inspect_state,emit):
+    """Single UI submission and cleanup. Preserve the earliest error even if diagnostic collection also fails."""
+    record={'scope':'SYNTHETIC_LATE_DERIVATIVE_SAVE_POSTCONDITION','ui':'NOT_COMPLETED','restored_held':False,'equal':None};first=None
+    try:
+        try:ui_action();record['ui']='PASS'
+        except Exception as e:first=e;record['ui_error_class']=type(e).__name__
+    finally:
+        # Always return the owned fixture, including a Python cancellation; never collect further UI after cancellation.
+        try:restore_held();record['restored_held']=True
+        except Exception as e:
+            if first is None:first=e
+            record['cleanup_error_class']=type(e).__name__
+    if record['restored_held']:
+        try:
+            measured=inspect_state();record['equal']=measured
+            keys={'all_tables','media_names','chosen_original','image_source','prior_derivative'}
+            if set(measured)!=keys or not all(v is True for v in measured.values()):raise AssertionError('late derivative postcondition not established')
+        except Exception as e:
+            if first is None:first=e
+            record['state_error_class']=type(e).__name__
+    record['status']='PASS' if first is None else 'NOT_ACCEPTED'
+    try:emit(record)
+    except Exception:
+        if first is None:raise
+    if first is not None:raise first
+    return record
+
+def late_derive_host():
+    import itertools
+    keys=('all_tables','media_names','chosen_original','image_source','prior_derivative');n=0
+    for uf,cf,sf,ef in itertools.product((False,True),repeat=4):
+        calls=[];docs=[];events=[RuntimeError(k) for k in ('ui','restore','state','report')]
+        def ui():
+            calls.append('ui')
+            if uf:raise events[0]
+        def cleanup():
+            calls.append('restore')
+            if cf:raise events[1]
+        def state():
+            calls.append('state')
+            if sf:raise events[2]
+            return dict.fromkeys(keys,True)
+        def emit(r):
+            calls.append('report');docs.append(r)
+            if ef:raise events[3]
+        err=None
+        try:late_derive_evidence(ui,cleanup,state,emit)
+        except Exception as e:err=e
+        want=events[0] if uf else events[1] if cf else events[2] if sf else events[3] if ef else None
+        assert err is want and calls==['ui','restore']+([] if cf else ['state'])+['report'] and len(docs)==1 and docs[0]['restored_held'] is (not cf);n+=1
+    for cls in (KeyboardInterrupt,SystemExit):
+        stop=cls('controlled cancellation');order=[]
+        def cancel():order.append('submit');raise stop
+        try:late_derive_evidence(cancel,lambda:order.append('restore'),lambda:order.append('read'),lambda _:order.append('emit'))
+        except BaseException as error:assert error is stop and order==['submit','restore']
+        else:raise AssertionError('interruption swallowed')
+    for key in keys:
+        x=dict.fromkeys(keys,True);x[key]=False;r=[]
+        try:late_derive_evidence(lambda:None,lambda:None,lambda:x,r.append)
+        except AssertionError:assert r[0]['equal'][key] is False and r[0]['status']=='NOT_ACCEPTED'
+        else:raise AssertionError('bad disk state accepted')
+    print('LATE_DERIVATIVE_RECEIPT',n,'ordered error combinations + 5 negative storage checks; host only',flush=True)
 
 def _verify_native_ui(adb,nodes):
     """Only real taps/text input; independently read SQLite after force-stop, no seeding UI DB."""
@@ -4125,13 +4205,19 @@ public class ImageImportFixture {
         drag(0,0,dw//2,dh//2);wait_crop();tap('预览');find(text='保存')
         held='files/media/'+derived_id
         subprocess.check_output([str(adb),'-s',SERIAL,'shell','run-as',PKG,'mv',held,held+'.held'],timeout=30)
-        try:
+        def submit_late_once():
             tap('保存')
             okh(find(**{'content-desc':'v12-status','text':DERIVE_SAVE_FAILED_MESSAGE}) is not None,'late derivative save failure shows the exact visible message')
-        finally:
+        def return_held():
             subprocess.check_output([str(adb),'-s',SERIAL,'shell','run-as',PKG,'mv',held+'.held',held],timeout=30)
-        hard_stop()
-        okh(hard_state('hardening-save-failed.db')==saved and hard_media()==media_before and private_bytes(derived_id)==derivative_bytes and private_bytes(derive_source_id)==derive_input and private_bytes(chosen_id)==chosen,'late derivative save failure and cancel leave every table and every original byte unchanged')
+        def inspect_late():
+            hard_stop()
+            return {'all_tables':hard_state('hardening-save-failed.db')==saved,'media_names':hard_media()==media_before,'prior_derivative':private_bytes(derived_id)==derivative_bytes,'image_source':private_bytes(derive_source_id)==derive_input,'chosen_original':private_bytes(chosen_id)==chosen}
+        def record_late(rec):
+            rec=dict(rec,source=os.environ['GITHUB_SHA'],run=os.environ['GITHUB_RUN_ID'],attempt=os.environ['GITHUB_RUN_ATTEMPT'],api=API)
+            with (ROOT/'device-derivative-late-state.txt').open('x',encoding='utf-8') as f:json.dump(rec,f)
+        observation=late_derive_evidence(submit_late_once,return_held,inspect_late,record_late)
+        okh(observation['status']=='PASS' and all(v is True for v in observation['equal'].values()),'late derivative save failure and cancel leave every table and every original byte unchanged')
         # Persistent JPEG-source derivative. A flat 8x8-block gray JPEG decodes identically in every
         # baseline decoder, so the host ImageIO oracle can demand exact pixels from the Android output.
         jpeg_input=make_derivative_jpeg(fixture_dir);jpeg_id=hashlib.sha256(jpeg_input).hexdigest()

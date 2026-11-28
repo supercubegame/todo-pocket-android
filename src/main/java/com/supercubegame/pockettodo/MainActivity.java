@@ -22,9 +22,12 @@ public final class MainActivity extends Activity {
     // Same-process instrumentation only. No intent, external path or preference can select this database.
     // Same-process test observer, no Intent, provider, preference, permission or external path. Normal users retain no references.
     // Fixed, private instrumentation fixture only; never selected by a preference, IPC or Intent extra.
+    // Fixed, private instrumentation fixture. No preference, Intent or external path can enable this route.
+    static volatile boolean isolatedNoteDeleteTest;
+    static final String NOTE_DELETE_DB="note-delete-window-ci.db", NOTE_DELETE_MEDIA="note-delete-window-ci-media";
     static volatile boolean isolatedNoteThumbnailTest;
     static final String THUMB_DB="note-thumbs-ui-ci.db", THUMB_MEDIA="note-thumbs-ui-ci-media";
-    static java.nio.file.Path noteDisplayMedia(android.app.Activity owner){return owner.getFilesDir().toPath().resolve(owner instanceof MainActivity && isolatedNoteThumbnailTest ? THUMB_MEDIA : "media");}
+    static java.nio.file.Path noteDisplayMedia(android.app.Activity owner){if(owner instanceof MainActivity&&isolatedNoteDeleteTest)return owner.getFilesDir().toPath().resolve(NOTE_DELETE_MEDIA).resolve("assets");return owner.getFilesDir().toPath().resolve(owner instanceof MainActivity && isolatedNoteThumbnailTest ? THUMB_MEDIA : "media");}
     static volatile int isolatedDraftFontScale;
     static volatile java.lang.ref.WeakReference<android.app.AlertDialog> draftFontDialog;
     static String draftFontDb(int scale){switch(scale){case 100:return "draft-font-100-ci.db";case 130:return "draft-font-130-ci.db";case 200:return "draft-font-200-ci.db";default:throw new IllegalArgumentException("unknown synthetic font");}}
@@ -53,6 +56,8 @@ public final class MainActivity extends Activity {
     }else if(isolatedShortcutTest){
         screen=new TodayScreen(this,AppDatabase.openSchema4(this,"schema4-ui.db"));
         Bundle isolated=new Bundle();isolated.putInt("page",1);screen.show(isolated);
+    }else if(isolatedNoteDeleteTest){
+        screen=new TodayScreen(this,AppDatabase.openSchema3(this,NOTE_DELETE_DB));Bundle isolated=new Bundle();isolated.putInt("page",1);screen.show(isolated);
     }else if(isolatedNoteThumbnailTest){
         screen=new TodayScreen(this,AppDatabase.openSchema4(this,THUMB_DB));Bundle isolated=new Bundle();isolated.putInt("page",1);screen.show(isolated);
     }else if(isolatedDraftFontScale!=0){

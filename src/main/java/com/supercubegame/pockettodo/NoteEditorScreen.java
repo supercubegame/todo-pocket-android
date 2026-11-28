@@ -328,7 +328,11 @@ public final class NoteEditorScreen {
         ScrollView scroll=new ScrollView(host.activity);scroll.addView(body);
         final int editorTheme=host.draftEditorTheme();
         // Keep actual outer actions above the scrollable editor on compact modern windows.
-        final boolean compact=editorTheme!=0&&android.os.Build.VERSION.SDK_INT>=34;
+        final int draftApi=android.os.Build.VERSION.SDK_INT;
+        final int draftWidthDp=host.activity.getResources().getConfiguration().screenWidthDp;
+        // API34+ uses the verified modern top actions. API26 is limited to the narrow compact window;
+        // ordinary API26 and all other layouts retain the native AlertDialog buttons.
+        final boolean compact=editorTheme!=0&&(draftApi>=34||(draftApi==26&&draftWidthDp>0&&draftWidthDp<=360));
         final Button outerCancel=compact?host.button("取消",()->{}):null;
         final Button outerSave=compact?host.button("保存",()->{}):null;
         if(compact){outerCancel.setTag("note-draft-cancel");outerSave.setTag("note-draft-commit");}

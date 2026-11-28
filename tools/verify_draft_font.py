@@ -99,15 +99,38 @@ def matrix(cmd,run_one,collect,serial,pkg,api,env):
         status='PASS' if not errors and len(rows)==3 and all(r['status']=='PASS' for r in rows) and all(rest.get(k,False) for k in KEYS) else 'FAIL';result={'source':src,'run_id':rid,'attempt':att,'api':api,'original':{k[1]:v for k,v in before.items()},'restored':{k[1]:v for k,v in rest.items()},'restoration':evidence,'original_rows':{k[1]:v for k,v in initial.items()},'runtime_baseline':runtime,'raw_series':rows,'status':status,'physical_device':False,'pixel_measurement':False,'release_ready':False};collect('font-matrix.json',json.dumps(result,indent=2)+'\n')
     need(result['status']=='PASS','draft font series incomplete: '+', '.join(errors));return result
 
+# Fixed, read-only API26 owner sample. Use one noninteractive shell for these three reads;
+# never put externally supplied text into this command, and never run settings through it.
+_OWNER26_SAMPLE = r'''printf '%s\n' PT26_BEGIN_V1
+u=$(id -u) || { r=$?; printf '%s\n' PT26_ERROR_UID; exit "$r"; }
+printf '%s\n' PT26_UID_DONE
+f=$(am get-current-user) || { r=$?; printf '%s\n' PT26_ERROR_FOREGROUND; exit "$r"; }
+printf '%s\n' PT26_FOREGROUND_DONE
+p=$(pm list users) || { r=$?; printf '%s\n' PT26_ERROR_USERS; exit "$r"; }
+printf 'PT26_VALUES\n%s\n%s\n%s\nPT26_END_V1\n' "$u" "$f" "$p"'''
+_OWNER26_PREFIX=('PT26_BEGIN_V1','PT26_UID_DONE','PT26_FOREGROUND_DONE')
+
+def _owner26(raw,at,trace):
+    step='api26-owner-'+at;trace['step']=step;trace['owner_requests']=trace.get('owner_requests',0)+1
+    try:text=raw('-n','-T',_OWNER26_SAMPLE)
+    except (subprocess.CalledProcessError,subprocess.TimeoutExpired) as e:
+        # Report the failing child if it gave an unambiguous marker; never store identifiers,
+        # full output, raw user lists, or assume that a transport 255 came from a remote read.
+        b=e.output or '';b=b.decode('ascii','replace') if isinstance(b,bytes) else b;lines=tuple(b.splitlines()) if len(b)<=512 else ();kind='unattributed'
+        for n,stage in enumerate(('uid','foreground','users'),1):
+            if lines==_OWNER26_PREFIX[:n]+('PT26_ERROR_'+stage.upper(),):kind=stage
+        trace['step']=step+'-'+kind;raise
+    trace['step']=step+'-frame';need(type(text) is str and len(text)<=4096,'bounded legacy owner sample required');ls=text.splitlines()
+    need(len(ls)>=9 and tuple(ls[:4])==_OWNER26_PREFIX+('PT26_VALUES',) and ls[-1]=='PT26_END_V1','incomplete owner frame')
+    uid,fg=ls[4:6];users=[l.strip() for l in ls[6:-1] if l.strip()];trace['step']=step+'-membership'
+    need(uid=='2000' and fg=='0' and len(users)==2 and users[0]=='Users:' and re.fullmatch(r'UserInfo\{0:[^:\r\n{}]{1,80}:[0-9a-fA-F]+\} running',users[1]) is not None,'legacy command refused without unique foreground owner and user-0 shell');trace['owner_checks']+=1
+
 def _legacy26_settings(raw,argv,trace):
     # Android 8 SettingsService rejects --user for LIST/DELETE. These two call SettingsProvider as the caller,
     # unlike explicit GET/PUT. Never issue their implicit spelling on other users, namespaces or a real phone.
     verb,namespace=argv[3:5];tail=argv[5:];need(tuple(argv[:3])==('settings','--user','0') and ((verb=='list' and not tail and namespace in ('system','secure')) or (verb=='delete' and len(tail)==1 and (namespace,tail[0]) in KEYS)),'unowned legacy setting command')
-    def owner(at):
-        trace['step']='api26-owner-'+at;uid=raw('id','-u').strip();foreground=raw('am','get-current-user').strip();users=[l.strip() for l in raw('pm','list','users').splitlines() if l.strip()]
-        need(uid=='2000' and foreground=='0' and len(users)==2 and users[0]=='Users:' and re.fullmatch(r'UserInfo\{0:[^:\r\n{}]{1,80}:[0-9a-fA-F]+\} running',users[1]) is not None,'legacy command refused without unique foreground owner and user-0 shell');trace['owner_checks']+=1
-    owner('before');trace['step']='api26-'+verb+'-'+namespace;trace['legacy_'+verb]+=1;value=raw('settings',verb,namespace,*tail)
-    owner('after');trace['step']='api26-result-'+verb+'-'+namespace
+    _owner26(raw,'before',trace);trace['step']='api26-'+verb+'-'+namespace;trace['legacy_'+verb]+=1;value=raw('settings',verb,namespace,*tail)
+    _owner26(raw,'after',trace);trace['step']='api26-result-'+verb+'-'+namespace
     if verb=='list':
         entries=[s for s in value.splitlines() if s.strip()];need(bool(entries) and all(re.match(r'^[^=\s]+=',x) for x in entries),'malformed or empty provider listing; never proof of an absent key')
     else:need(value.strip()=='Deleted 1 rows','selected owned row was not deleted exactly once')
@@ -118,9 +141,9 @@ def legacy26_settings_controls():
         calls=[];trace={'owner_checks':0,'legacy_list':0,'legacy_delete':0,'step':'init'}
         def run(*a):
             calls.append(a)
-            if a==('id','-u'):return '0' if case=='uid' else '2000'
-            if a==('am','get-current-user'):return '11' if case=='foreground' or (case=='switch' and ('settings','list','system') in calls) else '0'
-            if a==('pm','list','users'):return 'Users:\n UserInfo{0:Owner:13} running\n'+(' UserInfo{10:Other:30}\n' if case=='profile' else '')
+            if a==('-n','-T',_OWNER26_SAMPLE):
+                uid='0' if case=='uid' else '2000';fg='11' if case=='foreground' or (case=='switch' and ('settings','list','system') in calls) else '0';users='Users:\n UserInfo{0:Owner:13} running'+('\n UserInfo{10:Other:30}\n' if case=='profile' else '')
+                return '\n'.join(_OWNER26_PREFIX+('PT26_VALUES',uid,fg,users,'PT26_END_V1',''))
             if a==('settings','list','system'):return 'Bad arguments' if case=='badlist' else 'fixture=1'
             if a==('settings','delete','system','font_scale'):return 'Deleted 0 rows' if case=='badcount' else 'Deleted 1 rows'
             raise AssertionError('unexpected argv')
@@ -134,7 +157,7 @@ def legacy26_settings_controls():
 
 def device(adb,serial,pkg,api,out):
     prefix=[str(adb),'-s',serial,'shell'];out=Path(out)
-    trace={'scope':'DISPOSABLE_SETTINGS_COMMAND_FAMILY_NO_USER_NAMES_OR_VALUES','source':os.environ.get('GITHUB_SHA'),'run':os.environ.get('GITHUB_RUN_ID'),'attempt':os.environ.get('GITHUB_RUN_ATTEMPT'),'api':api,'legacy_list':0,'legacy_delete':0,'owner_checks':0,'step':'initial','first_failure':None}
+    trace={'scope':'DISPOSABLE_SETTINGS_COMMAND_FAMILY_NO_USER_NAMES_OR_VALUES','source':os.environ.get('GITHUB_SHA'),'run':os.environ.get('GITHUB_RUN_ID'),'attempt':os.environ.get('GITHUB_RUN_ATTEMPT'),'api':api,'legacy_list':0,'legacy_delete':0,'owner_checks':0,'owner_requests':0,'step':'initial','first_failure':None}
     def raw(*a):return subprocess.check_output(prefix+list(a),stdin=subprocess.DEVNULL,timeout=12,text=True)
     def failed(e):
         if trace['first_failure'] is None:trace['first_failure']={'step':trace['step'],'kind':type(e).__name__,'child_exit':e.returncode if isinstance(e,subprocess.CalledProcessError) else None}
@@ -166,9 +189,21 @@ def _confirmed_restores(j):
         need((noop or ev['seen_before']==active) and ev['decision']==('already_original' if noop else 'normalize_delete' if norm else 'delete' if orig=='null' else 'put') and ev['write_confirmed'] is (not noop),'wrong owner or operation in restore receipt')
         if norm:need(ev['normalized_written'] is True and _exact(ev['neutral_row'],'1.0') and _exact(ev['delete_guard'],'1.0'),'neutralization not witnessed')
 
+def _checked_owner_receipt(j,cli,src,rid,att):
+    # Each successful matrix has 2 original observations, 2 for each of four setting writes,
+    # and the pre/post row of both restores. Neutralization contributes its two additional rows.
+    # Never infer a successful deletion from a CLI exit or a default runtime font value.
+    traces=j['restoration'];normalize=traces['font_scale']['decision']=='normalize_delete'
+    want_lists=2+2*(1+len(SCALES))+2*len(KEYS)+2*int(normalize)
+    want_deletes=sum(v['decision'] in ('delete','normalize_delete') for v in traces.values())
+    need(cli.get('scope')=='DISPOSABLE_SETTINGS_COMMAND_FAMILY_NO_USER_NAMES_OR_VALUES' and cli.get('api')==26 and (cli.get('source'),cli.get('run'),cli.get('attempt'))==(src,rid,att) and 'first_failure' in cli and cli['first_failure'] is None,'API26 owner evidence missing or failed')
+    ns=('legacy_list','legacy_delete','owner_checks','owner_requests');counts=[cli.get(k) for k in ns]
+    need(all(type(x) is int for x in counts) and counts==[want_lists,want_deletes,2*(want_lists+want_deletes),2*(want_lists+want_deletes)],'API26 pre/post samples or exact setting operations missing')
+
 def check_font_files(folder,expected,api,src,rid,att):
     """Read only these four synthetic source-bound files; never trust the matrix's PASS alone."""
     raw=folder/'font-matrix.json';j=json.loads(raw.read_bytes());need(j.get('api')==api and j.get('source')==src and j.get('run_id')==rid and j.get('attempt')==att and j.get('status')=='PASS' and j.get('restored')=={'font_scale':True,'show_ime_with_hard_keyboard':True} and all(v is True for v in j['restored'].values()),'missing source-bound completed matrix and restored settings');_confirmed_restores(j); rows=j['raw_series'];need(len(rows)==3,'incomplete font series');labels=[]
+    if api==26:_checked_owner_receipt(j,json.loads((folder/'font-cli.json').read_bytes()),src,rid,att)
     stages=[] if j['original']['font_scale']!='null' else ['original']+(['neutral'] if j['restoration']['font_scale']['decision']=='normalize_delete' else [])
     need(set(j['runtime_baseline'])==set(stages),'missing or unexpected baseline sample')
     for stage in stages:
@@ -289,6 +324,7 @@ def full_evidence_controls():
             def proven(x):return {'user':0,'value':x,'count':int(x!='null'),'listed':None if x=='null' else x}
             for k,last in zip(KEYS,('2.0','1')):
                 orig=base['original'][k[1]];base['restoration'][k[1]]=dict(original=orig,last_owned=last,seen_before=last,after=orig,decision='already_original' if last==orig else 'put',write_confirmed=(last!=orig),restored=True,failed_stage=None,error_class=None,child_exit=None,before_row=proven(last),after_row=proven(orig));base['original_rows'][k[1]]=proven(orig)
+            if api==26:(folder/'font-cli.json').write_text(json.dumps({'scope':'DISPOSABLE_SETTINGS_COMMAND_FAMILY_NO_USER_NAMES_OR_VALUES','api':26,'source':env['src'],'run':'567','attempt':'1','first_failure':None,'legacy_list':14,'legacy_delete':0,'owner_requests':28,'owner_checks':28}))
             for fault in ('wrong_after','forged_write','claimed_foreign','absent_restore','none','missing_raw','wrong_hash','wrong_source','wrong_order','partial','fake_pos','foreign_attempt','not_restored','fake_bool','omitted_case','missing_terminal','wrong_apks'):
                 j=copy.deepcopy(base);b=dict(rawfiles);e=apks
                 if fault=='wrong_after':j['restoration']['font_scale']['after']='1.0'

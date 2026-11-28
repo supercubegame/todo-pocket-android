@@ -635,15 +635,15 @@ public final class NoteEditorScreen {
     private static final long IMAGE_BYTES=8L*1024*1024, IMAGE_PIXELS=20000000;
     private static final int IMAGE_EDGE=16384, PREVIEW_EDGE=1024;
     private static android.graphics.BitmapFactory.Options bounds(Path path)throws IOException{
-        if(java.nio.file.Files.size(path)<=0||java.nio.file.Files.size(path)>IMAGE_BYTES)throw new IOException("图片字节超限");
+        if(java.nio.file.Files.size(path)<=0||java.nio.file.Files.size(path)>IMAGE_BYTES)throw new NoteImageImport.Problem(NoteImageImport.Reason.FORMAT);
         android.graphics.BitmapFactory.Options o=new android.graphics.BitmapFactory.Options();o.inJustDecodeBounds=true;
         android.graphics.BitmapFactory.decodeFile(path.toString(),o);
         if(o.outWidth<=0||o.outHeight<=0||o.outWidth>IMAGE_EDGE||o.outHeight>IMAGE_EDGE||
-            (long)o.outWidth*o.outHeight>IMAGE_PIXELS||!("image/png".equals(o.outMimeType)||"image/jpeg".equals(o.outMimeType)))throw new IOException("图片格式或尺寸无效");
+            (long)o.outWidth*o.outHeight>IMAGE_PIXELS||!("image/png".equals(o.outMimeType)||"image/jpeg".equals(o.outMimeType)))throw new NoteImageImport.Problem(NoteImageImport.Reason.FORMAT);
         return o;
     }
     private static int displayDirection(Path path,android.graphics.BitmapFactory.Options header)throws IOException{
-        long len=java.nio.file.Files.size(path);if(len<1||len>IMAGE_BYTES)throw new IOException("图片字节超限");
+        long len=java.nio.file.Files.size(path);if(len<1||len>IMAGE_BYTES)throw new NoteImageImport.Problem(NoteImageImport.Reason.FORMAT);
         byte[] source=new byte[(int)len];
         try(java.io.DataInputStream in=new java.io.DataInputStream(java.nio.file.Files.newInputStream(path,java.nio.file.StandardOpenOption.READ,java.nio.file.LinkOption.NOFOLLOW_LINKS))){in.readFully(source);if(in.read()!=-1)throw new IOException("图片长度已变化");}
         return ShareExporter.visualOrientation(source,header.outMimeType);
@@ -671,35 +671,23 @@ public final class NoteEditorScreen {
         o.inSampleSize=1;o.inPreferredConfig=android.graphics.Bitmap.Config.ARGB_8888;
         while((header.outWidth+o.inSampleSize-1)/o.inSampleSize>PREVIEW_EDGE||(header.outHeight+o.inSampleSize-1)/o.inSampleSize>PREVIEW_EDGE)o.inSampleSize*=2;
         android.graphics.Bitmap image=android.graphics.BitmapFactory.decodeFile(path.toString(),o);
-        if(image==null)throw new IOException("图片解码失败");
-        if(image.getWidth()>PREVIEW_EDGE||image.getHeight()>PREVIEW_EDGE||image.getAllocationByteCount()>4*PREVIEW_EDGE*PREVIEW_EDGE){image.recycle();throw new IOException("图片解码预算超限");}
+        if(image==null)throw new NoteImageImport.Problem(NoteImageImport.Reason.FORMAT);
+        if(image.getWidth()>PREVIEW_EDGE||image.getHeight()>PREVIEW_EDGE||image.getAllocationByteCount()>4*PREVIEW_EDGE*PREVIEW_EDGE){image.recycle();throw new NoteImageImport.Problem(NoteImageImport.Reason.FORMAT);}
         return image;
+    }
+    static String checkedImageMime(Path staged)throws IOException{
+        android.graphics.BitmapFactory.Options checked=bounds(staged);android.graphics.Bitmap probe=rawPreview(staged,checked);
+        probe.recycle();return checked.outMimeType;
     }
     private void importImage(State s,android.net.Uri uri){
         if(uri==null){host.message("已取消选图，没有改变笔记",false);return;}
-        host.work(()->{
-            Path temp=java.nio.file.Files.createTempFile(host.activity.getCacheDir().toPath(),"image-",".part");
-            try{
-                try(java.io.InputStream in=host.activity.getContentResolver().openInputStream(uri);
-                    java.io.OutputStream out=java.nio.file.Files.newOutputStream(temp)){
-                    if(in==null)throw new IOException("无法读取图片");
-                    byte[] buffer=new byte[16384];long size=0;int n;
-                    while((n=in.read(buffer))!=-1){if(n==0||n>IMAGE_BYTES-size)throw new IOException("图片读取超限");out.write(buffer,0,n);size+=n;}
-                }
-                android.graphics.BitmapFactory.Options checked=bounds(temp);String mime=checked.outMimeType;
-                android.graphics.Bitmap probe=rawPreview(temp,checked);probe.recycle();
-                String assetId;
-                try(java.io.InputStream in=java.nio.file.Files.newInputStream(temp)){assetId=s.media.copy(in);}
-                android.database.sqlite.SQLiteDatabase sql=host.db.getWritableDatabase();
-                sql.beginTransaction();
-                try{
-                    host.db.registerMedia(assetId,mime,java.nio.file.Files.size(temp));
-                    persistBlocks(s,NoteDocument.Block.image(UUID.randomUUID().toString(),assetId,"",false),false);
-                    sql.setTransactionSuccessful();
-                }finally{sql.endTransaction();}
-                return true;
-            }finally{java.nio.file.Files.deleteIfExists(temp);}
-        },ignored->load(),()->host.message("图片未加入：仅支持有效 PNG/JPEG，最大 8 MiB、2000 万像素、单边 16384",true));
+        final java.util.concurrent.atomic.AtomicReference<Throwable> failure=new java.util.concurrent.atomic.AtomicReference<>();
+        host.work(()->{try{
+            NoteImageImport.preflight(host.db,activityId,s.noteId,s.blocks);
+            NoteImageImport.Stored file=NoteImageImport.stage(host.activity.getCacheDir().toPath(),()->host.activity.getContentResolver().openInputStream(uri),NoteEditorScreen::checkedImageMime,s.media,IMAGE_BYTES);
+            String assetId=file.id,mime=file.mime;long size=file.size;
+            NoteImageImport.append(host.db,activityId,title,s.noteId,s.blocks,assetId,mime,size);return true;
+        }catch(IOException|RuntimeException e){failure.set(e);throw e;}},ignored->load(),()->host.message(NoteImageImport.feedback(failure.get()),true));
     }
     /** Original retained privately; backups include it and any metadata. No share path yet. */
     private void addImage(State s){
@@ -708,18 +696,16 @@ public final class NoteEditorScreen {
             .setPositiveButton("加入合成图",null).create();
         pick.setOnShowListener(unused->pick.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
             pick.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
-            host.work(()->{
-                android.graphics.Bitmap image=android.graphics.Bitmap.createBitmap(96,96,android.graphics.Bitmap.Config.ARGB_8888);
-                image.eraseColor(Color.parseColor("#21785f"));
-                ByteArrayOutputStream out=new ByteArrayOutputStream();
-                if(!image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out))throw new IOException("无法生成图片");
-                byte[] bytes=out.toByteArray();
-                String assetId=s.media.copy(new java.io.ByteArrayInputStream(bytes));
-                host.db.registerMedia(assetId,"image/png",bytes.length);
-                String blockId=UUID.randomUUID().toString();
-                persistBlocks(s,NoteDocument.Block.image(blockId,assetId,"",false),false);
-                return true;
-            },ignored->{pick.dismiss();load();},()->pick.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true));
+            final java.util.concurrent.atomic.AtomicReference<Throwable> failure=new java.util.concurrent.atomic.AtomicReference<>();
+            host.work(()->{try{
+                NoteImageImport.preflight(host.db,activityId,s.noteId,s.blocks);
+                android.graphics.Bitmap image=android.graphics.Bitmap.createBitmap(96,96,android.graphics.Bitmap.Config.ARGB_8888);byte[] bytes;
+                try{image.eraseColor(Color.parseColor("#21785f"));ByteArrayOutputStream out=new ByteArrayOutputStream();
+                    if(!image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,out))throw new NoteImageImport.Problem(NoteImageImport.Reason.GENERATED);bytes=out.toByteArray();
+                }finally{image.recycle();}
+                String assetId;try{assetId=s.media.copy(new java.io.ByteArrayInputStream(bytes));}catch(IOException|SecurityException e){throw new NoteImageImport.Problem(NoteImageImport.Reason.STORE,e);}
+                NoteImageImport.append(host.db,activityId,title,s.noteId,s.blocks,assetId,"image/png",bytes.length);return true;
+            }catch(IOException|RuntimeException e){failure.set(e);throw e;}},ignored->{pick.dismiss();load();},()->{pick.dismiss();load();host.message(NoteImageImport.feedback(failure.get()),true);});
         }));
         pick.show();
     }

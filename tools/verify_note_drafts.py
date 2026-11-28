@@ -520,10 +520,15 @@ public class DraftUiContract {
   boolean enabled=true; String desc="",text=""; int color;
   void setContentDescription(String x){desc=x;}
   void setEnabled(boolean x){enabled=x;}
+  boolean isEnabled(){return enabled;}
   void setText(String x){text=x;}
   String getText(){return text;}
   void setTextColor(int x){color=x;}
+  void setTag(Object x){tag=x;}
+  Object getTag(){return tag;}
+  Object tag;
  }
+ static final class Gravity {static final int CENTER=17;}
  static final class ConfigurationModel {float fontScale=1f;int screenWidthDp=320;}
  static final class EditorResources {static final ConfigurationModel cfg=new ConfigurationModel();ConfigurationModel getConfiguration(){return cfg;}}
  static final class EditText extends TextView {int minLines=3,maxLines=6;EditorResources getResources(){return new EditorResources();}void setMinLines(int n){minLines=n;}}
@@ -532,12 +537,20 @@ public class DraftUiContract {
   void press(){if(enabled&&click!=null)click.accept(this);}
  }
  static final class LinearLayout {
+  static final int HORIZONTAL=0; static final int VERTICAL=1; int orientation=VERTICAL,gravity;
+  LinearLayout(){} LinearLayout(Object activity){}
+  String desc="";
   final List<Object> children=new ArrayList<>();
   void setPadding(int a,int b,int c,int d){}
+  void setContentDescription(String x){desc=x;}
+  void setTag(Object x){tag=x;} Object getTag(){return tag;} Object tag; int minimumHeight;
+  void setMinimumHeight(int x){minimumHeight=x;}
+  void setOrientation(int x){orientation=x;}
+  void setGravity(int x){gravity=x;}
   void addView(Object x){children.add(x);}
   void addView(Object x,int at){children.add(at,x);}
   final Map<Object,LayoutParams> sizes=new IdentityHashMap<>(); void addView(Object x,LayoutParams p){children.add(x);sizes.put(x,p);}
-  static final class LayoutParams{static final int MATCH_PARENT=-1,WRAP_CONTENT=-2; final int w,h; LayoutParams(int w,int h){this.w=w;this.h=h;}}
+  static final class LayoutParams{static final int MATCH_PARENT=-1,WRAP_CONTENT=-2; final int w,h; float weight; LayoutParams(int w,int h){this.w=w;this.h=h;} LayoutParams(int w,int h,float weight){this.w=w;this.h=h;this.weight=weight;}}
  }
  static final class ScrollView {
   Object child; ScrollView(Object activity){}
@@ -581,7 +594,8 @@ public class DraftUiContract {
  }
  static final class TodayScreen {
   static final int MUTED=1,ERROR=2;
-  static int themeForFixture=21; int draftEditorTheme(){return themeForFixture;} final Object activity=new Object();
+  static int themeForFixture=21;
+  int draftEditorTheme(){return themeForFixture;} final Object activity=new Object();
   boolean defer,fail; Runnable pending; String notice; int loads;
   LinearLayout column(){return new LinearLayout();}
   int dp(int x){return x;}
@@ -616,11 +630,12 @@ public class DraftUiContract {
  static final class Fixture {
   final DraftUiContract app=new DraftUiContract();
   final TextDraftSession s=new TextDraftSession();
-  final AlertDialog d; final LinearLayout body; final EditText input;
-  final TextView status; final Button save,recover,discard;
+  final AlertDialog d; final LinearLayout body; final LinearLayout root,top; final EditText input;
+  final TextView status; final Button save,recover,discard,cancel,commit;
   Fixture(String draft){
    s.record.text=draft;app.showTextDraft(s);d=AlertDialog.last;
-   body=(LinearLayout)((ScrollView)d.view).child;
+   if(d.view instanceof LinearLayout){root=(LinearLayout)d.view;top=(LinearLayout)root.children.get(0);body=(LinearLayout)((ScrollView)root.children.get(1)).child;cancel=(Button)top.children.get(0);commit=(Button)top.children.get(1);}
+   else {root=null;top=null;body=(LinearLayout)((ScrollView)d.view).child;cancel=d.negative;commit=d.positive;}
    input=(EditText)find("文字内容");status=(TextView)find("note-draft-status");
    save=(Button)find("note-draft-save");recover=(Button)find("note-draft-recover");discard=(Button)find("note-draft-discard");
   }
@@ -640,8 +655,15 @@ public class DraftUiContract {
   cfg.screenWidthDp=320;cfg.fontScale=1;
   TodayScreen.themeForFixture=0; Fixture roomy=new Fixture(null);
   if(roomy.d.theme!=0||roomy.d.window.w!=0||roomy.d.window.h!=0)throw new AssertionError("wide regular editor unexpectedly took over the screen");
-  TodayScreen.themeForFixture=21;Fixture f=new Fixture(null);
+  TodayScreen.themeForFixture=21;android.os.Build.VERSION.SDK_INT=26;Fixture legacy=new Fixture(null);
+  ok(legacy.root==null&&legacy.top==null&&legacy.d.negative.click!=null&&legacy.d.positive.click!=null,"api26_compact_keeps_native_buttons");
+  legacy.input.setText("legacy body");legacy.cancel.press();
+  ok(!legacy.d.showing&&legacy.s.closes==1&&legacy.untouched(),"api26_native_cancel_real_callback");
+  android.os.Build.VERSION.SDK_INT=34;Fixture f=new Fixture(null);
   if(f.d.theme!=21||f.d.window.w!=-1||f.d.window.h!=-1)throw new AssertionError("small or large-font editor must use available window");
+  ok(f.root!=null&&f.top!=null&&f.top.desc.equals("")&&f.cancel.text.equals("取消")&&f.commit.text.equals("保存"),"compact_top_actions_real_controls");
+  ok(f.root!=null&&f.d.negative.click==null&&f.d.positive.click==null,"no_bottom_duplicate_controls");
+  ok(f.top.sizes.get(f.cancel).h==LinearLayout.LayoutParams.WRAP_CONTENT&&f.top.sizes.get(f.commit).h==LinearLayout.LayoutParams.WRAP_CONTENT,"top_actions_wrap_content");
   if(f.body.children.indexOf(f.find("note-draft-help"))<=f.body.children.indexOf(f.discard))throw new AssertionError("guidance must remain after reachable actions");
   System.out.println("DRAFT_SURFACE explicit compact and regular window plus accessible help order");
   for(Button action:new Button[]{f.save,f.recover,f.discard}){LinearLayout.LayoutParams p=f.body.sizes.get(action);
@@ -651,11 +673,12 @@ public class DraftUiContract {
   ok(f.d.window.softInputMode==16,"resize_window");
   ok(f.input.text.equals("body")&&f.untouched(),"canonical_initial_no_autorestore");
   ok(f.save.enabled&&!f.recover.enabled&&!f.discard.enabled,"absent_draft_controls");
-  f.input.setText("cancel input");f.d.negative.press();
+  f.input.setText("cancel input");f.cancel.press();
   ok(!f.d.showing&&f.s.closes==1&&f.untouched(),"cancel_no_draft_mutation");
+  f.commit.click.accept(f.commit);f.cancel.click.accept(f.cancel);ok(f.s.commits==0&&f.s.closes==1&&f.app.host.loads==0,"closed_top_callbacks_do_not_write");
   f=new Fixture("  草稿\n😀  ");
   ok(f.recover.enabled&&f.discard.enabled&&f.input.text.equals("body")&&f.untouched(),"present_draft_explicit");
-  f.input.setText(" \n\t ");f.d.positive.press();
+  f.input.setText(" \n\t ");f.commit.press();
   ok(f.d.showing&&f.status.text.equals("内容不能为空")&&f.status.color==TodayScreen.ERROR&&f.untouched(),"blank_body_stays_open");
   String exact=" \n草稿😀\t ";f.input.setText(exact);f.save.press();
   ok(f.s.saves==1&&exact.equals(f.s.record.text)&&f.s.commits==0,"save_exact_draft");
@@ -678,17 +701,17 @@ public class DraftUiContract {
   f.recover.press();AlertDialog.last.positive.press();
   ok(f.input.text.equals("")&&f.s.recovers==1,"empty_draft_recovery");
   f=new Fixture(null);f.app.host.defer=true;f.input.setText(exact);f.save.press();
-  ok(!f.save.enabled&&!f.recover.enabled&&!f.discard.enabled&&!f.input.enabled&&!f.d.positive.enabled&&!f.d.negative.enabled&&!f.d.cancelable,"busy_disables_all");
-  f.d.back();f.d.negative.press();f.save.press();
+  ok(!f.save.enabled&&!f.recover.enabled&&!f.discard.enabled&&!f.input.enabled&&!f.commit.enabled&&!f.cancel.enabled&&!f.d.cancelable,"busy_disables_all");
+  f.d.back();f.cancel.press();f.save.press();
   ok(f.d.showing&&f.s.closes==0&&f.s.saves==0,"busy_blocks_cancel_duplicate");
   f.app.host.complete();
-  ok(f.s.saves==1&&f.d.negative.enabled&&f.d.positive.enabled&&f.d.cancelable,"deferred_save_completes_once");
+  ok(f.s.saves==1&&f.cancel.enabled&&f.commit.enabled&&f.d.cancelable,"deferred_save_completes_once");
   f=new Fixture("old");f.app.host.fail=true;f.input.setText(exact);f.save.press();
   ok(f.input.text.equals(exact)&&f.s.record.text.equals("old")&&f.untouched()&&f.d.showing,"failure_preserves_input_draft");
   ok(f.status.color==TodayScreen.ERROR&&f.save.enabled&&f.input.enabled&&f.d.cancelable,"failure_feedback_unlocks");
-  f=new Fixture(null);f.input.setText("body change");f.d.positive.press();
+  f=new Fixture(null);f.input.setText("body change");f.commit.press();
   ok(f.s.commits==1&&f.s.committed.equals("body change")&&!f.d.showing&&f.s.closes==1&&f.app.host.loads==1,"body_commit_closes_reload");
-  f=new Fixture("draft");f.s.clean=false;f.input.setText("body change");f.d.positive.press();
+  f=new Fixture("draft");f.s.clean=false;f.input.setText("body change");f.commit.press();
   ok(f.s.commits==1&&!f.d.showing&&f.app.host.loads==1&&f.app.host.notice.contains("正文已保存")&&f.app.host.notice.contains("请勿重复保存"),"cleanup_failure_not_body_failure");
   f=new Fixture("keep");f.d.back();
   ok(!f.d.showing&&f.s.closes==1&&f.untouched()&&f.s.record.text.equals("keep"),"back_closes_without_clear");
@@ -697,8 +720,8 @@ public class DraftUiContract {
 }
 '''
 
-UI_LABELS = """feedback_before_input resize_window canonical_initial_no_autorestore
-absent_draft_controls cancel_no_draft_mutation present_draft_explicit blank_body_stays_open
+UI_LABELS = """api26_compact_keeps_native_buttons api26_native_cancel_real_callback compact_top_actions_real_controls no_bottom_duplicate_controls top_actions_wrap_content feedback_before_input resize_window canonical_initial_no_autorestore
+absent_draft_controls cancel_no_draft_mutation closed_top_callbacks_do_not_write present_draft_explicit blank_body_stays_open
 save_exact_draft save_unlocks recover_requires_confirmation recover_cancel_keeps_input
 recover_exact_no_body_commit discard_requires_confirmation discard_cancel_keeps_draft
 discard_keeps_input_body discard_updates_controls empty_draft_is_present empty_draft_recovery
@@ -729,18 +752,20 @@ def ui_model_selftest():
         window = folder/"android/view/WindowManager.java"; window.parent.mkdir(parents=True)
         window.write_text("package android.view; public interface WindowManager {"
                           "public static class LayoutParams {public static final int SOFT_INPUT_ADJUST_RESIZE=16;}}")
+        sdk = folder/"android/os/Build.java"; sdk.parent.mkdir(parents=True)
+        sdk.write_text("package android.os;public final class Build {public static final class VERSION {public static int SDK_INT=34;}}")
         product = folder/"DraftUiContract.java"
         def build(method, name):
             product.write_text(UI_MODEL.replace("// ACTUAL_METHOD", method))
             classes = folder/name; classes.mkdir()
-            command([java, boot, "--release", "8", "-encoding", "UTF-8", "-d", classes, window, product])
+            command([java, boot, "--release", "8", "-encoding", "UTF-8", "-d", classes, window, sdk, product])
             return subprocess.run([java, "-cp", str(classes), "DraftUiContract"], text=True,
                                   capture_output=True, timeout=30)
         run = build(actual, "positive")
         labels = [line.removeprefix("DRAFT_UI_PASS ") for line in run.stdout.splitlines()
                   if line.startswith("DRAFT_UI_PASS ")]
         assert run.returncode == 0 and labels == UI_LABELS, (run.stdout, run.stderr)
-        assert run.stdout.splitlines()[-1] == "DRAFT_UI_RESULT 26 PASS"
+        assert run.stdout.splitlines()[-1] == "DRAFT_UI_RESULT "+str(len(UI_LABELS))+" PASS"
         mutations = (
             ("field.setMinLines(2);", "field.setMinLines(3);", "two initial lines only on compact 200 percent"),
             ("widthDp>0&&widthDp<=360", "widthDp>=0&&widthDp<=500", "two initial lines only on compact 200 percent"),
@@ -751,7 +776,9 @@ def ui_model_selftest():
             ("android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE", "0", "resize_window"),
             ("if(value.trim().isEmpty())", "if(false)", "blank_body_stays_open"),
             ("String exact=field.getText().toString();", "String exact=field.getText().toString().trim();", "save_exact_draft"),
-            ("unused->session.close()", "unused->{}", "cancel_no_draft_mutation"),
+            ("unused->session.close()", "unused->{}", "api26_native_cancel_real_callback"),
+            ("android.os.Build.VERSION.SDK_INT>=34", "android.os.Build.VERSION.SDK_INT>=26", "api26_compact_keeps_native_buttons"),
+            ("!dialog.isShowing()||busy[0]||!actionSave.isEnabled()", "busy[0]||!actionSave.isEnabled()", "closed_top_callbacks_do_not_write"),
         )
         for index, (before, after, expected) in enumerate(mutations):
             assert actual.count(before) == 1, "Draft UI mutation anchor changed"
@@ -760,6 +787,13 @@ def ui_model_selftest():
                 "UI mutant survived or wrong failure", expected, result.stdout, result.stderr)
         anchor="for(Button b:new Button[]{save,recover,discard})body.addView(b,new LinearLayout.LayoutParams(-1,LinearLayout.LayoutParams.WRAP_CONTENT));"
         assert actual.count(anchor)==1 and "DRAFT_ACTIONS_WRAP all 3 actual callbacks; host layout policy only" in run.stdout
+        assert "final boolean compact=editorTheme!=0&&android.os.Build.VERSION.SDK_INT>=34;" in actual
+        assert "outerCancel=compact?host.button(\"取消\",()->{}):null" in actual and "outerSave=compact?host.button(\"保存\",()->{}):null" in actual
+        assert "new LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1)" in actual
+        assert "new LinearLayout.LayoutParams(-1,LinearLayout.LayoutParams.WRAP_CONTENT)" in actual
+        assert "outerCancel.setTag(\"note-draft-cancel\")" in actual and "outerSave.setTag(\"note-draft-commit\")" in actual
+        assert "top.setContentDescription" not in actual
+        assert "top.setTag(\"note-draft-top-actions\")" in actual
         for tag,mutant in [("exact",anchor.replace("LinearLayout.LayoutParams.WRAP_CONTENT","host.dp(48)")),("only-two",anchor.replace("save,recover,discard","save,recover"))]:
             wrong=build(actual.replace(anchor,mutant,1),"wrong-height-"+tag)
             assert wrong.returncode!=0 and ("draft actions wrap content" in wrong.stderr or "missing control note-draft-discard" in wrong.stderr)

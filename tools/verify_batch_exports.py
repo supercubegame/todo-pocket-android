@@ -323,6 +323,8 @@ def deletion_ui_receipt(value, api, source, run, apk):
     return isinstance(value, dict) and (
         value.get("status") == "PASS" and value.get("scope") == DELETE_UI_SCOPE and
         type(value.get("api")) is int and value["api"] == api and
+        (api!=26 or (value.get("api26_surface")=="OWNED_ACTIVITY_REVIEW_VISIBLE" and
+                     value.get("api26_system_back")=="CHECKED_PREVIEW_CANCELLED_ALL_TABLES_MEDIA_EXACT")) and
         value.get("commit") == source and value.get("run_id") == run and
         isinstance(apk, str) and re.fullmatch("[0-9a-f]{64}", apk) is not None and
         value.get("apk_sha256") == apk and value.get("labels") == DELETE_UI_LABELS and
@@ -338,6 +340,7 @@ def deletion_ui_receipt(value, api, source, run, apk):
 
 def deletion_ui_sample():
     return {"status": "PASS", "scope": DELETE_UI_SCOPE, "api": 26, "commit": "source",
+            "api26_surface":"OWNED_ACTIVITY_REVIEW_VISIBLE","api26_system_back":"CHECKED_PREVIEW_CANCELLED_ALL_TABLES_MEDIA_EXACT",
             "run_id": "run", "apk_sha256": "a"*64, "labels": DELETE_UI_LABELS[:],
             "checks": len(DELETE_UI_LABELS), "release_ready": False,
             "note_id": "b", "sibling_id": "a", "owner": 1, "deleted_blocks": 2,
@@ -399,27 +402,39 @@ def _note_crash_frames(raw,pid,start,end):
         if m and len(frames)<16:frames.append(m[1]+'('+m[2]+')')
     return {'status':'OWNED_FATAL_HEADER','exception_types':classes,'frames':frames}
 
-def _note_db_state(read,clock,end,pkg,initial,note,sibling,owner):
+def _note_db_state(read,clock,end,pkg,initial,note,sibling,owner,stages=None):
     # Two byte-identical DB/WAL reads bracketed by positive observations of no live package PID.
     # Offline query only, no SQLite opens on the device. Do not infer physical media integrity.
     import tempfile
-    def obs(args,cap=512):return read(args,cap,min(2,end-clock()))
+    trace={} if stages is None else stages
+    def stage(name):trace.update(stage=name,command_rc=None)
+    def obs(args,cap=512):
+        rc,b=read(args,cap,min(2,end-clock()));trace['command_rc']=rc;return rc,b
     def get(args,cap):
         rc,b=obs(args,cap);assert rc==0;return b
-    def stopped():return obs(['shell','pidof',pkg])==(1,b'')
-    prefix=['exec-out','run-as',pkg];base='pocket-v12.db';assert stopped();caps={base:4194304,base+'-wal':8388608}
-    def image():
-        ns=get(prefix+['ls','-1','databases'],8192).decode('ascii').splitlines();assert base in ns and base+'-journal' not in ns
-        files={n:get(prefix+['cat','databases/'+n],cap) for n,cap in caps.items() if n in ns};assert len(files[base])>=100;return files
-    x=image();y=image();assert x==y and stopped();assert clock()<end
+    def stopped(name):
+        stage(name);rc,b=obs(['shell','pidof',pkg]);absent=(rc,b)==(1,b'')
+        trace['process']='absent' if absent else 'present' if rc==0 and re.fullmatch(rb'[0-9]+(?: +[0-9]+)*',b.strip()) else 'unknown'
+        return absent
+    prefix=['exec-out','run-as',pkg];base='pocket-v12.db';assert stopped('before_pid');caps={base:4194304,base+'-wal':8388608}
+    def image(which):
+        stage(which+'_names');ns=get(prefix+['ls','-1','databases'],8192).decode('ascii').splitlines();assert base in ns and base+'-journal' not in ns
+        files={}
+        for n,cap in caps.items():
+            if n in ns:
+                stage(which+('_db' if n==base else '_wal'));files[n]=get(prefix+['cat','databases/'+n],cap)
+        stage(which+'_db_length');assert len(files[base])>=100;return files
+    x=image('first');y=image('second');stage('same_images');assert x==y and stopped('after_pid');stage('time');assert clock()<end
     with tempfile.TemporaryDirectory(prefix='pocket-note-state-') as t:
         path=Path(t)/base
         for n,b in x.items():(Path(t)/n).write_bytes(b)
+        stage('open_copy')
         with sqlite3.connect(path.as_uri()+'?mode=ro',uri=True) as con:
-            con.execute('PRAGMA query_only=ON');assert con.execute('PRAGMA quick_check').fetchall()==[('ok',)]
+            stage('quick_check');con.execute('PRAGMA query_only=ON');assert con.execute('PRAGMA quick_check').fetchall()==[('ok',)]
+            stage('table_set')
             names=[v[0] for v in con.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")];assert set(names)==set(initial) and all(re.fullmatch('[A-Za-z0-9_]+',i) for i in names)
-            data={i:con.execute('SELECT * FROM "'+i+'" ORDER BY rowid').fetchall() for i in names}
-    assert sum(r[0]==note and r[1]==owner for r in initial['notes'])==sum(r[0]==sibling and r[1]==owner for r in initial['notes'])==1 and note!=sibling
+            stage('all_rows');data={i:con.execute('SELECT * FROM "'+i+'" ORDER BY rowid').fetchall() for i in names}
+    stage('original_pair');assert sum(r[0]==note and r[1]==owner for r in initial['notes'])==sum(r[0]==sibling and r[1]==owner for r in initial['notes'])==1 and note!=sibling
     expected=deletion_expected((initial,{},{}),note,owner)[0]
     return {'status':('DB_EXACT_BEFORE' if data==initial else 'DB_EXACT_ONE_DELETION' if data==expected else 'DB_OTHER_OBSERVED'),'target_rows':sum(r[0]==note for r in data['notes']),'sibling_rows':sum(r[0]==sibling for r in data['notes']),'physical_media':'NOT_OBSERVED','wal':base+'-wal' in x}
 
@@ -459,9 +474,9 @@ def _note_confirm_once(tap_confirm,ready,output,adb,serial,api,pkg,ci,initial,no
             try:
                 # A clock-format/log refusal is not a database result. The independent read still
                 # requires the exact bound app, a stopped process and two identical DB/WAL images.
-                assert clock()-binding['armed_at']<=70
-                d['database']=_note_db_state(read,clock,deadline,pkg,initial,note,sibling,owner)
-            except Exception as ex:d['database']={'status':'NOT_VERIFIED','reason':type(ex).__name__}
+                dbtrace={'stage':'time_since_bind','command_rc':None};assert clock()-binding['armed_at']<=70
+                d['database']=_note_db_state(read,clock,deadline,pkg,initial,note,sibling,owner,dbtrace)
+            except Exception as ex:d['database']={'status':'NOT_VERIFIED','reason':type(ex).__name__,**dbtrace}
         raise
     else:d['returned_to_app']=True
 
@@ -517,6 +532,9 @@ def _note_diag_selftest():
             else:
                 assert d['status']=='BOUND';dbstat=d['database']['status'];log=d['crash']['status'];assert dbstat==('NOT_VERIFIED' if mode in ('still_running','unreachable','changing','journal') else 'DB_OTHER_OBSERVED' if mode=='sibling_changed' else 'DB_EXACT_BEFORE' if mode=='unchanged' else 'DB_EXACT_ONE_DELETION'),(mode,d)
                 if dbstat!='NOT_VERIFIED':assert d['database']['physical_media']=='NOT_OBSERVED'
+                else:
+                    trace=d['database'];assert trace['stage']=={'still_running':'before_pid','unreachable':'before_pid','changing':'same_images','journal':'first_names'}[mode]
+                    if mode in ('still_running','unreachable'):assert (trace['process'],trace['command_rc'])==(('present',0) if mode=='still_running' else ('unknown',255))
                 assert log==('NO_UNIQUE_OWNED_FATAL' if mode in ('empty','wrong_header') else 'OWNED_FATAL_HEADER')
                 if log=='OWNED_FATAL_HEADER':assert d['crash']['exception_types']==['java.lang.IllegalStateException'] and d['crash']['frames']==['com.supercubegame.pockettodo.Example.finish(Example.java:91)']
             seen[mode+str(api)+serial+owner+str(ci)+str(success)]=1
@@ -1926,32 +1944,44 @@ def native(adb, gate):
         def detail():
             start(); tap("活动"); ready()
             click(locate("activity-"+str(owner))); ready()
+        label="我明白只删除这一篇，且无法撤销"
+        def consent_row():
+            if gate.API==26:return find(**{"package":gate.PKG,"class":"android.widget.CheckBox","text":label})
+            return locate("note-delete-consent")
+        def review_text(legacy,text):
+            return find(**({"package":gate.PKG,"class":"android.widget.TextView","text":text} if gate.API==26 else {"content-desc":legacy,"text":text}))
         def preview():
             detail(); click(locate("note-delete-"+note)); find(text="确认删除笔记？")
-            identity = find(**{"content-desc": "note-delete-identity"})
-            assert identity.get("text") == "活动："+initial[2][owner]+"\n笔记："+title+"\n笔记标识："+note
-            counts = find(**{"content-desc": "note-delete-counts"})
-            assert counts.get("text") == "将删除 "+str(len(blocks))+" 个正文块、"+str(len(links))+" 个字段笔记关联。\n字段和值、其他笔记和图片文件均保留。"
-            consent = locate("note-delete-consent")
+            review_text("note-delete-identity","活动："+initial[2][owner]+"\n笔记："+title+"\n笔记标识："+note)
+            review_text("note-delete-counts","将删除 "+str(len(blocks))+" 个正文块、"+str(len(links))+" 个字段笔记关联。\n字段和值、其他笔记和图片文件均保留。")
+            consent = consent_row()
+            if gate.API==26:
+                frame=nodes();assert sum(n.get('text')=='确认删除笔记？' and n.get('package')==gate.PKG for n in frame)==1 and sum(n.get('class')=='android.widget.CheckBox' and n.get('text')==label and n.get('package')==gate.PKG for n in frame)==1
+                assert not any(n.get('content-desc')=='v12-home' or n.get('resource-id')=='android:id/alertTitle' for n in frame),'unexpected underlying workbench/dialog heading'
+                proof['api26_surface']='OWNED_ACTIVITY_REVIEW_VISIBLE'
             assert consent.get("checked") == "false" and consent.get("enabled") == "true"
             assert consent.get("text") == "我明白只删除这一篇，且无法撤销"
             return consent
         preview(); passed("preview_exact_identity_counts")
+        if gate.API==26:
+            click(consent_row());assert consent_row().get('checked')=='true';shell('input','keyevent','4')
+            find(**{'package':gate.PKG,'content-desc':'v12-status','text':'已取消，笔记未修改。'});assert not any(n.get('text') in ('确认删除笔记？',label) for n in nodes());stop();assert state()==initial
+            proof['api26_system_back']='CHECKED_PREVIEW_CANCELLED_ALL_TABLES_MEDIA_EXACT';preview()
         tap("取消"); stop(); assert state() == initial; passed("cancel_readonly")
         preview(); tap("确认删除")
-        find(**{"content-desc": "note-delete-validation", "text": "请先勾选删除确认"})
-        assert find(**{"content-desc": "note-delete-consent"}).get("checked") == "false"
+        review_text("note-delete-validation","请先勾选删除确认")
+        assert consent_row().get("checked") == "false"
         assert state() == initial; passed("unchecked_blocked_readonly")
         # Kill a checked, still-open dialog. No saved token/consent may reappear.
-        touch("note-delete-consent")
-        assert find(**{"content-desc": "note-delete-consent"}).get("checked") == "true"
+        click(consent_row())
+        assert consent_row().get("checked") == "true"
         stop(); assert state() == initial; passed("process_loss_readonly")
         start()
         assert not any(n.get("text") == "确认删除笔记？" or
-                       n.get("content-desc") == "note-delete-consent" for n in nodes())
+                       n.get("content-desc") == "note-delete-consent" or n.get("text")==label for n in nodes())
         # start() above only establishes the post-restart root; detail() can reuse it.
         consent = preview(); passed("fresh_preview_unchecked")
-        click(consent); assert find(**{"content-desc": "note-delete-consent"}).get("checked") == "true"
+        click(consent); assert consent_row().get("checked") == "true"
         _note_confirm_once(lambda:tap("确认删除"),ready,proof,adb,gate.SERIAL,gate.API,gate.PKG,
                            os.environ.get("GITHUB_ACTIONS")=="true",initial[0],note,sibling[0],owner)
         stop(); deleted = state()

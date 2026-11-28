@@ -683,6 +683,8 @@ def report_deletion_ui(value, api, source, run, apk):
         value.get("status") == "PASS" and
         value.get("scope") == "NATIVE_NOTE_DELETE_EXACT_ID_CONSENT_FORCE_STOP_RESTART_NOT_LMK" and
         type(value.get("api")) is int and value["api"] == api and
+        (api!=26 or (value.get("api26_surface")=="OWNED_ACTIVITY_REVIEW_VISIBLE" and
+                     value.get("api26_system_back")=="CHECKED_PREVIEW_CANCELLED_ALL_TABLES_MEDIA_EXACT")) and
         value.get("commit") == source and value.get("run_id") == run and
         isinstance(apk, str) and re.fullmatch("[0-9a-f]{64}", apk) is not None and
         value.get("apk_sha256") == apk and value.get("release_ready") is False and
@@ -703,6 +705,7 @@ def report_ui_sample(api=26, source="source", run="run", apk="a"*64):
     # Host-only report fixture. Device results are never constructed here.
     return {"status": "PASS", "scope": "NATIVE_NOTE_DELETE_EXACT_ID_CONSENT_FORCE_STOP_RESTART_NOT_LMK",
             "api": api, "commit": source, "run_id": run, "apk_sha256": apk,
+            **({"api26_surface":"OWNED_ACTIVITY_REVIEW_VISIBLE","api26_system_back":"CHECKED_PREVIEW_CANCELLED_ALL_TABLES_MEDIA_EXACT"} if api==26 else {}),
             "release_ready": False, "labels": REPORT_DELETE_UI_LABELS[:], "checks": 8,
             "note_id": "second", "sibling_id": "third", "owner": 1,
             "deleted_blocks": 3, "deleted_field_links": 0, "preserved_media_files": 6,
@@ -854,6 +857,7 @@ def report_deletion_selftest():
             ("owner", True), ("owner", 0), ("deleted_blocks", True), ("deleted_blocks", 0),
             ("deleted_field_links", True), ("deleted_field_links", -1),
             ("preserved_media_files", True), ("preserved_media_files", 0),
+            ("api26_surface", "legacy"), ("api26_system_back", "NOT_VERIFIED"),
             ("state", "NOT_VERIFIED"), ("labels", REPORT_DELETE_UI_LABELS[::-1])):
         item = copy.deepcopy(good); item[key] = value; bad.append(item)
     for index in range(8):

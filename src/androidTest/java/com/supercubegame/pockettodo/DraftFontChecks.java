@@ -114,7 +114,24 @@ final class DraftFontChecks {
     private Button measure(String tag,String caption,boolean enabled)throws Exception{
         Button b=(Button)widget(true,tag,Button.class);int moved=reveal(b,true);Rect ime=keyboard();need(ime!=null,"no keyboard geometry");String data=ui(()->{Rect r=full(b);measuredBox=new Rect(r);measuredKeyboard=new Rect(ime);measuredButton=b;Layout l=b.getLayout();int min=Math.round(c.getResources().getDisplayMetrics().density*48f);int width=b.getWidth()-b.getCompoundPaddingLeft()-b.getCompoundPaddingRight(),height=b.getHeight()-b.getCompoundPaddingTop()-b.getCompoundPaddingBottom();need(b.hasWindowFocus()&&b.isEnabled()==enabled&&(!enabled||b.isClickable())&&onScreen(b)&&!Rect.intersects(r,ime)&&r.width()>=min&&r.height()>=min,"clipped target, state or IME overlap");need(b.getLayoutParams().height==ViewGroup.LayoutParams.WRAP_CONTENT&&b.getMinHeight()>=min&&caption.contentEquals(b.getText())&&l!=null&&l.getLineCount()>0&&l.getHeight()<=height,"unmeasured or clipped native text layout");need(l.getLineStart(0)==0&&l.getLineEnd(l.getLineCount()-1)==caption.length(),"missing native layout characters");for(int i=0;i<l.getLineCount();i++)need(l.getEllipsisCount(i)==0&&l.getLineLeft(i)>=-1f&&l.getLineRight(i)<=width+1f&&l.getLineTop(i)>=0&&l.getLineBottom(i)<=height,"ellipsized or clipped native line");return r.left+","+r.top+","+r.right+","+r.bottom+" ime="+ime.left+","+ime.top+","+ime.right+","+ime.bottom+" min="+min+" lines="+l.getLineCount()+" chars="+caption.length()+" scrolls="+moved;});out.append("FONT_GEOMETRY ").append(tag).append(" enabled=").append(enabled).append(" rect=").append(data).append('\n');return b;
     }
-    private void outerCancel()throws Exception{at("editor-cancel");Button b=ui(()->dialog.getButton(AlertDialog.BUTTON_NEGATIVE));need(ui(()->"取消".contentEquals(b.getText())),"unexpected outer cancel");click(b,false);until("native dialog did not close",()->ui(()->!dialog.isShowing()?Boolean.TRUE:null));}
+    private static void visibleNamed(View v,String caption,ArrayList<Button> hits){
+        if(!v.isAttachedToWindow()||!v.isShown())return;
+        if(v instanceof Button&&caption.contentEquals(((Button)v).getText()))hits.add((Button)v);
+        if(v instanceof ViewGroup){ViewGroup g=(ViewGroup)v;for(int i=0;i<g.getChildCount();i++)visibleNamed(g.getChildAt(i),caption,hits);}
+    }
+    private Button modernOuter(View decor,String caption,String tag,int nativeId){
+        ArrayList<Button> hits=new ArrayList<>();visibleNamed(decor,caption,hits);Button old=dialog.getButton(nativeId);
+        need((old==null||!old.isShown())&&hits.size()==1&&tag.equals(hits.get(0).getTag())&&hits.get(0).isEnabled(),"expected one owned top action: "+caption);return hits.get(0);
+    }
+    private void outerCancel()throws Exception{
+        at("editor-cancel");
+        if(api>=34&&TodayScreen.roomyDraftNeeded(main.getResources().getConfiguration().fontScale,main.getResources().getConfiguration().screenWidthDp)){
+            Button b=ui(()->{need(dialog.isShowing()&&dialog.getWindow()!=null,"draft closed before cancel");View decor=dialog.getWindow().getDecorView();need(decor.hasWindowFocus(),"draft no longer owns input");modernOuter(decor,"保存","note-draft-commit",AlertDialog.BUTTON_POSITIVE);return modernOuter(decor,"取消","note-draft-cancel",AlertDialog.BUTTON_NEGATIVE);});
+            int[] moves={0};Frame stable=readyFrame(b,false,true,moves),now=sample(b,false);int min=Math.round(c.getResources().getDisplayMetrics().density*48f);Rect hit=hit(now,true,min);
+            need(stable.matches(now)&&hit!=null,"top cancel not fully reachable before tap: "+now.diag());out.append("DRAFT_OUTER_HIT top ").append(hit.toShortString()).append(" ime=").append(now.ime==null?"none":now.ime.toShortString()).append('\n');tapRect(hit);
+        }else{Button b=ui(()->dialog.getButton(AlertDialog.BUTTON_NEGATIVE));need(b!=null&&ui(()->"取消".contentEquals(b.getText())),"unexpected outer cancel");click(b,false);}
+        until("native dialog did not close",()->ui(()->!dialog.isShowing()?Boolean.TRUE:null));
+    }
     private void measuredTap(String key,String caption)throws Exception{
         at(key);Button b=measure(key,caption,true);Frame f=sample(b,true);int min=Math.round(c.getResources().getDisplayMetrics().density*48f);
         need(b==measuredButton&&f.ime!=null&&f.ime.equals(measuredKeyboard)&&f.box.equals(measuredBox)&&hit(f,true,min)!=null,"measured target moved before the single tap: "+key+" "+f.diag());

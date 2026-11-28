@@ -1151,6 +1151,69 @@ def consent_copy_selftest():
             else:raise AssertionError('ambiguous, misleading or stale consent accepted')
     print('PREVIEW_CONSENT_COPY 3 actual Java labels, 2 wrong implementations, format-specific node controls; NOT_DEVICE',flush=True)
 
+# This code runs only under run-as for this synthetic sender, after distinct-UID receiver bytes were checked.
+# Three host/device calls previously separated writing, reading, and renaming a .part. The sender still validates
+# final bytes and its unchanged DB; the host still independently reads the exact final file and waits for its terminal code.
+_ACK26_ONE=r'''umask 077
+p=$1; f=$2; d=${f%/*}
+[ -d cache ] && [ ! -L cache ] && [ -d "$d" ] && [ ! -L "$d" ] || exit 61
+[ ! -e "$p" ] && [ ! -L "$p" ] && [ ! -e "$f" ] && [ ! -L "$f" ] || exit 62
+printf 'ACK_STEP start\n'
+(set -C; printf '%s' checked > "$p") || exit 63
+printf 'ACK_STEP staged\n'
+[ -f "$p" ] && [ ! -L "$p" ] || exit 64
+n=$(wc -c < "$p") || exit 65; [ "$n" -eq 7 ] || exit 66
+v=$(cat "$p") || exit 67; [ "$v" = checked ] || exit 68
+printf 'ACK_STEP checked\n'
+[ ! -e "$f" ] && [ ! -L "$f" ] || exit 69
+mv "$p" "$f"; rc=$?; [ "$rc" -eq 0 ] || { printf 'ACK_STEP move_failed\n'; exit "$rc"; }
+printf 'ACK_STEP renamed\n' '''
+_ACK26_STEPS=('start','staged','checked','renamed')
+
+def api26_publish_checked(prefix,pkg,api,marker,runner=subprocess.run):
+    e=os.environ;rid=e.get('GITHUB_RUN_ID','');att=e.get('GITHUB_RUN_ATTEMPT','');src=e.get('GITHUB_SHA','');validrun=re.fullmatch('[0-9]{1,20}',rid)
+    assert e.get('GITHUB_ACTIONS')=='true' and e.get('GITHUB_REPOSITORY')=='supercubegame/todo-pocket-android' and e.get('GITHUB_JOB') in ('database','export_probe') and validrun and re.fullmatch('[1-9][0-9]{0,3}',att) and re.fullmatch('[a-f0-9]{40}',src) and api==26 and type(api) is int and pkg=='com.supercubegame.pockettodo.v12.preview' and len(prefix)==3 and Path(prefix[0]).name=='adb' and list(map(str,prefix[1:]))==['-s','emulator-5554'] and re.fullmatch('cache/paged-contract-'+rid+'/ack-[a-f0-9]{32}',marker),'outside synthetic API26 acknowledgement'
+    command='run-as '+pkg+' sh -c '+shlex.quote(_ACK26_ONE)+' ack '+shlex.quote(marker+'.part')+' '+shlex.quote(marker);args=[*map(str,prefix),'shell','-n','-T',command];out=b'';err=b'';rc=None;how='execution_error'
+    try:
+        p=runner(args,stdin=subprocess.DEVNULL,capture_output=True,timeout=20,check=False);out=p.stdout or b'';err=p.stderr or b'';rc=p.returncode;how='completed'
+        if rc!=0:raise subprocess.CalledProcessError(rc,args,output=out,stderr=err)
+        assert out.splitlines()==[('ACK_STEP '+k).encode() for k in _ACK26_STEPS],'ack stages incomplete: not accepted';return True
+    except subprocess.TimeoutExpired as x:out=x.stdout or b'';err=x.stderr or b'';how='timeout';raise
+    finally:
+        safe={'scope':'CI_SENDER_ACK_STAGING_ONLY_NOT_SHARING_ACCEPTANCE','source':src,'run':rid,'attempt':att,'api':api,'nonce':marker.rsplit('ack-',1)[1],'calls':1,'outcome':how,'local_child_rc':rc,'stages':[l[9:].decode('ascii') for l in out.splitlines() if l in [('ACK_STEP '+k).encode() for k in (*_ACK26_STEPS,'move_failed')]],'stdout_len':len(out),'stderr_len':len(err),'stdout_sha256':hashlib.sha256(out).hexdigest(),'stderr_sha256':hashlib.sha256(err).hexdigest()};print('API26_ACK_STAGE '+json.dumps(safe,sort_keys=True),flush=True)
+
+def api26_ack_one_host():
+    import contextlib,io
+    from unittest.mock import patch
+    pkg='com.supercubegame.pockettodo.v12.preview';marker='cache/paged-contract-19/ack-'+'a'*32;pre=['/fake/adb','-s','emulator-5554'];env={'GITHUB_ACTIONS':'true','GITHUB_REPOSITORY':'supercubegame/todo-pocket-android','GITHUB_JOB':'database','GITHUB_SHA':'b'*40,'GITHUB_RUN_ID':'19','GITHUB_RUN_ATTEMPT':'1'}
+    with patch.dict(os.environ,env),tempfile.TemporaryDirectory() as td:
+        root=Path(td);(root/marker).parent.mkdir(parents=True);calls=[];p=root/(marker+'.part');f=root/marker
+        def local(argv,**kw):
+            calls.append(argv);assert argv[:6]==pre+['shell','-n','-T'] and kw==dict(stdin=subprocess.DEVNULL,capture_output=True,timeout=20,check=False);words=shlex.split(argv[6]);assert words[:4]==['run-as',pkg,'sh','-c'] and words[-3:]==['ack',marker+'.part',marker];return subprocess.run(words[2:],cwd=root,**kw)
+        def drive(run,expect):
+            buf=io.StringIO();bad=None
+            with contextlib.redirect_stdout(buf):
+                try:api26_publish_checked(pre,pkg,26,marker,run)
+                except Exception as e:bad=e
+            j=json.loads(buf.getvalue().split(' ',1)[1]);assert j['calls']==1 and j['local_child_rc']==expect and j['source']=='b'*40 and j['nonce']=='a'*32;return bad,j
+        err,r=drive(local,0);assert err is None and r['stages']==list(_ACK26_STEPS) and f.read_bytes()==b'checked' and not p.exists()
+        f.write_bytes(b'other');err,r=drive(local,62);assert isinstance(err,subprocess.CalledProcessError) and f.read_bytes()==b'other' and not p.exists();f.unlink();p.write_bytes(b'unrelated');err,r=drive(local,62);assert p.read_bytes()==b'unrelated' and not f.exists();p.unlink()
+        for name in ('partial','final'):
+            link=p if name=='partial' else f;link.symlink_to(root/'absent');err,r=drive(local,62);assert isinstance(err,subprocess.CalledProcessError) and link.is_symlink();link.unlink()
+        assert len(calls)==5
+        for rc in (17,255):
+            err,r=drive(lambda a,**kw:subprocess.CompletedProcess(a,rc,b'ACK_STEP staged\n',b'synthetic refusal'),rc);assert err.returncode==rc and r['stages']==['staged'] and r['stderr_len']>0
+        err,r=drive(lambda a,**kw:subprocess.CompletedProcess(a,0,b'ACK_STEP staged\n',b''),0);assert isinstance(err,AssertionError)
+        def timed(*a,**k):raise subprocess.TimeoutExpired('owned',20,output=b'ACK_STEP start\n')
+        err,r=drive(timed,None);assert isinstance(err,subprocess.TimeoutExpired) and r['outcome']=='timeout'
+        for prefix,who,platform,m in [(pre,pkg,34,marker),(['adb','-s','phone'],pkg,26,marker),(pre,'not.ours',26,marker),(pre,pkg,26,marker+'.part'),(pre,pkg,26,marker.replace('-19/','-20/'))]:
+            old=len(calls)
+            try:api26_publish_checked(prefix,who,platform,m,local)
+            except AssertionError:pass
+            else:raise AssertionError('out of scope dispatch')
+            assert len(calls)==old
+    print('API26_ACK_ONE 5 real local shell/filesystem outcomes + 4 child/summary outcomes + 5 scope refusals; one operation, not Android',flush=True)
+
 def receiver_ack_selftest():
     marker='cache/paged-contract-42/ack-'+'a'*32
     with tempfile.TemporaryDirectory() as temp:
@@ -1362,7 +1425,8 @@ def test_receiver_cases(folder,prefix,gate,work,root,args,component,cache):
                 assert proc.poll() is None,'send instrumentation ended before acknowledgement'
                 if md:markdown=markdown_receive_check(r,e,sender_uid,receiver_uid)
                 else:print('RECEIVER_BYTES_VERIFIED '+json.dumps(dict(r,sender_uid=sender_uid,receiver_uid=receiver_uid)),flush=True)
-                publish_receiver_ack(marker,lambda temp:seed(gate.PKG,temp,b'checked'),lambda temp,final:shell('run-as',gate.PKG,'mv',temp,final))
+                if gate.API==26:api26_publish_checked(prefix,gate.PKG,gate.API,marker)
+                else:publish_receiver_ack(marker,lambda temp:seed(gate.PKG,temp,b'checked'),lambda temp,final:shell('run-as',gate.PKG,'mv',temp,final))
                 assert read(gate.PKG,marker)==b'checked', 'sender ack post-rename readback'
                 assert proc.wait(timeout=20)==0
                 out.seek(0);output=out.read().decode(errors='replace');assert output.count('CHOOSER_TILE_CLICK '+nonce+' ')==1 and 'SEND_PROBE '+nonce in output and 'INSTRUMENTATION_CODE: -1' in output and 'PAGED_FAILED' not in output,output
@@ -1708,6 +1772,7 @@ def selftest():
     failure_evidence_selftest()
     bounded_drawer_selftest()
     receiver_ack_selftest()
+    api26_ack_one_host()
     print("PAGED_SHARE_FIXTURE_HOST", share_png_fixture_selftest(), flush=True)
     paged_readiness_selftest()
     paged_signing_selftest()

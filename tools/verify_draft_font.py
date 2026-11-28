@@ -99,9 +99,52 @@ def matrix(cmd,run_one,collect,serial,pkg,api,env):
         status='PASS' if not errors and len(rows)==3 and all(r['status']=='PASS' for r in rows) and all(rest.get(k,False) for k in KEYS) else 'FAIL';result={'source':src,'run_id':rid,'attempt':att,'api':api,'original':{k[1]:v for k,v in before.items()},'restored':{k[1]:v for k,v in rest.items()},'restoration':evidence,'original_rows':{k[1]:v for k,v in initial.items()},'runtime_baseline':runtime,'raw_series':rows,'status':status,'physical_device':False,'pixel_measurement':False,'release_ready':False};collect('font-matrix.json',json.dumps(result,indent=2)+'\n')
     need(result['status']=='PASS','draft font series incomplete: '+', '.join(errors));return result
 
+def _legacy26_settings(raw,argv,trace):
+    # Android 8 SettingsService rejects --user for LIST/DELETE. These two call SettingsProvider as the caller,
+    # unlike explicit GET/PUT. Never issue their implicit spelling on other users, namespaces or a real phone.
+    verb,namespace=argv[3:5];tail=argv[5:];need(tuple(argv[:3])==('settings','--user','0') and ((verb=='list' and not tail and namespace in ('system','secure')) or (verb=='delete' and len(tail)==1 and (namespace,tail[0]) in KEYS)),'unowned legacy setting command')
+    def owner(at):
+        trace['step']='api26-owner-'+at;uid=raw('id','-u').strip();foreground=raw('am','get-current-user').strip();users=[l.strip() for l in raw('pm','list','users').splitlines() if l.strip()]
+        need(uid=='2000' and foreground=='0' and len(users)==2 and users[0]=='Users:' and re.fullmatch(r'UserInfo\{0:[^:\r\n{}]{1,80}:[0-9a-fA-F]+\} running',users[1]) is not None,'legacy command refused without unique foreground owner and user-0 shell');trace['owner_checks']+=1
+    owner('before');trace['step']='api26-'+verb+'-'+namespace;trace['legacy_'+verb]+=1;value=raw('settings',verb,namespace,*tail)
+    owner('after');trace['step']='api26-result-'+verb+'-'+namespace
+    if verb=='list':
+        entries=[s for s in value.splitlines() if s.strip()];need(bool(entries) and all(re.match(r'^[^=\s]+=',x) for x in entries),'malformed or empty provider listing; never proof of an absent key')
+    else:need(value.strip()=='Deleted 1 rows','selected owned row was not deleted exactly once')
+    return value
+
+def legacy26_settings_controls():
+    for case in ('ok','profile','uid','foreground','switch','badcount','badlist','scope'):
+        calls=[];trace={'owner_checks':0,'legacy_list':0,'legacy_delete':0,'step':'init'}
+        def run(*a):
+            calls.append(a)
+            if a==('id','-u'):return '0' if case=='uid' else '2000'
+            if a==('am','get-current-user'):return '11' if case=='foreground' or (case=='switch' and ('settings','list','system') in calls) else '0'
+            if a==('pm','list','users'):return 'Users:\n UserInfo{0:Owner:13} running\n'+(' UserInfo{10:Other:30}\n' if case=='profile' else '')
+            if a==('settings','list','system'):return 'Bad arguments' if case=='badlist' else 'fixture=1'
+            if a==('settings','delete','system','font_scale'):return 'Deleted 0 rows' if case=='badcount' else 'Deleted 1 rows'
+            raise AssertionError('unexpected argv')
+        try:
+            _legacy26_settings(run,('settings','--user','0','list','system'),trace)
+            _legacy26_settings(run,('settings','--user','0','delete','system','other' if case=='scope' else 'font_scale'),trace)
+        except AssertionError:assert case!='ok'
+        else:assert case=='ok' and trace['owner_checks']==4
+        assert sum(a[:2]==('settings','delete') for a in calls)==int(case in ('ok','badcount'))
+    print('LEGACY26_SETTINGS 8 scoped shapes incl wrong caller, scope, membership, removal and changed foreground; no Android',flush=True)
+
 def device(adb,serial,pkg,api,out):
     prefix=[str(adb),'-s',serial,'shell'];out=Path(out)
-    def shell(*a):return subprocess.check_output(prefix+list(a),stdin=subprocess.DEVNULL,timeout=12,text=True)
+    trace={'scope':'DISPOSABLE_SETTINGS_COMMAND_FAMILY_NO_USER_NAMES_OR_VALUES','source':os.environ.get('GITHUB_SHA'),'run':os.environ.get('GITHUB_RUN_ID'),'attempt':os.environ.get('GITHUB_RUN_ATTEMPT'),'api':api,'legacy_list':0,'legacy_delete':0,'owner_checks':0,'step':'initial','first_failure':None}
+    def raw(*a):return subprocess.check_output(prefix+list(a),stdin=subprocess.DEVNULL,timeout=12,text=True)
+    def failed(e):
+        if trace['first_failure'] is None:trace['first_failure']={'step':trace['step'],'kind':type(e).__name__,'child_exit':e.returncode if isinstance(e,subprocess.CalledProcessError) else None}
+    def shell(*a):
+        trace['step']=('explicit-'+a[3]+'-'+a[4]) if a[:3]==('settings','--user','0') else 'foreground' if a[:2]==('am','get-current-user') else 'runtime' if a[:2]==('am','instrument') else 'emulator-check'
+        try:
+            if api==26 and a[:3]==('settings','--user','0') and a[3] in ('list','delete'):
+                need(serial=='emulator-5554' and pkg==PKG and os.environ.get('GITHUB_ACTIONS')=='true','disposable AVD only');return _legacy26_settings(raw,a,trace)
+            return raw(*a)
+        except Exception as e:failed(e);raise
     def invoke(pct,nonce):
         args=prefix+['-n','-T','am','instrument','-w','-r','-e','expectedApi',str(api),'-e','phase','draft_font_ui','-e','fontPct',str(pct),'-e','fontNonce',nonce,pkg+'.test/com.supercubegame.pockettodo.V12DeviceTest'];
         try:p=subprocess.run(args,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=145)
@@ -110,7 +153,9 @@ def device(adb,serial,pkg,api,out):
         return p.returncode,p.stdout+'\n'+p.stderr
     def save(n,t):
         with (out/n).open('x',encoding='utf-8') as f:f.write(t)
-    return matrix(shell,invoke,save,serial,pkg,api,os.environ)
+    try:return matrix(shell,invoke,save,serial,pkg,api,os.environ)
+    except Exception as e:failed(e);raise
+    finally:save('font-cli.json',json.dumps(trace,indent=2)+'\n')
 
 def _confirmed_restores(j):
     originals=j.get('original',{});r=j.get('restoration',{});need(set(originals)==set(r)=={k[1] for k in KEYS},'incomplete original or restore receipts')
@@ -145,7 +190,7 @@ def bind_full_endcheck(gate,root):
     def finish(adb):
         need(not once,'duplicate endcheck');once.append(True);folder=root/'build/ci-end-draft-font';folder.mkdir(parents=True,exist_ok=False);prefix=[str(adb),'-s',gate.SERIAL];record={'scope':'DISPOSABLE_FULL_JOB_FONT_ENDCHECK','source':src,'run_id':rid,'attempt':att,'api':gate.API,'expected_sha256':{k:hashlib.sha256(v).hexdigest() for k,v in expected.items()},'apk_readbacks':{},'status':'NOT_ACCEPTED','release_ready':False,'test_started':False}
         def command(argv,timeout=30):return subprocess.check_output(argv,timeout=timeout,stdin=subprocess.DEVNULL,text=True)
-        thumbnail_error=None
+        thumbnail_error=None;image_attach_error=None
         try:
             regs=command(prefix+['shell','pm','list','instrumentation']);need(registration(regs,'V12DeviceTest')['status']=='PASS','final runner not restored: no font setting changed')
             for name,original in expected.items():
@@ -156,18 +201,23 @@ def bind_full_endcheck(gate,root):
             try:verify_note_page(gate,adb,root)
             except Exception as error:
                 thumbnail_error=error;print('INDEPENDENT_NOTE_THUMB_FAILURE '+type(error).__name__,flush=True)
+            from verify_note_image_import import device as verify_image_attach
+            try:verify_image_attach(gate,adb,root)
+            except Exception as error:
+                image_attach_error=error;print('INDEPENDENT_IMAGE_ATTACH_FAILURE '+type(error).__name__,flush=True)
             record['test_started']=True;device(adb,gate.SERIAL,PKG,gate.API,folder);record['accepted_scales']=check_font_files(folder,expected,gate.API,src,rid,att);record['status']='PASS'
         except Exception as exc:
             record['error_class']=type(exc).__name__;raise
         finally:
             # Existing always-upload glob device-*.txt picks up even a partial failed matrix. No settings, permission, signer or workflow changes outside the disposable AVD.
-            for leaf in ('font-100.txt','font-130.txt','font-200.txt','font-matrix.json','font-config-original.txt','font-config-neutral.txt'):
+            for leaf in ('font-100.txt','font-130.txt','font-200.txt','font-matrix.json','font-config-original.txt','font-config-neutral.txt','font-cli.json'):
                 p=folder/leaf
                 if p.is_file():
                     with (root/('device-draft-'+p.stem+'.txt')).open('xb') as out:out.write(p.read_bytes())
             with (root/'device-draft-font-binding.txt').open('x') as w:w.write(json.dumps(record,indent=2)+'\n')
             print('DRAFT_FONT_ENDCHECK '+str(record['status'])+' api='+str(gate.API),flush=True)
         if thumbnail_error is not None:raise thumbnail_error # A font pass cannot hide a thumbnail failure.
+        if image_attach_error is not None:raise image_attach_error
     return finish
 
 def absent_restore_controls():
@@ -191,6 +241,9 @@ def absent_restore_controls():
     assert all(not _exact(x,'null') for x in ({'user':False,'count':0,'value':'null','listed':None},{'user':0,'count':False,'value':'null','listed':None},{'user':0,'count':1,'value':'null','listed':'null'}));print('ABSENT_FONT_RESTORE',count,'owned/foreign/runtime/row paths, 3 false receipt shapes rejected; NOT Android',flush=True)
 
 def full_evidence_controls():
+    legacy26_settings_controls()
+    from verify_note_image_import import host as image_attach_host
+    image_attach_host()
     absent_restore_controls()
     import tempfile,copy,ast
     import emulator_gate as gates
